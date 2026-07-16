@@ -688,7 +688,8 @@ running follow-ups list, and the decisions the next session must not re-derive.
   logged SKIPPED, 15/15 tests (11 unit + the 4 caller legs live, fresh request
   signed by the responder), vitest 68.5s, whole invocation 69s wall
   (18:36:29→18:37:38). actionlint clean on the rewritten ci.yml. Branch pushed
-  @ 8a0d304.
+  @ 129cfee (offline `yarn install && yarn build && yarn test` re-verified
+  green at that head after the manifest fix below).
 - Commits (PROTOCOL repo, branch `bernard/repo-refactor`, pushed):
   - protocol `46ed3da` refactor: delete vault-contract + cli; prune
     integration-tests to the signet-caller e2e
@@ -697,8 +698,13 @@ running follow-ups list, and the decisions the next session must not re-derive.
     signet-caller e2e
   - protocol `8a0d304` refactor: docs, skills and env template around the
     caller e2e
-  - examples: this HANDOFF entry's commit only (TASK.md Phase 8 bullets
-    amended in it).
+  - protocol `129cfee` refactor: declare midnight-js dependency in
+    integration-tests (orchestrator-directed fix: caller-session.ts imports
+    @midnight-ntwrk/midnight-js subpaths that previously resolved only via
+    hoisting; now declared at 5.0.0-beta.3, the exact prerelease every other
+    member carries per the same-version corollary)
+  - examples: this HANDOFF entry's commit + its amendment commit (TASK.md
+    Phase 8 bullets amended in the former).
 - Deviations from TASK.md (tables amended in this commit):
   - **Branch override (user-mandated, carried from Session 7):** all Phase 8
     work on `bernard/repo-refactor` (now @ 8a0d304), NOT
