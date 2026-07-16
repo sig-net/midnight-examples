@@ -13,6 +13,8 @@
     "compile:zk": "yarn workspaces foreach --all --exclude midnight-examples --topological run compile:zk",
     "compile:erc20-vault": "yarn workspace @midnight-examples/erc20-vault-contract compile",
     "compile:erc20-vault:zk": "yarn workspace @midnight-examples/erc20-vault-contract compile:zk",
+    "deploy:erc20-vault": "yarn workspace @midnight-examples/erc20-vault-contract deploy",
+    "test:erc20-vault": "yarn workspace @midnight-examples/erc20-vault-contract test && yarn workspace @midnight-examples/erc20-vault-integration-tests test",
     "test:erc20-vault:e2e": "yarn workspace @midnight-examples/erc20-vault-integration-tests test:e2e",
     "build": "yarn workspaces foreach --all --exclude midnight-examples --topological run build",
     "test": "yarn workspaces foreach --all --exclude midnight-examples --topological run test"

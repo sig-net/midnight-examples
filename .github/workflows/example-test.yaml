@@ -1,0 +1,166 @@
+# Reusable per-example CI: one job that runs the SAME commands a developer
+# types, parameterized by the example directory name (the `<example-dir>` in
+# the root `compile:<example-dir>` / `test:<example-dir>` scripts —
+# see AGENTS.md's root-script naming rule).
+#
+#   install → compact toolchain → compile (skip-zk) → zk keys (cached) →
+#   build → unit tests → compose up → e2e suite
+#
+# Caches (weekly- or source-keyed, never hand-pinned):
+#   compact-*  — the compact toolchain (~/.compact + the launcher binary),
+#                refreshed weekly (the toolchain floats on latest).
+#   zk-keys-*  — the example contract's prover/verifier keys, keyed on the
+#                compiler version + every .compact source in the repo; a hit
+#                lets the suite's setup skip ~10 min of keygen via
+#                TRUST_PREBUILT_ZK_KEYS (fresh by construction: the key
+#                changes whenever any contract source changes).
+#
+# EXPECTED-RED until `@sig-net/midnight-contract-deploy` is published to npm:
+# `yarn install` fails resolving the test harness's dependency (npm 404 — the
+# package exists only in the protocol repo today). Local development bridges
+# it with `yarn link` (see HANDOFF.md); CI has no such bridge BY DESIGN — this
+# workflow is a continuous compatibility test of the published packages, so
+# it stays red until the publish lands. Do not work around it here.
+
+name: example-test
+
+on:
+  workflow_call:
+    inputs:
+      example-dir:
+        description: "The example's directory name under examples/ (e.g. erc20-vault)"
+        required: true
+        type: string
+      full-suite:
+        description: "Run the example's FULL e2e suite; false runs only the gate spec"
+        required: false
+        type: boolean
+        default: false
+      gate-spec:
+        description: "Spec file (relative to the example's integration-tests package) run when full-suite is false"
+        required: false
+        type: string
+        default: tests/happy-day-e2e.test.ts
+
+jobs:
+  example:
+    name: ${{ inputs.example-dir }} — unit + e2e
+    runs-on: ubuntu-latest
+    # The claim/settle proofs are the pacing (and memory) item: a single one
+    # peaks >12 GiB inside the proof server, so the default 4-core/16 GB
+    # runner is marginal — happy-day-only as the PR gate keeps the wall clock
+    # and OOM exposure down; the full suite is opt-in via `full-suite`.
+    timeout-minutes: ${{ inputs.full-suite && 300 || 150 }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          # corepack owns yarn here; the action's cache probe would run
+          # yarn 1.x against the yarn-4 packageManager field and die
+          package-manager-cache: false
+      - name: Enable corepack (yarn 4 via the packageManager field)
+        run: corepack enable
+      - name: Cache period stamp (the compact toolchain floats on latest — refresh weekly)
+        id: stamp
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Restore the compact toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.compact
+            ~/.local/bin/compact
+          key: compact-${{ runner.os }}-${{ steps.stamp.outputs.week }}
+          restore-keys: compact-${{ runner.os }}-
+      - name: Install / update the compact toolchain (unpinned, per AGENTS.md)
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.compact/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.compact/bin" >> "$GITHUB_PATH"
+          if ! command -v compact >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -LsSf \
+              https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+          fi
+          compact update
+          # The workspace tracks the ledger-9 toolchain line: latest STABLE
+          # (0.31.1) speaks language 0.23 and rejects the contracts'
+          # `pragma language_version >= 0.25`. compactc 0.33.0-rc.0 is a
+          # PRERELEASE published on the toolchain's LF home
+          # (LFDT-Minokawa/compact), which the launcher's channel does not
+          # list — download it directly and let the launcher adopt it.
+          # Part of the ledger-9 MATCHED SET (see docker-compose.yaml's
+          # image-tag comment) — move it together with the npm stack.
+          RC_DIR="$HOME/.compact/versions/0.33.0-rc.0/x86_64-unknown-linux-musl"
+          if [ ! -x "$RC_DIR/compactc" ]; then
+            mkdir -p "$RC_DIR"
+            curl -fsSL -o /tmp/compactc-rc.zip \
+              https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.33.0-rc.0/compactc_v0.33.0-rc.0_x86_64-unknown-linux-musl.zip
+            unzip -qo /tmp/compactc-rc.zip -d "$RC_DIR"
+            chmod +x "$RC_DIR"/*
+          fi
+          # `compact update <ver>` adopts an already-on-disk version without
+          # downloading; if the launcher refuses (version not in its
+          # channel), wire the default symlinks it would have created.
+          compact update 0.33.0-rc.0 || ln -sfn "$RC_DIR"/* "$HOME/.compact/bin/"
+          compact compile --version
+      - name: Read the compact compiler version (part of the zk cache key)
+        id: compact
+        run: echo "version=$(compact compile --version | tr -cd '[:alnum:]._-')" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies (no lockfile by design — installs float to latest published)
+        run: yarn install --no-immutable
+      - name: Compile (skip-zk)
+        run: yarn compile
+      - name: Restore prebuilt zk proving keys
+        id: zk
+        uses: actions/cache/restore@v4
+        with:
+          path: examples/${{ inputs.example-dir }}/contract/src/managed
+          key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
+      - name: zk keygen (cache miss only)
+        if: steps.zk.outputs.cache-hit != 'true'
+        run: yarn compile:${{ inputs.example-dir }}:zk
+      - name: Save zk proving keys (immediately — a later flow failure must not lose them)
+        if: steps.zk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: examples/${{ inputs.example-dir }}/contract/src/managed
+          key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
+      - name: Build (typecheck, no emit)
+        run: yarn build
+      - name: Unit tests (simulator-only; e2e files self-skip without RUN_INTEGRATION_TESTS)
+        run: yarn test
+      - name: Start the local stack (midnight node, indexer, proof server, anvil)
+        run: docker compose up -d
+      - name: Wait for the stack
+        run: |
+          timeout 180 bash -c 'until curl -fsS http://127.0.0.1:9944/health >/dev/null 2>&1; do sleep 3; done'
+          timeout 60 bash -c 'until curl -s -o /dev/null http://127.0.0.1:6300; do sleep 3; done'
+          timeout 180 bash -c 'until curl -fs -X POST -H "content-type: application/json" -d "{\"query\":\"{__typename}\"}" http://127.0.0.1:8088/api/v3/graphql >/dev/null 2>&1; do sleep 3; done'
+          curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' http://127.0.0.1:8545
+      # The suite's own globalSetup does the rest: deploys the singleton +
+      # the example contract + the test ERC20, creates .env and appends the
+      # fakenet hand-off values, starts the fakenet responder container, and
+      # funds the derived accounts on anvil.
+      - name: e2e suite — gate spec only
+        if: inputs.full-suite != true
+        env:
+          TRUST_PREBUILT_ZK_KEYS: "1"
+        run: yarn test:${{ inputs.example-dir }}:e2e ${{ inputs.gate-spec }}
+      - name: e2e suite — full
+        if: inputs.full-suite == true
+        env:
+          TRUST_PREBUILT_ZK_KEYS: "1"
+        run: yarn test:${{ inputs.example-dir }}:e2e
+      - name: Collect service logs
+        if: failure()
+        run: |
+          mkdir -p ci-logs
+          docker compose --profile fakenet logs --no-color > ci-logs/compose.log 2>&1 || true
+          docker ps -a > ci-logs/docker-ps.txt 2>&1 || true
+      - name: Upload service logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.example-dir }}-e2e-logs
+          path: ci-logs/
