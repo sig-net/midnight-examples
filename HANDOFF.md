@@ -293,3 +293,111 @@ running follow-ups list, and the decisions the next session must not re-derive.
   `yarn workspace @midnight-examples/erc20-vault-contract deploy` (capture
   the printed address) wrapped in `retryDeployWhileDustGenerates`; run
   `compile:zk` for the vault contract early (~10 min, background it).
+
+## Session 4 — 2026-07-16 — Phase 4a (integration-tests: flows + vault helpers + setup + happy-day e2e GREEN)
+
+- Status: Phase 4a COMPLETE. `happy-day-e2e` GREEN against the local stack in
+  ONE run from a FRESH deployment (no pre-existing `.env`): setup pipeline
+  16/16 steps (fresh TestUSDC + signet + vault deploys, `.env` auto-created,
+  responder auto-started), flow tests 15/15 passed, exit 0. Flow-test wall
+  clock 391.6s; whole invocation ≈22 min (vault zk compile skipped via
+  TRUST_PREBUILT_ZK_KEYS=1 — this session had just compiled the keys from
+  current sources in the background; a cold run adds ~10 min). Root
+  `yarn build && yarn test` green offline: contract 50/50 (deploy-tx tests
+  ran against the fresh zk keys), lib 10/10, harness 11/11, integration
+  suite 15 skipped (RUN_INTEGRATION_TESTS gating verified).
+- Commits (examples repo, branch `port/erc20-vault`):
+  - `e170e97` port: Phase 4a — erc20-vault integration-tests package (flows,
+    vault context/providers, setup pipeline, happy-day spec) [TASK.md tables
+    amended in same commit]
+  - `d5690ca` port: default EVM_RPC_URL to the local compose evm service in
+    the vault setup
+  - (this HANDOFF entry's commit)
+  - (protocol repo: no commits — untouched, clean at `cae104b`)
+- Deviations from TASK.md (tables amended in `e170e97`):
+  - **CLI commands → per-verb flow files** `src/flows/{initialize,deposit,
+    claim,withdraw,complete-withdraw,broadcast-evm,poll-signature-response,
+    poll-respond-bidirectional}.ts`; `read-state` folded into
+    `src/vault-ledger.ts` (`printVaultState`, provider+address args so the
+    script can drive it wallet-free). `runDepositRoundTrip` lives in
+    `flows/deposit.ts` (consumers: Session 5's specs).
+  - **Old flows/withdraw.ts legs DISSOLVED** (they only wrapped cli calls);
+    Session 5's failure-refund spec calls the primitives + polls directly.
+  - **cli config/context → `src/vault-context.ts`**: `VaultContext` with ALL
+    fields required (incl. `evmUserAddress`/`evmVaultAddress`; the setup
+    pipeline populates everything) — `requireConfigValue` gone; the cli's
+    separate `midnightProviders.indexerPublicDataProvider` dropped
+    (duplicate of `providers.publicDataProvider`, same construction;
+    `createResponseReader(context)` uses the latter).
+  - **cli identity.ts split**: parsing = lib `parseIdentitySecretKey`
+    (existed since Phase 1); derivation (userCommitment circuit + signet
+    path) = example `src/vault-identity.ts` (`resolveUserIdentity(env)`).
+  - **scripts/ = `read-state.ts` ONLY** (wallet-free, indexer-only; run
+    `yarn workspace @midnight-examples/erc20-vault-integration-tests
+    read-state`). Dropped as hand-drive scripts: initialize, deposit, claim,
+    withdraw, complete-withdraw, broadcast-evm, both polls — each needs a
+    synced wallet (minutes of startup) and is driven through the specs +
+    resume vars (`DEPOSIT_REQUEST_ID`/`WITHDRAW_REQUEST_ID`) instead.
+  - **Root scripts added early** (Phase 5 owns the rest):
+    `compile:erc20-vault`, `compile:erc20-vault:zk` (the setup's zk-compile
+    step shells out to it), `test:erc20-vault:e2e`.
+  - **EVM_RPC_URL now defaults** to `http://127.0.0.1:8545` in the example's
+    setup (`d5690ca`): .env.example's header already promised local-stack
+    defaults; it was the one value without one and broke the zero-.env
+    fresh-clone path (first live run failed on it).
+  - vitest.config ports the protocol's PipelineSequencer with
+    FILE_ORDER=[happy-day] only; Session 5 appends the other four specs.
+- Earlier-phase files touched: NONE in lib/contract/harness src. Only root
+  `package.json` (scripts) and `.env.example` (comment wording for the new
+  default).
+- Active yarn links (NOT committed — unchanged from Session 3, re-create
+  after pulls per Session 3's Active-links entry): resolutions carries
+  `@sig-net/midnight-contract-deploy` + `@midnight-erc20-vault/lib` portals
+  to the protocol checkout plus the three link-era effect pins.
+- Environment state: EXAMPLES repo compose stack UP under project
+  `midnight-examples` — 5 containers: node, indexer, proof-server, local-evm,
+  fakenet-responder (started by the setup hand-off, healthy: "polling signet
+  contract registry at c50831…"). PROTOCOL repo stack DOWN (taken over this
+  session; its chain state destroyed again — FOLLOW-UPS note about stale
+  protocol `.env` addresses still applies). Examples repo-root `.env` now
+  EXISTS: setup appended MPC_ROOT_KEY + MIDNIGHT_SIGNET_CONTRACT_ADDRESS;
+  Session 4 appended the rest of the printed pipeline block (operator
+  convention), so the NEXT run is a RERUN against kept contracts
+  (deploys/compiles all SKIP; happy-day is rerun-tolerant end to end).
+  Deployed this run: signet c508313498449baa8a19ae3d7aa7a26950258341194363ebf791aa1247da42f7,
+  vault 85af3e48371e698e52f68ee96c72b1e6a1a449e42b5347a895bcd078bf6b5e81,
+  TestUSDC 0x5FbDB2315678afecb367f032d93F642f64180aa3 (chain 31337).
+  Vault zk keys compiled (src/managed, gitignored). Nothing running in
+  background. Compact toolchain still 0.33.0-rc.0.
+- Discovered gotchas:
+  1. **Profiled compose services survive plain `docker compose down`** — the
+     protocol repo's fakenet-responder needed
+     `docker compose --profile fakenet down`; a leftover profiled container
+     blocks the network removal AND collides with the other repo's stack.
+  2. **The claim proof peaked at ~12.5 GiB proof-server RSS** on a 15.6 GiB
+     Docker VM — passed, but it is the OOM candidate the Risks section
+     predicts; keep the resume-var playbook handy for Session 5's specs.
+  3. The vault deploy subprocess (`yarn workspace …contract deploy` via
+     harness `runCommand`) works as designed: address captured from the
+     `deployed erc20-vault at <addr>` line; a transient InsufficientFunds
+     failure would surface in the subprocess error tail, which
+     `retryDeployWhileDustGenerates`'s matcher still catches.
+  4. vitest prints a misleading `No test files found, exiting with code 1`
+     when globalSetup THROWS — the real error is the `Unhandled Error` block
+     below it; don't chase the test-discovery red herring.
+  5. This harness's bash cwd resets between tool calls — `yarn` invocations
+     without an explicit `cd` can land in the WRONG repo silently (one
+     stray `yarn test` ran in the old MVP checkout; harmless, nothing
+     written). Always `cd` explicitly in compound commands.
+- Next session first action: Session 5 (Phase 4b + Phase 5). The stack is UP
+  and `.env` holds the full pipeline block, so
+  `TRUST_PREBUILT_ZK_KEYS` is irrelevant and `yarn test:erc20-vault:e2e`
+  reruns happy-day against kept contracts in ~7 min — run that first as a
+  baseline, then port the remaining four specs
+  (`deposit-withdrawal-failure-refund`, `deposit-claimant-not-caller`,
+  `benchmark`, `false-claimer`) from the protocol repo's tests/, rewiring
+  cli-command calls to `src/flows/` functions (use `runDepositRoundTrip` +
+  `drainVaultErc20`; the withdraw legs are gone — call
+  withdraw/completeWithdraw/polls directly) and appending each file to
+  vitest.config's FILE_ORDER. Then Phase 5: remaining root scripts, CI
+  workflows, `/e2e` skill draft per TASK.md's spec.
