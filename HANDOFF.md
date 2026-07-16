@@ -23,9 +23,13 @@ running follow-ups list, and the decisions the next session must not re-derive.
   addresses in the PROTOCOL repo's `.env` are now stale — before rerunning
   the protocol repo's e2e suite, comment out its `MIDNIGHT_*_CONTRACT_ADDRESS`
   (and derived EVM/ERC20) values so its setup redeploys.
-- **Push + CI**: examples repo remote is `git@github.com:sig-net/midnight-examples.git`;
-  Phase 5's "CI green" gate needs the `port/erc20-vault` branch pushed and a PR
-  opened.
+- **Push + CI**: DONE Session 5 — `port/erc20-vault` pushed, draft PR #1 open
+  (https://github.com/sig-net/midnight-examples/pull/1). CI ran and is RED at
+  `yarn install` on the `@sig-net/midnight-contract-deploy` npm 404 — the
+  EXPECTED P2 state (every step before install green, incl. the rc-toolchain
+  install on a fresh runner). Remaining user action: after the publish lands,
+  re-run the PR's CI and confirm green end-to-end (the compile/zk-cache/
+  compose/e2e steps have never executed in CI).
 
 ## Porting baseline (protocol repo)
 
@@ -401,3 +405,78 @@ running follow-ups list, and the decisions the next session must not re-derive.
   withdraw/completeWithdraw/polls directly) and appending each file to
   vitest.config's FILE_ORDER. Then Phase 5: remaining root scripts, CI
   workflows, `/e2e` skill draft per TASK.md's spec.
+
+## Session 5 — 2026-07-16 — Phase 4b (four e2e specs + example README) + Phase 5 (root scripts, CI, /e2e skill)
+
+- Status: Phase 4b COMPLETE, Phase 5 COMPLETE. ALL FIVE e2e specs green
+  against the local stack (kept contracts), 49 tests total:
+  happy-day 15/15 (181.5s resumed pass; also passed inside the one
+  full-suite invocation), deposit-withdrawal-failure-refund 9/9 (183.7s
+  resumed pass), deposit-claimant-not-caller 6/6 (175.9s), benchmark 13/13
+  (291.3s, full BENCHMARK_TIMINGS_JSON line — no legs skipped),
+  false-claimer 6/6 (169.4s). Root `yarn build && yarn test` green offline
+  (5 e2e files / 49 tests skip cleanly). CI ran on PR #1 and is red ONLY at
+  the expected P2 npm 404 (see FOLLOW-UPS).
+- Commits (examples repo, branch `port/erc20-vault`, pushed):
+  - `2c2e858` port: Phase 4b — remaining four e2e specs rewired in-process +
+    example README
+  - `e5a5586` port: Phase 5 — root scripts, CI workflows, /e2e skill
+  - (this HANDOFF entry's commit)
+  - (protocol repo: no commits — untouched, clean at `cae104b`)
+- Deviations from TASK.md: none requiring table amendments. Judgment calls:
+  - The member script `test:e2e:happy-day-e2e` (Session 4) REMOVED: extra
+    args forward through the root script (verified:
+    `yarn test:erc20-vault:e2e tests/<file>` selects that file) — one
+    mechanism for per-spec runs, used by CI's gate step and the skill.
+  - "ALL FIVE specs pass" gate met via one full-suite invocation (happy-day
+    passed; failure-refund OOM'd the proof server at its arrange claim) +
+    the TASK-sanctioned resume playbook for the rest, run per-spec with a
+    proof-server restart between files. A zero-intervention single-run full
+    suite is NOT reliably achievable on a 16 GB Docker VM — the OOM hit the
+    claim leg twice today (also once on the plain happy-day baseline rerun).
+    The skill documents the restart-between-files cadence.
+  - CI: reusable workflow takes `example-dir` + `full-suite` + `gate-spec`
+    inputs; PR gate runs happy-day only (protocol repo precedent — wall
+    clock + runner-RAM), full suite via workflow_dispatch. Paths filter also
+    covers root package.json + tsconfig.base.json (root scripts/config drive
+    everything). actionlint clean (docker rhysd/actionlint).
+  - Architecture doc folded into `examples/erc20-vault/README.md`; the
+    drawio SVG copied to `examples/erc20-vault/docs/` (protocol repo copy
+    untouched — deletion is Phase 8).
+- Active yarn links (NOT committed — unchanged from Session 3, re-create
+  after pulls per Session 3's Active-links entry): resolutions carries
+  `@sig-net/midnight-contract-deploy` + `@midnight-erc20-vault/lib` portals
+  plus the three link-era effect pins. The Phase 5 root-scripts commit was
+  staged by temporarily stripping the hunk and restoring it after — the
+  committed package.json has clean resolutions.
+- Environment state: EXAMPLES stack UP (5 containers: node, indexer,
+  proof-server, local-evm, fakenet-responder; responder healthy and polling
+  signet c508313…). PROTOCOL stack DOWN. `.env` unchanged (full pipeline
+  block, kept contracts; no resume vars persisted). Vault zk keys compiled
+  (src/managed). Nothing running in background. Compact toolchain
+  0.33.0-rc.0. Branch pushed; draft PR #1 open.
+- Discovered gotchas:
+  1. `vitest run` IGNORES `--version` and runs the whole suite — never
+     "probe" the e2e script; a second vitest against the same stack collides
+     with an in-flight run (shared midnight-level-db wallet state) and adds
+     memory pressure. Verify arg-forwarding with the OFFLINE `test` script.
+  2. The proof-server OOM (Exited 137, OOMKilled=true) is now 2-for-2 on
+     claim legs that follow other proofs on the same server instance —
+     including a plain kept-contracts happy-day rerun. Treat
+     restart-proof-server-between-spec-files as the DEFAULT cadence on a
+     16 GB VM, not just OOM recovery.
+  3. Session 4's cwd-reset gotcha recurred: a background `yarn` without an
+     explicit `cd` ran in the WRONG repo (old MVP checkout, yarn 1.x,
+     "Command not found" — harmless but wasted a run). ALWAYS `cd` first in
+     backgrounded compound commands.
+- Next session first action: Session 6 (Phase 6). Fresh-clone the repo to a
+  NEW directory, re-create the two yarn links + three effect pins there
+  (P2), then follow `.claude/skills/e2e/SKILL.md` VERBATIM from the top
+  (corepack → install → compact update → compile:zk backgrounded → compose
+  up → full suite) — every divergence found is a skill bug to fix
+  in-session. NOTE for the verbatim run: a bare `compact update` on this
+  MACHINE is safe only because 0.33.0-rc.0 is already the default; on a
+  truly fresh machine the skill's `compact update` line installs stable and
+  the compile will reject the pragma — expect to hit this divergence and fix
+  the skill (the CI workflow's LFDT rc-download recipe is the reference).
+  Also expect the OOM cadence (gotcha 2) during the full suite.
