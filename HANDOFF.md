@@ -587,3 +587,87 @@ running follow-ups list, and the decisions the next session must not re-derive.
   out the protocol `.env`'s contract-address vars so its setup redeploys,
   then build `packages/caller-contract` + the generic e2e per TASK.md
   Phase 7.
+
+## Session 7 — 2026-07-16 — Phase 7 (caller contract + generic e2e)
+
+- Status: Phase 7 COMPLETE. Protocol repo: `yarn build && yarn test` green
+  from root (caller-contract 13/13 — 11 simulator + 2 deploy-tx against real
+  zk keys; all other members unchanged and green; vault e2e specs untouched,
+  skip offline). The generic signet-caller e2e is GREEN against the local
+  stack TWICE: fresh-deploy run 4/4 tests (vitest wall clock 120.0s; whole
+  invocation ≈4 min with TRUST_PREBUILT_ZK_KEYS=1 — both contracts' keys were
+  compiled from current sources earlier the same session), then a
+  kept-contracts rerun 4/4 (82.0s, all nine skippable setup steps logged
+  SKIPPED, fresh request submitted). Deployed this run: signet
+  92fcf9d061963085ee5afbf7e1eb4706781301b73d0caa04eada65faa06a1165, caller
+  23ff923c5ae50544fb4e9005c2213ab4f08013214ed2466cc0550247250071cf.
+- Commits (PROTOCOL repo, branch `bernard/repo-refactor`, pushed @ cfa31a8):
+  - protocol `2a0521c` refactor: minimal signet caller contract package
+    (submit request + verify Schnorr response)
+  - protocol `cfa31a8` refactor: generic signet-caller e2e (EVM-free
+    pipeline, own vitest config)
+  - examples: this HANDOFF entry's commit only.
+- Deviations from TASK.md:
+  - **Branch override (user-mandated):** TASK.md says protocol Phase 7 work
+    goes on `refactor/split-examples`; per the user's instruction ALL work
+    landed on `bernard/repo-refactor` (on top of 3537b84, the
+    self-contained-contract-deploy commit). No new branch was created.
+  - **The e2e has NO EVM leg (orchestrator-resolved judgment):** the fakenet
+    signs purely from request fields and posts the ECDSA signature response
+    with no EVM RPC involved; its Schnorr respond-bidirectional attestation
+    only follows an OBSERVED broadcast (vault semantics). The generic e2e is
+    therefore: submit → golden notification → poll + verify the ECDSA
+    signature response (recovers to the caller's derived account) → drive the
+    contract's `verifyResponse` circuit with a Schnorr attestation signed
+    in-test from the suite's shared MPC_ROOT_KEY (the exact key material the
+    fakenet holds; the sealed MPC_JUBJUB_PK is derived from it). TASK.md's
+    "verify the Schnorr response" is thus covered in-circuit on the LIVE
+    chain, without reintroducing broadcast semantics. The caller pipeline
+    (caller-global-setup.ts) has no EVM steps at all; the compose `evm`
+    service stays (fakenet's config needs a valid EVM_RPC_URL to boot).
+  - The caller spec runs under its OWN vitest config
+    (`vitest.caller.config.ts`, root script
+    `test:integration-tests:signet-caller-e2e`) rather than a sixth
+    FILE_ORDER entry: the two globalSetup pipelines differ (vault's requires
+    an EVM chain). The vault config excludes the caller spec; offline
+    `yarn test` in integration-tests runs BOTH configs (caller spec skips
+    cleanly).
+  - `contractAddressToReference` moved from vault-contract's deploy into
+    `signet-contract-deploy/src/plumbing/deploy.ts` (second-consumer rule);
+    `ensureDeployerDust` parameterized over the pipeline's contract-address
+    env vars; `trustsPrebuiltZkKeys` + `retryDeployWhileDustGenerates`
+    exported for the caller steps. Vault pipeline behavior unchanged.
+- Active yarn links: none (either repo).
+- Environment state: PROTOCOL repo's compose stack UP (5 containers: node,
+  indexer, proof-server, local-evm, fakenet-responder; responder healthy,
+  polling signet 92fcf9d0…). The examples fresh-clone stack from Session 6 was
+  already down. Protocol `.env`: the five stale address lines commented out
+  ("commented by Session 7"); setup appended the fresh
+  MIDNIGHT_SIGNET_CONTRACT_ADDRESS; MIDNIGHT_CALLER_CONTRACT_ADDRESS appended
+  manually (operator convention) — next caller e2e run is a rerun. zk keys
+  compiled this session for signet-contract AND caller-contract (protocol
+  repo). Nothing running in background. Compact toolchain 0.33.0-rc.0.
+- Discovered gotchas:
+  1. Protocol-repo baseline trap: root `yarn compile` (skip-zk) wipes
+     signet-contract's prover keys, and the SIGNET-CONTRACT `build` script
+     then FAILS its keys gate — restore with `yarn compile:signet-contract:zk`
+     (~3 min) before `yarn build`. The recorded-green baseline assumes keys
+     present.
+  2. Session 2's mid-compile gotcha recurred cross-package: a backgrounded
+     `compile:caller-contract:zk` rewrites src/managed while a root
+     `yarn build` reads it — the generated .d.ts vanishes mid-build and
+     surfaces as a bogus `never`-typed constructor-args error, not a missing
+     module. Never build while any zk compile runs.
+  3. compact-js types `Contract.Witnesses<C>` as `never` for a witness-less
+     contract — bind with `makeVacantCompiledContract`, never
+     `makeCompiledContract` with `{}` (the signet binding is the precedent).
+- Next session first action: Session 8 (Phase 8, protocol repo, SAME branch
+  `bernard/repo-refactor`): delete `packages/vault-contract` +
+  `packages/cli`, prune `packages/integration-tests` to the caller e2e's
+  needs (per TASK.md Phase 8 list; note `local-evm.ts`/`evm.ts` go — the
+  caller pipeline has no EVM leg — but the compose `evm` service STAYS for
+  fakenet's boot config), prune lib to remaining consumers, rewrite
+  AGENTS/skills/README, drop the five vault e2e root scripts + specs. Gate:
+  `yarn build && yarn test` + `yarn test:integration-tests:signet-caller-e2e`
+  green (stack is up, addresses kept — a rerun suffices unless pruning
+  touches a contract).
