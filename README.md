@@ -26,10 +26,12 @@ The quickest way to get going with these examples is to get an end to end integr
 
 | Prerequisite | Version |Check With| Where to Get It|
 | ------- | ------| ------  |----------- |
-| Node   | >20   |???| ??? ???|
-| Compact Compiler |??? ????    | ??? |???|
+| Node     | >20   |???| ??? ???|
+| Compact Compiler |0.33.0-rc.0    | ??? |???|
 | A docker environment| ???   | ??? |???|
 | Docker Compose    | ???   | ??? |???|
+
+NOTE: the midnight proof server is quite heavy. It is recommended that you allocate at least 16 GB of ram to your docker environment otherwise expect to have to restart the tests multiple times as the proof server hangs.
 
 
 ## Repository Layout
@@ -106,5 +108,5 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
 ```
 
 
-## TODOs:
+## TODOs - NOT YET!!:
 - add .github/workflows/cron-latest-sdk.yaml: a scheduled full-matrix run against *latest published* @sig-net/midnight — catches silent example rot AND breakage in newly published SDK versions.

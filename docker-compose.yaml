@@ -1,6 +1,6 @@
 # Local development stack for the examples' integration tests: Midnight (node +
 # indexer + proof server), a local EVM dev chain, and the fakenet MPC
-# responder. `docker compose up -d`.
+# responder. Start with `docker compose up -d`.
 #
 # The three midnight image tags are a MATCHED SET on the ledger-9 line,
 # paired with the npm @midnightntwrk/ledger-v9 version the workspace
