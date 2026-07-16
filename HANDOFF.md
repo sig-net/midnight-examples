@@ -90,3 +90,44 @@ running follow-ups list, and the decisions the next session must not re-derive.
 - **`standalone.env.example` not carried as a file:** its four `APP__INFRA__*`
   dev constants are inlined into the compose `indexer` service `environment:`
   block (TASK.md scaffolding table amended in the same commit).
+- **typescript resolved to `^7.0.2`** (latest stable — the native compiler
+  line; protocol repo was on 6.x). It typechecks this workspace correctly
+  (verified with a deliberate type-error canary). Every future member uses the
+  same `^7.0.2` per the shared-version corollary.
+- **`@midnightntwrk/wallet-sdk-address-format` is NOT a lib dependency** (its
+  only user was the dropped `deriveAddresses`); the root `resolutions` pin
+  for it stays (it arrives transitively via the facade).
+
+## Session 1 — 2026-07-16 — Preflight P1–P4 + Phase 0 + Phase 1
+
+- Status: Phase 0 COMPLETE, Phase 1 COMPLETE (both green: `yarn build && yarn test`, 10/10 lib tests)
+- Commits (examples repo, branch `port/erc20-vault`):
+  - `1cac587` port: Phase 0 scaffold — root manifests, compose stack, env example, HANDOFF
+  - `625f5b7` port: Phase 1 — packages/lib runtime helpers with tests
+  - (protocol repo: no commits — untouched, still dirty `M README.md` only)
+- Deviations from TASK.md: standalone.env.example dissolved into compose
+  indexer environment (table amended in `1cac587`); lib exports dropped per
+  the consumer audit above (recorded under Decisions); no other deviations.
+- Active yarn links: **none** (P1 concluded npm 0.0.3 suffices; the P2 link
+  for `@sig-net/midnight-contract-deploy` is first needed in Session 3 —
+  remember to link its unpublished workspace dep `@midnight-erc20-vault/lib`
+  too).
+- Environment state: the PROTOCOL repo's compose stack is up (5 containers:
+  midnight-node, midnight-indexer, midnight-proof-server, local-evm,
+  fakenet-responder) — left untouched. The examples repo's compose file uses
+  the SAME container names, so both stacks cannot run at once; Sessions 3+
+  must `docker compose down` in the protocol repo first (or reuse the running
+  stack — images/tags are identical). No zk keys compiled here yet. Nothing
+  running in background. Compact toolchain default: 0.33.0-rc.0 (see P3
+  gotcha — never bare `compact update`).
+- Discovered gotchas: (1) bare `compact update` downgrades to stable 0.31.1 —
+  restore with `compact update 0.33.0-rc.0`; (2) `yarn install` emits YN0002
+  peer warnings for @effect/platform-node's optional peers — same as the
+  source repo, harmless; (3) root `.gitignore` `src/managed/` pattern must be
+  written `**/src/managed/` (a mid-pattern slash anchors to the repo root).
+- Next session first action: Session 2 (Phase 2, vault contract). Start by
+  reading `packages/vault-contract/` in the protocol repo; scaffold
+  `examples/erc20-vault/contract` with deps `@sig-net/midnight@^0.0.3` (npm),
+  `@midnight-ntwrk/compact-runtime@0.18.0-rc.0`, and run
+  `yarn compile` (skip-zk) before typechecking. Expect `compile:zk` to take
+  ~10 min — background it early.
