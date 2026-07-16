@@ -131,3 +131,60 @@ running follow-ups list, and the decisions the next session must not re-derive.
   `@midnight-ntwrk/compact-runtime@0.18.0-rc.0`, and run
   `yarn compile` (skip-zk) before typechecking. Expect `compile:zk` to take
   ~10 min — background it early.
+
+## Session 2 — 2026-07-16 — Phase 2 (vault contract)
+
+- Status: Phase 2 COMPLETE (green: `yarn build && yarn test` from root; 50/50
+  contract tests incl. the 2 deploy-tx tests running against real zk keys;
+  env-agnostic audit clean — only grep hit is the word "path" in a JSDoc
+  sentence, not an API).
+- Commits (examples repo, branch `port/erc20-vault`):
+  - `c8f8b9b` port: Phase 2 — erc20-vault contract package with simulator +
+    deploy-tx tests
+  - (protocol repo: no commits — untouched, still dirty `M README.md` only)
+- Deviations from TASK.md (tables amended in `c8f8b9b`):
+  - **`@sig-net/midnight-contract@^0.0.3` added as a third dependency** (the
+    table said midnight + compact runtime only): the GENERATED vault code
+    imports the callee module `../../SignetNotifier/contract/index.js` at
+    runtime, satisfied by the compile-script symlink
+    `src/managed/SignetNotifier -> ../../../../../node_modules/@sig-net/midnight-contract/dist/managed`
+    (the published tarball ships the compiled contract module AND the signet
+    zk keys — the cross-contract proof provider's key source for Phase 4).
+    It is part of the Signature Network SDK per AGENTS.md, so within spirit.
+  - **`src/providers.ts` dropped, not folded**: the deploy flow doesn't use
+    it. `buildVaultProviders`/`VaultProviders`/`VAULT_PRIVATE_STATE_ID`/
+    `vaultCompiledContract` must be re-ported in Phase 4 (destination:
+    example integration-tests, Node-side) from the protocol repo's
+    `packages/vault-contract/src/providers.ts`.
+  - **`deployVault` is no longer an export**: deploy-vault.ts folded into
+    `deploy.ts`, a self-executing entrypoint outside the export surface (per
+    AGENTS.md). The OLD integration-tests imported it in-process
+    (`setup/steps.ts`); Sessions 3/4 must run
+    `yarn workspace @midnight-examples/erc20-vault-contract deploy` as a
+    subprocess step instead (harness owns subprocess helpers), or revisit
+    with the orchestrator if in-process proves necessary.
+- Active yarn links: none (npm 0.0.3 packages suffice for Phase 2; the P2
+  link for `@sig-net/midnight-contract-deploy` is first needed in Session 3).
+- Environment state: PROTOCOL repo's compose stack still up (5 containers),
+  untouched. zk keys compiled for `examples/erc20-vault/contract`
+  (src/managed gitignored — NOTE: a root `yarn compile` re-runs skip-zk and
+  the keys survive only until the managed dir is regenerated; re-run
+  `compile:zk` if deploy tests report SKIPPED). Nothing running in background.
+  Compact toolchain still 0.33.0-rc.0.
+- Discovered gotchas: (1) `compact compile` (both modes) rewrites the whole
+  managed dir and emits `contract/index.*` LAST — don't typecheck or test
+  mid-compile (first build attempt failed on the missing module while zk
+  keygen was still running); (2) the published @sig-net/midnight-contract
+  manifest exports `./managed/*` -> `./dist/managed/*`, so tests import the
+  callee as `@sig-net/midnight-contract/managed/contract/index.js` — same
+  realpath as the symlink route, so no dual-module instance; (3) vitest warns
+  "Sourcemap ... points to missing source files" for the generated
+  contract/index.js — cosmetic, present in the protocol repo too.
+- Next session first action: Session 3 (Phase 3, test-harness). Start by
+  `yarn link` the protocol checkout's `@sig-net/midnight-contract-deploy` AND
+  its unpublished workspace dep `@midnight-erc20-vault/lib` (P2 — record
+  links, keep them out of commits), then port
+  `packages/integration-tests/src/{e2e-env,env-file,output,preflight,waitForGo,flow-hooks}.ts`
+  and `src/setup/{global-setup,local-evm,mpc-keys}.ts` per the map. Remember
+  the vault deploy step must shell out to the contract package's `yarn deploy`
+  (see deviation above).
