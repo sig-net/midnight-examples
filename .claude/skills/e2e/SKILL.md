@@ -37,17 +37,6 @@ NOT run `yarn compile:erc20-vault:zk` separately first: the setup recompiles
 regardless and you pay keygen twice. Expect the whole first invocation to take
 ~20–25 minutes (keygen + fresh deploys + the flow tests).
 
-**Until `@sig-net/midnight-contract-deploy` is published to npm**,
-`yarn install` on a fresh clone fails resolving it (404). Bridge with a local
-protocol-repo checkout:
-`yarn link --private <checkout>/packages/signet-contract-deploy <checkout>/packages/lib`,
-then add `effect`, `@effect/platform`, and `@effect/platform-node` to the root
-`resolutions`, each pinned to the exact version in the checkout's own root
-`package.json` (version skew across the portal splits type identities inside
-the portal'd files), and rerun `yarn install`. Never commit the resulting
-`resolutions` hunk. The checkout's `packages/signet-contract/src/managed` must
-hold the signet prover keys (`yarn compile:signet-contract:zk` there if not).
-
 **Toolchain note:** the contracts declare `pragma language_version >= 0.25`,
 which needs the ledger-9 rc compiler (0.33.0-rc.0 — part of the matched set
 pinned in `docker-compose.yaml`'s image-tag comment). A bare `compact update`

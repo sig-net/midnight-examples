@@ -45,6 +45,37 @@ If the run is interrupted partway (typically the proof server exhausting memory 
 
 NOTE: the midnight proof server is quite heavy. It is recommended that you allocate at least 16 GB of ram to your docker environment otherwise expect to have to restart the tests multiple times as the proof server hangs.
 
+# Running against Sepolia
+
+By default the EVM leg runs on the local anvil dev chain from `docker-compose.yaml`. To point it at Sepolia instead, only the EVM side changes — the Midnight stack and the fakenet MPC responder stay local. Minimal changes, all in `.env`:
+
+```sh
+# Both must point at the SAME chain — the tests' endpoint and the responder's
+# container-side twin (an Infura/Alchemy/etc. Sepolia RPC URL works for both):
+EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
+FAKENET_EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
+
+# Required on any non-local chain (setup refuses to guess): an existing ERC20
+# with code on Sepolia, e.g. a test USDC deployment.
+ERC20_ADDRESS=0x...
+```
+
+Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialize.
+
+What does NOT happen automatically on a real chain, by design:
+
+- **No auto-funding.** The flows spend from two EVM accounts *derived from the vault contract's address* — you only learn them mid-run, when setup prints `EVM_VAULT_ADDRESS` / `EVM_USER_ADDRESS` with funding hints (the user account needs ≥ 0.01 ETH for gas and ≥ 0.1 USDC; the vault account needs ETH for withdrawal gas). Fund them when printed, either across two runs (first run derives + prints, second run tests) — or in one attended run with `STEP_THROUGH` (below).
+- **No token deploy.** TestUSDC auto-deploys on the local chain only; on Sepolia you bring your own `ERC20_ADDRESS`.
+- A redeploy of the vault contract derives **new** accounts — previously funded ones don't move with it.
+
+## Watching a run step by step: `STEP_THROUGH=1`
+
+```sh
+STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
+```
+
+pauses before every setup step and every test (after the first) until you press Enter — each pause names the step about to run. Recommended for seeing exactly how the sign-bidirectional flow unfolds, and **specifically recommended on Sepolia with Infura**: you can fund the derived accounts the moment they're printed (completing everything in one run), watch each transaction confirm on Etherscan before releasing the next leg, and avoid bursts against Infura rate limits. Attended runs only — it waits on stdin forever, so never set it in CI or an unattended/backgrounded run.
+
 
 ## Repository Layout
 This repository is structured as a yarn monorepo, split at the top level between shared utilities (`packages/`) and examples for integrators (`examples/`).
