@@ -340,15 +340,20 @@ coverage, and so the vault suite is still present as the working reference.
 **Phase 8 — Deletion & pruning (protocol repo).** Only after Phase 7 is green:
 - Delete `packages/vault-contract` and `packages/cli`.
 - Prune `packages/integration-tests` to exactly what the generic caller e2e
-  needs: keep the harness spine (env/session, global-setup, mpc-keys,
-  signet-notifications, waitForGo, preflight; local-evm only if Phase 7 kept the
-  EVM leg); delete flows/, fakenet-vault-account, TestUSDC + hardhat + the
-  `@openzeppelin`/`hardhat` deps (unless the EVM leg needs them), the five vault
-  e2e specs, subprocess.ts, and the `@midnight-erc20-vault/cli` +
-  `vault-contract` deps.
-- Prune `packages/lib` to what remaining members import (consumers:
-  signet-contract-deploy, caller-contract, integration-tests). Delete orphans —
-  no dead code.
+  needs: keep the harness spine (env/env-file, caller pipeline + shared steps,
+  mpc-keys, signet-notifications, waitForGo, preflight, flow-hooks, output);
+  delete flows/, session.ts, evm.ts, fakenet-vault-account, TestUSDC + hardhat
+  + the `@openzeppelin`/`hardhat` deps, local-evm.ts (Phase 7's pipeline is
+  EVM-free), the five vault e2e specs, the vault vitest config (the caller
+  config becomes THE vitest.config.ts), and the `@midnight-erc20-vault/cli` +
+  `vault-contract` deps. subprocess.ts is KEPT (amended Session 8): the caller
+  steps still shell out to root scripts and docker compose through it —
+  the no-dead-code rule, not this list, decides.
+- Prune `packages/lib` to what remaining members import (consumers after the
+  deploy-plumbing move into signet-contract-deploy: caller-contract and
+  xcontract-events — both use the provider adapters). Delete orphans — no dead
+  code (Session 8: `createProofServerProvider` dropped, its cross-contract
+  sibling covers the one-contract case).
 - Root `package.json`: remove `compile:vault-contract*`, `deploy:vault-contract`,
   `cli`, `compile:integration-tests:evm` (if the EVM leg is gone), and the five
   per-spec `test:integration-tests:*` scripts; keep `test:integration-tests` +

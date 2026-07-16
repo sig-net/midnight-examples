@@ -671,3 +671,84 @@ running follow-ups list, and the decisions the next session must not re-derive.
   `yarn build && yarn test` + `yarn test:integration-tests:signet-caller-e2e`
   green (stack is up, addresses kept — a rerun suffices unless pruning
   touches a contract).
+
+## Session 8 — 2026-07-16 — Phase 8 (deletion & pruning, protocol repo)
+
+- Status: Phase 8 COMPLETE — success criterion 4 met. Protocol repo pruned to
+  singleton + SDK + deploy tooling + generic caller e2e (+ the xcontract-events
+  exception): final package list `caller-contract, integration-tests, lib,
+  signet-contract, signet-contract-deploy, signet-midnight, xcontract-events`.
+  Gate evidence: fresh `yarn install && yarn compile` +
+  `compile:signet-contract:zk` + `compile:caller-contract:zk` +
+  `yarn build && yarn test` all green (signet-midnight 105/105, signet-contract
+  15/15, signet-contract-deploy 12/12, caller-contract 13/13 incl. deploy-tx
+  against fresh zk keys, integration-tests 11 unit passed + caller spec skips
+  offline, xcontract-events 6 passed/5 skipped); caller e2e green against the
+  running stack as a kept-contracts rerun — all nine skippable setup steps
+  logged SKIPPED, 15/15 tests (11 unit + the 4 caller legs live, fresh request
+  signed by the responder), vitest 68.5s, whole invocation 69s wall
+  (18:36:29→18:37:38). actionlint clean on the rewritten ci.yml. Branch pushed
+  @ 8a0d304.
+- Commits (PROTOCOL repo, branch `bernard/repo-refactor`, pushed):
+  - protocol `46ed3da` refactor: delete vault-contract + cli; prune
+    integration-tests to the signet-caller e2e
+  - protocol `02b3d9c` refactor: prune lib to its remaining consumers
+  - protocol `9ade370` refactor: CI integration job runs the generic
+    signet-caller e2e
+  - protocol `8a0d304` refactor: docs, skills and env template around the
+    caller e2e
+  - examples: this HANDOFF entry's commit only (TASK.md Phase 8 bullets
+    amended in it).
+- Deviations from TASK.md (tables amended in this commit):
+  - **Branch override (user-mandated, carried from Session 7):** all Phase 8
+    work on `bernard/repo-refactor` (now @ 8a0d304), NOT
+    `refactor/split-examples`; no new branch created.
+  - **ORCHESTRATOR RATIFICATION recorded:** Session 7's e2e leg-4 resolution
+    (test-signed Schnorr attestation from MPC_ROOT_KEY instead of a
+    broadcast-triggered fakenet attestation) is RATIFIED — full
+    broadcast+attestation loop coverage lives in THIS repo's vault e2e suite
+    (CI green); the protocol repo's caller e2e covers everything the protocol
+    repo owns.
+  - `subprocess.ts` KEPT (TASK.md's delete line was stale — caller steps
+    shell out to root scripts/docker compose through it); `session.ts`,
+    `evm.ts`, `local-evm.ts`, `printMpcServerConfig` + `PIPELINE_KEYS`, and
+    the `VITE_TEST_EVM_RPC_URL`→`EVM_RPC_URL` mapping DELETED (unreached by
+    the EVM-free caller pipeline). The caller vitest config became THE
+    `vitest.config.ts` (one config; offline `test` is one `vitest run`).
+  - lib consumers turned out to be caller-contract + xcontract-events (deploy
+    plumbing had already moved to signet-contract-deploy); lib stays, one
+    orphan export (`createProofServerProvider`) dropped.
+  - `docs/architecture.md` + `demo-architecture.drawio.svg` deleted (they
+    moved into `examples/erc20-vault/` here in Session 5 per the docs table).
+  - Deliberately KEPT `vault` references in the protocol repo (audited
+    repo-wide): `task.md` (historical record), `docs/e2e-sepolia-runbook.md`
+    + `scripts/sweep-derived-funds.ts` (parked Sepolia sweep — script moved
+    out of the skill dir to `scripts/`), `packages/xcontract-events` (its own
+    vault.compact research spike + knowledge-base design narrative),
+    illustrative "the vault" mentions in signet-midnight SDK comments that
+    describe the canonical example app (epsilon-derivation path examples,
+    Signet.compact protocol narration), and the `@midnight-erc20-vault/*`
+    package scope + root package name (repo rename is explicitly out of
+    scope). Comments that claimed IN-REPO vault facts (lockstep-enforcement
+    test pointers, "today's only producer") were rewritten to caller-contract.
+- Active yarn links: none (either repo).
+- Environment state: PROTOCOL repo's compose stack UP (5 containers: node,
+  indexer, proof-server, local-evm, fakenet-responder; responder healthy,
+  polling signet 92fcf9d0…). Protocol `.env` unchanged (kept addresses:
+  signet 92fcf9d0…, caller 23ff923c…) — next caller e2e run is a ~70s rerun.
+  zk keys compiled this session for signet-contract AND caller-contract
+  (restored after the root `yarn compile` wiped them, per the Session 7
+  gotcha). Examples repo untouched except HANDOFF.md + TASK.md. Nothing
+  running in background. Compact toolchain 0.33.0-rc.0.
+- Discovered gotchas: (1) deleting a package whose compose-era output was
+  gitignored leaves untracked debris (`packages/vault-contract/{src/managed,
+  node_modules}`, hardhat `artifacts/`+`cache/` once integration-tests'
+  .gitignore went) — `git rm` clears only tracked files; rm -rf the rest or
+  `git status` stays noisy. (2) Both contracts' zk keygen together took ~5 min
+  on this machine this session — well under the 10-min-per-contract planning
+  number; keygen wall clock varies (Session 6 gotcha holds). (3) Editing
+  .compact COMMENTS (signet-midnight docs fixes) does not require re-keygen —
+  but it does change CI's `hashFiles`-keyed zk cache key, so the first CI run
+  after 8a0d304 regenerates keys once.
+- Next session first action: orchestrator final cleanup: FOLLOW-UPS delivery +
+  HANDOFF.md deletion.
