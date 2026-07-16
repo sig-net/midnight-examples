@@ -164,9 +164,30 @@ function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   console.log(` ➜ 💡 Set as EVM_USER_ADDRESS in the environment to skip this step on the next run`);
 }
 
+/**
+ * Default `EVM_RPC_URL` to the local docker compose `evm` service when unset
+ * — the same local-stack defaulting lib gives the Midnight endpoints, so a
+ * fresh clone runs green with an empty environment. Any real chain must be
+ * set explicitly.
+ *
+ * @param env - The suite's env accumulator.
+ */
+function defaultEvmRpcUrl(env: NodeJS.ProcessEnv): void {
+  if (!env.EVM_RPC_URL) {
+    env.EVM_RPC_URL = "http://127.0.0.1:8545";
+    console.log(`defaulted EVM_RPC_URL=${env.EVM_RPC_URL} (the local docker compose evm service)`);
+  }
+}
+
 /** Step names match what the operator greps for and what STEP_THROUGH prompts show. */
 const STEPS: readonly SetupStep[] = [
-  ["environment: midnight stack reachable, compact on PATH, EVM_RPC_URL set", assertEnvironment],
+  [
+    "environment: midnight stack reachable, compact on PATH, EVM_RPC_URL resolved",
+    async (env) => {
+      defaultEvmRpcUrl(env);
+      await assertEnvironment(env);
+    },
+  ],
   ["setup: resolve EVM chain id from EVM_RPC_URL", resolveEvmChain],
   ["setup: check/deploy ERC20 token on the EVM chain", (env) => ensureErc20Deployed(env, deployTestUsdc)],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
