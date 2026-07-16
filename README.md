@@ -25,10 +25,9 @@ The quickest way to get going with these examples is to get an end to end integr
    compact update 0.33.0-rc.0   # exact version — a bare `compact update` installs/downgrades to stable, which cannot compile these contracts
    ```
 3. Start the local stack (Midnight node, indexer, proof server, anvil EVM, fakenet MPC responder) with `docker compose up -d`.
-4. Run the happy day test, backgrounded with a log — the first run takes **~20–25 minutes** (it generates zk proving keys, deploys every contract, and funds the derived accounts, all automatically; no `.env` needed):
+4. Run the happy day test and watch it go — the first run takes **~20–25 minutes** (it generates zk proving keys, deploys every contract, and funds the derived accounts, all automatically; no `.env` needed):
    ```sh
-   yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts > e2e-run.log 2>&1 &
-   tail -f e2e-run.log
+   yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
    ```
    Green looks like `Tests  15 passed (15)`. Afterwards, paste the setup's printed `.env` block into `.env` so the next run reuses the deployed contracts (~3–4 minutes).
 
