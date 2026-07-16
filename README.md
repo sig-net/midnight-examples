@@ -1,9 +1,38 @@
-# Signature Network: Midnight Examples.
-Examples Leveraging the Signature Network MPC Technology to bring other chains to Midnight.
+# Midnight Contracts Calling Foreign Chains with Sig Network
+
+These examples demonstrate Midnight contracts leveraging the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains.
+
+They show how builders can integrate with the MPC's [sign bidirectional flow](https://docs.sig.network/architecture/sign-bidirectional) to bring functionality on foreign blockchains to their contracts on Midnight. 
+
+The **Sign Bidirectional Flow** comprises of 5 Steps:
+1. Client calls a Contract on Midnight which requests a signature for a transaction destined for a foreign chain
+2. Sig Network MPC honours the request, generating the transaction signature and posting it back to Midnight
+3. Client extracts the signature, using it to submit the signed transaction to the foreign chain
+4. Sig Network MPC observes the foreign transaction and posts the output of the execution (signed) back to Midnight
+5. Client extracts the signed foreign execution output, then submits it back to the Midnight contract completing the foreign transacttion execution.
+
+Jump to the [Quickstart](#quikstart) to get going or start reading at [Repository Layout](#repository-layout) to gain a deeper understanding of what you can find in this repository.
 
 # Quikstart
 
-# Repository Layout
+The quickest way to get going with these examples is to get an end to end integration test for one of them running locally. We reccommend you start with the erc20-vault happy day test.
+
+1. Ensure you have all of the [prequisites](#prerequisites) installed
+2. Install workspace dependencies with `yarn install` from the repository root
+3. Start a local Midnight Blockchain Stack with `docker compose up -d`
+4. Run an integration test with: `yarn test:erc20-vault:e2e`
+
+# Prerequisites
+
+| Prerequisite | Version |Check With| Where to Get It|
+| ------- | ------| ------  |----------- |
+| Node   | >20   |???| ??? ???|
+| Compact Compiler |??? ????    | ??? |???|
+| A docker environment| ???   | ??? |???|
+| Docker Compose    | ???   | ??? |???|
+
+
+## Repository Layout
 This repository is structured as a yarn monorepo, split at the top level between shared utilities (`packages/`) and examples for integrators (`examples/`).
 
 Each example is a directory under `examples/` containing 1–2 workspace packages: `contract` is **required**, `integration-tests` is added as required.
@@ -77,5 +106,5 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
 ```
 
 
-# TODOs:
+## TODOs:
 - add .github/workflows/cron-latest-sdk.yaml: a scheduled full-matrix run against *latest published* @sig-net/midnight — catches silent example rot AND breakage in newly published SDK versions.
