@@ -9,7 +9,6 @@
     "compile:evm": "hardhat compile",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "RUN_INTEGRATION_TESTS=1 vitest run --disable-console-intercept --bail 1",
-    "test:e2e:happy-day-e2e": "yarn test:e2e tests/happy-day-e2e.test.ts",
     "read-state": "tsx scripts/read-state.ts"
   },
   "dependencies": {
