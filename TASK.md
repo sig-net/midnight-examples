@@ -174,15 +174,17 @@ parameters.
 
 | src (`integration-tests/`) | dst | notes |
 |---|---|---|
-| `src/e2e-env.ts`, `src/env-file.ts`, `src/output.ts`, `src/preflight.ts`, `src/waitForGo.ts`, `src/flow-hooks.ts` | `test-harness/src/` | generic; make env keys parameterizable, not vault-hardcoded |
-| `src/setup/global-setup.ts`, `src/setup/local-evm.ts`, `src/setup/mpc-keys.ts` | `test-harness/src/` | stack bring-up, EVM, MPC keys |
-| `src/setup/steps.ts` | **split** | generic step-running → harness; vault deploy wiring → example (Phase 4); singleton deploy → harness via P2 resolution |
-| `src/session.ts` | **split** | generic session mechanics → harness; vault addresses/state → example |
-| `src/evm.ts` | `test-harness/src/` | if truly generic; anything TestUSDC/vault-specific → example |
-| `src/signet-notifications.ts` | `test-harness/src/` | generic signet polling |
-| `src/subprocess.ts` | **delete** | existed to drive the CLI; flows run in-process now. If proving OOMs in-process later, reintroduce process isolation IN THE HARNESS (worker/fork around flow fns) — never a CLI |
-| `tests/env-file.test.ts`, `tests/mpc-keys.test.ts` | `test-harness/tests/` | harness unit tests move with the harness |
-| `hardhat.config.ts`, `@openzeppelin/contracts`, `hardhat` deps | judgment call | generic hardhat helpers → harness; the TestUSDC contract itself → example (it is the vault's EVM counterpart) |
+| `src/e2e-env.ts`, `src/env-file.ts`, `src/output.ts`, `src/preflight.ts`, `src/waitForGo.ts`, `src/flow-hooks.ts` | `test-harness/src/` | ported (Session 3). Parameterized: `PIPELINE_KEYS` moved to the example (passed to `printMpcServerConfig`); the dead `VITE_TEST_EVM_RPC_URL`→`EVM_RPC_URL` mapping dropped (this repo's `.env` uses `EVM_RPC_URL` directly). The vitest `ProvidedContext` augmentation lives in `provided-context.ts`, side-effect-imported by both halves |
+| `src/setup/global-setup.ts` | `test-harness/src/setup-pipeline.ts` | ported (Session 3): the STEPS list is the example's (Phase 4); the harness exports `SetupStep` + `runSetupPipeline` (env build, RUN_INTEGRATION_TESTS gate, step-through, provide) |
+| `src/setup/local-evm.ts`, `src/setup/mpc-keys.ts` | `test-harness/src/` (flattened, no `setup/` dir) | ported (Session 3). `deployTestUsdc` genericized to `deployEvmContract(rpcUrl, artifact)` — artifact reading moves to the example; `WellKnownEvmChainId.Sepolia` + Sepolia defaulting dropped (Sepolia is out of scope) |
+| `src/setup/steps.ts` | **split** (Session 3) | → harness: `assertEnvironment`, `resolveEvmChain`, `ensureErc20Deployed(env, deployErc20)` (token deploy callback = example's), MPC key steps, `ensureDeployerDust(env, addressEnvVars)`, `compileContractZk(env, opts)` (generic zk-compile w/ CI key-cache check), `retryDeployWhileDustGenerates`, `deploySignetContractStep`, fakenet hand-off + responder steps, `fundLocalEvmAccounts(env, addressEnvVars)`, `printMpcServerConfig(env, pipelineKeys)`. → example (Phase 4): `deployVaultContractStep` (subprocess `yarn workspace …erc20-vault-contract deploy`), `ensureVaultEvmAddress`, `ensureUserEvmAddress`, the named STEPS list, `PIPELINE_KEYS`. No signet zk-compile step here: the singleton's keys ship with the deploy package / npm tarball |
+| `src/session.ts` | **split** (Session 3) | → harness: `createE2eSession({ env, requesterAddressEnvVar })` = lazy started-and-synced user wallet (`wallet()`), lazy `SignetRequestResponseReader` (`responseReader()`), `stop()`; plus `resolveUserSeed` (USER_SEED default, from the dissolved cli config). → example (Phase 4): the vault context on top of `wallet()` — providers, joined vault handle, identity |
+| `src/evm.ts` | `test-harness/src/evm.ts` | ported (Session 3) minus `SEPOLIA_USDC_ADDRESS` (Sepolia out of scope) |
+| `src/signet-notifications.ts` | `test-harness/src/` | ported (Session 3) as-is |
+| `src/subprocess.ts` | `test-harness/src/exec.ts` | KEPT (Session 3), renamed: setup steps still shell out (docker compose, zk-compile root scripts, and Phase 4's vault deploy subprocess). Flows stay in-process — nothing under a flow may use it. If proving OOMs in-process later, reintroduce process isolation IN THE HARNESS (worker/fork around flow fns) — never a CLI |
+| `tests/env-file.test.ts`, `tests/mpc-keys.test.ts` | `test-harness/tests/` | ported (Session 3) |
+| `hardhat.config.ts`, `@openzeppelin/contracts`, `hardhat` deps | → example's `integration-tests` (Phase 4) | decided Session 3: hardhat exists solely to compile the example's own `TestUSDC.sol`, so config + contract + both deps live with the example (per the AGENTS corollary allowing tooling deps in an example's integration-tests). The harness stays hardhat-free; it exposes the generic ethers-based `deployEvmContract` + funding helpers |
+| — | `test-harness/scripts/stack-smoke.ts` | new (Session 3): the Phase 3 gate's smoke script — compose up, probe node/indexer/proof-server/EVM, compose down (`yarn workspace @midnight-examples/test-harness smoke:stack`) |
 
 ### `examples/erc20-vault/integration-tests` (Phase 4)
 
