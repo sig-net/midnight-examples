@@ -12,6 +12,14 @@ running follow-ups list, and the decisions the next session must not re-derive.
   Active-links entry), verify the committed `^0.0.3` range matches the
   actually-published version (bump the harness manifest if not), `yarn
   install`, re-run Phase 6 verification against npm.
+  **Decision (user, 2026-07-16): Option B** — the private `@midnight-erc20-vault/lib`
+  is NOT published; instead the deploy plumbing it provided MOVES into
+  `@sig-net/midnight-contract-deploy` (protocol repo branch
+  `refactor/self-contained-contract-deploy`), which is published alone at
+  0.0.3. Consequence for this repo: after publish only ONE link ever needed
+  existed; both portals + the effect pins all go away together. Sessions 7/8
+  must treat the protocol repo's contract-deploy/lib split accordingly
+  (plumbing lives in contract-deploy, not lib).
 - **Protocol repo working tree dirty** — RESOLVED before Session 3: the user
   committed the README hunk as `cae104b update repository layout` (only
   README.md changed; no ported source affected). The porting baseline is
