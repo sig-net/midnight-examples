@@ -190,22 +190,24 @@ parameters.
 
 | src | dst | notes |
 |---|---|---|
-| `integration-tests/src/flows/deposit.ts`, `flows/withdraw.ts` | `src/flows/` | THE example artifact — typed, in-process, JSDoc'd |
+| `integration-tests/src/flows/deposit.ts`, `flows/withdraw.ts` | `src/flows/` | THE example artifact — typed, in-process, JSDoc'd. Ported (Session 4): `runDepositRoundTrip` lives in `src/flows/deposit.ts`; the old withdraw *legs* (thin wrappers over cli calls) DISSOLVED — with everything in-process the flow primitives (`withdraw`, `completeWithdraw`, the polls) are called directly |
 | `integration-tests/src/fakenet-vault-account.ts` | `src/` | vault-specific derived account |
-| vault halves of `session.ts` / `setup/steps.ts` | `src/` | from Phase 3 split |
-| `integration-tests/contracts/TestUSDC.sol` | `contracts/TestUSDC.sol` | with its hardhat compile script |
+| vault halves of `session.ts` / `setup/steps.ts` | `src/vault-session.ts`, `src/setup.ts` | from Phase 3 split; `setup.ts` is the vitest globalSetup (STEPS + PIPELINE_KEYS, module-private) |
+| `integration-tests/contracts/TestUSDC.sol` | `contracts/TestUSDC.sol` | with its hardhat compile script (`compile:evm`); deploy callback in `src/test-usdc.ts` |
 | `integration-tests/tests/happy-day-e2e.test.ts`, `benchmark.test.ts`, `false-claimer.test.ts`, `deposit-withdrawal-failure-refund.test.ts`, `deposit-claimant-not-caller.test.ts` | `tests/` | rewire from subprocess-CLI calls to in-process flow calls |
-| `vitest.config.ts` | `vitest.config.ts` | adjust globalSetup path to test-harness |
+| `vitest.config.ts` | `vitest.config.ts` | globalSetup → `./src/setup.ts` (composes harness `runSetupPipeline`) |
+| `vault-contract/src/providers.ts` | `src/vault-providers.ts` | re-ported (Session 4) per Session 2's deviation; managed paths resolved relative to the sibling contract package |
+| — | root scripts `compile:erc20-vault`, `compile:erc20-vault:zk`, `test:erc20-vault:e2e` | added in Phase 4a (the setup pipeline's zk-compile step shells out to the root script); the remaining Phase 5 scripts unchanged |
 
 ### CLI dissolution — `packages/cli` (Phase 4; the package does NOT survive)
 
 | CLI piece | fate |
 |---|---|
 | `commands/deposit-e2e.ts`, `commands/withdraw-e2e.ts` | superseded by `src/flows/` (they were the flow compositions) |
-| `commands/initialize.ts`, `deposit.ts`, `claim.ts`, `withdraw.ts`, `complete-withdraw.ts`, `broadcast-evm.ts`, `poll-signature-response.ts`, `poll-respond-bidirectional.ts`, `read-state.ts` | each becomes a thin `scripts/<name>.ts` (tsx entrypoint, ~20 lines: parse args → call flow/step fn) — but ONLY where hand-driving is actually useful; drop any nobody would run by hand rather than porting ritually |
-| `src/config.ts`, `src/context.ts` | dissolve → harness env/session + lib providers |
-| `src/identity.ts` | dissolve → lib (`seed.ts` neighborhood) |
-| `src/evm.ts`, `src/mpc-routing.ts` | dissolve → flows/harness as consumers dictate |
+| `commands/initialize.ts`, `deposit.ts`, `claim.ts`, `withdraw.ts`, `complete-withdraw.ts`, `broadcast-evm.ts`, `poll-signature-response.ts`, `poll-respond-bidirectional.ts`, `read-state.ts` | each became a typed in-process flow fn in `src/flows/<name>.ts` (Session 4); `read-state.ts` folded into `src/vault-ledger.ts` (`printVaultState`). `scripts/` = `read-state.ts` ONLY (wallet-free, indexer-only — genuinely hand-drivable); the rest DROPPED as scripts: each needs a synced wallet (minutes of startup) and is driven through the e2e specs + their resume env vars (`DEPOSIT_REQUEST_ID` etc.) instead |
+| `src/config.ts`, `src/context.ts` | dissolved (Session 4) → harness session (`USER_SEED`) + example `src/vault-context.ts` (`VaultContext`: all fields REQUIRED — the setup pipeline populates every one; `requireConfigValue` gone) |
+| `src/identity.ts` | dissolved (Session 4): the secret PARSING half is lib's `parseIdentitySecretKey` (landed Phase 1); the DERIVATION half (`userCommitment` circuit + signet path) is contract-specific and lives in the example's `src/vault-identity.ts` — lib knows no contract |
+| `src/evm.ts`, `src/mpc-routing.ts` | → example `src/evm-transfer.ts`, `src/mpc-routing.ts` (Session 4; flows are their only consumers) |
 | `src/vault-ledger.ts`, `src/vault-token.ts` | → example `src/` (vault state readers; candidates for the contract package's surface if env-agnostic) |
 | `commander` dep, `src/main.ts`, `src/index.ts`, `tests/config.test.ts` | **deleted** (config test moves only if its subject survives in harness) |
 

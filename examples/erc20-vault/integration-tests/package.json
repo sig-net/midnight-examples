@@ -1,0 +1,36 @@
+{
+  "name": "@midnight-examples/erc20-vault-integration-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Integration tests that drive the erc20-vault example in-process (src/flows/) against a running local stack. Env-gated: skips entirely unless RUN_INTEGRATION_TESTS is set.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "compile:evm": "hardhat compile",
+    "test": "vitest run --passWithNoTests",
+    "test:e2e": "RUN_INTEGRATION_TESTS=1 vitest run --disable-console-intercept --bail 1",
+    "test:e2e:happy-day-e2e": "yarn test:e2e tests/happy-day-e2e.test.ts",
+    "read-state": "tsx scripts/read-state.ts"
+  },
+  "dependencies": {
+    "@midnight-examples/erc20-vault-contract": "*",
+    "@midnight-examples/lib": "*",
+    "@midnight-examples/test-harness": "*",
+    "@midnight-ntwrk/compact-runtime": "0.18.0-rc.0",
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.3",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.3",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.3",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.3",
+    "@midnight-ntwrk/midnight-js-types": "5.0.0-beta.3",
+    "@sig-net/midnight": "^0.0.3",
+    "ethers": "^6.17.0"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "^5.6.1",
+    "@types/node": "^26.1.1",
+    "hardhat": "^3.9.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
