@@ -11,25 +11,37 @@ The **Sign Bidirectional Flow** comprises of 5 Steps:
 4. Sig Network MPC observes the foreign transaction and posts the output of the execution (signed) back to Midnight
 5. Client extracts the signed foreign execution output, then submits it back to the Midnight contract completing the foreign transacttion execution.
 
-Jump to the [Quickstart](#quikstart) to get going or start reading at [Repository Layout](#repository-layout) to gain a deeper understanding of what you can find in this repository.
+Jump to the [Quickstart](#quickstart) to get going or start reading at [Repository Layout](#repository-layout) to gain a deeper understanding of what you can find in this repository.
 
-# Quikstart
+# Quickstart
 
-The quickest way to get going with these examples is to get an end to end integration test for one of them running locally. We reccommend you start with the erc20-vault happy day test.
+The quickest way to get going with these examples is to get an end to end integration test for one of them running locally. We recommend you start with the erc20-vault happy day test.
 
-1. Ensure you have all of the [prequisites](#prerequisites) installed
-2. Install workspace dependencies with `yarn install` from the repository root
-3. Start a local Midnight Blockchain Stack with `docker compose up -d`
-4. Run an integration test with: `yarn test:erc20-vault:e2e`
+1. Ensure you have all of the [prerequisites](#prerequisites) installed.
+2. From the repository root, install workspace dependencies and the Compact toolchain:
+   ```sh
+   corepack enable
+   yarn install
+   compact update 0.33.0-rc.0   # exact version — a bare `compact update` installs/downgrades to stable, which cannot compile these contracts
+   ```
+3. Start the local stack (Midnight node, indexer, proof server, anvil EVM, fakenet MPC responder) with `docker compose up -d`.
+4. Run the happy day test and watch it go — the first run takes **~20–25 minutes** (it generates zk proving keys, deploys every contract, and funds the derived accounts, all automatically; no `.env` needed):
+   ```sh
+   yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
+   ```
+   Green looks like `Tests  15 passed (15)`. Afterwards, paste the setup's printed `.env` block into `.env` so the next run reuses the deployed contracts (~3–4 minutes).
+
+If the run is interrupted partway (typically the proof server exhausting memory on a proving leg — routine on a 16 GB Docker VM), follow the recovery playbook in [.claude/skills/e2e/SKILL.md](.claude/skills/e2e/SKILL.md), which also covers running the full five-spec suite and redeploying after contract changes.
 
 # Prerequisites
 
-| Prerequisite | Version |Check With| Where to Get It|
+| Prerequisite | Version | Check With | Where to Get It |
 | ------- | ------| ------  |----------- |
-| Node     | >20   |???| ??? ???|
-| Compact Compiler |0.33.0-rc.0    | ??? |???|
-| A docker environment| ???   | ??? |???|
-| Docker Compose    | ???   | ??? |???|
+| Node | ≥ 20 (22+ recommended) | `node --version` | [nodejs.org](https://nodejs.org) or your version manager (nvm, fnm, …) |
+| Yarn 4 (via Corepack) | 4.x | `corepack enable && yarn --version` | Corepack ships with Node; the repo's `packageManager` field pins the Yarn version |
+| Compact toolchain | compiler 0.33.0-rc.0 | `compact compile --version` → `0.33.0` | Install the `compact` launcher per [Midnight's docs](https://docs.midnight.network/), then `compact update 0.33.0-rc.0` (compiler builds live at [LFDT-Minokawa/compact releases](https://github.com/LFDT-Minokawa/compact/releases)). If the launcher refuses the rc version, use the direct-download recipe in [.github/workflows/example-test.yaml](.github/workflows/example-test.yaml) |
+| A docker environment | any recent engine | `docker --version` | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS/Windows) or your distro's engine — with **≥ 16 GB RAM allocated** (see note) |
+| Docker Compose v2 | ≥ 2.x | `docker compose version` | Included with Docker Desktop; plugin package on Linux |
 
 NOTE: the midnight proof server is quite heavy. It is recommended that you allocate at least 16 GB of ram to your docker environment otherwise expect to have to restart the tests multiple times as the proof server hangs.
 
@@ -108,5 +120,5 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
 ```
 
 
-## TODOs - NOT YET!!:
+## TODOs:
 - add .github/workflows/cron-latest-sdk.yaml: a scheduled full-matrix run against *latest published* @sig-net/midnight — catches silent example rot AND breakage in newly published SDK versions.
