@@ -5,21 +5,23 @@ running follow-ups list, and the decisions the next session must not re-derive.
 
 ## FOLLOW-UPS (pending user actions)
 
-- **Publish `@sig-net/midnight-contract-deploy` to npm** (currently 404 — P2).
-  Session 3 linked it (AND its workspace dep `@midnight-erc20-vault/lib`) from
-  the protocol checkout. After publish: remove the links AND the three
-  link-era `effect`-family pins from the root resolutions (see Session 3's
-  Active-links entry), verify the committed `^0.0.3` range matches the
-  actually-published version (bump the harness manifest if not), `yarn
-  install`, re-run Phase 6 verification against npm.
-  **Decision (user, 2026-07-16): Option B** — the private `@midnight-erc20-vault/lib`
-  is NOT published; instead the deploy plumbing it provided MOVES into
+- **Publish `@sig-net/midnight-contract-deploy` to npm** — RESOLVED 2026-07-16.
+  **Decision (user): Option B** — the private `@midnight-erc20-vault/lib` is NOT
+  published; the deploy plumbing it provided MOVED into
   `@sig-net/midnight-contract-deploy` (protocol repo branch
-  `refactor/self-contained-contract-deploy`), which is published alone at
-  0.0.3. Consequence for this repo: after publish only ONE link ever needed
-  existed; both portals + the effect pins all go away together. Sessions 7/8
-  must treat the protocol repo's contract-deploy/lib split accordingly
-  (plumbing lives in contract-deploy, not lib).
+  `refactor/self-contained-contract-deploy` @ 3537b84), published alone at
+  0.0.3 (`latest`). De-link executed the same day: both portals + the three
+  effect pins removed from BOTH checkouts (primary + fresh clone), `yarn
+  install` resolves from npm, offline unit suite green, happy-day 15/15 green
+  from the clone (after one transient node rejection and one routine
+  proof-server OOM — both environmental, playbook applied). NO yarn links are
+  active anywhere anymore. Yarn 4.17's release-age quarantine blocked the
+  fresh publish; `.yarnrc.yml` now carries `npmPreapprovedPackages:
+  ["@sig-net/*"]` (committed — CI needs it too). The skill's "until published"
+  bridge paragraph was removed. Sessions 7/8: in the protocol repo the deploy
+  plumbing now lives in signet-contract-deploy, NOT lib (lib retains only the
+  midnight-js provider adapters); that branch is unmerged — coordinate with
+  the user on merging it before/during Session 7.
 - **Protocol repo working tree dirty** — RESOLVED before Session 3: the user
   committed the README hunk as `cae104b update repository layout` (only
   README.md changed; no ported source affected). The porting baseline is
