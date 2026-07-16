@@ -22,6 +22,10 @@ running follow-ups list, and the decisions the next session must not re-derive.
   plumbing now lives in signet-contract-deploy, NOT lib (lib retains only the
   midnight-js provider adapters); that branch is unmerged — coordinate with
   the user on merging it before/during Session 7.
+  **CI green 2026-07-16:** run 29507366093 at 1968003 — the FIRST fully green
+  CI run (npm-only install, rc toolchain, zk keygen, compose stack, happy-day
+  e2e on a fresh runner). PR #1 shows green checks. The "re-run CI after
+  publish" follow-up is closed.
 - **Protocol repo working tree dirty** — RESOLVED before Session 3: the user
   committed the README hunk as `cae104b update repository layout` (only
   README.md changed; no ported source affected). The porting baseline is
