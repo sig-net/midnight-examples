@@ -138,7 +138,8 @@ responsibilities are redistributed; the file itself does not survive.
 | `.yarnrc.yml` | `.yarnrc.yml` | `nodeLinker: node-modules` |
 | `tsconfig.base.json` | `tsconfig.base.json` | no-emit base, unchanged semantics |
 | `docker-compose.yaml` | `docker-compose.yaml` | copy; strip anything vault-named (container names/env stay generic) |
-| `.env.example`, `standalone.env.example` | `.env.example` | merge; drop dead vars (audit each against actual readers) |
+| `.env.example` | `.env.example` | drop dead vars (audit each against actual readers); Sepolia references dropped (local-only) |
+| `standalone.env.example` | **dissolved** → compose `indexer` `environment:` | its four `APP__INFRA__*` values are dev-only container constants, inlined into docker-compose.yaml (Session 1) |
 | `.gitignore` | extend existing | add `dist/`, `logs/`, `midnight-level-db/`, `src/managed/` patterns etc. |
 
 ### `packages/lib` (Phase 1) — runtime helpers
