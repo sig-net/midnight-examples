@@ -480,3 +480,87 @@ running follow-ups list, and the decisions the next session must not re-derive.
   the compile will reject the pragma — expect to hit this divergence and fix
   the skill (the CI workflow's LFDT rc-download recipe is the reference).
   Also expect the OOM cadence (gotcha 2) during the full suite.
+
+## Session 6 — 2026-07-16 — Phase 6 (fresh-clone full verification, /e2e skill verbatim)
+
+- Status: Phase 6 COMPLETE. All five e2e specs green from a FRESH CLONE
+  (cloned `origin/port/erc20-vault` @ `6ef1ce2` into a scratchpad dir),
+  following `.claude/skills/e2e/SKILL.md` VERBATIM as an agent that had
+  never seen the repo; full unit suite green in the clone (`yarn build &&
+  yarn test`: contract 50/50 incl. deploy-tx against the fresh zk keys,
+  lib 10/10, harness 11/11, e2e 5 files/49 tests skipped offline).
+  Run evidence: first invocation (no `.env`, fresh deploys) 18.3 min wall
+  (14:15:59→14:34:16) — setup 16/16 (fresh TestUSDC 0x5FbD…, signet
+  dbe0b52f…, vault 015785…, responder auto-started and healthy), happy-day
+  15/15, deposit-withdrawal-failure-refund 9/9, deposit-claimant-not-caller
+  6/6, then proof-server OOM (Exited 137, OOMKilled=true) at benchmark's
+  deposit PROVE; recovery per the skill's playbook: restart + plain rerun →
+  benchmark 13/13 (284.0s, full BENCHMARK_TIMINGS_JSON), restart →
+  false-claimer 6/6 (184.8s). 49/49 e2e total.
+- Commits (examples repo, branch `port/erc20-vault`, pushed):
+  - `c6eb84d` port: Phase 6 — /e2e skill fixes from the fresh-clone verbatim run
+  - (this HANDOFF entry's commit)
+  - (protocol repo: no commits — untouched, clean at `cae104b`)
+- Deviations from TASK.md: none (no table amendments needed). The gate's
+  real output is the skill-divergence list, all fixed in `c6eb84d`:
+  1. No P2 interim note — a truly fresh `yarn install` 404s on
+     `@sig-net/midnight-contract-deploy` (reproduced); quickstart now
+     carries the "until published" yarn-link bridge recipe.
+  2. Bare `compact update` installs — and DOWNGRADES an active rc default
+     to — stable 0.31.1, and the compile then fails `language version
+     0.23.0 mismatch` (both observed); quickstart now says
+     `compact update 0.33.0-rc.0` with the CI workflow's direct-download
+     recipe as fallback reference.
+  3. The quickstart's standalone `compile:erc20-vault:zk` was redundant:
+     the setup's skip conditions (address env var / TRUST_PREBUILT_ZK_KEYS)
+     never hold on a fresh clone, so it recompiled regardless — keygen paid
+     twice (observed). Step removed; first-invocation wall clock documented.
+  4. "Fresh deploy runs green in ONE pass" read as whole-suite-one-run;
+     clarified (deploy pipeline yes; flow files expect the OOM interrupt)
+     and restart-between-spec-files documented as the DEFAULT cadence on a
+     16 GB VM (OOM now 3-for-3 across Sessions 5–6).
+  5. OOM playbook extended: an OOM can kill the PROVE itself (benchmark
+     deposit leg this run) — no request-id banner printed means nothing to
+     resume; rerun the spec plain.
+  Example README timings checked against this session's numbers: accurate
+  as written, no correction needed.
+- Active yarn links (NOT committed): BOTH checkouts now carry the same
+  uncommitted resolutions hunk — the two portals
+  (`@sig-net/midnight-contract-deploy`, `@midnight-erc20-vault/lib` →
+  protocol checkout) plus the three effect pins — primary unchanged from
+  Session 3, clone re-created this session per Session 3's Active-links
+  entry. Re-create after pulls as before.
+- Environment state: the CLONE's compose stack is UP (5 containers; the
+  shared container names now belong to compose project
+  `midnight-examples-fresh`; responder healthy, polling signet dbe0b52f…).
+  PRIMARY checkout's stack DOWN (taken over this session with
+  `--profile fakenet down` — chain state destroyed again): the primary
+  `.env`'s Session-4 addresses (signet c50831…, vault 85af3e…) are STALE.
+  The clone's contracts live on the CURRENTLY RUNNING chain, so the primary
+  can adopt the clone's printed `.env` block instead of redeploying — or
+  comment out its contract-address vars for a fresh redeploy. Clone
+  location: the session scratchpad
+  (`…/scratchpad/midnight-examples-fresh`) — left in place, stack up,
+  `.env` holding the full current pipeline block; NOTE the scratchpad is
+  session-scoped, so treat the clone as disposable (branch state is fully
+  pushed; only the running stack + its `.env` matter, and only until the
+  next takeover). Vault zk keys compiled in the clone. Nothing running in
+  background. Compact toolchain default 0.33.0-rc.0 (restored after the
+  verbatim run's deliberate bare-`compact update` downgrade).
+- Discovered gotchas: (1) the setup's in-run zk keygen took ~3 min on this
+  machine vs ~12 min for the standalone pre-compile earlier the same hour —
+  keygen wall clock varies widely; don't diagnose a hang from duration
+  alone. (2) An OOM can hit a file's first deposit PROVE (not just claim
+  legs) when earlier spec files exhausted the same server instance — and a
+  killed prove leaves NO resume id (playbook updated). (3) `docker compose
+  up` in a second checkout works with the same container names as long as
+  the first checkout's stack was `--profile fakenet down`'d — the
+  containers just migrate to the new compose project name.
+- Next session first action: Session 7 (Phase 7, protocol repo, branch
+  `refactor/split-examples`): the protocol repo's `.env` addresses have
+  been stale since Session 3 (see FOLLOW-UPS) and the chain was reset again
+  this session — take the stack over from the protocol checkout
+  (`docker compose --profile fakenet down` in the CLONE dir first), comment
+  out the protocol `.env`'s contract-address vars so its setup redeploys,
+  then build `packages/caller-contract` + the generic e2e per TASK.md
+  Phase 7.
