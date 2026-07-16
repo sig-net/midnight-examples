@@ -20,8 +20,9 @@ running follow-ups list, and the decisions the next session must not re-derive.
   ["@sig-net/*"]` (committed — CI needs it too). The skill's "until published"
   bridge paragraph was removed. Sessions 7/8: in the protocol repo the deploy
   plumbing now lives in signet-contract-deploy, NOT lib (lib retains only the
-  midnight-js provider adapters); that branch is unmerged — coordinate with
-  the user on merging it before/during Session 7.
+  midnight-js provider adapters); that branch's commit (3537b84) became the
+  base of `bernard/repo-refactor`, whose merge is the protocol-repo bullet
+  below.
   **CI green 2026-07-16:** run 29507366093 at 1968003 — the FIRST fully green
   CI run (npm-only install, rc toolchain, zk keygen, compose stack, happy-day
   e2e on a fresh runner). PR #1 shows green checks. The "re-run CI after
@@ -30,29 +31,38 @@ running follow-ups list, and the decisions the next session must not re-derive.
   committed the README hunk as `cae104b update repository layout` (only
   README.md changed; no ported source affected). The porting baseline is
   otherwise unchanged; protocol tree now clean at `cae104b`.
-- **Protocol repo's local chain state was reset by Session 3's smoke gate**
-  (both repos' compose files use the same container names, so the protocol
-  stack had to come down for the examples stack to come up; recreating it
-  starts a fresh chain). Its 5 containers are back up, but the contract
-  addresses in the PROTOCOL repo's `.env` are now stale — before rerunning
-  the protocol repo's e2e suite, comment out its `MIDNIGHT_*_CONTRACT_ADDRESS`
-  (and derived EVM/ERC20) values so its setup redeploys.
-- **PRIMARY examples checkout's `.env` contract addresses are stale**
-  (Session 6's fresh-clone verification took the stack over — chain state
-  reset; the clone's stack now owns the shared container names). Before the
-  next e2e run from the PRIMARY checkout: either adopt the fresh-clone run's
-  printed `.env` block (its contracts live on the currently running chain —
-  values in the Session 6 entry) or comment out
+- **Protocol repo's local chain state was reset by Session 3's smoke gate** —
+  RESOLVED in Session 7: the stale `.env` address values were commented out,
+  setup redeployed fresh (signet 92fcf9d0…, caller 23ff923c…), and the
+  protocol `.env` now holds CURRENT addresses on the chain that is running
+  as of 2026-07-16 (the protocol stack owns the shared container names; a
+  kept-contracts caller e2e rerun takes ~70s).
+- **PRIMARY examples checkout's `.env` contract addresses are stale** (the
+  chain has been reset twice since they were minted — Session 6's fresh-clone
+  takeover, then the 2026-07-16 takeover for Sessions 7/8; the running chain
+  now belongs to the PROTOCOL stack, so the Session 6 clone's values are
+  dead too). Before the next e2e run from the PRIMARY checkout: comment out
   `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
   `ERC20_ADDRESS`, `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS` so setup
-  redeploys.
-- **Push + CI**: DONE Session 5 — `port/erc20-vault` pushed, draft PR #1 open
-  (https://github.com/sig-net/midnight-examples/pull/1). CI ran and is RED at
-  `yarn install` on the `@sig-net/midnight-contract-deploy` npm 404 — the
-  EXPECTED P2 state (every step before install green, incl. the rc-toolchain
-  install on a fresh runner). Remaining user action: after the publish lands,
-  re-run the PR's CI and confirm green end-to-end (the compile/zk-cache/
-  compose/e2e steps have never executed in CI).
+  redeploys (and take the protocol stack down first:
+  `docker compose --profile fakenet down` in the protocol repo).
+- **The `port/erc20-vault-stable` checkout at
+  `~/Projects/github.com/midnight-examples` has stale `.env` addresses too:**
+  its stack was taken over on 2026-07-16 for Session 7 (its proof server was
+  already OOM-dead, no run in flight). Same fix as the primary checkout.
+- **Push + CI**: DONE Session 5 — `port/erc20-vault` pushed, PR #1 open
+  (https://github.com/sig-net/midnight-examples/pull/1). CI fully green as of
+  2026-07-16 (run 29507366093; see the publish bullet above). Remaining user
+  action: **merge PR #1**.
+- **Merge the protocol repo branch `bernard/repo-refactor`** @ `129cfee`
+  (pushed): Sessions 7–8 — the minimal caller contract + generic singleton
+  e2e, then the Phase 8 pruning (vault-contract + cli deleted; repo is now
+  singleton + SDK + deploy tooling + caller e2e + xcontract-events). All
+  gates green: root build/test suites, caller e2e 4/4 live legs against the
+  local stack (fresh-deploy and kept-contracts rerun). Note for the first
+  post-merge CI run: the zk key cache regenerates once (comment fixes in
+  .compact sources changed the `hashFiles` cache key) — expected, not a
+  defect.
 
 ## Porting baseline (protocol repo)
 
