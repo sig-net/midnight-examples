@@ -23,6 +23,15 @@ running follow-ups list, and the decisions the next session must not re-derive.
   addresses in the PROTOCOL repo's `.env` are now stale — before rerunning
   the protocol repo's e2e suite, comment out its `MIDNIGHT_*_CONTRACT_ADDRESS`
   (and derived EVM/ERC20) values so its setup redeploys.
+- **PRIMARY examples checkout's `.env` contract addresses are stale**
+  (Session 6's fresh-clone verification took the stack over — chain state
+  reset; the clone's stack now owns the shared container names). Before the
+  next e2e run from the PRIMARY checkout: either adopt the fresh-clone run's
+  printed `.env` block (its contracts live on the currently running chain —
+  values in the Session 6 entry) or comment out
+  `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
+  `ERC20_ADDRESS`, `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS` so setup
+  redeploys.
 - **Push + CI**: DONE Session 5 — `port/erc20-vault` pushed, draft PR #1 open
   (https://github.com/sig-net/midnight-examples/pull/1). CI ran and is RED at
   `yarn install` on the `@sig-net/midnight-contract-deploy` npm 404 — the
@@ -498,11 +507,11 @@ running follow-ups list, and the decisions the next session must not re-derive.
   benchmark 13/13 (284.0s, full BENCHMARK_TIMINGS_JSON), restart →
   false-claimer 6/6 (184.8s). 49/49 e2e total.
 - Commits (examples repo, branch `port/erc20-vault`, pushed):
-  - `c6eb84d` port: Phase 6 — /e2e skill fixes from the fresh-clone verbatim run
+  - `a1b43bb` port: Phase 6 — /e2e skill fixes from the fresh-clone verbatim run (rebased over the user's `84c6e97` readme updates)
   - (this HANDOFF entry's commit)
   - (protocol repo: no commits — untouched, clean at `cae104b`)
 - Deviations from TASK.md: none (no table amendments needed). The gate's
-  real output is the skill-divergence list, all fixed in `c6eb84d`:
+  real output is the skill-divergence list, all fixed in `a1b43bb`:
   1. No P2 interim note — a truly fresh `yarn install` 404s on
      `@sig-net/midnight-contract-deploy` (reproduced); quickstart now
      carries the "until published" yarn-link bridge recipe.
