@@ -158,12 +158,12 @@ Classify as you port: anything consumed ONLY by tests/setup belongs in
 | `src/erc20-vault.compact` | `src/erc20-vault.compact` | unchanged |
 | `src/witnesses.ts` | `src/witnesses.ts` | must pass the env-agnostic audit |
 | `src/index.ts` | `src/index.ts` | curated surface; env-agnostic |
-| `src/providers.ts` | **out of `src/`** → fold into `deploy.ts` or drop | provider wiring is Node-side; nothing env-specific may stay under `src/` |
-| `src/deploy-vault.ts` | fold into `deploy.ts` | same reason |
+| `src/providers.ts` | **dropped** (Session 2) → re-ported into `examples/erc20-vault/integration-tests` in Phase 4 | provider wiring is Node-side (NodeZkConfigProvider, level-db) and the deploy flow doesn't use it; port `buildVaultProviders` & co. from the protocol repo's `vault-contract/src/providers.ts` when the flows land |
+| `src/deploy-vault.ts` | folded into `deploy.ts` | same reason. `deployVault` is NO LONGER an export: `deploy.ts` is a self-executing entrypoint outside the export surface (per AGENTS.md) — Phase 3/4 setup runs it as a subprocess (`yarn workspace @midnight-examples/erc20-vault-contract deploy`), not in-process |
 | `deploy.ts` | `deploy.ts` | Node entrypoint; lib imports allowed here only |
 | `tests/contract.test.ts` | `tests/erc20-vault.test.ts` | simulator-only |
 | `tests/deploy.test.ts` | `tests/deploy.test.ts` | needs `compile:zk` |
-| `package.json` | new | name `@midnight-examples/erc20-vault-contract`; deps: `@sig-net/midnight@^0.0.x` (npm!), compact runtime — NOTHING else |
+| `package.json` | new | name `@midnight-examples/erc20-vault-contract`; deps: `@sig-net/midnight@^0.0.3`, `@sig-net/midnight-contract@^0.0.3` (npm!), compact runtime — NOTHING else. midnight-contract is required at runtime: the generated vault code imports the callee module `../../SignetNotifier/contract/index.js`, satisfied by a compile-script symlink into the npm tarball's `dist/managed` (which also ships the signet zk keys) |
 
 **Env-agnostic audit (mandatory, Phase 2 gate):** grep `src/` for `node:`,
 `process.`, `Buffer`, `require(`, `fs`, `path`, `dotenv`; every hit either moves
