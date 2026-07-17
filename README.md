@@ -18,20 +18,31 @@ Jump to the [Quickstart](#quickstart) to get going or start reading at [Reposito
 The quickest way to get going with these examples is to get an end to end integration test for one of them running locally. We recommend you start with the erc20-vault happy day test.
 
 1. Ensure you have all of the [prerequisites](#prerequisites) installed.
-2. From the repository root, install workspace dependencies and the Compact toolchain:
+2. From the repository root, install workspace dependencies and select the required Compact toolchain explicitly:
    ```sh
    corepack enable
    yarn install
-   compact update 0.33.0-rc.0   # exact version — a bare `compact update` installs/downgrades to stable, which cannot compile these contracts
+   compact update 0.33.0-rc.0   # Exact version required.
+                                # `compact update` installs/downgrades
+                                # to stable.
    ```
 3. Start the local stack (Midnight node, indexer, proof server, anvil EVM, fakenet MPC responder) with `docker compose up -d`.
-4. Run the happy day test and watch it go — the first run takes **~20–25 minutes** (it generates zk proving keys, deploys every contract, and funds the derived accounts, all automatically; no `.env` needed):
+4. Run the happy day test and watch it go. The first run can take **~20–25 minutes** (it generates zk proving keys, deploys every contract and funds the derived accounts, all automatically no `.env` inserts needed):
    ```sh
    yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
+   
+   # Optional: Run with 'step-through' enabled to pause test at each step
+   # to make it a little easier to follow along with everything that is happening.
+   STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
    ```
    Green looks like `Tests  15 passed (15)`. Afterwards, paste the setup's printed `.env` block into `.env` so the next run reuses the deployed contracts (~3–4 minutes).
 
-If the run is interrupted partway (typically the proof server exhausting memory on a proving leg — routine on a 16 GB Docker VM), follow the recovery playbook in [.claude/skills/e2e/SKILL.md](.claude/skills/e2e/SKILL.md), which also covers running the full five-spec suite and redeploying after contract changes.
+**TIP:** If you are using Claude Code you can ask it to do all of this for you using this [skill](.claude/skills/e2e/SKILL.md), for example:
+```
+Use your /e2e skill to get the erc20-vault happy day test running for me, from fresh clone to green. Recover the run yourself if anything fails along the way.
+```
+
+**NOTE:** The most common reason that the run fails is as a result of the proof server hanging or crashing when it exhausts memory on a proving leg. This happens routinely, even on a Docker VM with 16 GB of RAM (the heavy claim/settle proofs peak above 12 GiB). This most often presents as the test failing with `connect ECONNREFUSED 127.0.0.1:6300` partway through a claim or settle step, with `docker ps -a` showing the `midnight-proof-server` container as `Exited (137)`, i.e. OOM-killed. If this happens it is usually possible to restart the proof server and pick up the test run at the last successful chain interaction instead of starting over using variables printed out in banners as the test progresses. See [test run recovery](./examples/erc20-vault/README.md#test-run-recovery) in the erc20-vault integration testing package for more details.
 
 # Prerequisites
 
@@ -43,7 +54,7 @@ If the run is interrupted partway (typically the proof server exhausting memory 
 | A docker environment | any recent engine | `docker --version` | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS/Windows) or your distro's engine — with **≥ 16 GB RAM allocated** (see note) |
 | Docker Compose v2 | ≥ 2.x | `docker compose version` | Included with Docker Desktop; plugin package on Linux |
 
-NOTE: the midnight proof server is quite heavy. It is recommended that you allocate at least 16 GB of ram to your docker environment otherwise expect to have to restart the tests multiple times as the proof server hangs.
+**NOTE:** the midnight proof server is quite heavy. It is recommended that you allocate at least 16 GB of ram to your docker environment otherwise expect to have to restart the tests multiple times as the proof server hangs.
 
 # Running against Sepolia
 
@@ -149,7 +160,3 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
     └── other-example/          # Minimal examples may be contract-only with simulator tests.
         └── contract/
 ```
-
-
-## TODOs:
-- add .github/workflows/cron-latest-sdk.yaml: a scheduled full-matrix run against *latest published* @sig-net/midnight — catches silent example rot AND breakage in newly published SDK versions.
