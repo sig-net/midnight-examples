@@ -27,7 +27,9 @@ which will soon point at the refactor.
 
 ## Tasks
 
-- [ ] **T.1 (KEY) Bearer-transfer ownership handoff test.** The vault tokens
+- [x] **T.1 (KEY) Bearer-transfer ownership handoff test.** `3445bc8` — live
+      spec `tests/bearer-transfer.test.ts` (11 tests, green against the local
+      stack; see Decision Log D30). The vault tokens
       are shielded *bearer* assets: the claim on the locked ERC20 travels with
       possession of the coin, transferable by an ordinary wallet-to-wallet
       Midnight transfer — no vault involvement, no depositor registry. The old
@@ -106,3 +108,38 @@ Append-only. Port-era decisions live in git history of this file and in
 HANDOFF.md's history (`git log --follow -- TASK.md HANDOFF.md`).
 
 <!-- Append new decisions below this line. -->
+
+- **D30 (2026-07-17, T.1) Bearer-transfer handoff proven live; runtime NIGHT
+  movement poisons the local chain's dust proofs.** T.1 landed as a LIVE spec
+  (`tests/bearer-transfer.test.ts`, `3445bc8`): the simulator cannot express
+  either assertion — "A can no longer fund a withdraw" and "B can" are both
+  WALLET funding semantics (the simulator's coins are bare structs). The spec
+  proves the full arc: A deposits+claims, transfers its ENTIRE shielded
+  vault-token balance to B with a plain `transferTransaction`, A's withdraw
+  dies client-side (`InsufficientFunds`, `signetNonce` unchanged — no ledger
+  trace), B runs withdraw → MPC sign → broadcast → success attestation →
+  `completeWithdraw` to settled completion. Findings along the way:
+  1. **Wallet B must be a genesis-endowed seed (`00…02`), never a fee-funded
+     fresh seed.** The first attempt fee-funded seed `…44` from A (NIGHT
+     transfer + dust registration, mirroring the old MVP's
+     `fundWalletForFees`); from that moment EVERY wallet's dust spend proofs
+     failed node verification — `1010: Invalid Transaction: Custom error:
+     170` (`InvalidDustSpendProof`) on every submit, all wallets, all tx
+     shapes — and nothing but a chain reset recovered it (re-registration,
+     fresh sessions, proof-server restarts all ineffective; wallet-sdk
+     5.0.0-beta.2 against the compose node). The dev chain genesis endows
+     seeds `…01`/`…02`/`…03` with registered, dust-generating NIGHT, so a
+     second SPENDING wallet needs no runtime funding at all. The helper was
+     deleted; the trap is a ground rule + failure-reading entry in the e2e
+     skill runbook.
+  2. **The prove timeout in lib's cross-contract proof provider rose from
+     midnight-js's 5-minute default to 15 minutes**: under host CPU load the
+     arrange deposit's prove exceeded 5 minutes and the client aborted
+     (`'prove' returned an error: AbortError`) proves that completed fine
+     once given headroom.
+  3. `runDepositRoundTrip`'s resume path serves mid-flight recovery only (a
+     CLAIMED deposit is no longer on the ledger, so its reader-based resume
+     throws); the spec's arrange step instead self-skips when A already holds
+     the tokens AND the vault's EVM account holds the matching ERC20 — both
+     sides checked because a failure-refund-style drain leaves tokens without
+     EVM custody.
