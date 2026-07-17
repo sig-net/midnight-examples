@@ -111,9 +111,13 @@ export function createCrossContractProofServerProvider(
   // key (its verifier-key join has only the caller), which fails a
   // cross-contract call at the check step. The `as` bridges the nominal type:
   // the base only ever calls `.resolveKeyLocation` on a registry argument.
+  // The timeout raises midnight-js's 5-minute default: a cross-contract prove
+  // takes minutes even unloaded, and on a busy host the default aborts proves
+  // that would have completed ("'prove' returned an error: AbortError").
   const base = httpClientProvingProvider(
     proofServerUrl,
     registry as unknown as ZKConfigProvider<string>,
+    { timeout: 15 * 60 * 1000 },
   );
 
   // Same resolution order as midnight-js's internal key-material resolver:

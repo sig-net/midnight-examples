@@ -5,7 +5,7 @@
 // keeps the offline path (RUN_INTEGRATION_TESTS unset) from ever touching
 // the network.
 
-import { createE2eSession, type E2eSession } from "@midnight-examples/test-harness";
+import { createE2eSession, type E2eSession, type SessionWallet } from "@midnight-examples/test-harness";
 import type { SignetRequestResponseReader } from "@sig-net/midnight";
 import { createVaultContext, type VaultContext } from "./vault-context.ts";
 
@@ -13,6 +13,12 @@ import { createVaultContext, type VaultContext } from "./vault-context.ts";
 export interface VaultSession {
   /** The shared wallet-backed vault context; built lazily on first use. */
   vaultContext(): Promise<VaultContext>;
+  /**
+   * The shared started-and-synced session wallet (facade + keys) the context
+   * is built around — for flows that drive the WALLET itself (balance reads,
+   * wallet-to-wallet transfers) rather than the vault contract.
+   */
+  wallet(): Promise<SessionWallet>;
   /** The shared MPC-style request/response reader; see the harness's `createE2eSession`. */
   responseReader(): SignetRequestResponseReader;
   /** Stop the wallet facade (call from afterAll); safe when never started. */
@@ -45,6 +51,10 @@ export function createVaultSession(env: NodeJS.ProcessEnv): VaultSession {
         sharedContext = await createVaultContext(env, wallet);
       }
       return sharedContext;
+    },
+
+    wallet(): Promise<SessionWallet> {
+      return session.wallet();
     },
 
     responseReader(): SignetRequestResponseReader {
