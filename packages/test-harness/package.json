@@ -1,0 +1,29 @@
+{
+  "name": "@midnight-examples/test-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Test-only machinery shared by the examples' integration tests: stack preflight, the env-gated setup pipeline (MPC keys, signet deploy, fakenet hand-off, local-EVM funding), session lifecycle and signet polling. Test deps live here, never in an example's manifests.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./flow-hooks": "./src/flow-hooks.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "smoke:stack": "tsx scripts/stack-smoke.ts"
+  },
+  "dependencies": {
+    "@midnight-examples/lib": "*",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.3",
+    "@sig-net/midnight": "^0.0.3",
+    "@sig-net/midnight-contract-deploy": "^0.0.3",
+    "ethers": "^6.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
