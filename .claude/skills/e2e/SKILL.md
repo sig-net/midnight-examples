@@ -97,7 +97,19 @@ kept contracts.
   order: it stops at the first failure.
 - Expected per-spec test counts, in run order: `happy-day-e2e` **15**,
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
-  **6**, `benchmark` **13**, `false-claimer` **6** — 49 total.
+  **6**, `benchmark` **13**, `false-claimer` **6**, `bearer-transfer` **11**
+  — 60 total.
+- **NEVER transfer NIGHT or register NIGHT for dust generation at runtime
+  on the local stack.** The first runtime NIGHT movement/registration makes
+  EVERY wallet's subsequent DUST spend proofs fail node verification —
+  `1010: Invalid Transaction: Custom error: 170` (`InvalidDustSpendProof`)
+  on every submit, all wallets, all transaction shapes — and nothing but a
+  chain reset recovers it (re-registration does not; fresh wallet sessions
+  do not). Extra SPENDING wallets must instead use the dev chain's other
+  genesis-endowed seeds: `00…01` (the default user/deployer), `00…02` and
+  `00…03` all hold registered, dust-generating NIGHT from block 0
+  (`bearer-transfer` uses `00…02` for exactly this reason). Receive-only
+  wallets (`…42`, `…43`) need no funding at all.
 - Every test from the first signature poll onward needs the **fakenet MPC
   responder running** with the CURRENT contract addresses — see the next
   section. A signature/attestation poll timing out while earlier contract
@@ -211,3 +223,10 @@ posts responses through the proof server.
   has not generated spendable DUST yet — the setup's own retry loop
   (`retryDeployWhileDustGenerates`) normally absorbs this; if it surfaces in
   a flow, rerun (dust accrues on its own).
+- **`1010: Invalid Transaction: Custom error: 170`** on every submit, from
+  every wallet: someone moved or registered NIGHT at runtime (see the
+  ground rule above) and the chain's dust proofs are poisoned. Reset the
+  stack (`docker compose --profile fakenet down && docker compose up -d`),
+  comment out the contract-address vars in `.env`, and redeploy. The full
+  node error table lives at
+  https://docs.midnight.network/nodes/error-codes.
