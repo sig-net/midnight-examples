@@ -68,7 +68,7 @@ protecting against double settlement.
 | Package | What it is |
 |---|---|
 | [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, a curated environment-agnostic export surface, simulator unit tests, and a deploy entrypoint. Its dependency list (`@sig-net/midnight`, `@sig-net/midnight-contract` and the compact tooling) is the minimal integration surface. |
-| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every leg above, the setup pipeline that deploys the whole stack, five e2e specs, and the example's TestUSDC ERC20. |
+| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every leg above, the setup pipeline that deploys the whole stack, six e2e specs, and the example's TestUSDC ERC20. |
 
 ## Running it
 
@@ -83,7 +83,7 @@ yarn install
 compact update 0.33.0-rc.0          # Exact version required.
 yarn compile:erc20-vault:zk         # ~10 min zk key generation, background it
 docker compose up -d
-yarn test:erc20-vault:e2e           # the five e2e specs, serially, bail on first failure
+yarn test:erc20-vault:e2e           # the six e2e specs, serially, bail on first failure
 ```
 
 Offline checks that need no stack and no proving keys beyond `yarn compile`:
@@ -108,7 +108,7 @@ failure recovery) and will drive it for you.
 
 ## The e2e suite
 
-Five specs run serially in a pinned order (see
+Six specs run serially in a pinned order (see
 `integration-tests/vitest.config.ts`). `happy-day-e2e` runs first because it
 initialises the vault and cycles the funds that the later flows build on.
 Each spec is rerun-tolerant against kept contract addresses and prints resume
@@ -121,8 +121,9 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `deposit-claimant-not-caller` | 6 | `claim` can direct the mint to a different wallet's coin public key, discovered from chain data alone | `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID` |
 | `benchmark` | 13 | Per-leg wall-clock report of both round trips (`BENCHMARK_TIMINGS_JSON` greppable line) | `BENCHMARK_DEPOSIT_REQUEST_ID`, `BENCHMARK_WITHDRAW_REQUEST_ID` |
 | `false-claimer` | 6 | A deposit recorded for identity A is NOT claimable by identity B, even with the valid MPC attestation | `FALSE_CLAIMER_DEPOSIT_REQUEST_ID` |
+| `bearer-transfer` | 11 | Shielded vault tokens are bearer assets: a plain Midnight transfer hands the claim to wallet B, the emptied wallet A can no longer withdraw, and B completes a full withdraw on the transferred balance | `BEARER_TRANSFER_DEPOSIT_REQUEST_ID`, `BEARER_TRANSFER_WITHDRAW_REQUEST_ID` |
 
-49 tests total. A rerun against kept contract addresses (a populated `.env`)
+60 tests total. A rerun against kept contract addresses (a populated `.env`)
 completes in roughly 25–35 minutes on a laptop. A fresh deployment adds the
 setup pipeline's deploys (a few minutes) on top, and a cold clone adds the
 ~10 minute zk key generation. The claim/settle proofs are the heavy legs: the

@@ -177,6 +177,8 @@ posts responses through the proof server.
     `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID`
   - `benchmark` — `BENCHMARK_DEPOSIT_REQUEST_ID` / `BENCHMARK_WITHDRAW_REQUEST_ID`
   - `false-claimer` — `FALSE_CLAIMER_DEPOSIT_REQUEST_ID`
+  - `bearer-transfer` — `BEARER_TRANSFER_DEPOSIT_REQUEST_ID` /
+    `BEARER_TRANSFER_WITHDRAW_REQUEST_ID`
 
   `broadcastEvm` is idempotent, so already-mined transfers skip through, and
   every spec skips already-claimed/settled requests cleanly. Expect the OOM
