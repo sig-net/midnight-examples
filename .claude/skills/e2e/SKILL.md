@@ -25,7 +25,7 @@ Run everything from the repo root, in this order:
 ```sh
 corepack enable                # yarn 4 via the packageManager field
 yarn install                   # NEVER from inside a member package
-compact update 0.33.0-rc.0     # the ledger-9 rc toolchain — see the toolchain note
+compact update 0.33.0-rc.2     # the ledger-9 rc toolchain — see the toolchain note
 docker compose up -d           # node :9944, indexer :8088, proof server :6300, anvil :8545
 yarn test:erc20-vault:e2e > e2e-run.log 2>&1 &        # BACKGROUND it, watch the log
 ```
@@ -38,7 +38,7 @@ regardless and you pay keygen twice. Expect the whole first invocation to take
 ~20–25 minutes (keygen + fresh deploys + the flow tests).
 
 **Toolchain note:** the contracts declare `pragma language_version >= 0.25`,
-which needs the ledger-9 rc compiler (0.33.0-rc.0 — part of the matched set
+which needs the ledger-9 rc compiler (0.33.0-rc.2 — part of the matched set
 pinned in `docker-compose.yaml`'s image-tag comment). A bare `compact update`
 installs latest STABLE (0.31.1, language 0.23) — and DOWNGRADES the default if
 an rc is already active — after which the compile fails with

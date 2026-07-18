@@ -5,6 +5,7 @@
 // keeps the offline path (RUN_INTEGRATION_TESTS unset) from ever touching
 // the network.
 
+import { VAULT_REQUESTS_INDEX_FIELD } from "@midnight-examples/erc20-vault-contract";
 import { createE2eSession, type E2eSession, type SessionWallet } from "@midnight-examples/test-harness";
 import type { SignetRequestResponseReader } from "@sig-net/midnight";
 import { createVaultContext, type VaultContext } from "./vault-context.ts";
@@ -39,6 +40,7 @@ export function createVaultSession(env: NodeJS.ProcessEnv): VaultSession {
   const session: E2eSession = createE2eSession({
     env,
     requesterAddressEnvVar: "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
+    requesterRequestsIndexField: VAULT_REQUESTS_INDEX_FIELD,
   });
   let sharedContext: VaultContext | undefined;
 

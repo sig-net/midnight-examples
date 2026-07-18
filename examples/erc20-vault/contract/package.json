@@ -16,9 +16,9 @@
     "deploy": "tsx deploy.ts"
   },
   "dependencies": {
-    "@midnight-ntwrk/compact-runtime": "0.18.0-rc.0",
-    "@sig-net/midnight": "^0.0.3",
-    "@sig-net/midnight-contract": "^0.0.3"
+    "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
+    "@sig-net/midnight": "^0.0.4",
+    "@sig-net/midnight-contract": "^0.0.4"
   },
   "devDependencies": {
     "@midnight-examples/lib": "*",
