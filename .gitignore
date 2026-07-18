@@ -16,3 +16,5 @@ yarn.lock
 *.DS_Store
 *scratch*
 **/src/managed/
+.env.local
+.env.stagenet
