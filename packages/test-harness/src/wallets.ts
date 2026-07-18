@@ -1,5 +1,5 @@
-// The multi-wallet seed + funding phase: ONE root wallet funds three role
-// wallets (deployer, user, mpc responder). Each role's seed is read from
+// The multi-wallet seed + funding phase: ONE root wallet funds the role
+// wallets (deployer, user, mpc responder, bearer). Each role's seed is read from
 // .env when present, otherwise generated, persisted (append-only), and its
 // addresses printed. Root does no test work; it only holds funds and pays the
 // roles out.
@@ -47,12 +47,16 @@ const ROOT: RoleWallet = { label: "root", envVar: "ROOT_SEED" };
  * The role wallets funded from root, in setup order: `deployer` deploys the
  * signet + example contracts, `user` drives the example's circuits (and seeds
  * the derived EVM account identity), `mpc responder` is the fakenet
- * responder's fee-paying wallet (docker-compose interpolates its seed).
+ * responder's fee-paying wallet (docker-compose interpolates its seed), and
+ * `bearer` is the second SPENDING wallet of the bearer-transfer flow (it
+ * pays its own withdraw fees). Receive-only test wallets (the fixed
+ * `…42`/`…43` seeds) never pay anything and need no role here.
  */
 const CHILDREN: readonly RoleWallet[] = [
   { label: "deployer", envVar: "DEPLOYER_SEED" },
   { label: "user", envVar: "USER_SEED" },
   { label: "mpc responder", envVar: "MPC_RESPONDER_SEED" },
+  { label: "bearer", envVar: "BEARER_SEED" },
 ];
 
 /** Format a wallet's three addresses as banner lines. */
@@ -70,7 +74,8 @@ function walletAddressLines(label: string, addresses: WalletAddresses): string[]
  * generate it (root on the local chain defaults to the genesis mint wallet),
  * populate the env accumulator, persist the newly-created seeds to `.env`
  * (append-only), and print each wallet's addresses. After this, ROOT_SEED,
- * DEPLOYER_SEED, USER_SEED and MPC_RESPONDER_SEED are all set in `env`.
+ * DEPLOYER_SEED, USER_SEED, MPC_RESPONDER_SEED and BEARER_SEED are all set
+ * in `env`.
  *
  * @param env - The suite's env accumulator (mutated with the resolved seeds).
  */
@@ -97,7 +102,7 @@ export function ensureWalletSeeds(env: NodeJS.ProcessEnv): void {
   }
 
   if (Object.keys(generated).length > 0) {
-    appendRepoDotEnv(generated, "test-harness setup: generated wallet seeds (root/deployer/user/mpc responder)");
+    appendRepoDotEnv(generated, "test-harness setup: generated wallet seeds (root/deployer/user/mpc responder/bearer)");
   }
 }
 

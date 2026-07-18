@@ -48,7 +48,8 @@ recipe in `.github/workflows/example-test.yaml` (the `Install / update the
 compact toolchain` step).
 
 No pre-existing `.env` is required: the setup pipeline creates it and appends
-the fakenet hand-off values (`MPC_ROOT_KEY`,
+the generated wallet seeds (root + the deployer/user/mpc responder/bearer
+roles, funded from root) and the fakenet hand-off values (`MPC_ROOT_KEY`,
 `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`) plus prints a ready-to-paste block with
 everything else it deployed/derived. Appends are append-only — existing lines
 are never modified, and a value that conflicts with the shell environment is
@@ -99,17 +100,17 @@ kept contracts.
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
   **6**, `benchmark` **13**, `false-claimer` **6**, `bearer-transfer` **11**
   — 60 total.
-- **NEVER transfer NIGHT or register NIGHT for dust generation at runtime
-  on the local stack.** The first runtime NIGHT movement/registration makes
-  EVERY wallet's subsequent DUST spend proofs fail node verification —
-  `1010: Invalid Transaction: Custom error: 170` (`InvalidDustSpendProof`)
-  on every submit, all wallets, all transaction shapes — and nothing but a
-  chain reset recovers it (re-registration does not; fresh wallet sessions
-  do not). Extra SPENDING wallets must instead use the dev chain's other
-  genesis-endowed seeds: `00…01` (the default user/deployer), `00…02` and
-  `00…03` all hold registered, dust-generating NIGHT from block 0
-  (`bearer-transfer` uses `00…02` for exactly this reason). Receive-only
-  wallets (`…42`, `…43`) need no funding at all.
+- **Wallets are role wallets funded from ROOT at setup.** The setup's
+  wallet steps resolve/generate `ROOT_SEED` plus the role seeds
+  (`DEPLOYER_SEED`, `USER_SEED`, `MPC_RESPONDER_SEED`, `BEARER_SEED`),
+  persist generated ones to `.env` (append-only), and fund each role from
+  root with dust-registered NIGHT (on the local chain root is the genesis
+  mint wallet, so this is fully automatic; on a deployed network the first
+  run stops printing root's NIGHT address to faucet-fund). The older
+  "dust-poison" rule (a runtime NIGHT transfer/registration bricking every
+  wallet's dust spend proofs, error 170) does NOT apply on the node
+  2.0.0-rc.4 line — runtime funding is how the roles are provisioned now.
+  Receive-only test wallets (`…42`, `…43`) need no funding at all.
 - Every test from the first signature poll onward needs the **fakenet MPC
   responder running** with the CURRENT contract addresses — see the next
   section. A signature/attestation poll timing out while earlier contract
@@ -225,10 +226,12 @@ posts responses through the proof server.
   has not generated spendable DUST yet — the setup's own retry loop
   (`retryDeployWhileDustGenerates`) normally absorbs this; if it surfaces in
   a flow, rerun (dust accrues on its own).
-- **`1010: Invalid Transaction: Custom error: 170`** on every submit, from
-  every wallet: someone moved or registered NIGHT at runtime (see the
-  ground rule above) and the chain's dust proofs are poisoned. Reset the
-  stack (`docker compose --profile fakenet down && docker compose up -d`),
+- **`1010: Invalid Transaction: Custom error: 170`** (`InvalidDustSpendProof`)
+  on every submit, from every wallet: historically the "dust-poison" state a
+  runtime NIGHT movement caused on the pre-rc.4 node line (confirmed NOT to
+  reproduce on 2.0.0-rc.4, where the setup's root-funding transfers are
+  routine). If it does surface, reset the stack
+  (`docker compose --profile fakenet down && docker compose up -d`),
   comment out the contract-address vars in `.env`, and redeploy. The full
   node error table lives at
   https://docs.midnight.network/nodes/error-codes.
