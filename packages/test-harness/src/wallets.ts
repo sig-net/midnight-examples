@@ -13,10 +13,10 @@
 //
 // No `vitest` imports here — this runs in vitest's main process (globalSetup).
 
+import { getFaucetUrl } from "@midnight-examples/lib";
 import {
   assertRootFunded,
   deriveWalletAddresses,
-  FAUCET_URLS,
   fundChildFromRoot,
   GENESIS_MINT_WALLET_SEED,
   generateHexSeed,
@@ -143,7 +143,9 @@ function perChildAmount(env: NodeJS.ProcessEnv, rootNight: bigint, unfundedCount
  */
 export async function ensureWalletsFunded(env: NodeJS.ProcessEnv): Promise<void> {
   const config = getMidnightNodeConfig(env);
-  const faucetUrl = FAUCET_URLS[config.networkId];
+  // Faucet URLs are not published in this repo; MIDNIGHT_FAUCET_URL
+  // supplies one for the underfunded-root hint (optional).
+  const faucetUrl = getFaucetUrl(env, config.networkId);
 
   const root = await preflightRoot(config, requireEnv(env, ROOT.envVar), faucetUrl);
   logFundedPass("root", root);
