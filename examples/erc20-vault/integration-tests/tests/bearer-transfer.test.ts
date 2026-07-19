@@ -10,17 +10,15 @@
 //
 // Wallet B is a real SPENDING wallet (unlike the claimant-not-caller flow's
 // receive-only recipient): its withdraw pays fees in DUST, so its seed is
-// one of the local dev chain's OTHER genesis-endowed seeds (`00…02` — the
-// chain endows `…01`/`…02`/`…03` with registered, dust-generating NIGHT).
-// Do NOT fee-fund a fresh seed instead: a runtime NIGHT transfer or dust
-// registration makes EVERY wallet's dust spend proofs fail node
-// verification (error 170, InvalidDustSpendProof) until the chain is reset
-// — see the e2e skill runbook. B's session overrides USER_SEED and
-// VAULT_USER_SECRET_KEY together (see the false-claimer flow header for why
-// both). The arrange deposit's 0.1 USDC leaves the vault's EVM account
-// again through B's withdraw to EVM_USER_ADDRESS, so the suite's EVM funds
-// keep cycling; the vault tokens left on B beyond the withdrawn amount
-// strand on its fixed seed, like the claimant-not-caller recipient's.
+// the `bearer` role wallet the setup resolves and funds from root
+// (BEARER_SEED — generated + persisted to .env and topped up with
+// dust-registered NIGHT like every role wallet, see the harness's
+// wallets.ts). B's session overrides USER_SEED and VAULT_USER_SECRET_KEY
+// together (see the false-claimer flow header for why both). The arrange
+// deposit's 0.1 USDC leaves the vault's EVM account again through B's
+// withdraw to EVM_USER_ADDRESS, so the suite's EVM funds keep cycling; the
+// vault tokens left on B beyond the withdrawn amount strand on its seed,
+// like the claimant-not-caller recipient's.
 //
 // Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives
 // there. Recovery from a run that died mid-flow (proof-server OOM): rerun
@@ -81,18 +79,18 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // the network); stopped once in afterAll.
 const session = createVaultSession(env);
 
-// Wallet B's seed AND identity secret: one fixed constant serving as both,
-// deliberately different from the depositor's USER_SEED /
-// VAULT_USER_SECRET_KEY (default `…01`) and from the other flows' fixed
-// seeds (`…42`/`…43`). `…02` specifically because B SPENDS: it is one of
-// the dev chain's genesis-endowed seeds, so it holds registered,
-// dust-generating NIGHT from block 0 and can pay its withdraw's fees
-// without any runtime funding (see the file header for why funding a fresh
-// seed is not an option). Both env vars are overridden together — a changed
-// secret under the SAME seed would hit midnight-js's persisted private
-// state (midnight-level-db, scoped per wallet account) and the stale
-// identity would win.
-const BEARER_SEED = "0000000000000000000000000000000000000000000000000000000000000002";
+// Wallet B's seed AND identity secret: the `bearer` role wallet's seed
+// serving as both, deliberately different from the depositor's USER_SEED /
+// VAULT_USER_SECRET_KEY and from the other flows' fixed receive-only seeds
+// (`…42`/`…43`). A role wallet specifically because B SPENDS: the setup
+// funds it from root with dust-registered NIGHT so it can pay its
+// withdraw's fees on ANY network. Both env vars are overridden together —
+// a changed secret under the SAME seed would hit midnight-js's persisted
+// private state (midnight-level-db, scoped per wallet account) and the
+// stale identity would win. Read leniently at module scope: offline
+// (RUN_INTEGRATION_TESTS unset) the injected env is empty and the suite
+// skips before any test touches it.
+const BEARER_SEED = env.BEARER_SEED ?? "";
 
 // Wallet B — the transferee's session: same lazily-built shape as A's, over
 // the same stack, differing ONLY in wallet seed + identity secret.
@@ -208,14 +206,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault bearer-transfer
   );
 
   it(
-    "wallet-B fee preflight: the genesis-endowed bearer seed holds spendable dust for its withdraw (read-only)",
+    "wallet-B fee preflight: the bearer role wallet holds spendable dust for its withdraw (read-only)",
     async () => {
       const walletB = await bearerSession.wallet();
       const dust = (await walletB.facade.waitForSyncedState()).dust.balance(new Date());
       console.log(`wallet B dust (fee) balance: ${dust}`);
       expect(
         dust,
-        "wallet B holds no spendable dust — is BEARER_SEED one of the dev chain's genesis-endowed seeds?",
+        "wallet B holds no spendable dust — did the setup's root-funding step fund BEARER_SEED?",
       ).toBeGreaterThan(0n);
     },
     5 * MINUTE,

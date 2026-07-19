@@ -80,7 +80,7 @@ everything it deploys so that later runs reuse the same contracts.
 ```sh
 corepack enable
 yarn install
-compact update 0.33.0-rc.0          # Exact version required.
+compact update 0.33.0-rc.2          # Exact version required.
 yarn compile:erc20-vault:zk         # ~10 min zk key generation, background it
 docker compose up -d
 yarn test:erc20-vault:e2e           # the six e2e specs, serially, bail on first failure

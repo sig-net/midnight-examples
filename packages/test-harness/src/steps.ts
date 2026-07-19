@@ -1,7 +1,8 @@
 // The GENERIC setup steps every example's pipeline composes: environment
-// check → EVM chain resolution + test-token deploy (example-supplied) → MPC
-// key derivation → deployer dust preflight → singleton signet deploy →
-// fakenet responder hand-off → local-EVM funding → MPC hand-off printout.
+// check → wallet seed resolution + root funding (wallets.ts) → EVM chain
+// resolution + test-token deploy (example-supplied) → MPC key derivation →
+// singleton signet deploy → fakenet responder hand-off → local-EVM funding →
+// MPC hand-off printout.
 // Each step keeps its skip-if-env-var-set semantics (presence of the
 // canonical env var doubles as the skip signal) and mutates the shared env
 // accumulator. Steps that touch an example's own artifacts (its requester
@@ -10,14 +11,7 @@
 // globalSetup via {@link file://./setup-pipeline.ts runSetupPipeline} in
 // vitest's main process, so no `vitest` imports here.
 
-import {
-  deriveAccountKeys,
-  getDeployConfig,
-  getMidnightNodeConfig,
-  registerNightForDustGeneration,
-  waitForSpendableDust,
-  withSyncedWalletFacade,
-} from "@midnight-examples/lib";
+import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { formatJubjubPublicKey } from "@sig-net/midnight";
 import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
 import { formatEther, formatUnits } from "ethers";
@@ -31,15 +25,14 @@ import { isLocalEvmChain, topUpLocalAccount } from "./local-evm.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { banner, logSkip } from "./output.ts";
 import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
-import { resolveUserSeed } from "./session.ts";
 
 const MINUTE = 60_000;
 
 /**
  * Assert the environment is workable before anything spends time or money:
  * the Midnight stack answers, the compact compiler is on PATH, and
- * `EVM_RPC_URL` is set. Also prints the seeds in effect so the operator
- * knows which wallets a run is about to spend from.
+ * `EVM_RPC_URL` is set. The wallets in play are resolved (and printed) by
+ * the wallet steps in wallets.ts, which run right after this.
  *
  * @param env - The suite's env accumulator.
  * @throws If a service is unreachable, compact is missing, or `EVM_RPC_URL` is unset.
@@ -51,16 +44,7 @@ export async function assertEnvironment(env: NodeJS.ProcessEnv): Promise<void> {
   await assertHttpReachable("proof server", nodeConfig.proofServerUrl);
   await assertCommandAvailable("compact", ["--version"]);
   requireEnv(env, "EVM_RPC_URL");
-
-  const deployConfig = getDeployConfig(env);
-  console.log(`DEPLOYER_SEED in effect: ${deployConfig.deployerSeed}`);
-  console.log(`USER_SEED in effect:     ${resolveUserSeed(env)}`);
-  console.log();
-  console.log(`DEPLOYER_SEED:`);
-  console.log(` ➜ seeds midnight wallet that pays for contract deploys.`);
-  console.log(`USER_SEED:`);
-  console.log(` ➜ seeds midnight wallet that interacts with deployed contracts.`);
-  console.log(` ➜ seeds derived EVM account generation`);
+  console.log(`targeting the ${nodeConfig.networkId} network at ${nodeConfig.nodeUrl}`);
 }
 
 /**
@@ -216,61 +200,6 @@ export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
 }
 
 /**
- * Deployer dust preflight. The deploys pay fees in DUST, which only
- * generates on NIGHT registered for dust generation — a funded-but-
- * unregistered deployer wallet (fresh seed, faucet-funded) would fail the
- * first deploy. Check up front: registered already → skip; unregistered
- * NIGHT → register it and wait for a spendable dust balance; no NIGHT at all
- * → fail with a funding hint. Skips entirely when every contract-address
- * env var in `contractAddressEnvVars` is already set (no deploys this run).
- *
- * @param env - The suite's env accumulator.
- * @param contractAddressEnvVars - The env-var names of every contract the
- *   pipeline may deploy this run (e.g. the signet contract and the example's
- *   requester contract).
- * @throws If the deployer wallet holds neither DUST nor NIGHT.
- */
-export async function ensureDeployerDust(
-  env: NodeJS.ProcessEnv,
-  contractAddressEnvVars: readonly string[],
-): Promise<void> {
-  if (contractAddressEnvVars.every((name) => env[name])) {
-    logSkip(
-      "deployer dust preflight",
-      `${contractAddressEnvVars.join(" and ")} are set — no deploys this run, the deployer wallet pays nothing`,
-    );
-    return;
-  }
-  const deployConfig = getDeployConfig(env);
-  const keys = deriveAccountKeys(deployConfig.deployerSeed, deployConfig.midnightNodeConfig.networkId);
-  await withSyncedWalletFacade(keys, deployConfig.midnightNodeConfig, async (facade, state) => {
-    const registered = await registerNightForDustGeneration(facade, keys, state);
-    if (registered === 0) {
-      logSkip("register deployer NIGHT for dust generation", "no unregistered NIGHT UTXOs");
-    } else {
-      console.log(`registered ${registered} deployer NIGHT UTXO(s) for dust generation`);
-    }
-
-    // A balance visible right now settles it; otherwise dust may still be
-    // generating from a (possibly just-submitted) registration — but only if
-    // there is registered NIGHT to generate FROM, so fail fast when the
-    // wallet is flat-out unfunded instead of polling into a timeout.
-    const dustNow = state.dust.balance(new Date());
-    if (dustNow > 0n) {
-      console.log(`deployer dust (fee) balance: ${dustNow}`);
-      return;
-    }
-    if (state.unshielded.availableCoins.length === 0) {
-      throw new Error(
-        "deployer wallet holds neither DUST nor NIGHT — fund it with NIGHT (see DEPLOYER_SEED) before deploying",
-      );
-    }
-    const dust = await waitForSpendableDust(facade);
-    console.log(`deployer dust (fee) balance: ${dust}`);
-  });
-}
-
-/**
  * True when the CI zk-key cache contract is in force: `TRUST_PREBUILT_ZK_KEYS=1`
  * AND the given managed keys directory already holds prover keys. Local runs
  * never set the variable — key PRESENCE alone is not FRESHNESS (a circuit
@@ -333,8 +262,9 @@ export async function compileContractZk(env: NodeJS.ProcessEnv, options: Compile
  * On a freshly started dev chain DUST generates block by block from the
  * genesis NIGHT, so the first deploy can race the chain's first minutes —
  * `Wallet.InsufficientFunds` ("could not balance dust") is transient there.
- * A genuinely unfunded wallet fails fast in {@link ensureDeployerDust}
- * instead, so the bounded retry here cannot mask real underfunding.
+ * A genuinely unfunded wallet fails fast in the root-funding preflight
+ * (see wallets.ts) instead, so the bounded retry here cannot mask real
+ * underfunding.
  *
  * @param what - Step label for the retry log lines.
  * @param deploy - The deploy call to (re)attempt.

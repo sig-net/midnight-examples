@@ -1,6 +1,6 @@
 // The example's vitest globalSetup: compose the ordered setup pipeline —
-// environment check → EVM chain + test token → MPC key derivation → deployer
-// dust preflight → signet deploy → fakenet responder hand-off → vault zk
+// environment check → wallet seeds + root funding → EVM chain + test token →
+// MPC key derivation → signet deploy → fakenet responder hand-off → vault zk
 // compile + deploy → derived EVM addresses → local funding → MPC hand-off
 // printout — from the harness's generic steps plus the vault-specific steps
 // below, and run it via `runSetupPipeline` in vitest's main process. The
@@ -13,11 +13,12 @@ import {
   assertEnvironment,
   compileContractZk,
   deploySignetContractStep,
-  ensureDeployerDust,
   ensureErc20Deployed,
   ensureMpcJubjubPk,
   ensureMpcRootKey,
   ensureMpcSecp256k1Pubkey,
+  ensureWalletSeeds,
+  ensureWalletsFunded,
   fundLocalEvmAccounts,
   logSkip,
   persistFakenetHandoffToDotEnv,
@@ -30,19 +31,12 @@ import {
   startFakenetResponder,
   type SetupStep,
 } from "@midnight-examples/test-harness";
-import { deriveEvmAddress } from "@sig-net/midnight";
+import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
 
 import { deployTestUsdc } from "./test-usdc.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 
 const MINUTE = 60_000;
-
-// Every contract the pipeline may deploy this run — both set means the
-// deployer wallet pays nothing, so the dust preflight skips.
-const CONTRACT_ADDRESS_ENV_VARS = [
-  "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
-  "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
-] as const;
 
 // The derived EVM accounts the local-chain funding step tops up.
 const DERIVED_EVM_ADDRESS_ENV_VARS = ["EVM_USER_ADDRESS", "EVM_VAULT_ADDRESS"] as const;
@@ -79,6 +73,16 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.MIDNIGHT_VAULT_CONTRACT_ADDRESS) {
     logSkip("deploy vault contract", `MIDNIGHT_VAULT_CONTRACT_ADDRESS is set (${env.MIDNIGHT_VAULT_CONTRACT_ADDRESS})`);
     return;
+  }
+  // The deploy seals the DEPLOYER identity commitment into the contract and
+  // `initialize` is deployer-gated, while the flows drive the identity-gated
+  // circuits AS THE USER. The wallets are split roles (the deployer wallet
+  // pays, the user wallet drives), so keep the IDENTITIES equal by sealing
+  // the user's: default VAULT_DEPLOYER_SECRET_KEY to the user identity
+  // secret unless the operator pinned it explicitly.
+  if (!env.VAULT_DEPLOYER_SECRET_KEY) {
+    env.VAULT_DEPLOYER_SECRET_KEY = bytesToHex(resolveUserIdentity(env).secretKey);
+    console.log("defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialize is deployer-gated)");
   }
   const contractAddress = await retryDeployWhileDustGenerates("deploy vault contract", async () => {
     const stdout = await runCommand(
@@ -188,15 +192,13 @@ const STEPS: readonly SetupStep[] = [
       await assertEnvironment(env);
     },
   ],
+  ["setup: resolve/generate wallet seeds (root + deployer/user/mpc responder)", ensureWalletSeeds],
+  ["setup: preflight root funding + fund the role wallets from root", ensureWalletsFunded],
   ["setup: resolve EVM chain id from EVM_RPC_URL", resolveEvmChain],
   ["setup: check/deploy ERC20 token on the EVM chain", (env) => ensureErc20Deployed(env, deployTestUsdc)],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
   ["setup: check/derive MPC_JUBJUB_PK public key", ensureMpcJubjubPk],
   ["setup: check/derive MPC_SECP256K1_PUBKEY public key", ensureMpcSecp256k1Pubkey],
-  [
-    "setup: deployer dust preflight (register NIGHT for dust generation if needed)",
-    (env) => ensureDeployerDust(env, CONTRACT_ADDRESS_ENV_VARS),
-  ],
   ["setup: deploy signet contract", deploySignetContractStep],
   ["setup: persist fakenet hand-off values to .env (append-only)", persistFakenetHandoffToDotEnv],
   ["setup: start the fakenet responder (docker compose)", startFakenetResponder],

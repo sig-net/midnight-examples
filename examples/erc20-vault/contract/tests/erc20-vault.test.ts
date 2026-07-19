@@ -24,7 +24,6 @@ import {
   signetFieldNode,
   signetPathOfCommitment,
   toSignBidirectionalRequestIndex,
-  SIGNET_REQUESTS_INDEX_FIELD,
   type JubjubKeypair,
   type RespondBidirectional,
   type SignBidirectionalRequestLedgerIndex,
@@ -39,6 +38,8 @@ import {
   createVaultPrivateState,
   ledger,
   pureCircuits,
+  VAULT_NONCE_FIELD,
+  VAULT_REQUESTS_INDEX_FIELD,
   witnesses,
   type VaultPrivateState,
 } from "../src/index.ts";
@@ -260,10 +261,14 @@ describe("erc20-vault ledger shape", () => {
     const { ctx } = await deployContract();
 
     const rawState = ctx.callContext.currentQueryContext.state;
-    const node = signetFieldNode(rawState, SIGNET_REQUESTS_INDEX_FIELD);
+    const node = signetFieldNode(rawState, VAULT_REQUESTS_INDEX_FIELD);
     expect(node.type()).toBe("map");
 
-    const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(rawState);
+    const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(
+      rawState,
+      VAULT_REQUESTS_INDEX_FIELD,
+      VAULT_NONCE_FIELD,
+    );
     const typedIndex = toSignBidirectionalRequestIndex(
       ledger(ctx.callContext.currentQueryContext.state).signetRequestsIndex,
     );
@@ -365,7 +370,11 @@ describe("deposit round-trip", () => {
       ledger(state).signetRequestsIndex,
     );
     // Read 2: MPC-style raw read — no compiled contract involved.
-    const rawLedger = readSignetRequestsLedgerFromState(state);
+    const rawLedger = readSignetRequestsLedgerFromState(
+      state,
+      VAULT_REQUESTS_INDEX_FIELD,
+      VAULT_NONCE_FIELD,
+    );
 
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);

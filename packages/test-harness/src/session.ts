@@ -18,21 +18,18 @@ import { SignetRequestResponseReader } from "@sig-net/midnight";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { requireEnv } from "./e2e-env.ts";
 
-// The pre-funded genesis mint wallet of the local standalone stack — the
-// documented default when USER_SEED is unset (same convention as lib's
-// DEPLOYER_SEED default).
-const DEFAULT_USER_SEED = "0000000000000000000000000000000000000000000000000000000000000001";
-
 /**
- * The user-side wallet seed in effect: `USER_SEED` from the env, defaulting
- * to the local stack's pre-funded genesis mint wallet (the same convention
- * as lib's `DEPLOYER_SEED` default).
+ * The user-side wallet seed in effect: `USER_SEED`, a role wallet the setup
+ * resolves (generated + persisted to `.env` when absent) and funds from the
+ * root wallet — see wallets.ts. Required: by the time a session or identity
+ * derivation runs, the wallet steps have populated it.
  *
  * @param env - The environment to read `USER_SEED` from.
  * @returns The seed (hex or mnemonic) the user-side flows spend from.
+ * @throws If `USER_SEED` is unset (the wallet steps did not run).
  */
 export function resolveUserSeed(env: NodeJS.ProcessEnv): string {
-  return env.USER_SEED?.trim() || DEFAULT_USER_SEED;
+  return requireEnv(env, "USER_SEED");
 }
 
 /** The started user wallet a session hands out: facade + its key material. */
@@ -63,6 +60,13 @@ export interface E2eSessionOptions {
    * `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
    */
   requesterAddressEnvVar: string;
+  /**
+   * Ledger field position of the requester contract's request index — the
+   * same position the contract passes as `requestsIndexField` in its
+   * notifications. A contract is free to declare the index at any field, so
+   * the reader cannot assume one.
+   */
+  requesterRequestsIndexField: number;
 }
 
 /**
@@ -106,6 +110,7 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
         const nodeConfig = getMidnightNodeConfig(env);
         sharedReader = new SignetRequestResponseReader({
           requesterContractAddress: requireEnv(env, options.requesterAddressEnvVar),
+          requesterRequestsIndexField: options.requesterRequestsIndexField,
           signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
           publicDataProvider: indexerPublicDataProvider({
             queryURL: nodeConfig.indexerUrl,

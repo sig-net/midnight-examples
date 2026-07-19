@@ -16,6 +16,7 @@ import { requireEnv, type SessionWallet } from "@midnight-examples/test-harness"
 import { SignetRequestResponseReader } from "@sig-net/midnight";
 import {
   createVaultPrivateState,
+  VAULT_REQUESTS_INDEX_FIELD,
   type Contract as VaultContract,
   type VaultPrivateState,
 } from "@midnight-examples/erc20-vault-contract";
@@ -135,6 +136,9 @@ export async function createVaultContext(env: NodeJS.ProcessEnv, wallet: Session
 export function createResponseReader(context: VaultContext): SignetRequestResponseReader {
   return new SignetRequestResponseReader({
     requesterContractAddress: context.vaultContractAddress,
+    // The vault declares its request index as ledger field 0: the
+    // requestsIndexField its notifications pass (erc20-vault.compact).
+    requesterRequestsIndexField: VAULT_REQUESTS_INDEX_FIELD,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,
   });
