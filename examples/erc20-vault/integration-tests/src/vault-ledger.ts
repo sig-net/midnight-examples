@@ -4,7 +4,7 @@
 // wallet.
 
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js-types";
-import { bytesToHex, toSignBidirectionalRequestIndex } from "@sig-net/midnight";
+import { bytesToHex, toSignBidirectionalEventIndex } from "@sig-net/midnight";
 import { ledger } from "@midnight-examples/erc20-vault-contract";
 
 /** The decoded vault public ledger state, as the generated `ledger()` returns it. */
@@ -49,7 +49,7 @@ export async function printVaultState(
   // caip2Id is zero-padded ASCII; NUL-trim for display.
   console.log(`EVM chain:         ${state.evmChainId} (${new TextDecoder().decode(state.caip2Id).replace(/\0+$/u, "")})`);
 
-  const index = toSignBidirectionalRequestIndex(state.signetRequestsIndex);
+  const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
   console.log(`pending signature requests: ${index.size}`);
   for (const [requestIdHex, request] of index) {
     console.log(`- ${requestIdHex} (requestNonce ${request.requestNonce})`);

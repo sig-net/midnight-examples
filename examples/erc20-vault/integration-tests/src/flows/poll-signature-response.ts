@@ -6,7 +6,7 @@
 import type { Transaction } from "ethers";
 
 import {
-  signBidirectionalRequestToSignedEVMTransaction,
+  signBidirectionalEventToSignedEVMTransaction,
   sleepUnlessAborted,
   type RequestIdHex,
 } from "@sig-net/midnight";
@@ -41,16 +41,16 @@ export interface PollSignatureResponseOptions {
  *
  * Enumeration and verification are delegated to signet-midnight's
  * `SignetRequestResponseReader`: each tick reads the response log at
- * `requestId` and — the log being unauthenticated (secp256k1 cannot be
- * verified in-circuit) — judges every post by whether its signature recovers
- * to the request's MPC-derived sender (see
+ * `requestId` and, the log being unauthenticated, judges every post by
+ * whether its signature recovers to the request's MPC-derived sender (see
  * {@link PollSignatureResponseOptions.expectedSigner}) over the requested
  * transaction's signing hash. The first valid post wins. The signed
  * transaction is assembled from the request record and that response via
- * {@link signBidirectionalRequestToSignedEVMTransaction}. This flow owns
- * the poll loop, the timeout, and the reporting — each rejected post is
+ * {@link signBidirectionalEventToSignedEVMTransaction}. This flow owns
+ * the poll loop, the timeout, and the reporting: each rejected post is
  * warned once across the loop's lifetime, not every tick. For the MPC's
- * attestation of the EVM result, see `pollRespondBidirectional`.
+ * respond-bidirectional response of the EVM result, see
+ * `pollRespondBidirectional`.
  *
  * @param context - The flow context.
  * @param options - What to poll for and how patiently.
@@ -78,7 +78,7 @@ export async function pollSignatureResponse(
   const timer = setTimeout(() => giveUp.abort(), options.timeoutMs);
   try {
     while (!giveUp.signal.aborted) {
-      const { verified, verdicts } = await reader.getVerifiedSignatureResponse(
+      const { verified, verdicts } = await reader.getVerifiedSignatureRespondedEvent(
         options.requestId,
         options.expectedSigner,
       );
@@ -97,7 +97,7 @@ export async function pollSignatureResponse(
         // record and this response. The reader's request fetch is cached (its
         // verification already fetched it), so this adds no extra query.
         const request = await reader.getSignatureRequest(options.requestId);
-        return signBidirectionalRequestToSignedEVMTransaction(request, verified);
+        return signBidirectionalEventToSignedEVMTransaction(request, verified);
       }
       await sleepUnlessAborted(options.intervalMs, giveUp.signal);
     }

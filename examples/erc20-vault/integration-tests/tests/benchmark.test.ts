@@ -265,7 +265,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
       // claimed this request the entry is gone and claim would reject
       // with "Request not found" — skip cleanly instead.
       const before = await readLedger();
-      if (!before.signetRequestsIndex.member(requestKey)) {
+      if (!before.signBidirectionalEventMap.member(requestKey)) {
         logSkip("claim", `request ${depositRequestId} already claimed (not on the ledger)`);
         return;
       }
@@ -276,7 +276,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
 
       const after = await readLedger();
       expect(
-        after.signetRequestsIndex.member(requestKey),
+        after.signBidirectionalEventMap.member(requestKey),
         "claim must consume the request from the ledger",
       ).toBe(false);
     },
@@ -413,7 +413,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
 
       const after = await readLedger();
       expect(
-        after.signetRequestsIndex.member(requestKey),
+        after.signBidirectionalEventMap.member(requestKey),
         "completeWithdraw must consume the request from the ledger",
       ).toBe(false);
     },

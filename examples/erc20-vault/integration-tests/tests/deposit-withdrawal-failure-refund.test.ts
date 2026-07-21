@@ -30,7 +30,7 @@ import {
   isExecutionError,
   requestIdBytes,
   type RequestIdHex,
-  type RespondBidirectional,
+  type RespondBidirectionalEvent,
 } from "@sig-net/midnight";
 import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
@@ -267,7 +267,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
   );
 
   // Populated by the poll step below for the settle step.
-  let withdrawAttestation: RespondBidirectional;
+  let withdrawAttestation: RespondBidirectionalEvent;
 
   it(
     "pollRespondBidirectional: the MPC attests the transfer as FAILED",
@@ -305,7 +305,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
     async () => {
       // Final leg: the request is on the vault ledger and the MPC's FAILURE
       // attestation is posted (previous steps). Settling re-verifies the
-      // attestation in-circuit (pk hash, Schnorr signature) and branches on
+      // response in-circuit (ECDSA against the stored MPC response key) and branches on
       // the EVM result — this is the FAILURE path, so the escrowed shielded
       // value is re-minted to the withdrawer (this session's wallet, which
       // proves the pinned refund commitment) instead of staying
@@ -333,13 +333,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
         );
         return;
       }
-      expect(before.signetRequestsIndex.member(requestKey)).toBe(true);
+      expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
       await completeWithdraw(context, { requestId: withdrawRequestId });
 
       const after = await readLedger();
       expect(
-        after.signetRequestsIndex.member(requestKey),
+        after.signBidirectionalEventMap.member(requestKey),
         "completeWithdraw must consume the request from the ledger",
       ).toBe(false);
       expect(

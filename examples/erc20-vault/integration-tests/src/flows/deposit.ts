@@ -1,22 +1,24 @@
-// `deposit` — record a deposit signature request on the vault's ledger, plus
-// the whole deposit leg as one arrange-stage helper ({@link runDepositRoundTrip}).
-// The deposit is the first half of the deposit flow: it asks the MPC to sign
-// an EVM `transfer(vault, amount)` on the ERC20, sent from the user's derived
-// address. The request id is recomputed off-chain with the library's TS twin
-// of the request-id circuit and asserted against the ledger map key before it
-// is returned.
+// `deposit`: record a deposit SignBidirectionalEvent on the vault's ledger,
+// plus the whole deposit leg as one arrange-stage helper
+// ({@link runDepositRoundTrip}). The deposit is the first half of the deposit
+// flow: it asks the MPC to sign an EVM `transfer(vault, amount)` on the
+// ERC20, sent from the user's derived address. The request id is recomputed
+// off-chain with the library's TS twin of the request-id circuit and asserted
+// against the ledger map key before it is returned.
 
 import {
   evmAddressAbiWord,
+  hexToBytes,
   numericAbiWordValue,
   requestIdBytes,
   requestIdHex,
+  stripHexPrefix,
   SIGNET_DEFAULT_KEY_VERSION,
   TxParamType,
   calculateRequestId,
   executionSucceeded,
-  toSignBidirectionalRequestIndex,
-  type SignBidirectionalRequest,
+  toSignBidirectionalEventIndex,
+  type SignBidirectionalEvent,
   type RequestIdHex,
 } from "@sig-net/midnight";
 
@@ -54,13 +56,14 @@ export interface DepositOptions {
  *
  * The circuit takes only what the caller genuinely chooses: their derived
  * account's nonce, the gas envelope (this flow uses the shared
- * `ERC20_TRANSFER_*` defaults — the caller's account pays), the MPC key
- * version, their identity path, and the deposit itself. Everything else —
- * chain, calldata, routing — is contract-composed from the initialize-pinned
- * config. The expected request record is reconstructed off-chain (chain
- * fields read from the ledger, routing from the {@link VAULT_MPC_ROUTING}
- * mirror), its id computed with the library's `calculateRequestId` TS twin,
- * and asserted present as a ledger map key after the call.
+ * `ERC20_TRANSFER_*` defaults, and the caller's account pays), the MPC key
+ * version, and the deposit itself. Everything else (chain, calldata, routing,
+ * and even the derivation path, which is the caller's identity commitment
+ * recomputed in-circuit) is contract-composed from the initialize-pinned
+ * config. The expected event record is reconstructed off-chain (chain fields
+ * read from the ledger, routing from the {@link VAULT_MPC_ROUTING} mirror),
+ * its id computed with the library's `calculateRequestId` TS twin, and
+ * asserted present as a ledger map key after the call.
  *
  * @param context - The flow context.
  * @param options - The deposit arguments.
@@ -85,9 +88,9 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
   // vault EVM address its calldata will pay to, and the pinned chain config.
   const before = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
   if (!before.initialized) {
-    throw new Error("vault is not initialized — run the initialize flow first");
+    throw new Error("vault is not initialized, run the initialize flow first");
   }
-  const requestNonce = before.signetNonce;
+  const requestNonce = before.signetRequestNonce;
   const vaultEvmAddress = before.vaultEvmAddress;
 
   const gasLimit = ERC20_TRANSFER_GAS_LIMIT;
@@ -96,13 +99,20 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
   const keyVersion = SIGNET_DEFAULT_KEY_VERSION;
 
   // The record the contract will store, reconstructed byte for byte: the
+  // event's own sender (the vault contract, kernel.self() in-circuit), the
   // contract-composed envelope on the initialize-pinned chain, the
   // contract-built `transfer(vaultEvmAddress, amount)` calldata (the raw
-  // selector, the big-endian address embed, the LE amount embed), and the
+  // selector, the big-endian address embed, the LE amount embed), the
+  // caller's identity commitment as the 32-byte derivation path, and the
   // contract-fixed routing.
-  const expectedRecord: SignBidirectionalRequest = {
+  const expectedRecord: SignBidirectionalEvent = {
+    sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce,
+    keyVersion,
+    path: context.identity.commitment,
+    ...VAULT_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
+    caip2Id: before.caip2Id,
     txParams: {
       to: erc20,
       chainId: before.evmChainId,
@@ -125,10 +135,6 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
         },
       },
     },
-    caip2Id: before.caip2Id,
-    keyVersion,
-    path: context.identity.path,
-    ...VAULT_MPC_ROUTING,
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
@@ -138,7 +144,6 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
     maxFeePerGas,
     maxPriorityFeePerGas,
     keyVersion,
-    context.identity.path,
     {
       erc20Address: erc20,
       amount: options.amount,
@@ -146,11 +151,11 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
   );
   console.log(`deposit finalized in tx ${result.public.txId}`);
 
-  // The ledger map key IS the domain-separated record hash — recomputing it
+  // The ledger map key IS the record's persistent hash: recomputing it
   // off-chain and finding it on the ledger proves both sides agree on every
-  // byte of the request.
+  // byte of the event.
   const after = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-  const index = toSignBidirectionalRequestIndex(after.signetRequestsIndex);
+  const index = toSignBidirectionalEventIndex(after.signBidirectionalEventMap);
   if (!index.has(expectedIdHex)) {
     throw new Error(
       `recomputed request id ${expectedIdHex} not found on the ledger — ` +
@@ -280,7 +285,7 @@ export async function runDepositRoundTrip(
   // claimed this request (claiming consumes it from the ledger) — the minted
   // tokens are already in the wallet, so skip instead of failing.
   const ledger = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-  if (!ledger.signetRequestsIndex.member(requestIdBytes(requestId))) {
+  if (!ledger.signBidirectionalEventMap.member(requestIdBytes(requestId))) {
     logSkip("claim", `request ${requestId} already claimed (not on the ledger)`);
   } else {
     await claim(context, { requestId, recipient: opts.claimRecipient });

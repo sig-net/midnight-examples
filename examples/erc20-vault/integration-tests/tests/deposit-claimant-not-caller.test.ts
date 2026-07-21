@@ -194,12 +194,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → cla
 
       // The public observable of a successful claim: the request is consumed
       // from the vault ledger — and consumption only happens after every
-      // in-circuit check (MPC key, Schnorr signature, EVM success, caller
+      // in-circuit check (ECDSA response signature, EVM success, caller
       // identity) passed.
       const context = await session.vaultContext();
       const ledger = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
       expect(
-        ledger.signetRequestsIndex.member(requestIdBytes(requestId)),
+        ledger.signBidirectionalEventMap.member(requestIdBytes(requestId)),
         "claim must consume the request from the ledger",
       ).toBe(false);
 

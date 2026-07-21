@@ -12,21 +12,63 @@ What this example demonstrates, end to end:
 - A Compact contract requesting EVM transaction signatures from the Signature
   Network singleton contract with a cross-contract call on Midnight.
 - The MPC observing the request, signing the EVM transaction (secp256k1), and
-  later attesting the EVM outcome (Schnorr over Jubjub). Both responses are
-  posted back on Midnight.
-- The vault verifying that attestation in-circuit and minting or burning
-  shielded vault tokens accordingly, including a refund branch for when the
-  EVM leg fails.
+  later attesting the EVM outcome with an ECDSA-signed
+  `RespondBidirectionalEvent`, signed by a response key derived for THIS
+  contract (from the MPC root key, the vault's own address and the fixed path
+  `"midnight response key"`). Both responses are posted back on Midnight.
+- The vault verifying that response in-circuit against the response key it
+  pinned at `initialize` time, and minting or burning shielded vault tokens
+  accordingly, including a refund branch for when the EVM leg fails.
 
 ## Architecture
 
 ![Demo architecture](docs/demo-architecture.drawio.svg)
 
+### Derived keys and accounts
+
+Every key the MPC signs with is scoped by the requesting contract:
+
+`derivedSigningKey = f(mpcRootKey[keyVersion], vaultContractAddress, path)`
+
+The path is 32 opaque bytes of the client contract's choosing. There are no
+format requirements, and the contract address is always part of the
+derivation, so no contract can ever reach another contract's derived keys.
+Within one contract, distinct paths yield disjoint accounts. The vault uses
+exactly three derivations:
+
+| Account / key | Path | What it does |
+|---|---|---|
+| The user's deposit account (EVM) | `userCommitment(callerSecretKey)`, the caller's 32-byte identity commitment | Signs the deposit sweep `transfer(vault, amount)`. The user funds this address with the ERC20 being deposited plus gas ETH. One account per identity: the contract recomputes the commitment in-circuit from the secret-key witness, so the path is never a circuit argument and the MPC can only ever sign with THIS caller's account. |
+| The vault's own account (EVM) | The contract-fixed literal `"vault"` (`pad(32, "vault")`) | Holds the vault's ERC20 balance and signs every withdraw `transfer(destination, amount)`. It also pays the withdraw gas, which is why the whole fee envelope is contract-fixed. |
+| The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id and execution output. It never signs transactions: it is per-client-contract yet independent of any request's own path, and `claim`/`completeWithdraw` verify responses against it in-circuit. |
+
+Deposits and withdrawals therefore move between two MPC-derived accounts on
+the EVM chain, and neither key ever exists anywhere: the MPC network signs
+for them on the vault's request, and only through the vault's circuits.
+
+Derivation happens off-chain with the `@sig-net/midnight` helpers:
+`deriveEvmAddress(mpcPublicKey, vaultContractAddress, path)` for the two EVM
+accounts and `deriveMidnightResponseKey(mpcPublicKey, vaultContractAddress)`
+for the response key (the setup pipeline derives all three and prints them).
+The vault's own address and the response key both take the contract address
+as INPUT, so they cannot exist at construction time: the deployer-gated
+one-shot `initialize` circuit pins them right after deploy, when the address
+(and therefore the derivations) exist.
+
+One subtlety for raw-hash paths: the MPC reads the 32 opaque path bytes as a
+UTF-8 string with NUL bytes stripped when it composes the derivation string.
+For the ASCII literals (`"vault"`) that reading is the obvious one, and for
+the user's commitment (a raw hash) it is lossy but deterministic, so client
+code deriving the user's EVM address must apply the exact same reading (see
+`pathStringOfBytes` in the integration tests' `vault-identity.ts`).
+
 ### Deposit: EVM ERC20 → shielded vault tokens
 
 1. Fund the derived accounts. The vault's EVM address (derivation path
    `"vault"`) and the user's EVM address (path set to the user's identity
-   commitment) are both derived from the MPC root public key. The user's
+   commitment) are both derived from the MPC root public key, scoped by the
+   vault's contract address (see
+   [Derived keys and accounts](#derived-keys-and-accounts)). The user's
    account holds the ERC20 being deposited plus some ETH for gas. The
    local-stack setup pipeline does all of this funding automatically.
 2. The user calls `deposit()` on the vault contract on Midnight. The vault
@@ -38,22 +80,25 @@ What this example demonstrates, end to end:
    transaction onto the singleton (`pollSignatureResponse`).
 4. Any client assembles the signed transaction and broadcasts it to the EVM
    chain (`broadcastEvm`). The ERC20 moves from the user to the vault.
-5. The MPC observes the mined receipt and posts a Schnorr attestation of the
-   outcome (`pollRespondBidirectional`).
-6. The depositor calls `claim()`, presenting the attestation to the vault. The
-   vault re-verifies it in-circuit (MPC key hash, Schnorr signature, EVM
-   success flag, caller identity) and mints shielded vault tokens to the
-   caller, or to an optional alternate recipient's coin public key. The
-   request is consumed, protecting against double claims.
+5. The MPC observes the mined receipt and posts an ECDSA-signed
+   `RespondBidirectionalEvent` of the outcome (`pollRespondBidirectional`
+   verifies each post off-chain, since the singleton's logs are
+   unauthenticated).
+6. The depositor calls `claim()`, presenting the response to the vault. The
+   vault re-verifies it in-circuit (ECDSA signature against the
+   initialize-pinned MPC response key, EVM success flag, caller identity) and
+   mints shielded vault tokens to the caller, or to an optional alternate
+   recipient's coin public key. The request is consumed, protecting against
+   double claims.
 
 ### Withdraw: shielded vault tokens → EVM ERC20
 
 Withdrawal is the mirror image. `withdraw()` escrows (burns) the caller's
 shielded vault tokens and records a signature request for an ERC20 transfer
 out of the vault's derived account, pinning a refund commitment of the
-caller's identity. The MPC signs, the transfer is broadcast, the MPC attests,
-and `completeWithdraw()` verifies the attestation in-circuit and branches on
-the EVM outcome:
+caller's identity. The MPC signs, the transfer is broadcast, the MPC posts
+its signed response, and `completeWithdraw()` verifies the response
+in-circuit and branches on the EVM outcome:
 
 - On success the withdrawal finalises and the escrowed value stays burned.
 - On failure (e.g. the transfer reverted) the escrowed value is re-minted to

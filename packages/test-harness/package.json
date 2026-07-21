@@ -16,8 +16,8 @@
   "dependencies": {
     "@midnight-examples/lib": "*",
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.4",
-    "@sig-net/midnight": "^0.0.5",
-    "@sig-net/midnight-contract-deploy": "^0.0.5",
+    "@sig-net/midnight": "^0.0.8",
+    "@sig-net/midnight-contract-deploy": "^0.0.8",
     "ethers": "^6.17.0"
   },
   "devDependencies": {

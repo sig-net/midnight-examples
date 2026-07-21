@@ -1,8 +1,9 @@
-// `claim` — the second half of the deposit flow: present the MPC's
-// Schnorr-signed attestation of the EVM sweep to the vault, which verifies it
-// in-circuit and mints shielded tokens to the caller (or a recipient the
-// caller names) under a fresh RANDOM mint nonce, so the minted coin cannot be
-// linked back to the request.
+// `claim`: the second half of the deposit flow. Present the MPC's
+// ECDSA-signed RespondBidirectionalEvent of the EVM sweep to the vault,
+// which verifies it in-circuit against its stored MPC response key and mints
+// shielded tokens to the caller (or a recipient the caller names) under a
+// fresh RANDOM mint nonce, so the minted coin cannot be linked back to the
+// request.
 
 import { encodeCoinPublicKey, type CoinPublicKey } from "@midnight-ntwrk/compact-runtime";
 import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
@@ -10,7 +11,8 @@ import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contr
 import type { EncPublicKey } from "@midnight-examples/lib";
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 
-import { createResponseReader, type VaultContext } from "../vault-context.ts";
+import type { VaultContext } from "../vault-context.ts";
+import { fetchVerifiedRespondBidirectionalEvent } from "./poll-respond-bidirectional.ts";
 
 /**
  * A shielded wallet the vault can mint to. Both halves of the key pair are
@@ -41,23 +43,21 @@ export interface ClaimOptions {
 /**
  * Call the vault's `claim` circuit for a completed deposit request.
  *
- * Fetches the MPC's respond-bidirectional attestation (`serializedOutput` +
- * Schnorr signature components) for `options.requestId` from the signet
- * contract via the `SignetRequestResponseReader` — the same read the
- * response server writes to — then calls the circuit, which verifies the MPC
- * public key hash, the Schnorr signature, the EVM success flag, and the
- * caller identity against the stored request, and mints shielded vault
- * tokens on success — to `options.recipient` when given, otherwise to the
- * caller. The mint's coin handling is midnight-js's job:
- * `vault.callTx.claim(...)` balances the resulting offer like any other call.
- *
- * The attestation is authentic by construction: the signet contract verified
- * it IN-CIRCUIT at post time, so a stored record needs no off-chain re-check
- * here — an absent one just means the MPC has not attested yet (poll first).
+ * Fetches the MPC's RespondBidirectionalEvent (`serializedOutput` + ECDSA
+ * signature scalars) for `options.requestId` from the signet contract's
+ * unauthenticated log, verified off-chain against the vault's stored MPC
+ * response key (see {@link fetchVerifiedRespondBidirectionalEvent}), then
+ * calls the circuit, which re-verifies the ECDSA signature in-circuit along
+ * with the EVM success flag and the caller identity against the stored
+ * request, and mints shielded vault tokens on success: to
+ * `options.recipient` when given, otherwise to the caller. The mint's coin
+ * handling is midnight-js's job: `vault.callTx.claim(...)` balances the
+ * resulting offer like any other call.
  *
  * @param context - The flow context.
  * @param options - The claim arguments.
- * @throws If no attestation has been posted for `options.requestId` yet.
+ * @throws If no verifying response has been posted for `options.requestId`
+ *   yet.
  */
 export async function claim(context: VaultContext, options: ClaimOptions): Promise<void> {
   console.log(`vault contract:  ${context.vaultContractAddress}`);
@@ -67,13 +67,11 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
     console.log(`recipient:       ${options.recipient.coinPublicKey}`);
   }
 
-  const reader = createResponseReader(context);
-
-  const respondBidirectional = await reader.getRespondBidirectional(options.requestId);
-  if (respondBidirectional === undefined) {
+  const respondBidirectionalEvent = await fetchVerifiedRespondBidirectionalEvent(context, options.requestId);
+  if (respondBidirectionalEvent === undefined) {
     throw new Error(
-      `no respond-bidirectional attestation posted for request ${options.requestId} — ` +
-        `run pollRespondBidirectional first (has the MPC attested the sweep?)`,
+      `no verified respond-bidirectional response posted for request ${options.requestId}: ` +
+        `run pollRespondBidirectional first (has the MPC responded to the sweep?)`,
     );
   }
 
@@ -111,7 +109,7 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
             await context.vault.callTx.claim(
               txCtx,
               requestIdBytes(options.requestId),
-              respondBidirectional,
+              respondBidirectionalEvent,
               mintNonce,
               recipient,
             );
@@ -124,7 +122,7 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
         )
       : await context.vault.callTx.claim(
           requestIdBytes(options.requestId),
-          respondBidirectional,
+          respondBidirectionalEvent,
           mintNonce,
           recipient,
         );

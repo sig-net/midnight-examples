@@ -80,7 +80,9 @@ services:
     # service. Manual equivalent (and the FAKENET_MANAGED=0 path):
     #   docker compose --profile fakenet up -d --force-recreate fakenet
     container_name: 'fakenet-responder'
-    image: 'ghcr.io/sig-net/fakenet:latest'
+    # Pinned to the responder release paired with @sig-net/* 0.0.8 (the
+    # event/ECDSA protocol with sender-scoped response keys).
+    image: 'ghcr.io/sig-net/fakenet:0.4.0'
     profiles: ['fakenet']
     depends_on:
       indexer:
