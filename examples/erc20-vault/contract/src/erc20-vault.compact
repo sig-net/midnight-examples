@@ -1,0 +1,518 @@
+//                                        ⚠️ CAUTION ⚠️
+// This is an example application for educational and experimental purposes.
+// Use at your own risk and expect rapid iteration.
+//
+// ==================== ERC20 Cross Chain Vault: Signet integration example ==============
+// A Signet client contract that moves ERC20 value between an EVM chain and shielded
+// tokens on the Midnight blockchain, with the Signet Distributed MPC network executing
+// the EVM side.
+//
+// READ THIS FILE TOGETHER WITH THE EXAMPLE README (../../README.md). The README's
+// integration walkthrough explains the protocol, the derived keys and accounts, and the
+// off-chain runtime legs. The "Setup step N" / "Runtime step N" markers below mirror its
+// numbering:
+//
+//   Setup step 2:               the Signet import.
+//   Setup step 3:               the ledger state and the constructor.
+//   Setup step 4:               initialize().
+//   Runtime step 1 (deposit):   deposit().
+//   Runtime step 5 (deposit):   claim().
+//   Runtime step 1 (withdraw):  withdraw().
+//   Runtime step 5 (withdraw):  completeWithdraw().
+//
+// Runtime steps 2 to 4 (polling the MPC's responses, broadcasting to the EVM chain) are
+// off-chain client code: see the README walkthrough and ../../integration-tests/src/flows/.
+
+pragma language_version >= 0.25;
+
+import CompactStandardLibrary;
+
+// Setup step 2: import the shared signet protocol module, resolved through node_modules
+// via COMPACT_PATH (see the compile scripts in package.json).
+import "@sig-net/midnight/src/Signet";
+
+// ---- Setup step 3: signet ledger state ----------------------------------------------
+// The three protocol-required fields every signet client contract declares, kept
+// together: the event map, the Signet singleton reference, and the MPC response key.
+
+// The request map the MPC reads authenticated SignBidirectionalEvents back from. Sized
+// for an ERC20 transfer(address,uint256): <2 calldata words, 0 access-list entries,
+// 0 storage keys>. Schema widths are 34 bytes, the exact length of
+// vaultResponseSchema() (schemas are exact-width by protocol convention, never padded).
+// This declaration is ledger FIELD 0. Field numbers are declaration order, and the
+// request circuits name this position in their notifications: the MPC locates the map
+// by position, so it must stay first and never move after the first deploy. No other
+// field's position carries meaning, so no other field is numbered.
+export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EVMType2TxParams<2, 0, 0>, 34, 34>;
+
+// The Signet singleton, pinned at deploy. The request circuits cross-contract call it
+// to register the notifications the MPC polls.
+sealed ledger signetSigner: SignetSigner;
+
+// The MPC RESPONSE key for this contract, derived off-chain from the MPC root key +
+// THIS contract's address + the fixed path "midnight response key". It never signs
+// transactions: it is the key claim and completeWithdraw accept
+// RespondBidirectionalEvents from, and their only authentication gate (the Signet
+// singleton stores MPC posts unverified). It depends on the contract's own address, so
+// it is set in initialize() (Setup step 4), not the constructor.
+export ledger mpcResponseKey: Secp256k1Point;
+
+// ---- Vault state --------------------------------------------------------------------
+
+// Keeps otherwise identical requests hashing to distinct request ids.
+export ledger signetRequestNonce: Counter;
+
+// Becomes 1 once initialize() has run.
+export ledger initialized: Counter;
+
+// The vault's own EVM address (derivation path "vault"), the contract-enforced
+// recipient of every deposit transfer. Derived FROM this contract's Midnight address,
+// so it is set in initialize(), not the constructor.
+export ledger vaultEvmAddress: Bytes<20>;
+
+// The ONE EVM chain this vault operates on, as the numeric id (for the transactions
+// the MPC signs) and the CAIP-2 string (for MPC routing). One vault serves one chain,
+// so requests never take a chain argument. Two fields exist as Compact cannot render a
+// number as a decimal string in-circuit: the deployer-gated initialize() is trusted to
+// supply a consistent pair.
+export ledger evmChainId: Uint<64>;
+export ledger caip2Id: Bytes<32>;
+
+// Identity commitment of the deployer. Only they may call initialize().
+sealed ledger deployer: Bytes<32>;
+
+// Pending withdrawals: requestId -> the withdrawer's refund commitment (see
+// withdrawRefundCommitment), pinned at request time so ONLY the withdrawer can pull a
+// refund when the EVM transfer fails. Doubles as the pending-withdrawal marker, and is
+// the ONLY per-withdrawal state: the surrendered coin itself is burned at receive time
+// (see withdraw), so any number of withdrawals across any ERC20 colours proceed
+// concurrently.
+export ledger refundCommitment: Map<RequestId, Bytes<32>>;
+
+// ---- Fixed MPC routing --------------------------------------------------------------
+// This vault does exactly one thing: have the MPC sign ERC20 `transfer` calls on an EVM
+// chain. The event fields that follow from that are contract CONSTANTS, never circuit
+// arguments: algo is always ecdsa, dest always unused, params always blank, and both
+// serialisation schemas are the schema below.
+
+// The ABI-style JSON schema of an ERC20 `transfer` result, used in both directions: it
+// tells the MPC how to deserialise the EVM execution output and how to serialise that
+// output into the RespondBidirectionalEvent it posts back. Exact-width: 34 bytes.
+pure circuit vaultResponseSchema(): Bytes<34> {
+  return "[{\"name\":\"success\",\"type\":\"bool\"}]" as Bytes<34>;
+}
+
+// ---- Token model --------------------------------------------------------------------
+// Each ERC20 the vault handles gets its own shielded token colour: the domain separator
+// encodes the ERC20 address, and tokenType() binds it to this contract via
+// kernel.self(). claim mints under it, withdraw accepts only coins of it. Exported so
+// off-chain code computes coin colours by calling the compiled circuit, never a TS
+// re-implementation.
+export pure circuit vaultTokenDomainSeparator(erc20Address: Bytes<20>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([
+    pad(32, "erc20:vault:"),
+    erc20Address as Field as Bytes<32>
+  ]);
+}
+
+// ---- Identity -----------------------------------------------------------------------
+// Users prove identity with a secret-key witness. Only a commitment (hash) of the key
+// ever reaches the ledger, and it doubles as the MPC key-derivation path of deposit
+// requests: identity -> path -> MPC-derived account is a forced 1:1 mapping (see the
+// README's "Derived keys and accounts").
+
+witness callerSecretKey(): Bytes<32>;
+
+// Exported so off-chain code (deploy tooling, tests) computes commitments by calling
+// the compiled circuit.
+export pure circuit userCommitment(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "vault:user:"), sk]);
+}
+
+// The refund commitment withdraw pins and completeWithdraw's refund branch proves.
+// Deliberately NOT userCommitment: the deposit path publishes THAT commitment on the
+// ledger (as the request's derivation path), so reusing it would let anyone link a
+// withdrawal's refund marker to a depositor's identity. The distinct domain string
+// breaks that link, and binding the (already public) requestId makes every
+// withdrawal's commitment unique, so two withdrawals by the same secret are unlinkable
+// to each other too.
+export pure circuit withdrawRefundCommitment(sk: Bytes<32>, requestId: RequestId): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([
+    pad(32, "vault:refund:"),
+    sk,
+    requestId as Bytes<32>
+  ]);
+}
+
+// ---- Setup step 3 (continued): the constructor --------------------------------------
+// The constructor pins WHO may configure (the deployer's identity commitment, computed
+// off-chain from their secret via the compiled userCommitment circuit) and the Signet
+// singleton. Everything that needs the contract's own address waits for initialize().
+
+constructor(
+  deployerCommitment: Bytes<32>,
+  signetContract: SignetSigner,
+) {
+  deployer = disclose(deployerCommitment);
+  signetSigner = disclose(signetContract);
+}
+
+// ---- Setup step 4: initialize -------------------------------------------------------
+// One-shot, deployer-gated post-deploy configuration. The vault's derived EVM address
+// and the MPC response key both take this contract's address as derivation input, so
+// they can only be derived (off-chain) once the address exists, right after deploy. The
+// gate prevents front-running: nobody else can initialise the vault to point at their
+// own address, chain or key.
+export circuit initialize(
+  vaultEvm: Bytes<20>,
+  chainId: Uint<64>,
+  chainCaip2Id: Bytes<32>,
+  responseKey: Secp256k1Point
+): [] {
+  assert(initialized == 0, "Already initialized");
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+  assert(chainId > 0 as Uint<64>, "Chain ID must be positive");
+  initialized.increment(1);
+  vaultEvmAddress = disclose(vaultEvm);
+  evmChainId = disclose(chainId);
+  caip2Id = disclose(chainCaip2Id);
+  mpcResponseKey = disclose(responseKey);
+}
+
+// ---- Runtime step 1 (deposit): deposit ----------------------------------------------
+
+// The vault-specific arguments of a deposit. Everything else about the request is
+// composed by the contract, see deposit.
+struct DepositRequest {
+  erc20Address: Bytes<20>; // the ERC20 token contract on the target chain
+  amount: Uint<128>;       // token amount to move into the vault
+}
+
+// Records a SignBidirectionalEvent for `transfer(vaultEvmAddress, amount)` on the
+// ERC20, to be signed by the MPC with the CALLER's derived account and broadcast
+// off-chain (runtime steps 2 and 3). The contract composes the ENTIRE transaction and
+// routing itself. The caller supplies only what is genuinely theirs to choose: their
+// account's nonce, the gas envelope their account pays, and the MPC key version. The
+// derivation path is not an argument at all: it is the caller's identity commitment,
+// recomputed in-circuit, so the MPC signs with THIS caller's account and no one else's.
+export circuit deposit(
+  evmNonce: Uint<64>,
+  gasLimit: Uint<64>,
+  maxFeePerGas: Uint<128>,
+  maxPriorityFeePerGas: Uint<128>,
+  keyVersion: Uint<8>,
+  depositRequest: DepositRequest
+): SignetMapKey {
+  assert(initialized >= 1, "Not initialized");
+  assert(depositRequest.erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
+  assert(depositRequest.amount > 0 as Uint<128>, "Amount must be positive");
+  // Claims mint shielded tokens via a Uint<64> API; reject unclaimable amounts.
+  assert(depositRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
+  assert(gasLimit > 0 as Uint<64>, "Gas limit must be positive");
+
+  // Identity -> derivation-path binding: claim later recomputes this commitment and
+  // requires it to match the stored request's path, making claims depositor-only.
+  const caller = disclose(userCommitment(callerSecretKey()));
+
+  // Contract-enforced calldata: transfer(vaultEvmAddress, amount), built here and
+  // never taken from the caller. The initialize-pinned recipient is what stops a
+  // malicious client having the MPC sign a transfer to themselves. Words are
+  // ABI-READY (big-endian, broadcast form): the signer concatenates
+  // selector || words verbatim, so these bytes ARE the calldata.
+  const calldata = EVMCalldata<2> {
+    selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
+    noWords: 2 as Uint<16>,
+    words: [
+      evmAddressAbiWord(vaultEvmAddress),
+      numericAbiWord(depositRequest.amount),
+    ]
+  };
+
+  // The full transaction the MPC will sign: the deposit's ERC20 on the
+  // initialize-pinned chain, no ETH value, the caller's gas envelope.
+  const txParams = EVMType2TxParams<2, 0, 0> {
+    to: depositRequest.erc20Address,
+    chainId: evmChainId,
+    nonce: evmNonce,
+    gasLimit: gasLimit,
+    maxFeePerGas: maxFeePerGas,
+    maxPriorityFeePerGas: maxPriorityFeePerGas,
+    value: 0 as Uint<128>,
+    accessListEntryCount: 0,
+    accessList: [],
+    calldata: some<EVMCalldata<2>>(calldata)
+  };
+
+  const schema = vaultResponseSchema();
+  const requestNonce = signetRequestNonce as Uint<64>;
+  const request = constructSignBidirectionalEvent<EVMType2TxParams<2, 0, 0>, 34, 34>(
+    kernel.self(),
+    requestNonce,
+    keyVersion,
+    caller,
+    MPCSignatureAlgorithm.ecdsa,
+    MPCDestination.unused,
+    pad(64, ""),
+    TxParamType.evmType2,
+    txParams,
+    caip2Id,
+    schema,
+    schema
+  );
+  // Circuit arguments are private inputs, and the event record is public ledger state
+  // by design, so disclose it (and its id) explicitly at the write site.
+  const requestId = disclose(calculateRequestId<EVMType2TxParams<2, 0, 0>, 34, 34>(request));
+
+  assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
+  signetRequestNonce.increment(1);
+  signBidirectionalEventMap.insert(requestId, disclose(request));
+
+  // Notify the MPC via the Signet singleton's registry. The second argument names the
+  // ledger field position of signBidirectionalEventMap (0, see Setup step 3). The
+  // returned SignetMapKey names the notification's (requestId, count) slot.
+  return signetSigner.signBidirectionalEvent(
+    requestId,
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(),
+      0 as Uint<8>,
+    ),
+  );
+}
+
+// ---- Runtime step 5 (deposit): claim ------------------------------------------------
+// The caller presents the MPC's ECDSA-signed RespondBidirectionalEvent proving the
+// sweep executed, and the vault mints shielded vault tokens for the deposited amount,
+// to the caller or an optionally provided recipient. Depositor-gated, one claim per
+// request. mintNonce must be RANDOM: a nonce derived from the (public) requestId would
+// let any observer link the minted coin to the deposit.
+export circuit claim(
+  requestId: RequestId,
+  respondBidirectionalEvent: RespondBidirectionalEvent,
+  mintNonce: Bytes<32>,
+  recipient: Maybe<Either<ZswapCoinPublicKey, ContractAddress>>,
+): [] {
+  // requestId keys the ledger operations, so it is public. The response is only
+  // verified, never written, and stays private.
+  const disclosedRequestId = disclose(requestId);
+
+  assert(initialized >= 1, "Not initialized");
+
+  // The EVM result: the first output word is transfer()'s ABI-encoded bool.
+  const returnValue = slice<32>(respondBidirectionalEvent.serializedOutput, 0);
+  assert(returnValue as Field == 1 as Field, "ERC20 transfer returned false");
+
+  // The only authentication gate: in-circuit ECDSA over the attestation digest of
+  // (requestId, output), against the initialize-pinned response key (the Signet
+  // singleton stores MPC posts unverified).
+  assert(
+    verifyRespondBidirectionalEvent(
+      disclosedRequestId,
+      respondBidirectionalEvent,
+      mpcResponseKey
+    ),
+    "Invalid attestation signature"
+  );
+
+  // Double-claim protection: the request must exist and is consumed here.
+  assert(signBidirectionalEventMap.member(disclosedRequestId), "Request not found");
+  const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
+  signBidirectionalEventMap.remove(disclosedRequestId);
+
+  // Depositor gate: the caller's recomputed commitment must match the request's
+  // derivation path (deposit stored the depositor's commitment there).
+  const caller = userCommitment(callerSecretKey());
+  assert(caller == signatureRequest.path, "Not the depositor");
+
+  // Mint for the deposited amount: deposit stored it as calldata word 1 (an ABI-ready
+  // big-endian word) and the ERC20 address in txParams.to. The random mint nonce is
+  // disclosed (a mint's nonce is public anyway) but never derivable from the request.
+  assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
+  const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
+  const erc20Addr = signatureRequest.txParams.to;
+
+  const domainSep = vaultTokenDomainSeparator(erc20Addr);
+  const claimRecipient = disclose(recipient).is_some
+    ? disclose(recipient).value
+    : left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
+  mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), claimRecipient);
+}
+
+// ---- Runtime step 1 (withdraw): withdraw --------------------------------------------
+
+// The vault-specific arguments of a withdraw. The surrendered coin is a separate
+// (coin-typed) circuit parameter.
+struct WithdrawRequest {
+  erc20Address: Bytes<20>;   // the ERC20 token contract on the target chain
+  amount: Uint<128>;         // token amount to pull out of the vault
+  destEvmAddress: Bytes<20>; // EVM recipient of the vault's transfer
+}
+
+// Starts a withdrawal, optimistically: the caller surrenders `amount` of the ERC20's
+// vault token up front, and the vault records a request for
+// `transfer(destEvmAddress, amount)`, to be signed by the MPC with the VAULT's own
+// derived account (path = the contract-fixed literal "vault"). Anyone may withdraw to
+// any destination: the coin spend IS the authorisation, since the wallet funds it from
+// the caller's own balance. On EVM failure completeWithdraw re-mints the surrendered
+// value to the withdrawer, who proves the refund commitment pinned here.
+//
+// The VAULT's account pays the withdraw gas, so the entire fee envelope is
+// contract-fixed below, never caller-chosen: a caller-supplied fee cap would let
+// anyone burn the vault account's ETH at will.
+export circuit withdraw(
+  evmNonce: Uint<64>,
+  keyVersion: Uint<8>,
+  withdrawRequest: WithdrawRequest,
+  coin: ShieldedCoinInfo
+): SignetMapKey {
+  assert(initialized >= 1, "Not initialized");
+  assert(withdrawRequest.erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
+  assert(withdrawRequest.amount > 0 as Uint<128>, "Amount must be positive");
+  // A refund re-mints via the same Uint<64> API claims use; reject unrefundable
+  // amounts.
+  assert(withdrawRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
+
+  // The coin must be the vault token for THIS erc20, of exactly `amount`.
+  const color = tokenType(
+    vaultTokenDomainSeparator(disclose(withdrawRequest.erc20Address)),
+    kernel.self()
+  );
+  assert(coin.color == color, "Coin is not the vault token for this ERC20");
+  assert(coin.value == withdrawRequest.amount, "Coin value must equal the withdraw amount");
+
+  // Contract-enforced calldata: transfer(destEvmAddress, amount). The destination is a
+  // validated typed argument, bound into the request id below. Words are ABI-READY
+  // (big-endian, broadcast form), used verbatim by the signer.
+  const calldata = EVMCalldata<2> {
+    selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
+    noWords: 2 as Uint<16>,
+    words: [
+      evmAddressAbiWord(withdrawRequest.destEvmAddress),
+      numericAbiWord(withdrawRequest.amount),
+    ]
+  };
+
+  // Contract-FIXED gas envelope: an ERC20 transfer costs ~50-65k gas, so the caps are
+  // generous for a testnet. Retuning them means a redeploy, the price of keeping the
+  // vault's ETH out of callers' hands.
+  const txParams = EVMType2TxParams<2, 0, 0> {
+    to: withdrawRequest.erc20Address,
+    chainId: evmChainId,
+    nonce: evmNonce,
+    gasLimit: 100000 as Uint<64>,
+    maxFeePerGas: 30000000000 as Uint<128>,       // 30 gwei
+    maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
+    value: 0 as Uint<128>,
+    accessListEntryCount: 0,
+    accessList: [],
+    calldata: some<EVMCalldata<2>>(calldata)
+  };
+
+  // Construct and key the event under the vault's OWN derivation path.
+  const path = pad(32, "vault");
+  const schema = vaultResponseSchema();
+  const requestNonce = signetRequestNonce as Uint<64>;
+  const request = constructSignBidirectionalEvent<EVMType2TxParams<2, 0, 0>, 34, 34>(
+    kernel.self(),
+    requestNonce,
+    keyVersion,
+    path,
+    MPCSignatureAlgorithm.ecdsa,
+    MPCDestination.unused,
+    pad(64, ""),
+    TxParamType.evmType2,
+    txParams,
+    caip2Id,
+    schema,
+    schema
+  );
+  // Circuit arguments are private inputs, and the event record is public ledger state
+  // by design, so disclose it (and its id) explicitly at the write site.
+  const requestId = disclose(calculateRequestId<EVMType2TxParams<2, 0, 0>, 34, 34>(request));
+  assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
+
+  // The surrendered value is BURNED here: the receive obliges the transaction to pay
+  // the coin to this contract, and the contract deliberately never records it, so it
+  // can never be spent. Vault tokens are IOUs, and a refund MINTS fresh ones. No
+  // per-withdrawal escrow slot means any number of concurrent withdrawals.
+  receiveShielded(disclose(coin));
+
+  // Record the event and pin the withdrawer's refund commitment: only the commitment
+  // (a hash) reaches the ledger, the refund recipient's key stays private.
+  signetRequestNonce.increment(1);
+  signBidirectionalEventMap.insert(requestId, disclose(request));
+  refundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
+
+  // Notify the MPC (field position 0 = signBidirectionalEventMap, see Setup step 3).
+  return signetSigner.signBidirectionalEvent(
+    requestId,
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(),
+      0 as Uint<8>,
+    ),
+  );
+}
+
+// ---- Runtime step 5 (withdraw): completeWithdraw ------------------------------------
+// Settles a withdrawal in BOTH branches, decided by the MPC-signed output, never the
+// caller. On success the withdrawal is final (the surrendered value stays burned) and
+// the call only cleans up: no mint, no identity, so ANYONE holding the signed success
+// may settle it. On failure the value re-mints to the WITHDRAWER only: they prove the
+// secret behind the commitment pinned at withdraw time, under a caller-chosen random
+// mintNonce (one derived from the public requestId would link the refunded coin to the
+// withdrawal). One settle per request.
+export circuit completeWithdraw(
+  requestId: RequestId,
+  respondBidirectionalEvent: RespondBidirectionalEvent,
+  mintNonce: Bytes<32>,
+): [] {
+  // requestId keys the ledger operations, so it is public. The response is only
+  // verified, never written.
+  const disclosedRequestId = disclose(requestId);
+
+  assert(initialized >= 1, "Not initialized");
+
+  // Same authentication gate as claim: in-circuit ECDSA against the initialize-pinned
+  // response key.
+  assert(
+    verifyRespondBidirectionalEvent(
+      disclosedRequestId,
+      respondBidirectionalEvent,
+      mpcResponseKey
+    ),
+    "Invalid attestation signature"
+  );
+
+  // Double-settle protection: refundCommitment is the pending-withdrawal marker.
+  // Deposits never insert it, so a deposit request cannot be settled through this
+  // circuit (its own settle is claim, which is depositor-gated).
+  assert(refundCommitment.member(disclosedRequestId), "Withdrawal not found");
+  const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
+  signBidirectionalEventMap.remove(disclosedRequestId);
+
+  // Branch on the EVM result: a success output's first byte is 0x01, and the MPC's
+  // 0xdeadbeef error sentinel (or a `false` return = 0x00) is not. One byte only: a
+  // full 32-byte cast risks BLS-field overflow on arbitrary failure outputs.
+  // Disclosed: whether a refund happens is public anyway (a mint is observable).
+  const succeeded = disclose(slice<1>(respondBidirectionalEvent.serializedOutput, 0) as Field == 1 as Field);
+
+  if (!succeeded) {
+    // Refund path only: it mints a private coin, so it is withdrawer-only. The
+    // success branch above skips all of this, as cleanup needs no identity.
+    assert(
+      withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
+        == refundCommitment.lookup(disclosedRequestId),
+      "Not the withdrawer"
+    );
+
+    // Re-mint the surrendered value to the withdrawer's own wallet key. Amount and
+    // token come from the consumed request: calldata word 1 and txParams.to.
+    const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
+    const erc20Addr = signatureRequest.txParams.to;
+
+    const domainSep = vaultTokenDomainSeparator(erc20Addr);
+    const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
+    mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), recipient);
+  }
+
+  refundCommitment.remove(disclosedRequestId);
+}

@@ -1,0 +1,308 @@
+// Seed → account construction utilities shared by every wallet host (deploy
+// scripts, flows, tests): key derivation and WalletFacade wiring. Pure
+// crypto + facade construction — no network I/O happens here (the facade
+// connects only when started).
+import * as ledger from "@midnightntwrk/ledger-v9";
+import { HDWallet, Roles } from "@midnightntwrk/wallet-sdk-hd";
+import {
+  mergeWalletEntries,
+  WalletEntrySchema,
+  WalletFacade,
+  type CombinedTokenTransfer,
+  type FacadeState,
+  type TransactionIdentifier,
+} from "@midnightntwrk/wallet-sdk-facade";
+import { ShieldedWallet } from "@midnightntwrk/wallet-sdk-shielded";
+import { DustWallet } from "@midnightntwrk/wallet-sdk-dust-wallet";
+import {
+  createKeystore,
+  PublicKey as UnshieldedPublicKey,
+  type UnshieldedKeystore,
+  UnshieldedWallet,
+} from "@midnightntwrk/wallet-sdk-unshielded-wallet";
+import { InMemoryTransactionHistoryStorage } from "@midnightntwrk/wallet-sdk-abstractions";
+
+import type { MidnightNodeConfig } from "./midnight-node-config.ts";
+import type { NetworkId } from "./network-id.ts";
+import { parseSeed } from "./seed.ts";
+
+// Consumers hold facades/states we hand them without adding the wallet-sdk
+// packages themselves — re-export the handle types alongside the builders.
+export type {
+  CombinedTokenTransfer,
+  FacadeState,
+  TransactionIdentifier,
+  WalletFacade,
+} from "@midnightntwrk/wallet-sdk-facade";
+// The encryption-key string type of the shielded key pair consumers receive
+// through AccountKeys (e.g. to address a mint to another wallet) —
+// re-exported so they don't add the ledger package themselves.
+export type { EncPublicKey } from "@midnightntwrk/ledger-v9";
+
+/** The live key material for one account. Reused for signing / balancing. */
+export interface AccountKeys {
+  shieldedSecretKeys: ledger.ZswapSecretKeys;
+  dustSecretKey: ledger.DustSecretKey;
+  unshieldedKeystore: UnshieldedKeystore;
+}
+
+/**
+ * The fee settings the facade balances transactions with: it burns
+ * `feesWithMargin(params, feeBlocksMargin) + additionalFeeOverhead` per
+ * transaction.
+ */
+export const COST_PARAMETERS: { readonly additionalFeeOverhead: bigint; readonly feeBlocksMargin: number } = {
+  additionalFeeOverhead: 300_000_000_000n,
+  feeBlocksMargin: 5,
+};
+
+/**
+ * Parse a seed and derive the three role keys (Zswap / NightExternal / Dust).
+ * Pure crypto — no network. This is the step that exercises the ledger WASM.
+ *
+ * @param seed - The wallet seed, hex or mnemonic (see {@link parseSeed}).
+ * @param networkId - The network the unshielded keystore encodes addresses for.
+ * @returns The derived {@link AccountKeys}.
+ * @throws If the seed does not parse or HD derivation fails.
+ */
+export function deriveAccountKeys(seed: string, networkId: NetworkId): AccountKeys {
+  const { seed: seedBytes } = parseSeed(seed);
+
+  const hd = HDWallet.fromSeed(seedBytes);
+  if (hd.type !== "seedOk") throw new Error("HDWallet.fromSeed failed (seedError).");
+
+  const derived = hd.hdWallet
+    .selectAccount(0)
+    .selectRoles([Roles.Zswap, Roles.NightExternal, Roles.Dust])
+    .deriveKeysAt(0);
+  if (derived.type !== "keysDerived") throw new Error("deriveKeysAt failed (keyOutOfBounds).");
+  hd.hdWallet.clear();
+
+  const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(derived.keys[Roles.Zswap]);
+  const dustSecretKey = ledger.DustSecretKey.fromSeed(derived.keys[Roles.Dust]);
+  const unshieldedKeystore = createKeystore(
+    { kind: "schnorr", secret: derived.keys[Roles.NightExternal] },
+    networkId,
+  );
+
+  return { shieldedSecretKeys, dustSecretKey, unshieldedKeystore };
+}
+
+/**
+ * Wire up the WalletFacade for the given keys + connection config. This only
+ * constructs the three sub-wallets — it does NOT start syncing.
+ *
+ * @param keys - The account to open the facade for (see {@link deriveAccountKeys}).
+ * @param config - The stack the facade connects to.
+ * @returns The initialised (not yet started) facade.
+ */
+export function initialiseWalletFacade(keys: AccountKeys, config: MidnightNodeConfig): Promise<WalletFacade> {
+  return WalletFacade.init({
+    configuration: {
+      networkId: config.networkId,
+      indexerClientConnection: {
+        indexerHttpUrl: config.indexerUrl,
+        indexerWsUrl: config.indexerWsUrl,
+      },
+      provingServerUrl: new URL(config.proofServerUrl),
+      // The facade talks to the node over WebSocket, so flip http(s) -> ws(s).
+      relayURL: new URL(config.nodeUrl.replace(/^http/, "ws")),
+      costParameters: COST_PARAMETERS,
+      txHistoryStorage: new InMemoryTransactionHistoryStorage(WalletEntrySchema, mergeWalletEntries),
+    },
+    shielded: (cfg) => ShieldedWallet(cfg).startWithSecretKeys(keys.shieldedSecretKeys),
+    unshielded: (cfg) =>
+      UnshieldedWallet(cfg).startWithPublicKey(UnshieldedPublicKey.fromKeyStore(keys.unshieldedKeystore)),
+    dust: (cfg) =>
+      DustWallet(cfg).startWithSecretKey(keys.dustSecretKey, ledger.LedgerParameters.initialParameters().dust),
+  });
+}
+
+// Recipes (balancing plans for submitted transactions) expire 30 min out.
+const RECIPE_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * Balance, sign, prove and submit a serialized unproven transaction (e.g. a
+ * contract deploy built by `buildDeployTransaction` in deploy.ts). Proving
+ * happens in `finalizeRecipe` via the facade's configured proof server.
+ *
+ * @param facade - A started (and synced) wallet facade that pays for and submits the transaction.
+ * @param keys - The key material of the same wallet, for balancing and signing.
+ * @param serializedTransaction - The unproven transaction bytes.
+ * @returns The submitted transaction's identifier.
+ * @throws If the wallet cannot cover fees, proving fails, or the node rejects the transaction.
+ */
+export async function submitUnprovenTransaction(
+  facade: WalletFacade,
+  keys: AccountKeys,
+  serializedTransaction: Uint8Array,
+): Promise<TransactionIdentifier> {
+  // Deserialize back into the ledger UnprovenTransaction the facade balances.
+  const tx = ledger.Transaction.deserialize<ledger.SignatureEnabled, ledger.PreProof, ledger.PreBinding>(
+    "signature",
+    "pre-proof",
+    "pre-binding",
+    serializedTransaction,
+  );
+
+  // Balance (add dust/fee inputs) → sign those inputs → finalize (prove) → submit.
+  const recipe = await facade.balanceUnprovenTransaction(
+    tx,
+    { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
+    { ttl: new Date(Date.now() + RECIPE_TTL_MS) },
+  );
+  const signed = await facade.signRecipe(recipe, keys.unshieldedKeystore.signDataAsync);
+  const finalized = await facade.finalizeRecipe(signed);
+  return facade.submitTransaction(finalized);
+}
+
+/**
+ * Build, balance, sign, prove and submit a wallet-to-wallet token transfer.
+ * The facade funds the outputs (and the fee) from its own balances during
+ * balancing; proving happens in `finalizeRecipe` via the facade's configured
+ * proof server. The receiving wallet discovers the coins from chain data on
+ * its next sync — pair with {@link waitForFacadeState} on the receiver.
+ *
+ * @param facade - A started (and synced) wallet facade that funds, pays for and submits the transfer.
+ * @param keys - The key material of the same wallet, for balancing and signing.
+ * @param outputs - The transfer outputs (shielded and/or unshielded), each naming a token type, receiver address and amount.
+ * @returns The submitted transaction's identifier.
+ * @throws If the wallet cannot fund the outputs or fees, proving fails, or the node rejects the transaction.
+ */
+export async function submitTransferTransaction(
+  facade: WalletFacade,
+  keys: AccountKeys,
+  outputs: CombinedTokenTransfer[],
+): Promise<TransactionIdentifier> {
+  const recipe = await facade.transferTransaction(
+    outputs,
+    { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
+    { ttl: new Date(Date.now() + RECIPE_TTL_MS) },
+  );
+  const signed = await facade.signRecipe(recipe, keys.unshieldedKeystore.signDataAsync);
+  const finalized = await facade.finalizeRecipe(signed);
+  return facade.submitTransaction(finalized);
+}
+
+// A freshly submitted transaction lands within a block or two on the local
+// dev chain; poll gently rather than hammering the indexer.
+const STATE_POLL_INTERVAL_MS = 3_000;
+
+/**
+ * Wait until the wallet's synced state satisfies `predicate`, polling the
+ * facade. For observing the effect of a submitted transaction (own or
+ * incoming) on balances — e.g. a transfer's outputs arriving at the
+ * receiving wallet.
+ *
+ * @param facade - A started wallet facade.
+ * @param predicate - Returns true when the awaited state has been reached.
+ * @param timeoutMs - Give-up deadline in milliseconds.
+ * @returns The first synced state satisfying `predicate`.
+ * @throws If no satisfying state appears within `timeoutMs`.
+ */
+export async function waitForFacadeState(
+  facade: WalletFacade,
+  predicate: (state: FacadeState) => boolean,
+  timeoutMs: number = 300_000,
+): Promise<FacadeState> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const state = await facade.waitForSyncedState();
+    if (predicate(state)) return state;
+    if (Date.now() >= deadline) {
+      throw new Error(`facade state did not satisfy the predicate within ${timeoutMs} ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, STATE_POLL_INTERVAL_MS));
+  }
+}
+
+/**
+ * Register every NIGHT UTXO not yet registered for dust generation, so the
+ * wallet can pay transaction fees (fees are paid in DUST, which only
+ * generates on registered NIGHT). Registers ONLY unregistered UTXOs — the
+ * node rejects a re-registration of an already-registered one — and submits
+ * nothing when there is nothing new to register.
+ *
+ * @param facade - A started wallet facade for `keys` (builds, proves and submits the registration).
+ * @param keys - The key material of the same wallet; its unshielded keystore signs the registration.
+ * @param state - The synced facade state to read the NIGHT UTXOs from.
+ * @returns How many NIGHT UTXOs this call registered (0 = nothing unregistered, including no NIGHT at all).
+ * @throws If the node rejects the registration transaction.
+ */
+export async function registerNightForDustGeneration(
+  facade: WalletFacade,
+  keys: AccountKeys,
+  state: FacadeState,
+): Promise<number> {
+  const unregistered = state.unshielded.availableCoins.filter(
+    (coin) => !coin.meta.registeredForDustGeneration,
+  );
+  if (unregistered.length === 0) return 0;
+
+  // Register → finalize (prove) → submit. The registration segments are
+  // signed inside registerNightUtxosForDustGeneration via the keystore
+  // callback; no separate signRecipe step.
+  const recipe = await facade.registerNightUtxosForDustGeneration(
+    unregistered,
+    keys.unshieldedKeystore.getPublicKey(),
+    keys.unshieldedKeystore.signDataAsync,
+  );
+  const finalized = await facade.finalizeRecipe(recipe);
+  await facade.submitTransaction(finalized);
+  return unregistered.length;
+}
+
+// Dust generates continuously once NIGHT is registered, but a fresh
+// registration takes a few blocks before a spendable balance appears.
+const DUST_POLL_INTERVAL_MS = 5_000;
+
+/**
+ * Wait until the wallet's spendable DUST (fee) balance is positive, polling
+ * the synced facade state. Pair with {@link registerNightForDustGeneration}:
+ * a wallet whose NIGHT was just registered has no dust for a few blocks.
+ *
+ * @param facade - A started wallet facade.
+ * @param timeoutMs - Give-up deadline in milliseconds.
+ * @returns The first positive dust balance observed.
+ * @throws If no dust appears within `timeoutMs`.
+ */
+export async function waitForSpendableDust(facade: WalletFacade, timeoutMs: number = 300_000): Promise<bigint> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const state = await facade.waitForSyncedState();
+    const dust = state.dust.balance(new Date());
+    if (dust > 0n) return dust;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `no spendable DUST after ${timeoutMs} ms — is the wallet's NIGHT registered for dust generation?`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, DUST_POLL_INTERVAL_MS));
+  }
+}
+
+/**
+ * Run `fn` against a started-and-synced {@link WalletFacade}, then stop the
+ * facade — even when `fn` throws. The one place the start / wait-for-sync /
+ * stop boilerplate lives.
+ *
+ * @param keys - The account to open the facade for (see {@link deriveAccountKeys}).
+ * @param config - The stack the facade connects to.
+ * @param fn - Work to run with the live facade; receives the synced state for balance checks.
+ * @returns Whatever `fn` returns.
+ * @throws Whatever {@link initialiseWalletFacade}, the facade start/sync, or `fn` throws.
+ */
+export async function withSyncedWalletFacade<T>(
+  keys: AccountKeys,
+  config: MidnightNodeConfig,
+  fn: (facade: WalletFacade, state: FacadeState) => Promise<T>,
+): Promise<T> {
+  const facade = await initialiseWalletFacade(keys, config);
+  await facade.start(keys.shieldedSecretKeys, keys.dustSecretKey);
+  try {
+    const state = await facade.waitForSyncedState();
+    return await fn(facade, state);
+  } finally {
+    await facade.stop().catch(() => {});
+  }
+}
