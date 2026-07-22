@@ -1,0 +1,43 @@
+# Thin per-example caller: paths-filter + one `uses:` of the reusable
+# example-test workflow. PRs/pushes run the happy-day gate spec; the full
+# five-spec suite is opt-in via workflow_dispatch.
+
+name: erc20-vault
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/erc20-vault/**"
+      - "packages/**"
+      - "docker-compose.yaml"
+      - "package.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/example-test.yaml"
+      - ".github/workflows/erc20-vault.yaml"
+  pull_request:
+    paths:
+      - "examples/erc20-vault/**"
+      - "packages/**"
+      - "docker-compose.yaml"
+      - "package.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/example-test.yaml"
+      - ".github/workflows/erc20-vault.yaml"
+  workflow_dispatch:
+    inputs:
+      full-suite:
+        description: "Run the FULL e2e suite (all five specs), not just happy-day"
+        type: boolean
+        default: false
+
+concurrency:
+  group: erc20-vault-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    uses: ./.github/workflows/example-test.yaml
+    with:
+      example-dir: erc20-vault
+      full-suite: ${{ github.event_name == 'workflow_dispatch' && inputs.full-suite == true }}

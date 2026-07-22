@@ -1,0 +1,30 @@
+{
+  "name": "@midnight-examples/erc20-vault-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The ERC20 vault Compact contract. src/index.ts is the curated export surface — this IS the \"sdk\" face of the package.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./managed/*": "./src/managed/*"
+  },
+  "scripts": {
+    "compile": "COMPACT_PATH=../../../node_modules compact compile --skip-zk --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
+    "compile:zk": "COMPACT_PATH=../../../node_modules compact compile --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "tsx deploy.ts"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
+    "@sig-net/midnight": "0.10.0",
+    "@sig-net/midnight-contract": "0.10.0"
+  },
+  "devDependencies": {
+    "@midnight-examples/lib": "*",
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
