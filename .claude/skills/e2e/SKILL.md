@@ -130,7 +130,8 @@ kept contracts.
 
 ## The fakenet responder
 
-The `fakenet` compose service (`ghcr.io/sig-net/fakenet:latest`, built from
+The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
+`docker-compose.yaml`, built from
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
 stand-in: it polls the signet contract's notification registry via the
 indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and

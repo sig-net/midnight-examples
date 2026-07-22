@@ -17,8 +17,8 @@
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-    "@sig-net/midnight": "^0.0.9",
-    "@sig-net/midnight-contract": "^0.0.9"
+    "@sig-net/midnight": "0.10.0",
+    "@sig-net/midnight-contract": "0.10.0"
   },
   "devDependencies": {
     "@midnight-examples/lib": "*",

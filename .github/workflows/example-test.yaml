@@ -6,10 +6,10 @@
 #   install → compact toolchain → compile (skip-zk) → zk keys (cached) →
 #   build → unit tests → compose up → e2e suite
 #
-# Caches (weekly- or source-keyed, never hand-pinned):
-#   compact-*  — the compact toolchain (~/.compact + the launcher binary),
-#                refreshed weekly (the toolchain floats on latest).
-#   zk-keys-*  — the example contract's prover/verifier keys, keyed on the
+# Caches (keyed on the pinned compiler version and the contract sources):
+#   compact-*  : the compact toolchain (~/.compact + the launcher binary),
+#                keyed on the pinned compiler version.
+#   zk-keys-*  : the example contract's prover/verifier keys, keyed on the
 #                compiler version + every .compact source in the repo; a hit
 #                lets the suite's setup skip ~10 min of keygen via
 #                TRUST_PREBUILT_ZK_KEYS (fresh by construction: the key
@@ -54,18 +54,15 @@ jobs:
           package-manager-cache: false
       - name: Enable corepack (yarn 4 via the packageManager field)
         run: corepack enable
-      - name: Cache period stamp (the compact toolchain floats on latest — refresh weekly)
-        id: stamp
-        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
       - name: Restore the compact toolchain
         uses: actions/cache@v4
         with:
           path: |
             ~/.compact
             ~/.local/bin/compact
-          key: compact-${{ runner.os }}-${{ steps.stamp.outputs.week }}
+          key: compact-${{ runner.os }}-0.33.0-rc.2
           restore-keys: compact-${{ runner.os }}-
-      - name: Install / update the compact toolchain (unpinned, per AGENTS.md)
+      - name: Install the compact toolchain (pinned 0.33.0-rc.2, per AGENTS.md)
         run: |
           export PATH="$HOME/.local/bin:$HOME/.compact/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -74,15 +71,13 @@ jobs:
             curl --proto '=https' --tlsv1.2 -LsSf \
               https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
           fi
-          compact update
-          # The workspace tracks the ledger-9 toolchain line: latest STABLE
-          # (0.31.1) speaks language 0.23 and rejects the contracts'
-          # `pragma language_version >= 0.25`. compactc 0.33.0-rc.2 is a
-          # PRERELEASE published on the toolchain's LF home
-          # (LFDT-Minokawa/compact), which the launcher's channel does not
-          # list — download it directly and let the launcher adopt it.
-          # Part of the ledger-9 MATCHED SET (see docker-compose.yaml's
-          # image-tag comment) — move it together with the npm stack.
+          # compactc 0.33.0-rc.2 is the PINNED compiler, part of the ledger-9
+          # MATCHED SET (see docker-compose.yaml's image-tag comment: move it
+          # together with the npm stack). It is a prerelease published on the
+          # toolchain's LF home (LFDT-Minokawa/compact), which the launcher's
+          # channel does not list: download it directly and let the launcher
+          # adopt it. A bare `compact update` would install latest stable and
+          # break the pin, so it is never run here.
           RC_DIR="$HOME/.compact/versions/0.33.0-rc.2/x86_64-unknown-linux-musl"
           if [ ! -x "$RC_DIR/compactc" ]; then
             mkdir -p "$RC_DIR"
@@ -94,6 +89,7 @@ jobs:
           # `compact update <ver>` adopts an already-on-disk version without
           # downloading; if the launcher refuses (version not in its
           # channel), wire the default symlinks it would have created.
+          mkdir -p "$HOME/.compact/bin"
           compact update 0.33.0-rc.2 || ln -sfn "$RC_DIR"/* "$HOME/.compact/bin/"
           compact compile --version
       - name: Read the compact compiler version (part of the zk cache key)
@@ -109,8 +105,8 @@ jobs:
           version="$(basename "$(dirname "$(dirname "$target")")")"
           case "$version" in [0-9]*) ;; *) version="$(compact compile --version)" ;; esac
           echo "version=$(printf '%s' "$version" | tr -cd '[:alnum:]._-')" >> "$GITHUB_OUTPUT"
-      - name: Install dependencies (no lockfile by design — installs float to latest published)
-        run: yarn install --no-immutable
+      - name: Install dependencies (locked by the committed yarn.lock)
+        run: yarn install --immutable
       - name: Compile (skip-zk)
         run: yarn compile
       - name: Restore prebuilt zk proving keys
