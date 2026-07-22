@@ -72,20 +72,24 @@ exception for that specific case.
   "later". Code that isn't reached is a lie about what the system does. In an
   examples repo this is doubly true: dead code in an example teaches integrators
   the wrong integration.
-- **ALWAYS install dependencies at the latest STABLE version; NEVER pin.** First
-  resolve the version — `yarn npm info <pkg> --fields dist-tags,version,deprecated`
-  — then add it explicitly: `yarn workspace <workspace> add <pkg>@^<version>`, where
-  `<version>` is that latest stable release. The caret is deliberate and NOT
-  optional: `yarn add` writes exactly the range you name, so a bare
-  `<pkg>@<version>` would silently pin — always spell the `^`. If the resolved
-  latest is a prerelease (`-rc`/`-beta`/`-alpha`/`-next`/`-canary`), STOP and ask
-  the user — never adopt a prerelease unprompted. Before you install, confirm the
-  release is not deprecated and `yarn npm audit` reports no new advisory. The
-  compact toolchain is likewise unpinned: `compact update` installs it and compile
-  scripts carry **no `+version` pin**. Corollary: a dependency shared by two
-  members MUST resolve to the same version in every member — bump it everywhere in
-  the same change and `yarn install` from the root. A single shared version is what
-  keeps the WASM-backed `@midnight-ntwrk/*` packages resolving to one instance;
+- **ALWAYS install dependencies at FIXED versions; the committed `yarn.lock` is
+  the source of truth.** CI installs with `yarn install --immutable`, and an
+  upgrade is a deliberate, reviewed change to `package.json` plus `yarn.lock`,
+  never a side effect of installing. To add a dependency, first resolve the
+  intended version (`yarn npm info <pkg> --fields dist-tags,version,deprecated`),
+  then add it exactly: `yarn workspace <workspace> add <pkg>@<version>`.
+  `yarn add` writes the range you name verbatim, so naming the bare version is
+  what pins it. Never install from the `latest` dist-tag and never leave a
+  version free to float. If the version you need is a prerelease
+  (`-rc`/`-beta`/`-alpha`/`-next`/`-canary`), STOP and ask the user before
+  adopting it. Before you install, confirm the release is not deprecated and
+  `yarn npm audit` reports no new advisory. The compact toolchain is likewise
+  pinned: install it with `compact update 0.33.0-rc.2` (the exact version named
+  in the README's prerequisites), and CI installs exactly that version.
+  Corollary: a dependency shared by two members MUST resolve to the same
+  version in every member. Bump it everywhere in the same change and
+  `yarn install` from the root: a single shared version is what keeps the
+  WASM-backed `@midnight-ntwrk/*` packages resolving to one instance, and
   divergence causes dual-instance "expected instance of…" bugs.
 - **NEVER emit JavaScript.** Packages export TypeScript source
   (`"." : "./src/index.ts"`); `build` means `tsc` under the base config's `noEmit`.

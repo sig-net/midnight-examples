@@ -12,7 +12,7 @@
 // vitest's main process, so no `vitest` imports here.
 
 import { getMidnightNodeConfig } from "@midnight-examples/lib";
-import { formatJubjubPublicKey } from "@sig-net/midnight";
+import { deriveMidnightResponseKey, formatSecp256k1PublicKey } from "@sig-net/midnight";
 import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
 import { formatEther, formatUnits } from "ethers";
 import { readdirSync } from "node:fs";
@@ -150,28 +150,43 @@ export function ensureMpcRootKey(env: NodeJS.ProcessEnv): void {
 const mpcKeys = (env: NodeJS.ProcessEnv) => deriveMpcKeys(requireEnv(env, "MPC_ROOT_KEY"));
 
 /**
- * Ensure `MPC_JUBJUB_PK` matches the key derived from `MPC_ROOT_KEY`,
- * deriving it when absent.
+ * Derive (or check) `MPC_RESPONSE_KEY` for a deployed client contract:
+ * `MPC_RESPONSE_KEY = f(MPC root key, client contract address, "midnight
+ * response key")`, the sender-scoped derivation the real MPC uses for
+ * respond-bidirectional signing. The key depends on the client contract's
+ * address, so this step MUST run after the client contract deploy; the
+ * example's initialize flow then pins the key on-chain via the contract's
+ * one-shot initialize circuit. The fakenet responder derives the same key
+ * per request from its MPC_ROOT_KEY + the request's sender, so nothing
+ * extra is handed off.
  *
  * @param env - The suite's env accumulator.
- * @throws If a preset `MPC_JUBJUB_PK` mismatches the derived key.
+ * @param contractAddressEnvVar - The env-var name holding the client
+ *   contract's deployed address (e.g. the example's vault contract).
+ * @throws If a pre-set MPC_RESPONSE_KEY disagrees with the derivation.
  */
-export function ensureMpcJubjubPk(env: NodeJS.ProcessEnv): void {
-  const expectedMPCJubjubPK = formatJubjubPublicKey(mpcKeys(env).jubjubPoint);
-  if (env.MPC_JUBJUB_PK) {
-    console.log(`Found MPC_JUBJUB_PK in the environment as ${env.MPC_JUBJUB_PK}`);
-    if (env.MPC_JUBJUB_PK !== expectedMPCJubjubPK) {
+export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvVar: string): void {
+  const expected = formatSecp256k1PublicKey(
+    deriveMidnightResponseKey(
+      requireEnv(env, "MPC_SECP256K1_PUBKEY"),
+      requireEnv(env, contractAddressEnvVar),
+    ),
+  );
+  if (env.MPC_RESPONSE_KEY) {
+    console.log(`Found MPC_RESPONSE_KEY in the environment as ${env.MPC_RESPONSE_KEY}`);
+    if (env.MPC_RESPONSE_KEY !== expected) {
       throw new Error(
-        `MPC_JUBJUB_PK should be derived from MPC_ROOT_KEY: expected ${expectedMPCJubjubPK}, found ${env.MPC_JUBJUB_PK}`,
+        `MPC_RESPONSE_KEY should be derived from MPC_ROOT_KEY + ${contractAddressEnvVar}: ` +
+          `expected ${expected}, found ${env.MPC_RESPONSE_KEY}`,
       );
     }
-    logSkip("check/derive MPC_JUBJUB_PK public key", `MPC_JUBJUB_PK is set correctly`);
+    logSkip("check/derive MPC_RESPONSE_KEY public key", `MPC_RESPONSE_KEY is set correctly`);
     return;
   }
-  env.MPC_JUBJUB_PK = expectedMPCJubjubPK;
-  console.log(`generated a fresh MPC_JUBJUB_PK=${env.MPC_JUBJUB_PK}`);
-  console.log(` ➜ used by contracts to validate signatures`);
-  console.log(` ➜ 💡 Set as MPC_JUBJUB_PK in the environment to skip this step on the next run`);
+  env.MPC_RESPONSE_KEY = expected;
+  console.log(`derived a fresh MPC_RESPONSE_KEY=${env.MPC_RESPONSE_KEY}`);
+  console.log(` ➜ the MPC's respond-bidirectional key for the client contract; the initialize flow pins it on-chain`);
+  console.log(` ➜ 💡 Set as MPC_RESPONSE_KEY in the environment to skip this step on the next run`);
 }
 
 /**
@@ -313,7 +328,7 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
   );
   env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${contractAddress}`);
-  console.log(` ➜ the central signet contract on Midnight — records signature requests and authenticated MPC responses`);
+  console.log(` ➜ the Signet singleton on Midnight: append-only logs of signature requests and MPC responses`);
   console.log(` ➜ 💡 Set as MIDNIGHT_SIGNET_CONTRACT_ADDRESS in the environment to skip the deploy on the next run`);
 }
 

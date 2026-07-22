@@ -50,15 +50,16 @@ export type VaultProviders = MidnightProviders<
   VaultPrivateState
 >;
 
-// The compiler output dirs (each holds contract/, keys/, zkir/) — the "zk
+// The compiler output dirs (each holds contract/, keys/, zkir/): the "zk
 // config roots" the proof + zk-config providers read proving/verifier keys
-// from. deposit cross-contract-calls the signet contract, so proving spans
-// both: SignetNotifier is a compile-time symlink to the published signet
-// contract's managed output (see the contract package's compile script).
-// Resolved RELATIVE to this file: the contract package is this example's
-// sibling, and an integrator copies the whole example directory together.
+// from. The request circuits cross-contract-call the signet contract, so
+// proving spans both: SignetSigner is a compile-time symlink to the published
+// signet contract's managed output (see the contract package's compile
+// script). Resolved RELATIVE to this file: the contract package is this
+// example's sibling, and an integrator copies the whole example directory
+// together.
 const managedPath = fileURLToPath(new URL("../../contract/src/managed/erc20-vault", import.meta.url));
-const signetManagedPath = fileURLToPath(new URL("../../contract/src/managed/SignetNotifier", import.meta.url));
+const signetManagedPath = fileURLToPath(new URL("../../contract/src/managed/SignetSigner", import.meta.url));
 
 /**
  * The vault's compact-js compiled-contract binding: generated module + real

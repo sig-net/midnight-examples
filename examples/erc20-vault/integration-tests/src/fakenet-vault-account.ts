@@ -3,15 +3,9 @@
 // MPC never exposes its root key, so this can never be a flow capability —
 // it stays in test-support code.
 
-import {
-  EPSILON_DERIVATION_PREFIX,
-  MIDNIGHT_TESTNET_CHAIN_ID,
-} from "@sig-net/midnight";
-import { Contract, JsonRpcProvider, keccak256, toUtf8Bytes, Wallet } from "ethers";
+import { deriveEpsilon, SECP256K1_ORDER } from "@sig-net/midnight";
+import { Contract, JsonRpcProvider, Wallet } from "ethers";
 import { requireEnv } from "@midnight-examples/test-harness";
-
-/** secp256k1 group order — derived private keys are reduced modulo this. */
-const SECP256K1_ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 
 const ERC20_TRANSFER_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -47,10 +41,9 @@ export async function drainVaultErc20(env: NodeJS.ProcessEnv, to: string): Promi
   const erc20Address = requireEnv(env, "ERC20_ADDRESS");
 
   // The private-key side of the sig-net v1.0.0 epsilon scheme:
-  // epsilon = keccak256("<prefix>,<chainId>,<contract>,<path>") mod n,
-  // derivedPriv = rootPriv + epsilon mod n.
-  const epsilonString = `${EPSILON_DERIVATION_PREFIX},${MIDNIGHT_TESTNET_CHAIN_ID},${vaultContractAddress},vault`;
-  const epsilon = BigInt(keccak256(toUtf8Bytes(epsilonString))) % SECP256K1_ORDER;
+  // epsilon = deriveEpsilon(contract, path) (keccak of the derivation string
+  // reduced mod the curve order), derivedPriv = rootPriv + epsilon mod n.
+  const epsilon = deriveEpsilon(vaultContractAddress, "vault");
   const rootKey = BigInt(requireEnv(env, "MPC_ROOT_KEY"));
   const derivedPriv = (rootKey + epsilon) % SECP256K1_ORDER;
 

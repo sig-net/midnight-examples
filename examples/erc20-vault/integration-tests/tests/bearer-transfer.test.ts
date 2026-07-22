@@ -36,7 +36,7 @@ import {
   executionSucceeded,
   requestIdBytes,
   type RequestIdHex,
-  type RespondBidirectional,
+  type RespondBidirectionalEvent,
 } from "@sig-net/midnight";
 import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
@@ -291,7 +291,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault bearer-transfer
 
       const context = await session.vaultContext();
       const readNonce = async () =>
-        (await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)).signetNonce;
+        (await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)).signetRequestNonce;
       const nonceBefore = await readNonce();
 
       // The withdraw circuit demands a surrendered coin of the full amount;
@@ -408,7 +408,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault bearer-transfer
   );
 
   // Populated by the poll step below for the settle step.
-  let withdrawAttestation: RespondBidirectional;
+  let withdrawAttestation: RespondBidirectionalEvent;
 
   it(
     "pollRespondBidirectional: the MPC attests wallet B's transfer as succeeded",
@@ -458,13 +458,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault bearer-transfer
         );
         return;
       }
-      expect(before.signetRequestsIndex.member(requestKey)).toBe(true);
+      expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
       await completeWithdraw(context, { requestId: withdrawRequestId });
 
       const after = await readLedger();
       expect(
-        after.signetRequestsIndex.member(requestKey),
+        after.signBidirectionalEventMap.member(requestKey),
         "completeWithdraw must consume the request from the ledger",
       ).toBe(false);
       expect(

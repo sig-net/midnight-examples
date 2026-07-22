@@ -161,7 +161,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault false-claimer e
       // claim — then the request is gone and both claim steps below skip.
       const context = await session.vaultContext();
       const ledger = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      requestOnLedger = ledger.signetRequestsIndex.member(requestIdBytes(requestId));
+      requestOnLedger = ledger.signBidirectionalEventMap.member(requestIdBytes(requestId));
 
       banner([
         `Arrange deposit ${requestId} complete — attested, UNCLAIMED, on the ledger: ${requestOnLedger}.`,
@@ -183,21 +183,21 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault false-claimer e
       }
 
       // Identity B presents the SAME request id and the SAME valid MPC
-      // attestation — everything a claim needs except the right secret key.
+      // response, i.e. everything a claim needs except the right secret key.
       // The circuit recomputes B's commitment from the callerSecretKey
-      // witness, compares it to the request's recorded path (A's commitment
-      // hex), and rejects during local transaction building.
+      // witness, compares it to the request's recorded path (A's commitment),
+      // and rejects during local transaction building.
       const falseClaimerContext = await falseClaimerSession.vaultContext();
       await expect(
         claim(falseClaimerContext, { requestId: depositRequestId }),
-      ).rejects.toThrow(/path hex does not match commitment/);
+      ).rejects.toThrow(/Not the depositor/);
 
       // The rejection happened client-side, so nothing was consumed: the
       // request must still sit on the ledger, claimable by identity A.
       const context = await session.vaultContext();
       const ledger = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
       expect(
-        ledger.signetRequestsIndex.member(requestIdBytes(depositRequestId)),
+        ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
         "the rejected claim must not consume the request",
       ).toBe(true);
 
@@ -224,7 +224,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault false-claimer e
 
       const ledger = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
       expect(
-        ledger.signetRequestsIndex.member(requestIdBytes(depositRequestId)),
+        ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
         "the rightful claim must consume the request from the ledger",
       ).toBe(false);
 

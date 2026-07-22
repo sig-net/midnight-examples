@@ -9,16 +9,16 @@
     "./managed/*": "./src/managed/*"
   },
   "scripts": {
-    "compile": "COMPACT_PATH=../../../node_modules compact compile --skip-zk src/erc20-vault.compact src/managed/erc20-vault && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetNotifier",
-    "compile:zk": "COMPACT_PATH=../../../node_modules compact compile src/erc20-vault.compact src/managed/erc20-vault && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetNotifier",
+    "compile": "COMPACT_PATH=../../../node_modules compact compile --skip-zk --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
+    "compile:zk": "COMPACT_PATH=../../../node_modules compact compile --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "deploy": "tsx deploy.ts"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-    "@sig-net/midnight": "^0.0.5",
-    "@sig-net/midnight-contract": "^0.0.5"
+    "@sig-net/midnight": "0.10.0",
+    "@sig-net/midnight-contract": "0.10.0"
   },
   "devDependencies": {
     "@midnight-examples/lib": "*",

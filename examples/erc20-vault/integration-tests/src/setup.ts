@@ -1,11 +1,14 @@
-// The example's vitest globalSetup: compose the ordered setup pipeline —
-// environment check → wallet seeds + root funding → EVM chain + test token →
-// MPC key derivation → signet deploy → fakenet responder hand-off → vault zk
-// compile + deploy → derived EVM addresses → local funding → MPC hand-off
-// printout — from the harness's generic steps plus the vault-specific steps
-// below, and run it via `runSetupPipeline` in vitest's main process. The
-// signet contract needs no zk-compile step: its proving keys ship inside the
-// published @sig-net/midnight-contract package the deploy reads them from.
+// The example's vitest globalSetup: compose the ordered setup pipeline
+// (environment check -> wallet seeds + root funding -> EVM chain + test token
+// -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
+// vault zk compile + deploy -> MPC response key -> derived EVM addresses ->
+// local funding -> MPC hand-off printout) from the harness's generic steps
+// plus the vault-specific steps below, and run it via `runSetupPipeline` in
+// vitest's main process. The signet contract needs no zk-compile step: its
+// proving keys ship inside the published @sig-net/midnight-contract package
+// the deploy reads them from. The MPC response key step runs AFTER the vault
+// deploy: the key derives from the vault's own contract address, and the
+// initialize flow pins it on-chain.
 
 import type { TestProject } from "vitest/node";
 
@@ -14,7 +17,7 @@ import {
   compileContractZk,
   deploySignetContractStep,
   ensureErc20Deployed,
-  ensureMpcJubjubPk,
+  ensureMpcResponseKey,
   ensureMpcRootKey,
   ensureMpcSecp256k1Pubkey,
   ensureWalletSeeds,
@@ -47,10 +50,10 @@ const PIPELINE_KEYS = [
   "EVM_CHAIN_ID",
   "ERC20_ADDRESS",
   "MPC_ROOT_KEY",
-  "MPC_JUBJUB_PK",
   "MPC_SECP256K1_PUBKEY",
-  "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
   "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
+  "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
+  "MPC_RESPONSE_KEY",
   "EVM_VAULT_ADDRESS",
   "EVM_USER_ADDRESS",
 ] as const;
@@ -65,7 +68,7 @@ const PIPELINE_KEYS = [
  * transient-failure matcher still applies).
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
- *   `MPC_JUBJUB_PK`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` and node config from it).
+ *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` and node config from it).
  * @throws If the deploy subprocess fails (after the dust-generation retries)
  *   or its output carries no contract address.
  */
@@ -137,7 +140,7 @@ function ensureVaultEvmAddress(env: NodeJS.ProcessEnv): void {
 /**
  * Ensure `EVM_USER_ADDRESS` matches the user's derived EVM account
  * (`MPC_SECP256K1_PUBKEY` + vault contract address, path = the user identity
- * commitment hex), deriving it when absent.
+ * commitment read as the MPC's path string), deriving it when absent.
  *
  * @param env - The suite's env accumulator.
  * @throws If a preset `EVM_USER_ADDRESS` mismatches the derivation.
@@ -147,7 +150,7 @@ function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   const expectedAddress = deriveEvmAddress(
     requireEnv(env, "MPC_SECP256K1_PUBKEY"),
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
-    identity.commitmentHex,
+    identity.pathString,
   );
   if (env.EVM_USER_ADDRESS) {
     console.log(`Found EVM_USER_ADDRESS in the environment as ${env.EVM_USER_ADDRESS}`);
@@ -161,7 +164,7 @@ function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   }
   env.EVM_USER_ADDRESS = expectedAddress;
   console.log(`derived a fresh EVM_USER_ADDRESS=${expectedAddress}`);
-  console.log(` ➜ the user's derived EVM account (path = identity commitment hex)`);
+  console.log(` ➜ the user's derived EVM account (path = identity commitment)`);
   console.log(
     ` ➜ FUND IT ON EVM before the deposit test: >= 0.01 ETH (gas) and >= 0.1 USDC (deposit) — automatic on the local dev chain`,
   );
@@ -197,7 +200,6 @@ const STEPS: readonly SetupStep[] = [
   ["setup: resolve EVM chain id from EVM_RPC_URL", resolveEvmChain],
   ["setup: check/deploy ERC20 token on the EVM chain", (env) => ensureErc20Deployed(env, deployTestUsdc)],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
-  ["setup: check/derive MPC_JUBJUB_PK public key", ensureMpcJubjubPk],
   ["setup: check/derive MPC_SECP256K1_PUBKEY public key", ensureMpcSecp256k1Pubkey],
   ["setup: deploy signet contract", deploySignetContractStep],
   ["setup: persist fakenet hand-off values to .env (append-only)", persistFakenetHandoffToDotEnv],
@@ -212,6 +214,10 @@ const STEPS: readonly SetupStep[] = [
       }),
   ],
   ["setup: deploy vault contract", deployVaultContractStep],
+  [
+    "setup: check/derive MPC_RESPONSE_KEY for the vault contract",
+    (env) => ensureMpcResponseKey(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
+  ],
   ["setup: check/derive vault EVM address", ensureVaultEvmAddress],
   ["setup: check/derive user EVM address", ensureUserEvmAddress],
   [

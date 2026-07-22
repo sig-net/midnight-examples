@@ -1,23 +1,24 @@
-// `withdraw` — the first half of the withdraw flow: surrender a shielded
-// vault coin (burned by the contract) and record a signature request asking
-// the MPC to sign an EVM `transfer(destination, amount)` on the ERC20, sent
-// from the VAULT's derived address (path = "vault"). The request id is
-// recomputed off-chain with the library's TS twin of the request-id circuit
-// and asserted against the ledger map key before it is returned.
+// `withdraw`: the first half of the withdraw flow. Surrender a shielded
+// vault coin (burned by the contract) and record a SignBidirectionalEvent
+// asking the MPC to sign an EVM `transfer(destination, amount)` on the
+// ERC20, sent from the VAULT's derived address (path = "vault"). The request
+// id is recomputed off-chain with the library's TS twin of the request-id
+// circuit and asserted against the ledger map key before it is returned.
 
 import {
   asciiPadded,
   calculateRequestId,
   evmAddressAbiWord,
   hexToBytes,
-  numericAbiWordValue,
+  numericAbiWord,
   PATH_BYTES,
   requestIdHex,
+  stripHexPrefix,
   SIGNET_DEFAULT_KEY_VERSION,
-  toSignBidirectionalRequestIndex,
+  toSignBidirectionalEventIndex,
   TxParamType,
   type RequestIdHex,
-  type SignBidirectionalRequest,
+  type SignBidirectionalEvent,
 } from "@sig-net/midnight";
 
 import {
@@ -42,8 +43,8 @@ export interface WithdrawOptions {
   readonly evmNonce: bigint;
 }
 
-// The MPC derivation path of the vault's own EVM account — mirrors the
-// contract-fixed in-circuit literal `pad(256, "vault")` in withdraw.
+// The MPC derivation path of the vault's own EVM account: mirrors the
+// contract-fixed in-circuit literal `pad(32, "vault")` in withdraw.
 const VAULT_PATH = asciiPadded("vault", PATH_BYTES);
 
 /**
@@ -89,9 +90,9 @@ export async function withdraw(context: VaultContext, options: WithdrawOptions):
   // pinned chain config.
   const before = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
   if (!before.initialized) {
-    throw new Error("vault is not initialized — run the initialize flow first");
+    throw new Error("vault is not initialized, run the initialize flow first");
   }
-  const requestNonce = before.signetNonce;
+  const requestNonce = before.signetRequestNonce;
 
   // The surrendered coin: the vault token for THIS erc20, of exactly
   // `amount`, under a fresh random nonce.
@@ -104,13 +105,19 @@ export async function withdraw(context: VaultContext, options: WithdrawOptions):
   const keyVersion = SIGNET_DEFAULT_KEY_VERSION;
 
   // The record the contract will store, reconstructed byte for byte: the
+  // event's own sender (the vault contract, kernel.self() in-circuit), the
   // fully contract-composed envelope (the pinned chain, the contract-fixed
   // gas), the contract-built `transfer(destination, amount)` calldata (the
-  // raw selector, the big-endian address embed, the LE amount embed), the
-  // vault's own derivation path, and the contract-fixed routing.
-  const expectedRecord: SignBidirectionalRequest = {
+  // raw selector, the ABI-ready big-endian address and amount words, as broadcast), the
+  // vault's own 32-byte derivation path, and the contract-fixed routing.
+  const expectedRecord: SignBidirectionalEvent = {
+    sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce,
+    keyVersion,
+    path: VAULT_PATH,
+    ...VAULT_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
+    caip2Id: before.caip2Id,
     txParams: {
       to: erc20,
       chainId: before.evmChainId,
@@ -128,15 +135,11 @@ export async function withdraw(context: VaultContext, options: WithdrawOptions):
           noWords: 2n,
           words: [
             evmAddressAbiWord(destEvmAddress),
-            numericAbiWordValue(options.amount),
+            numericAbiWord(options.amount),
           ],
         },
       },
     },
-    caip2Id: before.caip2Id,
-    keyVersion,
-    path: VAULT_PATH,
-    ...VAULT_MPC_ROUTING,
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
@@ -152,11 +155,11 @@ export async function withdraw(context: VaultContext, options: WithdrawOptions):
   );
   console.log(`withdraw finalized in tx ${result.public.txId}`);
 
-  // The ledger map key IS the domain-separated record hash — recomputing it
+  // The ledger map key IS the record's persistent hash: recomputing it
   // off-chain and finding it on the ledger proves both sides agree on every
-  // byte of the request.
+  // byte of the event.
   const after = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-  const index = toSignBidirectionalRequestIndex(after.signetRequestsIndex);
+  const index = toSignBidirectionalEventIndex(after.signBidirectionalEventMap);
   if (!index.has(expectedIdHex)) {
     throw new Error(
       `recomputed request id ${expectedIdHex} not found on the ledger — ` +
