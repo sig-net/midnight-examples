@@ -1,15 +1,8 @@
-pragma language_version >= 0.25;
-
-import CompactStandardLibrary;
-
-// Shared signet library: the SignBidirectionalEvent record and its map,
-// request-id hashing, event construction, the SignetSigner cross-contract
-// interface, and ECDSA verification of RespondBidirectionalEvents. See the
-// module header in Signet.compact and https://docs.sig.network for the
-// protocol.
-import "@sig-net/midnight/src/Signet";
-
-// =======================================================================================================
+//                                        ⚠️ CAUTION ⚠️
+// This is an example application for educational and experimental purposes.
+// Use at your own risk and expect rapid iteration.
+//
+// ===================ERC20 Cross Chain Vault Signet Integration Example==================================
 // ERC20 cross chain vault: a Signet client contract that moves ERC20 value between an EVM
 // chain and shielded tokens on the Midnight blockchain, using the Signet Distributed MPC
 // network to execute the EVM side.
@@ -37,6 +30,17 @@ import "@sig-net/midnight/src/Signet";
 //    mpcResponseKey = f(mpcRootKey[keyVersion], vaultContractAddress, "midnight response key")
 //  pinned once in initialize() and checked in-circuit by claim and completeWithdraw (the Signet
 //  singleton stores MPC posts unverified, so that check is the only authentication gate).
+
+pragma language_version >= 0.25;
+
+import CompactStandardLibrary;
+
+// Shared signet library: the SignBidirectionalEvent record and its map,
+// request-id hashing, event construction, the SignetSigner cross-contract
+// interface, and ECDSA verification of RespondBidirectionalEvents. See the
+// module header in Signet.compact and https://docs.sig.network for the
+// protocol.
+import "@sig-net/midnight/src/Signet";
 
 // ---- Signet ledger layout -----------------------------------------------------------
 // Field numbers are declaration order and stay fixed for the contract's lifetime. The
@@ -125,38 +129,6 @@ export ledger refundCommitment: Map<RequestId, Bytes<32>>;
 // width from the stored bytes.
 pure circuit vaultResponseSchema(): Bytes<34> {
   return "[{\"name\":\"success\",\"type\":\"bool\"}]" as Bytes<34>;
-}
-
-// ---- EVM address calldata words -----------------------------------------------------
-// The field value to embed in a calldata word for an EVM address: the BIG-ENDIAN
-// numeric reading of its 20 display-order bytes. Embedding the address directly
-// (`addr as Field`) would be wrong: that cast is little-endian, so the MPC's
-// LE-decode -> BE-encode assembly step would emit the address byte-reversed in the
-// calldata. Usage: a calldata word `evmAddressAbiValue(addr) as Bytes<32>`. (Uint
-// amounts need no helper: `amount as Field` already embeds the correct numeric
-// value.) TS mirror: evmAddressAbiWord in @sig-net/midnight. Exported so off-chain
-// code can cross-check word construction against the compiled circuit.
-export pure circuit evmAddressAbiValue(addr: Bytes<20>): Field {
-  const a0  = slice<1>(addr, 0) as Field;
-  const a1  = a0  * 256 + (slice<1>(addr, 1)  as Field);
-  const a2  = a1  * 256 + (slice<1>(addr, 2)  as Field);
-  const a3  = a2  * 256 + (slice<1>(addr, 3)  as Field);
-  const a4  = a3  * 256 + (slice<1>(addr, 4)  as Field);
-  const a5  = a4  * 256 + (slice<1>(addr, 5)  as Field);
-  const a6  = a5  * 256 + (slice<1>(addr, 6)  as Field);
-  const a7  = a6  * 256 + (slice<1>(addr, 7)  as Field);
-  const a8  = a7  * 256 + (slice<1>(addr, 8)  as Field);
-  const a9  = a8  * 256 + (slice<1>(addr, 9)  as Field);
-  const a10 = a9  * 256 + (slice<1>(addr, 10) as Field);
-  const a11 = a10 * 256 + (slice<1>(addr, 11) as Field);
-  const a12 = a11 * 256 + (slice<1>(addr, 12) as Field);
-  const a13 = a12 * 256 + (slice<1>(addr, 13) as Field);
-  const a14 = a13 * 256 + (slice<1>(addr, 14) as Field);
-  const a15 = a14 * 256 + (slice<1>(addr, 15) as Field);
-  const a16 = a15 * 256 + (slice<1>(addr, 16) as Field);
-  const a17 = a16 * 256 + (slice<1>(addr, 17) as Field);
-  const a18 = a17 * 256 + (slice<1>(addr, 18) as Field);
-  return      a18 * 256 + (slice<1>(addr, 19) as Field);
 }
 
 // ---- Token model --------------------------------------------------------------------
@@ -286,15 +258,16 @@ export circuit deposit(
   // -- contract-enforced calldata: transfer(vault, amount) --
   // Built here, never taken from the caller. The recipient comes from
   // initialize-pinned config, which is what stops a malicious client from having the
-  // MPC sign a transfer to themselves (or any arbitrary call). The address word
-  // embeds the BE numeric value (see evmAddressAbiValue); the amount's `as Field`
-  // cast already embeds the right number.
+  // MPC sign a transfer to themselves (or any arbitrary call). Words are ABI-READY
+  // (big-endian, broadcast form): the signer concatenates selector || words
+  // verbatim into the transaction it signs, so these bytes ARE the calldata (see
+  // the word builders in Signet.compact).
   const calldata = EVMCalldata<2> {
     selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
     noWords: 2 as Uint<16>,
     words: [
-      evmAddressAbiValue(vaultEvmAddress) as Bytes<32>,
-      depositRequest.amount as Field as Bytes<32>,
+      evmAddressAbiWord(vaultEvmAddress),
+      numericAbiWord(depositRequest.amount),
     ]
   };
 
@@ -408,12 +381,12 @@ export circuit claim(
   assert(caller == signatureRequest.path, "Not the depositor");
 
   // -- mint shielded tokens for the deposited amount --
-  // deposit stored the amount as calldata word 1 (an LE field embed) and the ERC20
-  // address in txParams.to. The mint nonce is the caller's random one: disclosed (a
-  // mint's nonce is public anyway) but never derivable from the request, so the coin
-  // cannot be linked back to it.
+  // deposit stored the amount as calldata word 1 (an ABI-ready big-endian word) and
+  // the ERC20 address in txParams.to. The mint nonce is the caller's random one:
+  // disclosed (a mint's nonce is public anyway) but never derivable from the
+  // request, so the coin cannot be linked back to it.
   assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
-  const amount = signatureRequest.txParams.calldata.value.words[1] as Field as Uint<128>;
+  const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
   const erc20Addr = signatureRequest.txParams.to;
 
   const domainSep = vaultTokenDomainSeparator(erc20Addr);
@@ -472,15 +445,15 @@ export circuit withdraw(
 
   // -- contract-enforced calldata: transfer(destEvmAddress, amount) --
   // Built here, never taken from the caller as raw words (the destination is a
-  // validated typed argument, bound into the request id below). The address word
-  // embeds the BE numeric value (see evmAddressAbiValue); the amount's `as Field`
-  // cast already embeds the right number.
+  // validated typed argument, bound into the request id below). Words are
+  // ABI-READY (big-endian, broadcast form), used verbatim by the signer (see the
+  // word builders in Signet.compact).
   const calldata = EVMCalldata<2> {
     selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
     noWords: 2 as Uint<16>,
     words: [
-      evmAddressAbiValue(withdrawRequest.destEvmAddress) as Bytes<32>,
-      withdrawRequest.amount as Field as Bytes<32>,
+      evmAddressAbiWord(withdrawRequest.destEvmAddress),
+      numericAbiWord(withdrawRequest.amount),
     ]
   };
 
@@ -614,9 +587,9 @@ export circuit completeWithdraw(
 
     // Re-mint the surrendered value to the withdrawer's own wallet key under their
     // random mintNonce. Amount and token come from the consumed request: withdraw
-    // stored the amount as calldata word 1 (an LE field embed) and the ERC20
-    // address in txParams.to.
-    const amount = signatureRequest.txParams.calldata.value.words[1] as Field as Uint<128>;
+    // stored the amount as calldata word 1 (an ABI-ready big-endian word) and the
+    // ERC20 address in txParams.to.
+    const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
     const erc20Addr = signatureRequest.txParams.to;
 
     const domainSep = vaultTokenDomainSeparator(erc20Addr);

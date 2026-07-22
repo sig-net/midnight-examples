@@ -14,7 +14,7 @@
 // (src/flows/) — in-process, never a subprocess.
 
 import {
-  bytesToBigint,
+  abiWordToUint128,
   bytesToHex,
   executionSucceeded,
   parseSecp256k1PublicKey,
@@ -23,7 +23,7 @@ import {
   type RequestIdHex,
   type RespondBidirectionalEvent,
 } from "@sig-net/midnight";
-import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
+import { JsonRpcProvider, formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   banner,
@@ -163,7 +163,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
       expect(record.txParams.nonce).toBe(evmNonce);
       expect(record.txParams.calldata.is_some).toBe(true);
-      expect(bytesToBigint(record.txParams.calldata.value.words[1])).toBe(
+      expect(abiWordToUint128(record.txParams.calldata.value.words[1])).toBe(
         amount,
       );
 
@@ -251,10 +251,31 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const context = await session.vaultContext();
       const result = await broadcastEvm(context, { transaction: signedDepositSweepTransaction });
 
+      // No-translation invariant: the transaction the EVM chain accepted
+      // carries the vault's stored calldata VERBATIM — selector || words,
+      // byte for byte as they sit on the Midnight ledger. This is the
+      // definitive end-to-end proof that nothing between the contract write
+      // and the MPC signature reordered or reinterpreted the calldata.
+      const record = await session.responseReader().getSignatureRequest(
+        depositTransactionSignatureRequestId,
+      );
+      const storedCalldata = record.txParams.calldata.value;
+      const expectedData =
+        `0x${bytesToHex(storedCalldata.selector)}` +
+        storedCalldata.words
+          .slice(0, Number(storedCalldata.noWords))
+          .map((word) => bytesToHex(word))
+          .join("");
+      const minedTx = await new JsonRpcProvider(requireEnv("EVM_RPC_URL")).getTransaction(result);
+      expect(minedTx?.data, "broadcast calldata must be the stored bytes verbatim").toBe(expectedData);
+
       banner([
         `Deposit sweep transaction broadcast to EVM.`,
         "",
         `Deposit Sweep Transaction Hex: ${result}`,
+        "",
+        "Verified: the mined transaction's calldata is the vault-stored",
+        "selector || words, verbatim.",
       ]);
     },
     1 * MINUTE,
@@ -407,7 +428,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
       expect(record.txParams.nonce).toBe(evmNonce);
       expect(record.txParams.calldata.is_some).toBe(true);
-      expect(bytesToBigint(record.txParams.calldata.value.words[1])).toBe(
+      expect(abiWordToUint128(record.txParams.calldata.value.words[1])).toBe(
         WITHDRAW_AMOUNT,
       );
       expect(new TextDecoder().decode(record.path).replace(/\0+$/u, "")).toBe("vault");

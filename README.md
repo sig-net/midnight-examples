@@ -1,6 +1,6 @@
 # Midnight Contracts Calling Foreign Chains with Sig Network
 
-These examples demonstrate Midnight contracts leveraging the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains.
+This monorepo contains experimental example projects demonstrating Midnight contracts leveraging the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains.
 
 They show how builders can integrate with the MPC's [sign bidirectional flow](https://docs.sig.network/architecture/sign-bidirectional) to bring functionality on foreign blockchains to their contracts on Midnight. 
 
@@ -12,6 +12,11 @@ The **Sign Bidirectional Flow** comprises of 5 Steps:
 5. Client extracts the signed foreign execution output, then submits it back to the Midnight contract completing the foreign transacttion execution.
 
 Jump to the [Quickstart](#quickstart) to get going or start reading at [Repository Layout](#repository-layout) to gain a deeper understanding of what you can find in this repository.
+
+> ## ⚠️ CAUTION ⚠️
+>
+> This is an example application for educational and experimental purposes.
+> Use at your own risk and expect rapid iteration.
 
 # Quickstart
 

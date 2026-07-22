@@ -10,7 +10,7 @@ import {
   calculateRequestId,
   evmAddressAbiWord,
   hexToBytes,
-  numericAbiWordValue,
+  numericAbiWord,
   PATH_BYTES,
   requestIdHex,
   stripHexPrefix,
@@ -108,7 +108,7 @@ export async function withdraw(context: VaultContext, options: WithdrawOptions):
   // event's own sender (the vault contract, kernel.self() in-circuit), the
   // fully contract-composed envelope (the pinned chain, the contract-fixed
   // gas), the contract-built `transfer(destination, amount)` calldata (the
-  // raw selector, the big-endian address embed, the LE amount embed), the
+  // raw selector, the ABI-ready big-endian address and amount words, as broadcast), the
   // vault's own 32-byte derivation path, and the contract-fixed routing.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
@@ -135,7 +135,7 @@ export async function withdraw(context: VaultContext, options: WithdrawOptions):
           noWords: 2n,
           words: [
             evmAddressAbiWord(destEvmAddress),
-            numericAbiWordValue(options.amount),
+            numericAbiWord(options.amount),
           ],
         },
       },

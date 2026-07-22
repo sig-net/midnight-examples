@@ -9,7 +9,7 @@
 import {
   evmAddressAbiWord,
   hexToBytes,
-  numericAbiWordValue,
+  numericAbiWord,
   requestIdBytes,
   requestIdHex,
   stripHexPrefix,
@@ -102,7 +102,7 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
   // event's own sender (the vault contract, kernel.self() in-circuit), the
   // contract-composed envelope on the initialize-pinned chain, the
   // contract-built `transfer(vaultEvmAddress, amount)` calldata (the raw
-  // selector, the big-endian address embed, the LE amount embed), the
+  // selector, the ABI-ready big-endian address and amount words, as broadcast), the
   // caller's identity commitment as the 32-byte derivation path, and the
   // contract-fixed routing.
   const expectedRecord: SignBidirectionalEvent = {
@@ -130,7 +130,7 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
           noWords: 2n,
           words: [
             evmAddressAbiWord(vaultEvmAddress),
-            numericAbiWordValue(options.amount),
+            numericAbiWord(options.amount),
           ],
         },
       },

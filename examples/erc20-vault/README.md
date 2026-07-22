@@ -7,6 +7,12 @@ from the Signature Network MPC's root public key, and every EVM transaction the
 vault sends is signed by the MPC network on the vault's request via the
 [sign-bidirectional flow](https://docs.sig.network/architecture/sign-bidirectional).
 
+> ## ⚠️ CAUTION ⚠️
+>
+> These example applications are for educational and experimental purposes.
+> Expect rapid iteration.
+> **Use at your own risk.**
+
 What this example demonstrates, end to end:
 
 - A Compact contract requesting EVM transaction signatures from the Signature

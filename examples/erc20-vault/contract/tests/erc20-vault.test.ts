@@ -17,9 +17,9 @@ import {
   TxParamType,
   asciiPadded,
   bigintToBytes32,
-  bytesToBigint,
   calculateRequestId,
   evmAddressAbiWord,
+  numericAbiWord,
   hexToBytes,
   pureCircuits as signetCircuits,
   readSignetRequestsLedgerFromState,
@@ -302,14 +302,16 @@ describe("withdrawRefundCommitment", () => {
   });
 });
 
-describe("evmAddressAbiValue", () => {
-  it("TS mirror matches the compiled circuit's big-endian address value", () => {
-    // The compiled circuit returns the BE numeric value as a Field bigint;
-    // the TS mirror (the library's evmAddressAbiWord) returns its 32-byte LE
-    // embed. Same number.
-    expect(bytesToBigint(evmAddressAbiWord(VAULT_EVM))).toBe(
-      pureCircuits.evmAddressAbiValue(VAULT_EVM),
+describe("ABI words (shared library circuits)", () => {
+  it("TS mirrors match the compiled circuits byte for byte", () => {
+    // Words are ABI-ready (big-endian, broadcast form); the library's TS
+    // mirrors and its compiled circuits must emit identical bytes. The vault
+    // stores exactly these words (see the deposit/withdraw record tests).
+    expect(evmAddressAbiWord(VAULT_EVM)).toEqual(
+      signetCircuits.evmAddressAbiWord(VAULT_EVM),
     );
+    expect(numericAbiWord(AMOUNT)).toEqual(signetCircuits.numericAbiWord(AMOUNT));
+    expect(signetCircuits.abiWordToUint128(numericAbiWord(AMOUNT))).toBe(AMOUNT);
   });
 });
 
@@ -412,14 +414,14 @@ describe("deposit round-trip", () => {
     );
     expect(record.requestNonce).toBe(0n);
 
-    // Contract-built calldata: transfer(vaultEvmAddress, amount) as words,
-    // i.e. the raw selector, the BE-embedded address, the LE amount.
+    // Contract-built calldata: transfer(vaultEvmAddress, amount) as ABI-ready
+    // big-endian words, stored exactly as broadcast.
     expect(calldata.is_some).toBe(true);
     expect(calldata.value.selector).toEqual(ERC20_TRANSFER_SELECTOR);
     expect(calldata.value.noWords).toBe(2n);
     expect(calldata.value.words).toHaveLength(2);
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(VAULT_EVM));
-    expect(bytesToBigint(calldata.value.words[1])).toBe(AMOUNT);
+    expect(calldata.value.words[1]).toEqual(numericAbiWord(AMOUNT));
 
     // The map key IS the persistent hash of the record, recomputed off-chain
     // with the library's TS twin of the request-id circuit. This assertion is
@@ -639,13 +641,13 @@ describe("withdraw round-trip", () => {
     );
     expect(record.requestNonce).toBe(0n);
 
-    // Contract-built calldata: transfer(destEvmAddress, amount) as words,
-    // i.e. the raw selector, the BE-embedded address, the LE amount.
+    // Contract-built calldata: transfer(destEvmAddress, amount) as ABI-ready
+    // big-endian words, stored exactly as broadcast.
     expect(calldata.is_some).toBe(true);
     expect(calldata.value.selector).toEqual(ERC20_TRANSFER_SELECTOR);
     expect(calldata.value.noWords).toBe(2n);
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(DEST_EVM));
-    expect(bytesToBigint(calldata.value.words[1])).toBe(AMOUNT);
+    expect(calldata.value.words[1]).toEqual(numericAbiWord(AMOUNT));
 
     // TS-twin lockstep: the ledger map key is the id the library recomputes.
     expect(idHex).toBe(requestIdHex(calculateRequestId(record)));
