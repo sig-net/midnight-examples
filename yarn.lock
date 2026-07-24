@@ -2080,9 +2080,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@sig-net/midnight-contract-deploy@npm:0.10.0":
-  version: 0.10.0
-  resolution: "@sig-net/midnight-contract-deploy@npm:0.10.0"
+"@sig-net/midnight-contract-deploy@portal:../midnight-integration/packages/signet-contract-deploy::locator=midnight-examples%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@sig-net/midnight-contract-deploy@portal:../midnight-integration/packages/signet-contract-deploy::locator=midnight-examples%40workspace%3A."
   dependencies:
     "@effect/platform-node": "npm:^0.107.0"
     "@midnight-ntwrk/compact-js": "npm:2.5.5-rc.6"
@@ -2101,31 +2101,35 @@ __metadata:
     "@sig-net/midnight": "npm:^0.10.0"
     "@sig-net/midnight-contract": "npm:^0.10.0"
     effect: "npm:^3.21.4"
-  checksum: 10c0/c1dec754b2f4b30c50bf20b6edbdcb4caf574167ee97a6669a87b91a455a8889ab0854ca974802d687bdf7d9f5034992e4c7cfa58538e3af5262c9bb04c0a303
   languageName: node
-  linkType: hard
+  linkType: soft
 
-"@sig-net/midnight-contract@npm:0.10.0, @sig-net/midnight-contract@npm:^0.10.0":
-  version: 0.10.0
-  resolution: "@sig-net/midnight-contract@npm:0.10.0"
+"@sig-net/midnight-contract@portal:../midnight-integration/packages/signet-contract::locator=midnight-examples%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@sig-net/midnight-contract@portal:../midnight-integration/packages/signet-contract::locator=midnight-examples%40workspace%3A."
   dependencies:
     "@midnight-ntwrk/compact-runtime": "npm:0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js": "npm:5.0.0-beta.4"
-  checksum: 10c0/7717647f4a0b264dd1cd5e4912d98d56d5ace00efd7df57b3d5de4c7a6658cf86f69386ed44b99ba856f7d99b80715364ba7fa6f017db95d1432208af83a0182
   languageName: node
-  linkType: hard
+  linkType: soft
 
-"@sig-net/midnight@npm:0.10.0, @sig-net/midnight@npm:^0.10.0":
-  version: 0.10.0
-  resolution: "@sig-net/midnight@npm:0.10.0"
+"@sig-net/midnight-serde@portal:../midnight-integration/packages/midnight-serde::locator=midnight-examples%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@sig-net/midnight-serde@portal:../midnight-integration/packages/midnight-serde::locator=midnight-examples%40workspace%3A."
+  languageName: node
+  linkType: soft
+
+"@sig-net/midnight@portal:../midnight-integration/packages/signet-midnight::locator=midnight-examples%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@sig-net/midnight@portal:../midnight-integration/packages/signet-midnight::locator=midnight-examples%40workspace%3A."
   dependencies:
     "@midnight-ntwrk/compact-runtime": "npm:0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js-types": "npm:5.0.0-beta.4"
     "@noble/curves": "npm:^2.2.0"
+    "@sig-net/midnight-serde": "npm:*"
     ethers: "npm:^6.17.0"
-  checksum: 10c0/a9b9b07b3cc94a6352954b4be891f6613f7a44bf2926f6a278e9d02f44effd1367292817b930d63db879e576f846851b2d3365b54ca4b16c3ef8bb7ed70e0401
   languageName: node
-  linkType: hard
+  linkType: soft
 
 "@standard-schema/spec@npm:^1.0.0, @standard-schema/spec@npm:^1.1.0":
   version: 1.1.0

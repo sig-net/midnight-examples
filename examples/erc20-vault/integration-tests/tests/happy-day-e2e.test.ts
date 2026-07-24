@@ -16,12 +16,11 @@
 import {
   abiWordToUint128,
   bytesToHex,
-  executionSucceeded,
+  calculateSignetAttestationDigest,
   parseSecp256k1PublicKey,
   requestIdBytes,
   stripHexPrefix,
   type RequestIdHex,
-  type RespondBidirectionalEvent,
 } from "@sig-net/midnight";
 import { JsonRpcProvider, formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
@@ -43,7 +42,7 @@ import { claim } from "../src/flows/claim.ts";
 import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
 import { deposit } from "../src/flows/deposit.ts";
 import { initialize } from "../src/flows/initialize.ts";
-import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
+import { pollRespondBidirectional, type RespondOutcome } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { withdraw } from "../src/flows/withdraw.ts";
 import { printVaultState, readVaultLedger } from "../src/vault-ledger.ts";
@@ -249,7 +248,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(signedDepositSweepTransaction).toBeDefined();
 
       const context = await session.vaultContext();
-      const result = await broadcastEvm(context, { transaction: signedDepositSweepTransaction });
+      const receipt = await broadcastEvm(context, { transaction: signedDepositSweepTransaction });
 
       // No-translation invariant: the transaction the EVM chain accepted
       // carries the vault's stored calldata VERBATIM — selector || words,
@@ -266,13 +265,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
           .slice(0, Number(storedCalldata.noWords))
           .map((word) => bytesToHex(word))
           .join("");
-      const minedTx = await new JsonRpcProvider(requireEnv("EVM_RPC_URL")).getTransaction(result);
+      const minedTx = await new JsonRpcProvider(requireEnv("EVM_RPC_URL")).getTransaction(receipt.hash);
       expect(minedTx?.data, "broadcast calldata must be the stored bytes verbatim").toBe(expectedData);
 
       banner([
         `Deposit sweep transaction broadcast to EVM.`,
         "",
-        `Deposit Sweep Transaction Hex: ${result}`,
+        `Deposit Sweep Transaction Hex: ${receipt.hash} (block ${receipt.blockNumber})`,
         "",
         "Verified: the mined transaction's calldata is the vault-stored",
         "selector || words, verbatim.",
@@ -282,26 +281,47 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   // Populated by the poll step below for the claim step.
-  let depositSweepTransactionRespondBidirectional: RespondBidirectionalEvent;
+  let depositSweepTransactionRespondBidirectional: RespondOutcome;
 
   it(
     "pollRespondBidirectional: poll signet contract for sweep transaction attestation",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
+      // The attestation carries only the digest of (requestId, output): the
+      // poll recomputes the sweep's output from the chain (re-simulation at
+      // the previous block, exactly the responder's own extraction) and
+      // digest-matches it against the posted events. Deposit sweeps are
+      // signed by the USER's derived account.
       const context = await session.vaultContext();
       depositSweepTransactionRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: depositTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: 1 * MINUTE,
+        expectedSigner: context.evmUserAddress,
       });
 
+      // The digest seals the round trip: recomputing it from the matched
+      // output bytes must reproduce the attested digest byte for byte.
+      const outcome = depositSweepTransactionRespondBidirectional;
+      const digest = calculateSignetAttestationDigest(
+        requestIdBytes(depositTransactionSignatureRequestId),
+        outcome.serializedOutput,
+      );
+      expect(
+        bytesToHex(digest),
+        "the recomputed digest must equal the attested digest",
+      ).toBe(bytesToHex(outcome.event.attestationDigest));
+
       banner([
-        `Found deposit RespondBidirectionalEvent (verified) on the signet contract: ` +
-          `success '${executionSucceeded(depositSweepTransactionRespondBidirectional.serializedOutput)}' ` +
-          `(${depositSweepTransactionRespondBidirectional.outputLen} output bytes)`,
+        `Found deposit RespondBidirectionalEvent (digest-matched) on the signet contract: ` +
+          `success '${outcome.succeeded}' ` +
+          `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${outcome.serializedOutput.length} byte(s))`,
         "",
-        `Signature: ${signedDepositSweepTransaction}`,
+        `Attested digest: 0x${bytesToHex(outcome.event.attestationDigest)}`,
+        "",
+        "The output itself never went on-chain: it was recomputed here and",
+        "matched the attestation byte for byte.",
       ]);
     },
     5 * MINUTE,
@@ -519,10 +539,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const before = await getErc20Balance(rpcUrl, erc20Address, destination);
 
       // broadcastEvm waits for one confirmation and throws if the tx reverted.
-      const txHash = await broadcastEvm(context, { transaction: signedWithdrawTransaction });
+      const receipt = await broadcastEvm(context, { transaction: signedWithdrawTransaction });
 
       if (alreadyMined) {
-        logSkip("withdraw balance delta assertion", `tx ${txHash} had already mined on a previous run`);
+        logSkip("withdraw balance delta assertion", `tx ${receipt.hash} had already mined on a previous run`);
       } else {
         const after = await getErc20Balance(rpcUrl, erc20Address, destination);
         expect(
@@ -532,7 +552,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       }
 
       banner([
-        `Withdraw transaction mined on EVM: ${txHash}`,
+        `Withdraw transaction mined on EVM: ${receipt.hash}`,
         "",
         `The vault's derived account transferred ${WITHDRAW_AMOUNT} base units of`,
         `${erc20Address} to ${destination}.`,
@@ -542,31 +562,33 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   // Populated by the poll step below for the settle step.
-  let withdrawRespondBidirectional: RespondBidirectionalEvent;
+  let withdrawRespondBidirectional: RespondOutcome;
 
   it(
     "pollRespondBidirectional: poll signet contract for withdraw transaction attestation",
     async () => {
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
 
+      // Withdraw transfers are signed by the VAULT's derived account.
       const context = await session.vaultContext();
       withdrawRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: withdrawTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: 1 * MINUTE,
+        expectedSigner: context.evmVaultAddress,
       });
 
       // Happy-day flow: the broadcast step saw the transfer mine, so the MPC
-      // must attest success (first output byte 1), not its error sentinel.
+      // must attest success (the 1-byte 0x01 result), not its failure output.
       expect(
-        executionSucceeded(withdrawRespondBidirectional.serializedOutput),
+        withdrawRespondBidirectional.succeeded,
         "the MPC must attest the withdraw transfer as succeeded",
       ).toBe(true);
 
       banner([
-        `Found withdraw RespondBidirectionalEvent (verified) on the signet contract: ` +
-          `success '${executionSucceeded(withdrawRespondBidirectional.serializedOutput)}' ` +
-          `(${withdrawRespondBidirectional.outputLen} output bytes)`,
+        `Found withdraw RespondBidirectionalEvent (digest-matched) on the signet contract: ` +
+          `success '${withdrawRespondBidirectional.succeeded}' ` +
+          `(payload 0x${bytesToHex(withdrawRespondBidirectional.serializedOutput)})`,
       ]);
     },
     5 * MINUTE,

@@ -1,8 +1,9 @@
 // `claim`: the second half of the deposit flow. Present the MPC's
-// ECDSA-signed RespondBidirectionalEvent of the EVM sweep to the vault,
-// which verifies it in-circuit against its stored MPC response key and mints
-// shielded tokens to the caller (or a recipient the caller names) under a
-// fresh RANDOM mint nonce, so the minted coin cannot be linked back to the
+// digest-only RespondBidirectionalEvent of the EVM sweep together with the
+// recomputed serialized output to the vault, which re-hashes and verifies
+// them in-circuit against its stored MPC response key and mints shielded
+// tokens to the caller (or a recipient the caller names) under a fresh
+// RANDOM mint nonce, so the minted coin cannot be linked back to the
 // request.
 
 import { encodeCoinPublicKey, type CoinPublicKey } from "@midnight-ntwrk/compact-runtime";
@@ -12,7 +13,7 @@ import type { EncPublicKey } from "@midnight-examples/lib";
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 
 import type { VaultContext } from "../vault-context.ts";
-import { fetchVerifiedRespondBidirectionalEvent } from "./poll-respond-bidirectional.ts";
+import { fetchAttestedRespondOutcome } from "./respond-output.ts";
 
 /**
  * A shielded wallet the vault can mint to. Both halves of the key pair are
@@ -43,21 +44,23 @@ export interface ClaimOptions {
 /**
  * Call the vault's `claim` circuit for a completed deposit request.
  *
- * Fetches the MPC's RespondBidirectionalEvent (`serializedOutput` + ECDSA
- * signature scalars) for `options.requestId` from the signet contract's
- * unauthenticated log, verified off-chain against the vault's stored MPC
- * response key (see {@link fetchVerifiedRespondBidirectionalEvent}), then
- * calls the circuit, which re-verifies the ECDSA signature in-circuit along
- * with the EVM success flag and the caller identity against the stored
- * request, and mints shielded vault tokens on success: to
- * `options.recipient` when given, otherwise to the caller. The mint's coin
- * handling is midnight-js's job: `vault.callTx.claim(...)` balances the
- * resulting offer like any other call.
+ * Resolves the MPC's attestation for `options.requestId` from the signet
+ * contract's unauthenticated log by digest-matching it against the
+ * independently recomputed sweep output (see
+ * {@link fetchAttestedRespondOutcome}), then calls the circuit with the
+ * event AND the recomputed output bytes. The circuit re-hashes the bytes,
+ * verifies the ECDSA signature in-circuit along with the EVM success flag
+ * and the caller identity against the stored request, and mints shielded
+ * vault tokens on success: to `options.recipient` when given, otherwise to
+ * the caller. The mint's coin handling is midnight-js's job:
+ * `vault.callTx.claim(...)` balances the resulting offer like any other
+ * call.
  *
  * @param context - The flow context.
  * @param options - The claim arguments.
- * @throws If no verifying response has been posted for `options.requestId`
- *   yet.
+ * @throws If no matching attestation has been posted for `options.requestId`
+ *   yet, or the attested outcome is not a success (a failed sweep cannot be
+ *   claimed).
  */
 export async function claim(context: VaultContext, options: ClaimOptions): Promise<void> {
   console.log(`vault contract:  ${context.vaultContractAddress}`);
@@ -67,11 +70,19 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
     console.log(`recipient:       ${options.recipient.coinPublicKey}`);
   }
 
-  const respondBidirectionalEvent = await fetchVerifiedRespondBidirectionalEvent(context, options.requestId);
-  if (respondBidirectionalEvent === undefined) {
+  // Deposit sweeps are signed by the USER's derived account.
+  const outcome = await fetchAttestedRespondOutcome(context, options.requestId, context.evmUserAddress);
+  if (outcome === undefined) {
     throw new Error(
-      `no verified respond-bidirectional response posted for request ${options.requestId}: ` +
+      `no matching respond-bidirectional attestation posted for request ${options.requestId}: ` +
         `run pollRespondBidirectional first (has the MPC responded to the sweep?)`,
+    );
+  }
+  if (!outcome.succeeded) {
+    throw new Error(
+      `the MPC attested the sweep for request ${options.requestId} as ` +
+        `${outcome.isMpcErrorSentinel ? "failed (MPC failure output)" : "returned false"}: ` +
+        `a failed sweep cannot be claimed`,
     );
   }
 
@@ -109,7 +120,8 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
             await context.vault.callTx.claim(
               txCtx,
               requestIdBytes(options.requestId),
-              respondBidirectionalEvent,
+              outcome.event,
+              outcome.serializedOutput,
               mintNonce,
               recipient,
             );
@@ -122,7 +134,8 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
         )
       : await context.vault.callTx.claim(
           requestIdBytes(options.requestId),
-          respondBidirectionalEvent,
+          outcome.event,
+          outcome.serializedOutput,
           mintNonce,
           recipient,
         );

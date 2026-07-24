@@ -51,11 +51,15 @@ function isAlreadySubmitted(err: unknown): boolean {
  *
  * @param context - The flow context.
  * @param options - The transaction to broadcast.
- * @returns The EVM transaction hash.
+ * @returns The mined transaction's receipt (its `hash` is the tx hash, and
+ *   `blockNumber` is what output recomputation re-simulates against).
  * @throws Error when the transaction reverted on-chain, or its nonce was
  *   consumed by a different transaction (so it can never mine).
  */
-export async function broadcastEvm(context: VaultContext, options: BroadcastEvmOptions): Promise<string> {
+export async function broadcastEvm(
+  context: VaultContext,
+  options: BroadcastEvmOptions,
+): Promise<TransactionReceipt> {
   const provider = new JsonRpcProvider(context.evmRpcUrl);
 
   // The hash and sender are already borne by the signed transaction — no
@@ -127,11 +131,11 @@ export async function broadcastEvm(context: VaultContext, options: BroadcastEvmO
 /**
  * A mined receipt with `status: 0` means the tx was included but its execution
  * reverted (nonce consumed, gas burned, state rolled back). Treat that as a
- * failure rather than silently returning the hash of a reverted tx.
+ * failure rather than silently returning the receipt of a reverted tx.
  */
-function assertMinedOk(receipt: TransactionReceipt, hash: string): string {
+function assertMinedOk(receipt: TransactionReceipt, hash: string): TransactionReceipt {
   if (receipt.status === 0) {
     throw new Error(`transaction ${hash} reverted on-chain (mined in block ${receipt.blockNumber}, status 0)`);
   }
-  return hash;
+  return receipt;
 }
