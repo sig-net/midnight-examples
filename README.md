@@ -8,7 +8,7 @@ Jump to the [Quickstart](#quickstart) to get an example running, read the [Integ
 
 > ## ⚠️ CAUTION ⚠️
 >
-> Thes are example applications for educational and experimental purposes.
+> These are example applications for educational and experimental purposes.
 > Use at your own risk and expect rapid iteration.
 
 # Sign Bidirectional Flow
