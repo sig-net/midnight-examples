@@ -6,7 +6,7 @@
 import type { Transaction } from "ethers";
 
 import {
-  signBidirectionalEventToSignedEVMTransaction,
+  signBidirectionalEventToSignedEvmTransaction,
   sleepUnlessAborted,
   type RequestIdHex,
 } from "@sig-net/midnight";
@@ -46,7 +46,7 @@ export interface PollSignatureResponseOptions {
  * {@link PollSignatureResponseOptions.expectedSigner}) over the requested
  * transaction's signing hash. The first valid post wins. The signed
  * transaction is assembled from the request record and that response via
- * {@link signBidirectionalEventToSignedEVMTransaction}. This flow owns
+ * {@link signBidirectionalEventToSignedEvmTransaction}. This flow owns
  * the poll loop, the timeout, and the reporting: each rejected post is
  * warned once across the loop's lifetime, not every tick. For the MPC's
  * respond-bidirectional response of the EVM result, see
@@ -97,7 +97,7 @@ export async function pollSignatureResponse(
         // record and this response. The reader's request fetch is cached (its
         // verification already fetched it), so this adds no extra query.
         const request = await reader.getSignatureRequest(options.requestId);
-        return signBidirectionalEventToSignedEVMTransaction(request, verified);
+        return signBidirectionalEventToSignedEvmTransaction(request, verified);
       }
       await sleepUnlessAborted(options.intervalMs, giveUp.signal);
     }

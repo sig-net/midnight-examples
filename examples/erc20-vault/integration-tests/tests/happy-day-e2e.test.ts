@@ -289,16 +289,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
       // The attestation carries only the digest of (requestId, output): the
-      // poll recomputes the sweep's output from the chain (re-simulation at
-      // the previous block, exactly the responder's own extraction) and
-      // digest-matches it against the posted events. Deposit sweeps are
-      // signed by the USER's derived account.
+      // poll fetches the sweep's raw traced output from the fakenet's
+      // /responses API, re-packs it per the schema and digest-matches it
+      // against the posted events.
       const context = await session.vaultContext();
       depositSweepTransactionRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: depositTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: 1 * MINUTE,
-        expectedSigner: context.evmUserAddress,
       });
 
       // The digest seals the round trip: recomputing it from the matched
@@ -320,8 +318,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         "",
         `Attested digest: 0x${bytesToHex(outcome.event.attestationDigest)}`,
         "",
-        "The output itself never went on-chain: it was recomputed here and",
-        "matched the attestation byte for byte.",
+        "The output itself never went on-chain: the raw bytes came from the",
+        "fakenet /responses API, were re-packed here, and matched the",
+        "attestation byte for byte.",
       ]);
     },
     5 * MINUTE,
@@ -569,13 +568,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     async () => {
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
 
-      // Withdraw transfers are signed by the VAULT's derived account.
       const context = await session.vaultContext();
       withdrawRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: withdrawTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: 1 * MINUTE,
-        expectedSigner: context.evmVaultAddress,
       });
 
       // Happy-day flow: the broadcast step saw the transfer mine, so the MPC

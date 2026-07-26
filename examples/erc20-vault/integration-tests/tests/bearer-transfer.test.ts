@@ -413,13 +413,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault bearer-transfer
     async () => {
       expect(withdrawRequestId).toBeDefined();
 
-      // Withdraw transfers are signed by the VAULT's derived account.
       const context = await bearerSession.vaultContext();
       withdrawAttestation = await pollRespondBidirectional(context, {
         requestId: withdrawRequestId,
         intervalMs: 1000,
         timeoutMs: 3 * MINUTE,
-        expectedSigner: context.evmVaultAddress,
       });
 
       // The broadcast step saw the transfer mine, so the MPC must attest

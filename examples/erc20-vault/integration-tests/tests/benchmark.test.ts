@@ -240,7 +240,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
         requestId: depositRequestId,
         intervalMs: 1000,
         timeoutMs: 2 * MINUTE,
-        expectedSigner: context.evmUserAddress,
       });
       timings.deposit.pollRespondBidirectional = stop();
 
@@ -373,7 +372,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
         requestId: withdrawRequestId,
         intervalMs: 1000,
         timeoutMs: 3 * MINUTE,
-        expectedSigner: context.evmVaultAddress,
       });
       timings.withdraw.pollRespondBidirectional = stop();
 

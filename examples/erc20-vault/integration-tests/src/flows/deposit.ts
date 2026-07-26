@@ -150,7 +150,7 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
   );
   console.log(`deposit finalized in tx ${result.public.txId}`);
 
-  // The ledger map key IS the record's persistent hash: recomputing it
+  // The ledger map key IS the record's keccak256 hash: recomputing it
   // off-chain and finding it on the ledger proves both sides agree on every
   // byte of the event.
   const after = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
@@ -264,7 +264,6 @@ export async function runDepositRoundTrip(
     requestId,
     intervalMs: 1000,
     timeoutMs: 2 * MINUTE,
-    expectedSigner: context.evmUserAddress,
   });
   // This helper arranges a SUCCESSFUL deposit — a failure attestation means
   // the sweep did not land and the claim below could never mint.

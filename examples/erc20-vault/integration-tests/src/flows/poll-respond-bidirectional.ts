@@ -1,6 +1,6 @@
 // `pollRespondBidirectional`: stage 2 of the MPC round trip. Poll the Signet
 // singleton's respond-bidirectional log by request id until an MPC
-// attestation appears whose digest MATCHES an independently recomputed
+// attestation appears whose digest MATCHES the independently recomputed
 // serialized output for the request, and return the resolved outcome. There
 // is deliberately no push/websocket alternative.
 
@@ -19,16 +19,6 @@ export interface PollRespondBidirectionalOptions {
   readonly intervalMs: number;
   /** Give-up timeout in milliseconds. */
   readonly timeoutMs: number;
-  /**
-   * EVM address the MPC's transaction signature must recover to — the
-   * request's derived sender. Deposit requests are signed by the user's
-   * derived account (`context.evmUserAddress`); withdraw requests by the
-   * VAULT's (`context.evmVaultAddress`). Always explicit: this flow is
-   * generic over request kinds, and which account signs is the caller's
-   * knowledge. The outcome recomputation reconstructs that account's signed
-   * transaction and follows its on-chain fate.
-   */
-  readonly expectedSigner: string;
 }
 
 /**
@@ -37,8 +27,8 @@ export interface PollRespondBidirectionalOptions {
  * return the resolved outcome.
  *
  * The event carries only the attestation digest, so each tick recomputes
- * the candidate outputs from the signed transaction's on-chain fate and
- * digest-matches them against the posted events (see
+ * the serialized output from the fakenet's cached raw EVM output and
+ * digest-matches it against the posted events (see
  * `fetchAttestedRespondOutcome`): the log is unauthenticated, and digest
  * matching is what makes a returned record meaningful off-chain. The settle
  * circuits re-verify digest and ECDSA signature in-circuit, which is the
@@ -49,8 +39,9 @@ export interface PollRespondBidirectionalOptions {
  * @param context - The flow context.
  * @param options - What to poll for and how patiently.
  * @returns The resolved outcome (attested event + matched output bytes).
- * @throws Error when the contract has no state on-chain or `timeoutMs`
- *   elapses with no matching attestation posted.
+ * @throws Error when the contract has no state on-chain, the fakenet's
+ *   /responses API is unreachable, or `timeoutMs` elapses with no matching
+ *   attestation posted.
  */
 export async function pollRespondBidirectional(
   context: VaultContext,
@@ -58,7 +49,6 @@ export async function pollRespondBidirectional(
 ): Promise<RespondOutcome> {
   console.log(`signet contract:   ${context.signetContractAddress}`);
   console.log(`request id:        ${options.requestId}`);
-  console.log(`expected signer:   ${options.expectedSigner}`);
   console.log(`poll:              every ${options.intervalMs}ms, up to ${options.timeoutMs}ms`);
 
   // The reads are single-shot; this loop owns the cadence and the give-up
@@ -67,11 +57,7 @@ export async function pollRespondBidirectional(
   const timer = setTimeout(() => giveUp.abort(), options.timeoutMs);
   try {
     while (!giveUp.signal.aborted) {
-      const outcome = await fetchAttestedRespondOutcome(
-        context,
-        options.requestId,
-        options.expectedSigner,
-      );
+      const outcome = await fetchAttestedRespondOutcome(context, options.requestId);
       if (outcome !== undefined) {
         if (outcome.isMpcErrorSentinel) {
           console.log("remote execution FAILED (MPC failure output attested)");

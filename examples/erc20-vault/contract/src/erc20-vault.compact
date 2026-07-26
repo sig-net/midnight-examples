@@ -43,7 +43,7 @@ import "@sig-net/midnight/src/Signet";
 // request circuits name this position in their notifications: the MPC locates the map
 // by position, so it must stay first and never move after the first deploy. No other
 // field's position carries meaning, so no other field is numbered.
-export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EVMType2TxParams<2, 0, 0>, 34, 34>;
+export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // The Signet singleton, pinned at deploy. The request circuits cross-contract call it
 // to register the notifications the MPC polls.
@@ -219,7 +219,7 @@ export circuit deposit(
   // malicious client having the MPC sign a transfer to themselves. Words are
   // ABI-READY (big-endian, broadcast form): the signer concatenates
   // selector || words verbatim, so these bytes ARE the calldata.
-  const calldata = EVMCalldata<2> {
+  const calldata = EvmCalldata<2> {
     selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
     noWords: 2 as Uint<16>,
     words: [
@@ -230,22 +230,22 @@ export circuit deposit(
 
   // The full transaction the MPC will sign: the deposit's ERC20 on the
   // initialize-pinned chain, no ETH value, the caller's gas envelope.
-  const txParams = EVMType2TxParams<2, 0, 0> {
-    to: depositRequest.erc20Address,
+  const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    gasLimit: gasLimit,
-    maxFeePerGas: maxFeePerGas,
     maxPriorityFeePerGas: maxPriorityFeePerGas,
+    maxFeePerGas: maxFeePerGas,
+    gasLimit: gasLimit,
+    to: depositRequest.erc20Address,
     value: 0 as Uint<128>,
+    calldata: some<EvmCalldata<2>>(calldata),
     accessListEntryCount: 0,
-    accessList: [],
-    calldata: some<EVMCalldata<2>>(calldata)
+    accessList: []
   };
 
   const schema = vaultResponseSchema();
   const requestNonce = signetRequestNonce as Uint<64>;
-  const request = constructSignBidirectionalEvent<EVMType2TxParams<2, 0, 0>, 34, 34>(
+  const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
     requestNonce,
     keyVersion,
@@ -261,7 +261,7 @@ export circuit deposit(
   );
   // Circuit arguments are private inputs, and the event record is public ledger state
   // by design, so disclose it (and its id) explicitly at the write site.
-  const requestId = disclose(calculateRequestId<EVMType2TxParams<2, 0, 0>, 34, 34>(request));
+  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
 
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
   signetRequestNonce.increment(1);
@@ -270,7 +270,7 @@ export circuit deposit(
   // Notify the MPC via the Signet singleton's registry. The second argument names the
   // ledger field position of signBidirectionalEventMap (0, see Setup step 3). The
   // returned SignetMapKey names the notification's (requestId, count) slot.
-  return signetSigner.signBidirectionalEvent(
+  return signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
       kernel.self(),
@@ -310,7 +310,7 @@ export circuit claim(
     verifyRespondBidirectionalEvent<1>(
       disclosedRequestId,
       serializedOutput,
-      respondBidirectionalEvent,
+      disclose(respondBidirectionalEvent),
       mpcResponseKey
     ),
     "Invalid attestation signature"
@@ -385,7 +385,7 @@ export circuit withdraw(
   // Contract-enforced calldata: transfer(destEvmAddress, amount). The destination is a
   // validated typed argument, bound into the request id below. Words are ABI-READY
   // (big-endian, broadcast form), used verbatim by the signer.
-  const calldata = EVMCalldata<2> {
+  const calldata = EvmCalldata<2> {
     selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
     noWords: 2 as Uint<16>,
     words: [
@@ -397,24 +397,24 @@ export circuit withdraw(
   // Contract-FIXED gas envelope: an ERC20 transfer costs ~50-65k gas, so the caps are
   // generous for a testnet. Retuning them means a redeploy, the price of keeping the
   // vault's ETH out of callers' hands.
-  const txParams = EVMType2TxParams<2, 0, 0> {
-    to: withdrawRequest.erc20Address,
+  const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    gasLimit: 100000 as Uint<64>,
-    maxFeePerGas: 30000000000 as Uint<128>,       // 30 gwei
     maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
+    maxFeePerGas: 30000000000 as Uint<128>,       // 30 gwei
+    gasLimit: 100000 as Uint<64>,
+    to: withdrawRequest.erc20Address,
     value: 0 as Uint<128>,
+    calldata: some<EvmCalldata<2>>(calldata),
     accessListEntryCount: 0,
-    accessList: [],
-    calldata: some<EVMCalldata<2>>(calldata)
+    accessList: []
   };
 
   // Construct and key the event under the vault's OWN derivation path.
   const path = pad(32, "vault");
   const schema = vaultResponseSchema();
   const requestNonce = signetRequestNonce as Uint<64>;
-  const request = constructSignBidirectionalEvent<EVMType2TxParams<2, 0, 0>, 34, 34>(
+  const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
     requestNonce,
     keyVersion,
@@ -430,7 +430,7 @@ export circuit withdraw(
   );
   // Circuit arguments are private inputs, and the event record is public ledger state
   // by design, so disclose it (and its id) explicitly at the write site.
-  const requestId = disclose(calculateRequestId<EVMType2TxParams<2, 0, 0>, 34, 34>(request));
+  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
 
   // The surrendered value is BURNED here: the receive obliges the transaction to pay
@@ -446,7 +446,7 @@ export circuit withdraw(
   refundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
 
   // Notify the MPC (field position 0 = signBidirectionalEventMap, see Setup step 3).
-  return signetSigner.signBidirectionalEvent(
+  return signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
       kernel.self(),
@@ -486,7 +486,7 @@ export circuit completeWithdraw(
     verifyRespondBidirectionalEvent<1>(
       disclosedRequestId,
       serializedOutput,
-      respondBidirectionalEvent,
+      disclose(respondBidirectionalEvent),
       mpcResponseKey
     ),
     "Invalid attestation signature"
@@ -553,7 +553,7 @@ export circuit refundWithdraw(
     verifyRespondBidirectionalEvent<5>(
       disclosedRequestId,
       serializedOutput,
-      respondBidirectionalEvent,
+      disclose(respondBidirectionalEvent),
       mpcResponseKey
     ),
     "Invalid attestation signature"

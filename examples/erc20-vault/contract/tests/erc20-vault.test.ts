@@ -19,9 +19,9 @@ import {
   MPCSignatureAlgorithm,
   TxParamType,
   asciiPadded,
-  bigintToBytes32,
   calculateRequestId,
   calculateSignetAttestationDigest,
+  ecdsaSignatureToMpcSignature,
   evmAddressAbiWord,
   numericAbiWord,
   hexToBytes,
@@ -54,7 +54,7 @@ import {
 // The signet contract (callee) module, the same one the vault's generated code
 // cross-contract-calls (via the compile-time src/managed/SignetSigner link
 // into this npm package's managed output). The request circuits end in a call
-// to its signBidirectionalEvent, so the simulator needs its state
+// to its signBidirectional, so the simulator needs its state
 // (see signetStateProvider) to execute that path.
 import * as SignetSigner from "@sig-net/midnight-contract/managed/contract/index.js";
 
@@ -435,7 +435,7 @@ describe("deposit round-trip", () => {
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(VAULT_EVM));
     expect(calldata.value.words[1]).toEqual(numericAbiWord(AMOUNT));
 
-    // The map key IS the persistent hash of the record, recomputed off-chain
+    // The map key IS the keccak256 hash of the record, recomputed off-chain
     // with the library's TS twin of the request-id circuit. This assertion is
     // the lockstep check the twin's deviation note relies on: the id computed
     // in TS must equal the key the REAL compiled contract minted in-circuit.
@@ -800,8 +800,8 @@ const OUTPUT_REVERTED = MPC_FAILURE_OUTPUT;
  * with `secretKey`: the digest comes from the library's sanctioned TS twin
  * (pinned byte-for-byte against the compiled oracles in signet-midnight's
  * own tests), exactly like the MPC. The event carries ONLY the digest and
- * the signature scalars (LE bytes, the ledger form) — the output itself
- * travels as a separate circuit argument.
+ * the stored-form signature (big-endian SEC1, bigR as a full point): the
+ * output itself travels as a separate circuit argument.
  */
 const respond = (
   secretKey: Uint8Array,
@@ -812,9 +812,7 @@ const respond = (
   const sig = signAttestationDigest(digest, secretKey);
   return {
     attestationDigest: digest,
-    r: bigintToBytes32(sig.r),
-    s: bigintToBytes32(sig.s),
-    recoveryId: BigInt(sig.recoveryId),
+    signature: ecdsaSignatureToMpcSignature(sig),
   };
 };
 

@@ -70,8 +70,7 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
     console.log(`recipient:       ${options.recipient.coinPublicKey}`);
   }
 
-  // Deposit sweeps are signed by the USER's derived account.
-  const outcome = await fetchAttestedRespondOutcome(context, options.requestId, context.evmUserAddress);
+  const outcome = await fetchAttestedRespondOutcome(context, options.requestId);
   if (outcome === undefined) {
     throw new Error(
       `no matching respond-bidirectional attestation posted for request ${options.requestId}: ` +

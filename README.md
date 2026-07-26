@@ -155,14 +155,14 @@ Integrating a contract on Midnight with the Sig Network MPC consists of:
    // Configured and sized here for an EVM Type 2 transaction with
    // <1 calldata word, 0 access-list entries, 0 storage keys> and
    // 34-byte serialisation schemas.
-   export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EVMType2TxParams<1, 0, 0>, 34, 34>;
+   export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<1, 0, 0>, 34, 34>;
 
    // Required: The Signet singleton signer interface, set at deploy.
    // Used to notify the MPC of events you add to your signBidirectionalEventMap.
    sealed ledger signetSigner: SignetSigner;
 
    // Required: This contract's MPC response key, set in step 4.
-   // Used to verify RespondBidirectionalEvents containing the serialised output of foreign chain execution.
+   // Used to verify RespondBidirectionalEvents attesting the output of foreign chain execution.
    export ledger mpcResponseKey: Secp256k1Point;
 
    // Recommended: contract-local source of request nonces, so identical
@@ -243,8 +243,8 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
 
    ```compact
    // Construct SignBidirectionalEvent signature request and calculate its RequestId
-   const request = constructSignBidirectionalEvent<EVMType2TxParams<1, 0, 0>, 34, 34>(/* ... */);
-   const requestId = disclose(calculateRequestId<EVMType2TxParams<1, 0, 0>, 34, 34>(request));
+   const request = constructSignBidirectionalEvent<EvmType2TxParams<1, 0, 0>, 34, 34>(/* ... */);
+   const requestId = disclose(calculateRequestId<EvmType2TxParams<1, 0, 0>, 34, 34>(request));
 
    // Store the signature request in your signBidirectionalEventMap for MPC to discover
    signetRequestNonce.increment(1);
@@ -252,7 +252,7 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
 
    // Notify the MPC of the SignBidirectionalEvent and the location of your signBidirectionalEventMap.
    // The location is 0 here based on the position of the declaration in Setup step 3.
-   signetSigner.signBidirectionalEvent(
+   signetSigner.signBidirectional(
       requestId,
       constructSignBidirectionalEventNotificationV1(kernel.self(), 0 as Uint<8>),
    );
@@ -272,30 +272,49 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
    ```ts
    import { JsonRpcProvider } from "ethers";
 
-   const signedTx = await reader.getSignedEVMTransaction(requestId, expectedSigner);
+   const signedTx = await reader.getSignedEvmTransaction(requestId, expectedSigner);
    await new JsonRpcProvider(foreignChainRpcUrl).broadcastTransaction(signedTx.serialized);
    ```
 
-4. Poll the Signet singleton for the MPC's signed remote execution output (posted once the MPC observes the transaction execute on the foreign chain). Posts are stored unverified, so treat them as candidates: the authoritative check is your contract's verify circuit in step 5:
+4. Poll the Signet singleton for the MPC's remote execution attestation (posted once the MPC observes the transaction execute on the foreign chain). The event carries only the 32-byte attestation digest, `keccak256(requestId || serializedOutput)`, plus the MPC's ECDSA signature over it: the serialized output itself travels off chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and digest-match it against the posted events. Posts are stored unverified, so treat them as candidates: the authoritative check is your contract's verify circuit in step 5:
 
    ```ts
-   const [respondBidirectionalEvent] = await reader.getRespondBidirectionalEvents(requestId);
+   import { calculateSignetAttestationDigest, deserializeEvmOutput, requestIdBytes, serializeRespondOutput } from "@sig-net/midnight";
+
+   const events = await reader.getRespondBidirectionalEvents(requestId);
    // Empty array: not posted yet, poll again.
+
+   // Recompute the serialized output from the raw execution output (fetched
+   // off chain, e.g. from the fakenet's /responses API) and select the event
+   // whose attested digest matches.
+   const decoded = deserializeEvmOutput(mySchema, rawExecutionOutput);
+   const serializedOutput = serializeRespondOutput(mySchema, decoded);
+   const digest = calculateSignetAttestationDigest(requestIdBytes(requestId), serializedOutput);
+   const respondBidirectionalEvent = events.find(
+      (event) => Buffer.from(event.attestationDigest).equals(Buffer.from(digest)),
+   );
    ```
 
-5. Deliver the response to your contract, which verifies it in-circuit against the response key pinned in Setup step 4 and consumes the request:
+5. Deliver the event AND the recomputed output bytes to your contract, which re-hashes the bytes, verifies the ECDSA signature in-circuit against the response key pinned in Setup step 4, and consumes the request:
 
    ```compact
    assert(
-      verifyRespondBidirectionalEvent(requestId, respondBidirectionalEvent, mpcResponseKey),
+      verifyRespondBidirectionalEvent<1>(
+         requestId,
+         serializedOutput,
+         disclose(respondBidirectionalEvent),
+         mpcResponseKey
+      ),
       "Invalid attestation signature"
    );
    signBidirectionalEventMap.remove(requestId);
    ```
 
+   The width parameter (`<1>` here) is your respond serialisation schema's exact packed byte width: the output is hashed at that width, never padded.
+
 # EVM Type 2 Transactions and ABI Calldata Words
 
-An `EVMType2TxParams` request decomposes the EVM transaction into typed fields your contract can enforce field by field in-circuit. Its optional `calldata` is an `EVMCalldata<maxWords>`: the 4-byte function selector plus a list of 32-byte ABI words, per the [Solidity ABI spec](https://docs.soliditylang.org/en/latest/abi-spec.html). Slots past `noWords` are unused capacity and never reach the transaction.
+An `EvmType2TxParams` request decomposes the EVM transaction into typed fields your contract can enforce field by field in-circuit, declared in canonical EIP-1559 order (chainId, nonce, maxPriorityFeePerGas, maxFeePerGas, gasLimit, to, value, calldata, accessListEntryCount, accessList), which is also the request-id hash order. Its optional `calldata` is an `EvmCalldata<maxWords>`: the 4-byte function selector plus a list of 32-byte ABI words, per the [Solidity ABI spec](https://docs.soliditylang.org/en/latest/abi-spec.html). Slots past `noWords` are unused capacity and never reach the transaction.
 
 Every word must be stored in canonical ABI form (big-endian). The MPC signs a transaction whose calldata is exactly `selector || words[0..noWords]`, byte for byte, so a word stored in any other form becomes a signed transaction calling the foreign contract with garbage arguments. Compact's integer casts are little-endian, so do not hand-roll the byte order: build every word with the helper circuits the Signet module exports, and read words back with the matching readers.
 
@@ -310,7 +329,7 @@ Every word must be stored in canonical ABI form (big-endian). The MPC signs a tr
 `transfer(address,uint256)`, selector `0xa9059cbb`, takes an address word and a numeric word. This is exactly how the erc20-vault contract builds its deposit and withdrawal calldata:
 
 ```compact
-const calldata = EVMCalldata<2> {
+const calldata = EvmCalldata<2> {
   selector: Bytes[0xa9, 0x05, 0x9c, 0xbb],
   noWords: 2 as Uint<16>,
   words: [
@@ -325,7 +344,7 @@ const calldata = EVMCalldata<2> {
 `setApprovalForAll(address,bool)`, selector `0xa22cb465`:
 
 ```compact
-const calldata = EVMCalldata<2> {
+const calldata = EvmCalldata<2> {
   selector: Bytes[0xa2, 0x2c, 0xb4, 0x65],
   noWords: 2 as Uint<16>,
   words: [
@@ -335,11 +354,11 @@ const calldata = EVMCalldata<2> {
 };
 ```
 
-The readers run the same rules in the other direction, rejecting any non-canonical word instead of silently truncating or coercing it. A `RespondBidirectionalEvent`'s `serializedOutput` is the ABI-encoded return data of the remote call, so a settle circuit can decode an ERC20 `transfer`'s `bool` return from the first output word:
+The readers run the same rules in the other direction, rejecting any non-canonical word instead of silently truncating or coercing it. The serialized output a `RespondBidirectionalEvent` attests is the schema-packed return data of the remote call, delivered to the settle circuit as its own argument (Runtime step 5). Packed booleans are single bytes, so an ERC20 `transfer`'s result reads directly:
 
 ```compact
-const success = abiWordToBool(slice<32>(respondBidirectionalEvent.serializedOutput, 0));
-assert(success, "Remote transfer failed");
+const succeeded = serializedOutput as Field == 1 as Field;
+assert(succeeded, "Remote transfer failed");
 ```
 
 The same builders and readers exist in `@sig-net/midnight` as TypeScript twins under identical names, for composing expected words off-chain (UIs, expected-record builders, tests).

@@ -51,8 +51,7 @@ export async function completeWithdraw(context: VaultContext, options: CompleteW
   console.log(`signet contract: ${context.signetContractAddress}`);
   console.log(`request id:      ${options.requestId}`);
 
-  // Withdraw transfers are signed by the VAULT's derived account.
-  const outcome = await fetchAttestedRespondOutcome(context, options.requestId, context.evmVaultAddress);
+  const outcome = await fetchAttestedRespondOutcome(context, options.requestId);
   if (outcome === undefined) {
     throw new Error(
       `no matching respond-bidirectional attestation posted for request ${options.requestId}: ` +

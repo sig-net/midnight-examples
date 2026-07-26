@@ -135,7 +135,12 @@ The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
 stand-in: it polls the signet contract's notification registry via the
 indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and
-posts responses through the proof server.
+posts responses through the proof server. It also serves the public
+`/responses/{requestId}` helper API on port 3040 (mapped to localhost by the
+compose file): the attestation poll and settle flows fetch each request's
+raw traced EVM output from it, so a poll that times out with
+`no fakenet response for … at http://localhost:3040/...` means the responder
+(or its API port mapping) is down, not the Midnight stack.
 
 - **Managed by setup (default):** the setup's hand-off steps append
   `MPC_ROOT_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
@@ -152,7 +157,8 @@ posts responses through the proof server.
 - **Responder development:** set `FAKENET_MANAGED=0` so setup leaves the
   responder — and `.env` — alone, and run it yourself (`yarn response` in a
   solana-signet-program checkout, with the current signet address and root
-  key in its config). Then a poll timeout is YOUR restart to do.
+  key in its config, and it serves the responses API on 3040 automatically).
+  Then a poll timeout is YOUR restart to do.
 - **Prover/verifier parity is by construction here:** the singleton is
   always deployed from the published `@sig-net/midnight-contract` — the same
   package the fakenet image proves with. Parity only breaks when a yarn link
@@ -195,7 +201,7 @@ posts responses through the proof server.
   proof is the FIRST on a fresh server and the rest of the file fits in the
   remaining headroom.
 - **A signature poll timing out on a request the responder DID log as "New
-  request"**, with `postSignatureResponse … FAILED` + a proof-server
+  request"**, with `respond(0x…) … FAILED` + a proof-server
   transport error in `docker logs fakenet-responder`: the responder proves
   its posts through the SAME proof server (:6300), and a proof-server
   restart during its post kills the post — the responder does not retry, so

@@ -272,17 +272,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
     async () => {
       expect(withdrawRequestId).toBeDefined();
 
-      // Withdraw transfers are signed by the VAULT's derived account. The
-      // event carries only the digest, so the poll recomputes the candidates
-      // from the transaction's fate (a status-0 receipt here) and matches:
-      // for a mined revert the ONLY matchable candidate is the protocol's
-      // fixed failure output.
+      // The event carries only the digest, so the poll fetches the observed
+      // result from the fakenet's /responses API and matches: for a mined
+      // revert the API serves success: false, so the ONLY matchable
+      // candidate is the protocol's fixed failure output.
       const context = await session.vaultContext();
       withdrawAttestation = await pollRespondBidirectional(context, {
         requestId: withdrawRequestId,
         intervalMs: 1000,
         timeoutMs: 3 * MINUTE,
-        expectedSigner: context.evmVaultAddress,
       });
 
       // The observable contract of the failure leg: the attested output must
