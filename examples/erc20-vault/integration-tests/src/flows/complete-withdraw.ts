@@ -65,7 +65,7 @@ export async function completeWithdraw(context: VaultContext, options: CompleteW
   // success branch mints nothing and ignores it.
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
 
-  if (outcome.isMpcErrorSentinel) {
+  if (outcome.matchedFailureOutput) {
     console.log("EVM transfer never executed: refunding to this wallet (the withdrawer)");
     const result = await context.vault.callTx.refundWithdraw(
       requestIdBytes(options.requestId),

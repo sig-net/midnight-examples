@@ -55,7 +55,7 @@ The quickest way to get going with these examples is to get an end to end integr
                                 # to stable.
    yarn compile
    ```
-3. Start the local stack (Midnight node, indexer, proof server, anvil EVM, fakenet MPC responder) with `docker compose up -d`.
+3. Start the local stack (Midnight node, indexer, proof server, anvil EVM) with `docker compose up -d`. The fakenet MPC responder is not part of this: its compose service sits behind the `fakenet` profile, and the test setup starts it itself mid-run once the hand-off values are in `.env`.
 4. Run the happy day test and watch it go. The first run can take **~20–25 minutes** (it generates zk proving keys, deploys every contract and funds the derived accounts, all automatically, no `.env` inserts needed):
    ```sh
    yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts

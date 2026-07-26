@@ -9,7 +9,7 @@ import {
   rawTokenType,
   sampleContractAddress,
 } from "@midnight-ntwrk/compact-runtime";
-// This tree's wasm ContractState class — see signetStateProvider for why the
+// This tree's wasm ContractState class: see signetStateProvider for why the
 // portal-linked signet module's state must round-trip through it.
 import { ContractState } from "@midnightntwrk/onchain-runtime-v4";
 
@@ -929,7 +929,7 @@ describe("completeWithdraw settle", () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     // Signed over the FALSE result, presented as a success byte: the digest
     // checkpoint catches the mismatch. This is the attack the hash-only
-    // event must stop — settling a failed transfer as a success.
+    // event must stop: settling a failed transfer as a success.
     await expect(
       contract.circuits.completeWithdraw(
         ctx,
@@ -1243,7 +1243,7 @@ describe("claim settle", () => {
     const { contract, ctx, requestId } = await depositRequested();
     // Signed over the FALSE result, presented as a success byte: the digest
     // checkpoint catches the mismatch. This is the attack the hash-only
-    // event must stop — claiming a failed sweep as a success. (The reverse
+    // event must stop: claiming a failed sweep as a success. (The reverse
     // presentation would trip the return-value assert first.)
     await expect(
       contract.circuits.claim(

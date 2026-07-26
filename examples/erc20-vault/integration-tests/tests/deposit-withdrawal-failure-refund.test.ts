@@ -290,7 +290,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
         "the MPC must attest the reverted transfer as failed",
       ).toBe(false);
       expect(
-        withdrawAttestation.isMpcErrorSentinel,
+        withdrawAttestation.matchedFailureOutput,
         "a mined revert must be attested as the fixed MPC failure output",
       ).toBe(true);
 
@@ -317,7 +317,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
       // of leaving it burned. The request + its pending-withdrawal marker
       // are consumed (double-settle protection). The refunded shielded
       // balance itself is not publicly observable; the marker consumption is
-      // — present before, absent after — and refundWithdraw is the only
+      // (present before, absent after), and refundWithdraw is the only
       // circuit a failure attestation can settle through.
       expect(withdrawRequestId).toBeDefined();
       expect(withdrawAttestation).toBeDefined();

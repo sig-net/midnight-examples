@@ -39,7 +39,7 @@ runs the whole flow twice, once per direction:
 | 2 | MPC posts the transaction signature back to Midnight | Signature by the user's derived key | Signature by the vault's derived key |
 | 3 | Client broadcasts the signed transaction on the foreign chain | The ERC20 moves user → vault | The ERC20 moves vault → destination |
 | 4 | MPC attests the execution output back to Midnight | Signed `RespondBidirectionalEvent` for the sweep | The same, for the payout |
-| 5 | Contract verifies the attestation in-circuit and settles | `claim()` mints shielded vault tokens to the depositor | `completeWithdraw()` finalises, or refunds the withdrawer on EVM failure |
+| 5 | Contract verifies the attestation in-circuit and settles | `claim()` mints shielded vault tokens to the depositor | `completeWithdraw()` finalises an executed transfer, or refunds the withdrawer on a false return. `refundWithdraw()` refunds the withdrawer when the transfer never executed (reverted or replaced) |
 
 # Derived keys and accounts
 
@@ -101,8 +101,8 @@ The contract package's dependency list is the minimal integration surface:
 // contract/package.json
 "dependencies": {
   "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-  "@sig-net/midnight": "0.10.0",
-  "@sig-net/midnight-contract": "0.10.0"
+  "@sig-net/midnight": "0.12.0",
+  "@sig-net/midnight-contract": "0.12.0"
 }
 ```
 
@@ -568,7 +568,7 @@ transfer spends from the vault's own account:
 | Who pays the EVM gas | The user's account, caller-chosen envelope | The vault's account, contract-fixed envelope |
 | Runtime step 2 `expectedSigner` | `evmUserAddress` | `evmVaultAddress = deriveEvmAddress(mpcRootPublicKey, vaultContractAddress, "vault")` |
 | Runtime steps 3 and 4 | Identical mechanics | Identical mechanics |
-| Runtime step 5 | `claim()`: depositor-only, mints on success | `completeWithdraw()`: open to anyone on success, withdrawer-only refund on failure |
+| Runtime step 5 | `claim()`: depositor-only, mints on success | `completeWithdraw()`: open to anyone on success, withdrawer-only refund on a false return. `refundWithdraw()`: withdrawer-only refund when the transfer never executed |
 
 The whole round trip at a glance
 ([`withdraw.ts`](integration-tests/src/flows/withdraw.ts) /
@@ -749,16 +749,21 @@ Flow function:
 # Running it
 
 Everything runs from the repo root against the local docker stack (Midnight
-node, indexer, proof server, anvil EVM, fakenet MPC responder). No
-pre-existing `.env` is required. The setup pipeline creates one and records
-everything it deploys so that later runs reuse the same contracts.
+node, indexer, proof server, anvil EVM, fakenet MPC responder). The fakenet
+responder's compose service sits behind the `fakenet` profile, so a plain
+`docker compose up -d` does not start it: the test setup starts it itself
+mid-run once the hand-off values are in `.env`. No pre-existing `.env` is
+required. The setup pipeline creates one and records everything it deploys
+so that later runs reuse the same contracts.
 
 ```sh
 corepack enable
 yarn install
 compact update 0.33.0-rc.2          # Exact version required.
 yarn compile:erc20-vault:zk         # ~10 min zk key generation, background it
-docker compose up -d
+docker compose up -d                # node, indexer, proof server, anvil (NOT the
+                                    # fakenet responder: it is behind the `fakenet`
+                                    # profile, and the test setup starts it mid-run)
 yarn test:erc20-vault:e2e           # the six e2e specs, serially, bail on first failure
 ```
 
@@ -769,6 +774,11 @@ yarn compile:erc20-vault            # generate src/managed (skip-zk)
 yarn build                          # typecheck everything
 yarn test:erc20-vault               # simulator unit tests + offline-skipped e2e files
 ```
+
+Beware: rerunning plain `yarn compile` (or `yarn compile:erc20-vault`) after
+a deploy regenerates `src/managed` WITHOUT proving keys, deleting the zk keys
+directory the e2e suite proves with, so `yarn compile:erc20-vault:zk` is
+required again before the next e2e run.
 
 Deploy a fresh vault by hand (the e2e setup does this automatically when the
 `.env` has no vault address):

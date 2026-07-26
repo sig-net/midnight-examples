@@ -455,6 +455,35 @@ export circuit withdraw(
   );
 }
 
+// ---- Runtime step 5 (withdraw): the shared refund block -----------------------------
+// The withdrawer gate plus re-mint bookkeeping both refund paths share. Deliberately
+// NOT exported: completeWithdraw's false-return branch and refundWithdraw call it after
+// their own width-specific verification, and nothing here re-checks that verification,
+// so it must never be callable on its own. Withdrawer-only: a refund mints a private
+// coin, so the caller must prove the secret behind the commitment pinned at withdraw
+// time. Amount and token come from the consumed request: calldata word 1 and
+// txParams.to. mintNonce must be RANDOM (see the callers).
+circuit refundSurrenderedValue(
+  disclosedRequestId: RequestId,
+  signatureRequest: SignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>,
+  mintNonce: Bytes<32>
+): [] {
+  assert(
+    withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
+      == refundCommitment.lookup(disclosedRequestId),
+    "Not the withdrawer"
+  );
+
+  // Re-mint the surrendered value to the withdrawer's own wallet key.
+  assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
+  const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
+  const erc20Addr = signatureRequest.txParams.to;
+
+  const domainSep = vaultTokenDomainSeparator(erc20Addr);
+  const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
+  mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), recipient);
+}
+
 // ---- Runtime step 5 (withdraw): completeWithdraw ------------------------------------
 // Settles an EXECUTED withdrawal in both branches, decided by the MPC-attested output,
 // never the caller. The transfer ran on the EVM, so its packed bool result is one byte:
@@ -504,22 +533,10 @@ export circuit completeWithdraw(
   const succeeded = disclose(serializedOutput as Field == 1 as Field);
 
   if (!succeeded) {
-    // Refund path only: it mints a private coin, so it is withdrawer-only. The
-    // success branch above skips all of this, as cleanup needs no identity.
-    assert(
-      withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
-        == refundCommitment.lookup(disclosedRequestId),
-      "Not the withdrawer"
-    );
-
-    // Re-mint the surrendered value to the withdrawer's own wallet key. Amount and
-    // token come from the consumed request: calldata word 1 and txParams.to.
-    const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
-    const erc20Addr = signatureRequest.txParams.to;
-
-    const domainSep = vaultTokenDomainSeparator(erc20Addr);
-    const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-    mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), recipient);
+    // Refund path only: it mints a private coin, so it is withdrawer-only (the shared
+    // block proves the withdraw-time commitment). The success branch above skips all
+    // of this, as cleanup needs no identity.
+    refundSurrenderedValue(disclosedRequestId, signatureRequest, mintNonce);
   }
 
   refundCommitment.remove(disclosedRequestId);
@@ -570,22 +587,9 @@ export circuit refundWithdraw(
   const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
   signBidirectionalEventMap.remove(disclosedRequestId);
 
-  // Withdrawer-only: a refund mints a private coin, so the caller must prove the
-  // secret behind the commitment pinned at withdraw time.
-  assert(
-    withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
-      == refundCommitment.lookup(disclosedRequestId),
-    "Not the withdrawer"
-  );
-
-  // Re-mint the surrendered value to the withdrawer's own wallet key. Amount and
-  // token come from the consumed request: calldata word 1 and txParams.to.
-  const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
-  const erc20Addr = signatureRequest.txParams.to;
-
-  const domainSep = vaultTokenDomainSeparator(erc20Addr);
-  const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-  mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), recipient);
+  // Withdrawer-only refund of the surrendered value, via the shared block (the
+  // withdrawer gate plus the re-mint bookkeeping).
+  refundSurrenderedValue(disclosedRequestId, signatureRequest, mintNonce);
 
   refundCommitment.remove(disclosedRequestId);
 }

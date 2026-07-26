@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository —
 follow the quickstart top to bottom and a bare checkout ends at a green
-five-spec suite. The pipeline itself (globalSetup steps + flow test files)
+six-spec suite (60 tests). The pipeline itself (globalSetup steps + flow test files)
 lives in `examples/erc20-vault/integration-tests/`; setup (compile, deploy,
 key and address derivation, responder hand-off) runs in vitest globalSetup
 before ANY flow file — including single-file runs — and flow files run one at
@@ -59,7 +59,7 @@ chain id 31337) a fresh DEPLOY runs green in ONE pass: funding of the derived
 accounts is automatic, TestUSDC is auto-deployed, and the setup starts the
 fakenet responder itself mid-run. The FLOW files are another matter: on a
 16 GB Docker VM expect the proof-server OOM (see "Reading failures") to
-interrupt the suite at some proving leg partway through the five files —
+interrupt the suite at some proving leg partway through the six files:
 that is routine, not a defect; recover per the playbook and the suite
 completes across two or three invocations.
 
@@ -87,7 +87,7 @@ kept contracts.
 
 ## Ground rules (violating these wastes 10+ minutes per mistake)
 
-- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all five
+- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all six
   specs) or `yarn test:erc20-vault:e2e tests/<spec-file>` for one spec (the
   setup pipeline still runs first; extra args pass through to vitest).
 - **Background any run that may zk-compile or deploy** (fresh clone,

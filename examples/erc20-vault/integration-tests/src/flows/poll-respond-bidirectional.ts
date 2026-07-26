@@ -39,9 +39,10 @@ export interface PollRespondBidirectionalOptions {
  * @param context - The flow context.
  * @param options - What to poll for and how patiently.
  * @returns The resolved outcome (attested event + matched output bytes).
- * @throws Error when the contract has no state on-chain, the fakenet's
- *   /responses API is unreachable, or `timeoutMs` elapses with no matching
- *   attestation posted.
+ * @throws Error when the contract has no state on-chain, or `timeoutMs`
+ *   elapses with no matching attestation posted (a fakenet /responses API
+ *   that stays unreachable surfaces as this timeout: each tick's fetch
+ *   failure is logged and retried, this loop owns the deadline).
  */
 export async function pollRespondBidirectional(
   context: VaultContext,
@@ -59,7 +60,7 @@ export async function pollRespondBidirectional(
     while (!giveUp.signal.aborted) {
       const outcome = await fetchAttestedRespondOutcome(context, options.requestId);
       if (outcome !== undefined) {
-        if (outcome.isMpcErrorSentinel) {
+        if (outcome.matchedFailureOutput) {
           console.log("remote execution FAILED (MPC failure output attested)");
         } else {
           console.log(`remote execution ${outcome.succeeded ? "succeeded" : "returned false"}`);

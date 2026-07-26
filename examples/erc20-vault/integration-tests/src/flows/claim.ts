@@ -80,7 +80,7 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
   if (!outcome.succeeded) {
     throw new Error(
       `the MPC attested the sweep for request ${options.requestId} as ` +
-        `${outcome.isMpcErrorSentinel ? "failed (MPC failure output)" : "returned false"}: ` +
+        `${outcome.matchedFailureOutput ? "failed (MPC failure output)" : "returned false"}: ` +
         `a failed sweep cannot be claimed`,
     );
   }
