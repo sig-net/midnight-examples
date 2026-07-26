@@ -41,6 +41,8 @@ runs the whole flow twice, once per direction:
 | 4 | MPC attests the execution output back to Midnight | Signed `RespondBidirectionalEvent` for the sweep | The same, for the payout |
 | 5 | Contract verifies the attestation in-circuit and settles | `claim()` mints shielded vault tokens to the depositor | `completeWithdraw()` finalises an executed transfer, or refunds the withdrawer on a false return. `refundWithdraw()` refunds the withdrawer when the transfer never executed (reverted or replaced) |
 
+> **Output recovery (between steps 4 and 5):** the attestation carries only the digest, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), digest matching in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.8.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's digest match and in-circuit signature verification.
+
 # Derived keys and accounts
 
 Every key the MPC signs with is scoped by the requesting contract:
