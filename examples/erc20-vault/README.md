@@ -420,15 +420,33 @@ nonce-burned one throws).
 Once the MPC observes the mined execution it posts an ECDSA-signed
 `RespondBidirectionalEvent`. The event carries only the 32-byte attestation
 digest, `keccak256(requestId || serializedOutput)`, plus the MPC's signature
-over it: the serialized output itself travels off chain. So the client
-obtains the raw execution output independently, re-packs it per the vault's
-respond serialisation schema, and selects the posted event whose attested
-digest matches. On the local stack the fakenet responder serves the raw
-traced output over its public `/responses/{requestId}` helper API (port
-3040), so clients need no `debug_traceTransaction` RPC access of their own.
-The fetched output, and every post on the log, stays UNTRUSTED here: the
-authoritative check is the in-circuit digest + signature verification `claim`
-runs in step 5.
+over it. The serialized output itself is never posted on chain: the client
+must reconstruct the exact bytes the MPC hashed, in two moves.
+
+**Move 1: fetch the raw execution output.** This is the mined call's raw
+EVM return data (for the sweep: the single ABI-encoded `bool` word that
+`transfer` returned). Any source works, since the bytes stay untrusted
+until the digest match below. With a node that has tracing enabled you can
+trace the mined transaction via `debug_traceTransaction` (the same RPC
+method the MPC itself uses to extract the output). On the local stack the fakenet
+responder saves you that RPC access: it caches each request's traced output
+and serves it over its public `/responses/{requestId}` helper API (port
+3040). It caches before it posts the attestation, so once an event is
+visible the fetch succeeds. Check the response's `success` flag: a reverted
+or replaced transaction has no output to fetch at all, and the candidate to
+hash is instead the protocol's fixed 5-byte failure output `0xdeadbeef01`.
+
+**Move 2: re-pack it into the bytes the MPC hashed.** The MPC did not hash
+the raw return data. It decoded the raw data per the request's
+`outputDeserializationSchema`, then packed the decoded values per its
+`respondSerializationSchema`, and hashed THAT. Run the same two conversions
+(for the vault: the 32-byte ABI `bool` word in, the 1-byte packed result
+out), hash the request id with the re-packed bytes, and the digest selects
+which posted event the MPC attested for this outcome.
+
+Everything stays UNTRUSTED here (the respond log is open to anyone, and the
+helper API is unauthenticated): the authoritative check is the in-circuit
+digest + signature verification `claim` runs in step 5.
 
 ```ts
 import {
@@ -441,12 +459,19 @@ import {
 const events = await reader.getRespondBidirectionalEvents(requestId);
 // Empty array: not posted yet, poll again.
 
-// The raw EVM return data of the mined sweep, from the fakenet's
-// /responses API (unauthenticated, digest-matched below).
+// Move 1: the raw EVM return data of the mined sweep, here from the
+// fakenet's /responses helper API. Unauthenticated, and any other source
+// (e.g. your own trace RPC) works equally: the digest match below is what
+// makes the bytes meaningful.
 const response = await fetch(`http://localhost:3040/responses/${requestId}`);
-const { output } = await response.json();
+const { success, output } = await response.json();
+// success === false: nothing was returned to fetch (reverted/replaced tx).
+// The candidate to hash is then MPC_FAILURE_OUTPUT instead of `output`.
 
-// Re-pack per the vault's schema: the same two conversions the MPC ran.
+// Move 2: raw return data -> the serialized output the MPC hashed. Decode
+// per the output deserialization schema, re-pack per the respond
+// serialization schema (the exact two conversions the responder ran):
+// the 32-byte ABI bool word in, transfer()'s 1-byte packed result out.
 const decoded = deserializeEvmOutput('[{"name":"success","type":"bool"}]', output);
 const serializedOutput = serializeRespondOutput('[{"name":"success","type":"bool"}]', decoded);
 

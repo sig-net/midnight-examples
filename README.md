@@ -18,8 +18,8 @@ The flow comprises 5 steps:
 1. Client calls a contract on Midnight which requests a signature for a transaction destined for a foreign chain. The signature is made with a key derived for the requesting contract (see [Derived keys](#derived-keys)).
 2. Sig Network MPC honours the request, generating the transaction signature and posting it back to Midnight.
 3. Client extracts the signature, using it to submit the signed transaction to the foreign chain.
-4. Sig Network MPC observes the foreign transaction and posts the output of the execution (signed) back to Midnight.
-5. Client extracts the signed foreign execution output and submits it back to the Midnight contract, which verifies the MPC's signature over it in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
+4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: the attestation digest `keccak256(requestId || serializedOutput)` plus its ECDSA signature over that digest. The output itself travels off chain.
+5. Client obtains the execution output off chain (it broadcast the transaction in step 3, so it can read the result), extracts the posted attestation and submits both back to the Midnight contract, which recomputes the digest from the output bytes and verifies the MPC's signature in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
 
 ## Derived keys
 
@@ -35,7 +35,7 @@ The path is 32 opaque bytes of the contract's choosing (e.g. a fixed literal for
 
 ### Response key
 
-The key the MPC signs foreign execution outputs with when posting them back to Midnight:
+The key the MPC signs remote execution attestations with when posting them back to Midnight:
 
 `responseKey = f(mpcRootKey[keyVersion], contractAddress, "midnight response key")`
 
@@ -46,13 +46,14 @@ The same derivation, but with the path fixed to the literal `"midnight response 
 The quickest way to get going with these examples is to get an end to end integration test for one of them running locally. We recommend you start with the erc20-vault happy day test.
 
 1. Ensure you have all of the [prerequisites](#prerequisites) installed.
-2. From the repository root, install workspace dependencies and select the required Compact toolchain explicitly:
+2. From the repository root, install workspace dependencies, select the required Compact toolchain explicitly, and compile:
    ```sh
    corepack enable
    yarn install
    compact update 0.33.0-rc.2   # Exact version required.
                                 # `compact update` installs/downgrades
                                 # to stable.
+   yarn compile
    ```
 3. Start the local stack (Midnight node, indexer, proof server, anvil EVM, fakenet MPC responder) with `docker compose up -d`.
 4. Run the happy day test and watch it go. The first run can take **~20–25 minutes** (it generates zk proving keys, deploys every contract and funds the derived accounts, all automatically, no `.env` inserts needed):
@@ -71,6 +72,51 @@ Use your /e2e skill to get the erc20-vault happy day test running for me, from f
 ```
 
 **NOTE:** The most common reason that the run fails is as a result of the proof server hanging or crashing when it exhausts memory on a proving leg. This happens routinely, even on a Docker VM with 16 GB of RAM (the heavy claim/settle proofs peak above 12 GiB). This most often presents as the test failing with `connect ECONNREFUSED 127.0.0.1:6300` partway through a claim or settle step, with `docker ps -a` showing the `midnight-proof-server` container as `Exited (137)`, i.e. OOM-killed. If this happens it is usually possible to restart the proof server and pick up the test run at the last successful chain interaction instead of starting over, using variables printed out in banners as the test progresses. See [test run recovery](./examples/erc20-vault/README.md#test-run-recovery) in the erc20-vault integration testing package for more details.
+
+# Compiling, Building and Running Tests
+
+There are two test layers. The unit tests run offline against a simulated Midnight runtime: no docker stack, no zk keys, seconds not minutes. The end to end integration suites (what the [Quickstart](#quickstart) runs) drive the full protocol against the local docker stack and the fakenet MPC responder.
+
+## Unit tests
+
+Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only the contract packages have a compile step, and only they have a zk compile option. Unit tests do not need zk keys, though the vault's deploy-tx suite gates itself on them: without keys it skips visibly (its describe title says so) rather than failing. From the root of the repository:
+
+```sh
+## --- All packages ---
+
+# Quick compile: all packages (checks syntax and generates circuits)
+# Runs the compact compiler for each contract package without generating zk keys (compiler output in the package's src/managed/)
+yarn compile
+
+# Longer compile: all packages that require zk keys (checks syntax, generates circuits and zk keys)
+# Runs the compact compiler with zk keys for each package that has a :zk option (needed for deploys and the e2e suites, not for unit tests)
+yarn compile:zk
+
+# Test: all packages (typecheck + unit tests: offline simulator-only)
+# Requires 'yarn compile' to have been run (contract packages typecheck against the generated managed/ output).
+yarn test
+
+# Build: all packages
+# Requires 'yarn compile'.
+yarn build
+
+## --- Per example ---
+
+# The erc20-vault example (contract + integration-tests packages):
+yarn compile:erc20-vault
+yarn compile:erc20-vault:zk  # generates the vault contract's zk keys
+yarn test:erc20-vault        # requires at least 'yarn compile:erc20-vault'
+yarn build:erc20-vault       # requires 'yarn compile:erc20-vault'
+```
+
+## Integration tests
+
+The e2e suites need the running docker stack and the fakenet MPC responder: the [Quickstart](#quickstart) walks the first run end to end, and the [erc20-vault README](examples/erc20-vault/README.md) documents every spec in the suite. From the root:
+
+```sh
+yarn test:erc20-vault:e2e                              # the full six-spec suite, requires 'yarn compile'
+yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any tests/*.test.ts name works), requires 'yarn compile'
+```
 
 # Prerequisites
 
