@@ -9,15 +9,19 @@ import {
   rawTokenType,
   sampleContractAddress,
 } from "@midnight-ntwrk/compact-runtime";
+// This tree's wasm ContractState class: see signetStateProvider for why the
+// portal-linked signet module's state must round-trip through it.
+import { ContractState } from "@midnightntwrk/onchain-runtime-v4";
 
 import {
-  MPC_ERROR_SENTINEL,
+  MPC_FAILURE_OUTPUT,
   MPCDestination,
   MPCSignatureAlgorithm,
   TxParamType,
   asciiPadded,
-  bigintToBytes32,
   calculateRequestId,
+  calculateSignetAttestationDigest,
+  ecdsaSignatureToMpcSignature,
   evmAddressAbiWord,
   numericAbiWord,
   hexToBytes,
@@ -50,7 +54,7 @@ import {
 // The signet contract (callee) module, the same one the vault's generated code
 // cross-contract-calls (via the compile-time src/managed/SignetSigner link
 // into this npm package's managed output). The request circuits end in a call
-// to its signBidirectionalEvent, so the simulator needs its state
+// to its signBidirectional, so the simulator needs its state
 // (see signetStateProvider) to execute that path.
 import * as SignetSigner from "@sig-net/midnight-contract/managed/contract/index.js";
 
@@ -92,13 +96,21 @@ const BLOCK_HASH = "0".repeat(64);
  * simulator's cross-contract call, which is how the request circuits reach
  * signBidirectionalEvent in-process (no node/indexer). Returns the state for
  * any address: the vault only calls the single sealed signet contract.
+ *
+ * The state is re-materialised through bytes: while `@sig-net/*` resolve to
+ * the sibling checkout (portal wiring), the signet module runs on its OWN
+ * copy of the wasm runtime, and the simulator's `instanceof ContractState`
+ * checks demand THIS tree's class identity. Serialisation is
+ * identity-neutral, so a byte round trip converts between the two. Harmless
+ * (a no-op copy) under published single-tree installs.
  */
 const signetStateProvider = async () => {
   const signet = new SignetSigner.Contract({});
   const { currentContractState } = await signet.initialState(
     createConstructorContext(undefined, CPK),
   );
-  return { getContractState: async () => currentContractState };
+  const state = ContractState.deserialize(currentContractState.serialize());
+  return { getContractState: async () => state };
 };
 
 const VAULT_EVM = bytes(20, 0xee);
@@ -423,7 +435,7 @@ describe("deposit round-trip", () => {
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(VAULT_EVM));
     expect(calldata.value.words[1]).toEqual(numericAbiWord(AMOUNT));
 
-    // The map key IS the persistent hash of the record, recomputed off-chain
+    // The map key IS the keccak256 hash of the record, recomputed off-chain
     // with the library's TS twin of the request-id circuit. This assertion is
     // the lockstep check the twin's deviation note relies on: the id computed
     // in TS must equal the key the REAL compiled contract minted in-circuit.
@@ -771,39 +783,36 @@ const IMPOSTER_SECRET = bytes(32, 0x43);
 // value is fine for these deterministic simulator tests.
 const MINT_NONCE = bytes(32, 0x2e);
 
-// A successful remote execution: first byte 1 (the LE encoding the circuit
-// decodes as `as Field == 1`), rest zero; 32 meaningful bytes (one ABI word).
-const OUTPUT_SUCCESS = new Uint8Array(128);
-OUTPUT_SUCCESS[0] = 1;
+// A successful remote execution: the packed bool result at its exact
+// unpadded width, one 0x01 byte (the circuits take it as Bytes<1>).
+const OUTPUT_SUCCESS = Uint8Array.of(1);
 
-// A failed remote execution: the MPC's 0xdeadbeef error sentinel.
-const OUTPUT_FAILURE = new Uint8Array(128);
-OUTPUT_FAILURE.set(MPC_ERROR_SENTINEL);
+// An EXECUTED transfer that returned false: one 0x00 byte. Settles through
+// completeWithdraw's refund branch.
+const OUTPUT_FALSE = Uint8Array.of(0);
 
-const OUTPUT_LEN = 32n;
+// A NEVER-EXECUTED transfer (reverted or replaced): the protocol's fixed
+// 5-byte failure output. Settles through refundWithdraw (Bytes<5>).
+const OUTPUT_REVERTED = MPC_FAILURE_OUTPUT;
 
 /**
  * Sign a REAL RespondBidirectionalEvent for (requestId, serializedOutput)
- * with `secretKey`: the digest comes from the compiled circuit, exactly like
- * the MPC. Signature scalars land as LE bytes, the ledger form.
+ * with `secretKey`: the digest comes from the library's sanctioned TS twin
+ * (pinned byte-for-byte against the compiled oracles in signet-midnight's
+ * own tests), exactly like the MPC. The event carries ONLY the digest and
+ * the stored-form signature (big-endian SEC1, bigR as a full point): the
+ * output itself travels as a separate circuit argument.
  */
 const respond = (
   secretKey: Uint8Array,
   requestId: Uint8Array,
   serializedOutput: Uint8Array,
 ): RespondBidirectionalEvent => {
-  const digest = signetCircuits.signetAttestationDigest(
-    requestId,
-    serializedOutput,
-    OUTPUT_LEN,
-  );
+  const digest = calculateSignetAttestationDigest(requestId, serializedOutput);
   const sig = signAttestationDigest(digest, secretKey);
   return {
-    serializedOutput,
-    outputLen: OUTPUT_LEN,
-    r: bigintToBytes32(sig.r),
-    s: bigintToBytes32(sig.s),
-    recoveryId: BigInt(sig.recoveryId),
+    attestationDigest: digest,
+    signature: ecdsaSignatureToMpcSignature(sig),
   };
 };
 
@@ -835,6 +844,7 @@ describe("completeWithdraw settle", () => {
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
       )
     ).context;
@@ -852,6 +862,7 @@ describe("completeWithdraw settle", () => {
         await strangerContext("completeWithdraw", ctx),
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
       )
     ).context;
@@ -861,7 +872,7 @@ describe("completeWithdraw settle", () => {
     expect(state.refundCommitment.isEmpty()).toBe(true);
   });
 
-  it("failure response: the WITHDRAWER re-mints the surrendered value and consumes the withdrawal", async () => {
+  it("false-return response: the WITHDRAWER re-mints the surrendered value and consumes the withdrawal", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
 
     // The refund branch runs mintShieldedToken in-circuit: the call
@@ -873,7 +884,8 @@ describe("completeWithdraw settle", () => {
       await contract.circuits.completeWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FAILURE),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        OUTPUT_FALSE,
         MINT_NONCE,
       )
     ).context;
@@ -883,7 +895,7 @@ describe("completeWithdraw settle", () => {
     expect(state.refundCommitment.isEmpty()).toBe(true);
   });
 
-  it("failure response: a caller other than the withdrawer cannot take the refund", async () => {
+  it("false-return response: a caller other than the withdrawer cannot take the refund", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
 
     // The refund mints to the CALLER's own key, so the circuit demands proof
@@ -893,7 +905,8 @@ describe("completeWithdraw settle", () => {
       contract.circuits.completeWithdraw(
         await strangerContext("completeWithdraw", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FAILURE),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        OUTPUT_FALSE,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the withdrawer/);
@@ -906,20 +919,23 @@ describe("completeWithdraw settle", () => {
         ctx,
         requestId,
         respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
 
-  it("rejects a tampered response (output differs from what was signed)", async () => {
+  it("rejects presented output bytes that differ from what was signed", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
-    const response = respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS);
-    const tamperedOutput = new Uint8Array(OUTPUT_FAILURE);
+    // Signed over the FALSE result, presented as a success byte: the digest
+    // checkpoint catches the mismatch. This is the attack the hash-only
+    // event must stop: settling a failed transfer as a success.
     await expect(
       contract.circuits.completeWithdraw(
         ctx,
         requestId,
-        { ...response, serializedOutput: tamperedOutput },
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -935,6 +951,7 @@ describe("completeWithdraw settle", () => {
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, otherId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -948,6 +965,7 @@ describe("completeWithdraw settle", () => {
         ctx,
         unknownId,
         respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
@@ -960,6 +978,7 @@ describe("completeWithdraw settle", () => {
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
       )
     ).context;
@@ -968,6 +987,7 @@ describe("completeWithdraw settle", () => {
         next,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
@@ -987,6 +1007,131 @@ describe("completeWithdraw settle", () => {
         next,
         depositId,
         respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Withdrawal not found/);
+  });
+});
+
+// ---- Refund-withdraw tests ----
+
+describe("refundWithdraw settle", () => {
+  it("failure output: the WITHDRAWER re-mints the surrendered value and consumes the withdrawal", async () => {
+    const { contract, ctx, requestId } = await withdrawRequested();
+
+    // Same shielded-mint reasoning as completeWithdraw's refund branch: the
+    // call resolving proves the mint executed, the observable effect is the
+    // consumption of the request and its pending-withdrawal marker.
+    const next = (
+      await contract.circuits.refundWithdraw(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      )
+    ).context;
+
+    const state = ledger(next.callContext.currentQueryContext.state);
+    expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
+    expect(state.refundCommitment.isEmpty()).toBe(true);
+  });
+
+  it("a caller other than the withdrawer cannot take the refund", async () => {
+    const { contract, ctx, requestId } = await withdrawRequested();
+    await expect(
+      contract.circuits.refundWithdraw(
+        await strangerContext("refundWithdraw", ctx),
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Not the withdrawer/);
+  });
+
+  it("rejects a genuinely attested 5-byte output that is not the failure output", async () => {
+    const { contract, ctx, requestId } = await withdrawRequested();
+    // Digest and signature check out, but the bytes are not the sentinel:
+    // no refund. Guards against width collisions as respond schemas grow.
+    const notTheSentinel = bytes(5, 0x01);
+    await expect(
+      contract.circuits.refundWithdraw(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, notTheSentinel),
+        notTheSentinel,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Not the MPC failure output/);
+  });
+
+  it("rejects a failure output signed by a key other than the stored MPC response key", async () => {
+    const { contract, ctx, requestId } = await withdrawRequested();
+    await expect(
+      contract.circuits.refundWithdraw(
+        ctx,
+        requestId,
+        respond(IMPOSTER_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Invalid attestation signature/);
+  });
+
+  it("rejects presented output bytes that differ from what was signed", async () => {
+    const { contract, ctx, requestId } = await withdrawRequested();
+    // Signed over some other 5-byte output, presented as the sentinel: the
+    // digest checkpoint catches the mismatch before the sentinel gate.
+    await expect(
+      contract.circuits.refundWithdraw(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, bytes(5, 0x01)),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Invalid attestation signature/);
+  });
+
+  it("rejects refunding a DEPOSIT request (no refund marker) even with a genuine failure output", async () => {
+    const { contract, ctx } = await deployInitialized();
+    const next = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
+    const index = toSignBidirectionalEventIndex(
+      ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+    );
+    const [depositIdHex] = [...index.keys()];
+    const depositId = requestIdBytes(depositIdHex);
+
+    await expect(
+      contract.circuits.refundWithdraw(
+        next,
+        depositId,
+        respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Withdrawal not found/);
+  });
+
+  it("refunds once: a second refundWithdraw for the same request rejects", async () => {
+    const { contract, ctx, requestId } = await withdrawRequested();
+    const next = (
+      await contract.circuits.refundWithdraw(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      )
+    ).context;
+    await expect(
+      contract.circuits.refundWithdraw(
+        next,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
@@ -1056,6 +1201,7 @@ describe("claim settle", () => {
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
         recipient,
       )
@@ -1072,37 +1218,39 @@ describe("claim settle", () => {
         ctx,
         requestId,
         respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
 
-  it("rejects a genuinely signed FAILED sweep (MPC error sentinel)", async () => {
+  it("rejects a genuinely signed sweep that returned false", async () => {
     const { contract, ctx, requestId } = await depositRequested();
     await expect(
       contract.circuits.claim(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FAILURE),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        OUTPUT_FALSE,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
     ).rejects.toThrow(/ERC20 transfer returned false/);
   });
 
-  it("rejects a tampered response (output differs from what was signed)", async () => {
+  it("rejects presented output bytes that differ from what was signed", async () => {
     const { contract, ctx, requestId } = await depositRequested();
-    const response = respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS);
-    // Keep the tampered output a "success" so the tamper is caught by the
-    // signature check, not the earlier return-value check.
-    const tamperedOutput = new Uint8Array(OUTPUT_SUCCESS);
-    tamperedOutput[64] = 0xff;
+    // Signed over the FALSE result, presented as a success byte: the digest
+    // checkpoint catches the mismatch. This is the attack the hash-only
+    // event must stop: claiming a failed sweep as a success. (The reverse
+    // presentation would trip the return-value assert first.)
     await expect(
       contract.circuits.claim(
         ctx,
         requestId,
-        { ...response, serializedOutput: tamperedOutput },
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1117,6 +1265,7 @@ describe("claim settle", () => {
         ctx,
         unknownId,
         respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1130,6 +1279,7 @@ describe("claim settle", () => {
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
         CALLER_RECIPIENT,
       )
@@ -1139,6 +1289,7 @@ describe("claim settle", () => {
         next,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1154,6 +1305,7 @@ describe("claim settle", () => {
         await strangerContext("claim", ctx),
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
         MINT_NONCE,
         OTHER_WALLET_RECIPIENT,
       ),

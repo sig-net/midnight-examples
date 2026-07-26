@@ -18,8 +18,10 @@ The flow comprises 5 steps:
 1. Client calls a contract on Midnight which requests a signature for a transaction destined for a foreign chain. The signature is made with a key derived for the requesting contract (see [Derived keys](#derived-keys)).
 2. Sig Network MPC honours the request, generating the transaction signature and posting it back to Midnight.
 3. Client extracts the signature, using it to submit the signed transaction to the foreign chain.
-4. Sig Network MPC observes the foreign transaction and posts the output of the execution (signed) back to Midnight.
-5. Client extracts the signed foreign execution output and submits it back to the Midnight contract, which verifies the MPC's signature over it in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
+4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: the attestation digest `keccak256(requestId || serializedOutput)` plus its ECDSA signature over that digest. The output itself travels off chain.
+5. Client obtains the execution output off chain (see the output recovery note below: it broadcast the transaction in step 3, so it can read the result), extracts the posted attestation and submits both back to the Midnight contract, which recomputes the digest from the output bytes and verifies the MPC's signature in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
+
+> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.8.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's digest match and in-circuit signature verification.
 
 ## Derived keys
 
@@ -35,7 +37,7 @@ The path is 32 opaque bytes of the contract's choosing (e.g. a fixed literal for
 
 ### Response key
 
-The key the MPC signs foreign execution outputs with when posting them back to Midnight:
+The key the MPC signs remote execution attestations with when posting them back to Midnight:
 
 `responseKey = f(mpcRootKey[keyVersion], contractAddress, "midnight response key")`
 
@@ -46,15 +48,16 @@ The same derivation, but with the path fixed to the literal `"midnight response 
 The quickest way to get going with these examples is to get an end to end integration test for one of them running locally. We recommend you start with the erc20-vault happy day test.
 
 1. Ensure you have all of the [prerequisites](#prerequisites) installed.
-2. From the repository root, install workspace dependencies and select the required Compact toolchain explicitly:
+2. From the repository root, install workspace dependencies, select the required Compact toolchain explicitly, and compile:
    ```sh
    corepack enable
    yarn install
    compact update 0.33.0-rc.2   # Exact version required.
                                 # `compact update` installs/downgrades
                                 # to stable.
+   yarn compile
    ```
-3. Start the local stack (Midnight node, indexer, proof server, anvil EVM, fakenet MPC responder) with `docker compose up -d`.
+3. Start the local stack (Midnight node, indexer, proof server, anvil EVM) with `docker compose up -d`. The fakenet MPC responder is not part of this: its compose service sits behind the `fakenet` profile, and the test setup starts it itself mid-run once the hand-off values are in `.env`.
 4. Run the happy day test and watch it go. The first run can take **~20–25 minutes** (it generates zk proving keys, deploys every contract and funds the derived accounts, all automatically, no `.env` inserts needed):
    ```sh
    yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
@@ -71,6 +74,51 @@ Use your /e2e skill to get the erc20-vault happy day test running for me, from f
 ```
 
 **NOTE:** The most common reason that the run fails is as a result of the proof server hanging or crashing when it exhausts memory on a proving leg. This happens routinely, even on a Docker VM with 16 GB of RAM (the heavy claim/settle proofs peak above 12 GiB). This most often presents as the test failing with `connect ECONNREFUSED 127.0.0.1:6300` partway through a claim or settle step, with `docker ps -a` showing the `midnight-proof-server` container as `Exited (137)`, i.e. OOM-killed. If this happens it is usually possible to restart the proof server and pick up the test run at the last successful chain interaction instead of starting over, using variables printed out in banners as the test progresses. See [test run recovery](./examples/erc20-vault/README.md#test-run-recovery) in the erc20-vault integration testing package for more details.
+
+# Compiling, Building and Running Tests
+
+There are two test layers. The unit tests run offline against a simulated Midnight runtime: no docker stack, no zk keys, seconds not minutes. The end to end integration suites (what the [Quickstart](#quickstart) runs) drive the full protocol against the local docker stack and the fakenet MPC responder.
+
+## Unit tests
+
+Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only the contract packages have a compile step, and only they have a zk compile option. Unit tests do not need zk keys, though the vault's deploy-tx suite gates itself on them: without keys it skips visibly (its describe title says so) rather than failing. From the root of the repository:
+
+```sh
+## --- All packages ---
+
+# Quick compile: all packages (checks syntax and generates circuits)
+# Runs the compact compiler for each contract package without generating zk keys (compiler output in the package's src/managed/)
+yarn compile
+
+# Longer compile: all packages that require zk keys (checks syntax, generates circuits and zk keys)
+# Runs the compact compiler with zk keys for each package that has a :zk option (needed for deploys and the e2e suites, not for unit tests)
+yarn compile:zk
+
+# Test: all packages (typecheck + unit tests: offline simulator-only)
+# Requires 'yarn compile' to have been run (contract packages typecheck against the generated managed/ output).
+yarn test
+
+# Build: all packages
+# Requires 'yarn compile'.
+yarn build
+
+## --- Per example ---
+
+# The erc20-vault example (contract + integration-tests packages):
+yarn compile:erc20-vault
+yarn compile:erc20-vault:zk  # generates the vault contract's zk keys
+yarn test:erc20-vault        # requires at least 'yarn compile:erc20-vault'
+yarn build:erc20-vault       # requires 'yarn compile:erc20-vault'
+```
+
+## Integration tests
+
+The e2e suites need the running docker stack and the fakenet MPC responder: the [Quickstart](#quickstart) walks the first run end to end, and the [erc20-vault README](examples/erc20-vault/README.md) documents every spec in the suite. From the root:
+
+```sh
+yarn test:erc20-vault:e2e                              # the full six-spec suite, requires 'yarn compile'
+yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any tests/*.test.ts name works), requires 'yarn compile'
+```
 
 # Prerequisites
 
@@ -155,14 +203,14 @@ Integrating a contract on Midnight with the Sig Network MPC consists of:
    // Configured and sized here for an EVM Type 2 transaction with
    // <1 calldata word, 0 access-list entries, 0 storage keys> and
    // 34-byte serialisation schemas.
-   export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EVMType2TxParams<1, 0, 0>, 34, 34>;
+   export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<1, 0, 0>, 34, 34>;
 
    // Required: The Signet singleton signer interface, set at deploy.
    // Used to notify the MPC of events you add to your signBidirectionalEventMap.
    sealed ledger signetSigner: SignetSigner;
 
    // Required: This contract's MPC response key, set in step 4.
-   // Used to verify RespondBidirectionalEvents containing the serialised output of foreign chain execution.
+   // Used to verify RespondBidirectionalEvents attesting the output of foreign chain execution.
    export ledger mpcResponseKey: Secp256k1Point;
 
    // Recommended: contract-local source of request nonces, so identical
@@ -243,8 +291,8 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
 
    ```compact
    // Construct SignBidirectionalEvent signature request and calculate its RequestId
-   const request = constructSignBidirectionalEvent<EVMType2TxParams<1, 0, 0>, 34, 34>(/* ... */);
-   const requestId = disclose(calculateRequestId<EVMType2TxParams<1, 0, 0>, 34, 34>(request));
+   const request = constructSignBidirectionalEvent<EvmType2TxParams<1, 0, 0>, 34, 34>(/* ... */);
+   const requestId = disclose(calculateRequestId<EvmType2TxParams<1, 0, 0>, 34, 34>(request));
 
    // Store the signature request in your signBidirectionalEventMap for MPC to discover
    signetRequestNonce.increment(1);
@@ -252,7 +300,7 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
 
    // Notify the MPC of the SignBidirectionalEvent and the location of your signBidirectionalEventMap.
    // The location is 0 here based on the position of the declaration in Setup step 3.
-   signetSigner.signBidirectionalEvent(
+   signetSigner.signBidirectional(
       requestId,
       constructSignBidirectionalEventNotificationV1(kernel.self(), 0 as Uint<8>),
    );
@@ -272,30 +320,49 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
    ```ts
    import { JsonRpcProvider } from "ethers";
 
-   const signedTx = await reader.getSignedEVMTransaction(requestId, expectedSigner);
+   const signedTx = await reader.getSignedEvmTransaction(requestId, expectedSigner);
    await new JsonRpcProvider(foreignChainRpcUrl).broadcastTransaction(signedTx.serialized);
    ```
 
-4. Poll the Signet singleton for the MPC's signed remote execution output (posted once the MPC observes the transaction execute on the foreign chain). Posts are stored unverified, so treat them as candidates: the authoritative check is your contract's verify circuit in step 5:
+4. Poll the Signet singleton for the MPC's remote execution attestation (posted once the MPC observes the transaction execute on the foreign chain). The event carries only the 32-byte attestation digest, `keccak256(requestId || serializedOutput)`, plus the MPC's ECDSA signature over it: the serialized output itself travels off chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and digest-match it against the posted events. Posts are stored unverified, so treat them as candidates: the authoritative check is your contract's verify circuit in step 5:
 
    ```ts
-   const [respondBidirectionalEvent] = await reader.getRespondBidirectionalEvents(requestId);
+   import { calculateSignetAttestationDigest, deserializeEvmOutput, requestIdBytes, serializeRespondOutput } from "@sig-net/midnight";
+
+   const events = await reader.getRespondBidirectionalEvents(requestId);
    // Empty array: not posted yet, poll again.
+
+   // Recompute the serialized output from the raw execution output (fetched
+   // off chain, e.g. from the fakenet's /responses API) and select the event
+   // whose attested digest matches.
+   const decoded = deserializeEvmOutput(mySchema, rawExecutionOutput);
+   const serializedOutput = serializeRespondOutput(mySchema, decoded);
+   const digest = calculateSignetAttestationDigest(requestIdBytes(requestId), serializedOutput);
+   const respondBidirectionalEvent = events.find(
+      (event) => Buffer.from(event.attestationDigest).equals(Buffer.from(digest)),
+   );
    ```
 
-5. Deliver the response to your contract, which verifies it in-circuit against the response key pinned in Setup step 4 and consumes the request:
+5. Deliver the event AND the recomputed output bytes to your contract, which re-hashes the bytes, verifies the ECDSA signature in-circuit against the response key pinned in Setup step 4, and consumes the request:
 
    ```compact
    assert(
-      verifyRespondBidirectionalEvent(requestId, respondBidirectionalEvent, mpcResponseKey),
+      verifyRespondBidirectionalEvent<1>(
+         requestId,
+         serializedOutput,
+         disclose(respondBidirectionalEvent),
+         mpcResponseKey
+      ),
       "Invalid attestation signature"
    );
    signBidirectionalEventMap.remove(requestId);
    ```
 
+   The width parameter (`<1>` here) is your respond serialisation schema's exact packed byte width: the output is hashed at that width, never padded.
+
 # EVM Type 2 Transactions and ABI Calldata Words
 
-An `EVMType2TxParams` request decomposes the EVM transaction into typed fields your contract can enforce field by field in-circuit. Its optional `calldata` is an `EVMCalldata<maxWords>`: the 4-byte function selector plus a list of 32-byte ABI words, per the [Solidity ABI spec](https://docs.soliditylang.org/en/latest/abi-spec.html). Slots past `noWords` are unused capacity and never reach the transaction.
+An `EvmType2TxParams` request decomposes the EVM transaction into typed fields your contract can enforce field by field in-circuit, declared in canonical EIP-1559 order (chainId, nonce, maxPriorityFeePerGas, maxFeePerGas, gasLimit, to, value, calldata, accessListEntryCount, accessList), which is also the request-id hash order. Its optional `calldata` is an `EvmCalldata<maxWords>`: the 4-byte function selector plus a list of 32-byte ABI words, per the [Solidity ABI spec](https://docs.soliditylang.org/en/latest/abi-spec.html). Slots past `noWords` are unused capacity and never reach the transaction.
 
 Every word must be stored in canonical ABI form (big-endian). The MPC signs a transaction whose calldata is exactly `selector || words[0..noWords]`, byte for byte, so a word stored in any other form becomes a signed transaction calling the foreign contract with garbage arguments. Compact's integer casts are little-endian, so do not hand-roll the byte order: build every word with the helper circuits the Signet module exports, and read words back with the matching readers.
 
@@ -310,7 +377,7 @@ Every word must be stored in canonical ABI form (big-endian). The MPC signs a tr
 `transfer(address,uint256)`, selector `0xa9059cbb`, takes an address word and a numeric word. This is exactly how the erc20-vault contract builds its deposit and withdrawal calldata:
 
 ```compact
-const calldata = EVMCalldata<2> {
+const calldata = EvmCalldata<2> {
   selector: Bytes[0xa9, 0x05, 0x9c, 0xbb],
   noWords: 2 as Uint<16>,
   words: [
@@ -325,7 +392,7 @@ const calldata = EVMCalldata<2> {
 `setApprovalForAll(address,bool)`, selector `0xa22cb465`:
 
 ```compact
-const calldata = EVMCalldata<2> {
+const calldata = EvmCalldata<2> {
   selector: Bytes[0xa2, 0x2c, 0xb4, 0x65],
   noWords: 2 as Uint<16>,
   words: [
@@ -335,11 +402,11 @@ const calldata = EVMCalldata<2> {
 };
 ```
 
-The readers run the same rules in the other direction, rejecting any non-canonical word instead of silently truncating or coercing it. A `RespondBidirectionalEvent`'s `serializedOutput` is the ABI-encoded return data of the remote call, so a settle circuit can decode an ERC20 `transfer`'s `bool` return from the first output word:
+The readers run the same rules in the other direction, rejecting any non-canonical word instead of silently truncating or coercing it. The serialized output a `RespondBidirectionalEvent` attests is the schema-packed return data of the remote call, delivered to the settle circuit as its own argument (Runtime step 5). Packed booleans are single bytes, so an ERC20 `transfer`'s result reads directly:
 
 ```compact
-const success = abiWordToBool(slice<32>(respondBidirectionalEvent.serializedOutput, 0));
-assert(success, "Remote transfer failed");
+const succeeded = serializedOutput as Field == 1 as Field;
+assert(succeeded, "Remote transfer failed");
 ```
 
 The same builders and readers exist in `@sig-net/midnight` as TypeScript twins under identical names, for composing expected words off-chain (UIs, expected-record builders, tests).

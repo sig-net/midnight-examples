@@ -28,7 +28,7 @@ import {
   printMpcServerConfig,
   requireEnv,
   resolveEvmChain,
-  retryDeployWhileDustGenerates,
+  retryWhileDustGenerates,
   runCommand,
   runSetupPipeline,
   startFakenetResponder,
@@ -87,7 +87,7 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
     env.VAULT_DEPLOYER_SECRET_KEY = bytesToHex(resolveUserIdentity(env).secretKey);
     console.log("defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialize is deployer-gated)");
   }
-  const contractAddress = await retryDeployWhileDustGenerates("deploy vault contract", async () => {
+  const contractAddress = await retryWhileDustGenerates("deploy vault contract", async () => {
     const stdout = await runCommand(
       "yarn",
       ["workspace", "@midnight-examples/erc20-vault-contract", "deploy"],

@@ -155,7 +155,7 @@ export async function withdraw(context: VaultContext, options: WithdrawOptions):
   );
   console.log(`withdraw finalized in tx ${result.public.txId}`);
 
-  // The ledger map key IS the record's persistent hash: recomputing it
+  // The ledger map key IS the record's keccak256 hash: recomputing it
   // off-chain and finding it on the ledger proves both sides agree on every
   // byte of the event.
   const after = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);

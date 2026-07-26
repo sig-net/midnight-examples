@@ -30,7 +30,6 @@
 // (src/flows/) — in-process, never a subprocess.
 
 import {
-  executionSucceeded,
   requestIdBytes,
   type RequestIdHex,
 } from "@sig-net/midnight";
@@ -246,7 +245,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
 
       // The claim below can only mint from a success attestation.
       expect(
-        executionSucceeded(attestation.serializedOutput),
+        attestation.succeeded,
         "the MPC must attest the deposit sweep as succeeded",
       ).toBe(true);
     },
@@ -377,9 +376,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
       timings.withdraw.pollRespondBidirectional = stop();
 
       // Happy-path benchmark: the broadcast leg saw the transfer mine, so
-      // the MPC must attest success (first output byte 1).
+      // the MPC must attest success (the 1-byte 0x01 result).
       expect(
-        executionSucceeded(attestation.serializedOutput),
+        attestation.succeeded,
         "the MPC must attest the withdraw transfer as succeeded",
       ).toBe(true);
     },

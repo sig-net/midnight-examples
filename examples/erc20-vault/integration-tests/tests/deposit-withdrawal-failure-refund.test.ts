@@ -26,11 +26,8 @@
 // (src/flows/) — in-process, never a subprocess.
 
 import {
-  executionSucceeded,
-  isExecutionError,
   requestIdBytes,
   type RequestIdHex,
-  type RespondBidirectionalEvent,
 } from "@sig-net/midnight";
 import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
@@ -49,7 +46,7 @@ import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit.ts";
-import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
+import { pollRespondBidirectional, type RespondOutcome } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { withdraw } from "../src/flows/withdraw.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
@@ -260,20 +257,25 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
         `Doomed transfer ${signedWithdrawTransaction.hash} mined and reverted, as arranged.`,
         "",
         "The responder should observe the status-0 receipt and post its",
-        "failure attestation (0xdeadbeef error sentinel) on its next poll.",
+        "failure attestation (the digest of the fixed 5-byte 0xdeadbeef01",
+        "failure output) on its next poll.",
       ]);
     },
     3 * MINUTE,
   );
 
   // Populated by the poll step below for the settle step.
-  let withdrawAttestation: RespondBidirectionalEvent;
+  let withdrawAttestation: RespondOutcome;
 
   it(
     "pollRespondBidirectional: the MPC attests the transfer as FAILED",
     async () => {
       expect(withdrawRequestId).toBeDefined();
 
+      // The event carries only the digest, so the poll fetches the observed
+      // result from the fakenet's /responses API and matches: for a mined
+      // revert the API serves success: false, so the ONLY matchable
+      // candidate is the protocol's fixed failure output.
       const context = await session.vaultContext();
       withdrawAttestation = await pollRespondBidirectional(context, {
         requestId: withdrawRequestId,
@@ -282,38 +284,41 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
       });
 
       // The observable contract of the failure leg: the attested output must
-      // NOT read as success (first output byte 0x01). The responder encodes
-      // a mined revert as its 0xdeadbeef error sentinel — log which failure
-      // shape arrived, but pin only the success flag.
+      // be the MPC's failure output (0xdeadbeef sentinel), never a success.
       expect(
-        executionSucceeded(withdrawAttestation.serializedOutput),
+        withdrawAttestation.succeeded,
         "the MPC must attest the reverted transfer as failed",
       ).toBe(false);
+      expect(
+        withdrawAttestation.matchedFailureOutput,
+        "a mined revert must be attested as the fixed MPC failure output",
+      ).toBe(true);
 
       banner([
         `Found failure attestation for doomed withdraw ${withdrawRequestId}:`,
         "",
-        `  executionSucceeded: false`,
-        `  MPC error sentinel: ${isExecutionError(withdrawAttestation.serializedOutput)}`,
+        `  succeeded:           false`,
+        `  MPC failure output:  true (digest-matched)`,
       ]);
     },
     5 * MINUTE,
   );
 
   it(
-    "completeWithdraw: takes the refund branch and consumes the request + refund marker",
+    "completeWithdraw: routes to refundWithdraw and consumes the request + refund marker",
     async () => {
       // Final leg: the request is on the vault ledger and the MPC's FAILURE
-      // attestation is posted (previous steps). Settling re-verifies the
-      // response in-circuit (ECDSA against the stored MPC response key) and branches on
-      // the EVM result — this is the FAILURE path, so the escrowed shielded
-      // value is re-minted to the withdrawer (this session's wallet, which
-      // proves the pinned refund commitment) instead of staying
-      // burned, and the request + its pending-withdrawal marker are consumed
-      // (double-settle protection). The refunded shielded balance itself is
-      // not publicly observable; the marker consumption is — present before,
-      // absent after — and the refund branch is the only completeWithdraw
-      // path a failure attestation can take.
+      // attestation is posted (previous steps). The settle flow routes the
+      // fixed 5-byte failure output to the refundWithdraw circuit, which
+      // re-verifies the attestation in-circuit (digest equality + ECDSA
+      // against the stored MPC response key), checks the sentinel bytes, and
+      // re-mints the escrowed shielded value to the withdrawer (this
+      // session's wallet, which proves the pinned refund commitment) instead
+      // of leaving it burned. The request + its pending-withdrawal marker
+      // are consumed (double-settle protection). The refunded shielded
+      // balance itself is not publicly observable; the marker consumption is
+      // (present before, absent after), and refundWithdraw is the only
+      // circuit a failure attestation can settle through.
       expect(withdrawRequestId).toBeDefined();
       expect(withdrawAttestation).toBeDefined();
 
@@ -340,11 +345,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
       const after = await readLedger();
       expect(
         after.signBidirectionalEventMap.member(requestKey),
-        "completeWithdraw must consume the request from the ledger",
+        "refundWithdraw must consume the request from the ledger",
       ).toBe(false);
       expect(
         after.refundCommitment.member(requestKey),
-        "completeWithdraw must consume the pending-withdrawal marker",
+        "refundWithdraw must consume the pending-withdrawal marker",
       ).toBe(false);
 
       banner([

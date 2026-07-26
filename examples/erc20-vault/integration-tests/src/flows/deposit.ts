@@ -16,7 +16,6 @@ import {
   SIGNET_DEFAULT_KEY_VERSION,
   TxParamType,
   calculateRequestId,
-  executionSucceeded,
   toSignBidirectionalEventIndex,
   type SignBidirectionalEvent,
   type RequestIdHex,
@@ -151,7 +150,7 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
   );
   console.log(`deposit finalized in tx ${result.public.txId}`);
 
-  // The ledger map key IS the record's persistent hash: recomputing it
+  // The ledger map key IS the record's keccak256 hash: recomputing it
   // off-chain and finding it on the ledger proves both sides agree on every
   // byte of the event.
   const after = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
@@ -261,14 +260,14 @@ export async function runDepositRoundTrip(
   // nonce-burned sweep throws — either would starve the claim, so let it.
   await broadcastEvm(context, { transaction: signedSweepTransaction });
 
-  const attestation = await pollRespondBidirectional(context, {
+  const outcome = await pollRespondBidirectional(context, {
     requestId,
     intervalMs: 1000,
     timeoutMs: 2 * MINUTE,
   });
   // This helper arranges a SUCCESSFUL deposit — a failure attestation means
   // the sweep did not land and the claim below could never mint.
-  if (!executionSucceeded(attestation.serializedOutput)) {
+  if (!outcome.succeeded) {
     throw new Error(
       `the MPC attested deposit sweep ${requestId} as FAILED — ` +
         `the sweep broadcast above mined, so the responder saw a different outcome (stale responder config?)`,

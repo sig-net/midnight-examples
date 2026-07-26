@@ -40,9 +40,10 @@ export async function drainVaultErc20(env: NodeJS.ProcessEnv, to: string): Promi
   const expectedAddress = requireEnv(env, "EVM_VAULT_ADDRESS");
   const erc20Address = requireEnv(env, "ERC20_ADDRESS");
 
-  // The private-key side of the sig-net v1.0.0 epsilon scheme:
-  // epsilon = deriveEpsilon(contract, path) (keccak of the derivation string
-  // reduced mod the curve order), derivedPriv = rootPriv + epsilon mod n.
+  // The private-key side of the sig-net v2.0.0 epsilon scheme:
+  // epsilon = deriveEpsilon(contract, path) (keccak of the colon-separated
+  // "<prefix>:<chainId>:<contract>:<path>" derivation string reduced mod the
+  // curve order), derivedPriv = rootPriv + epsilon mod n.
   const epsilon = deriveEpsilon(vaultContractAddress, "vault");
   const rootKey = BigInt(requireEnv(env, "MPC_ROOT_KEY"));
   const derivedPriv = (rootKey + epsilon) % SECP256K1_ORDER;

@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository —
 follow the quickstart top to bottom and a bare checkout ends at a green
-five-spec suite. The pipeline itself (globalSetup steps + flow test files)
+six-spec suite (60 tests). The pipeline itself (globalSetup steps + flow test files)
 lives in `examples/erc20-vault/integration-tests/`; setup (compile, deploy,
 key and address derivation, responder hand-off) runs in vitest globalSetup
 before ANY flow file — including single-file runs — and flow files run one at
@@ -26,6 +26,7 @@ Run everything from the repo root, in this order:
 corepack enable                # yarn 4 via the packageManager field
 yarn install                   # NEVER from inside a member package
 compact update 0.33.0-rc.2     # the ledger-9 rc toolchain — see the toolchain note
+yarn compile                   # run before the e2e
 docker compose up -d           # node :9944, indexer :8088, proof server :6300, anvil :8545
 yarn test:erc20-vault:e2e > e2e-run.log 2>&1 &        # BACKGROUND it, watch the log
 ```
@@ -58,7 +59,7 @@ chain id 31337) a fresh DEPLOY runs green in ONE pass: funding of the derived
 accounts is automatic, TestUSDC is auto-deployed, and the setup starts the
 fakenet responder itself mid-run. The FLOW files are another matter: on a
 16 GB Docker VM expect the proof-server OOM (see "Reading failures") to
-interrupt the suite at some proving leg partway through the five files —
+interrupt the suite at some proving leg partway through the six files:
 that is routine, not a defect; recover per the playbook and the suite
 completes across two or three invocations.
 
@@ -86,7 +87,7 @@ kept contracts.
 
 ## Ground rules (violating these wastes 10+ minutes per mistake)
 
-- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all five
+- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all six
   specs) or `yarn test:erc20-vault:e2e tests/<spec-file>` for one spec (the
   setup pipeline still runs first; extra args pass through to vitest).
 - **Background any run that may zk-compile or deploy** (fresh clone,
@@ -135,7 +136,12 @@ The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
 stand-in: it polls the signet contract's notification registry via the
 indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and
-posts responses through the proof server.
+posts responses through the proof server. It also serves the public
+`/responses/{requestId}` helper API on port 3040 (mapped to localhost by the
+compose file): the attestation poll and settle flows fetch each request's
+raw traced EVM output from it, so a poll that times out with
+`no fakenet response for … at http://localhost:3040/...` means the responder
+(or its API port mapping) is down, not the Midnight stack.
 
 - **Managed by setup (default):** the setup's hand-off steps append
   `MPC_ROOT_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
@@ -152,7 +158,8 @@ posts responses through the proof server.
 - **Responder development:** set `FAKENET_MANAGED=0` so setup leaves the
   responder — and `.env` — alone, and run it yourself (`yarn response` in a
   solana-signet-program checkout, with the current signet address and root
-  key in its config). Then a poll timeout is YOUR restart to do.
+  key in its config, and it serves the responses API on 3040 automatically).
+  Then a poll timeout is YOUR restart to do.
 - **Prover/verifier parity is by construction here:** the singleton is
   always deployed from the published `@sig-net/midnight-contract` — the same
   package the fakenet image proves with. Parity only breaks when a yarn link
@@ -195,7 +202,7 @@ posts responses through the proof server.
   proof is the FIRST on a fresh server and the rest of the file fits in the
   remaining headroom.
 - **A signature poll timing out on a request the responder DID log as "New
-  request"**, with `postSignatureResponse … FAILED` + a proof-server
+  request"**, with `respond(0x…) … FAILED` + a proof-server
   transport error in `docker logs fakenet-responder`: the responder proves
   its posts through the SAME proof server (:6300), and a proof-server
   restart during its post kills the post — the responder does not retry, so

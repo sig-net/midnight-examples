@@ -50,9 +50,18 @@ export interface AccountKeys {
  * The fee settings the facade balances transactions with: it burns
  * `feesWithMargin(params, feeBlocksMargin) + additionalFeeOverhead` per
  * transaction.
+ *
+ * The overhead compensates for the wallet sdk pricing a PROOF-ERASED
+ * transaction while the node prices the real proof bytes. The vault's
+ * keccak-based attestation-verification proofs (claim / completeWithdraw /
+ * refundWithdraw, ~9.2 KB vs ~6.4 KB for persistentHash-era ones) left the
+ * node's fee ~2.2e13 above the wallet's estimate, so the node rejected the
+ * spend with Malformed(BalanceCheckOverspend) (node custom error 138). 5e13
+ * covers that with headroom; the excess is simply burned dust. Mirrors the
+ * same constant in @sig-net/midnight-contract-deploy's wallet plumbing.
  */
 export const COST_PARAMETERS: { readonly additionalFeeOverhead: bigint; readonly feeBlocksMargin: number } = {
-  additionalFeeOverhead: 300_000_000_000n,
+  additionalFeeOverhead: 50_000_000_000_000n,
   feeBlocksMargin: 5,
 };
 

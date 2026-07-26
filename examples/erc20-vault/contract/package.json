@@ -17,11 +17,12 @@
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-    "@sig-net/midnight": "0.10.0",
-    "@sig-net/midnight-contract": "0.10.0"
+    "@sig-net/midnight": "0.13.0",
+    "@sig-net/midnight-contract": "0.13.0"
   },
   "devDependencies": {
     "@midnight-examples/lib": "*",
+    "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3",
     "@types/node": "^26.1.1",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",

@@ -33,10 +33,8 @@ import {
   waitForFacadeState,
 } from "@midnight-examples/lib";
 import {
-  executionSucceeded,
   requestIdBytes,
   type RequestIdHex,
-  type RespondBidirectionalEvent,
 } from "@sig-net/midnight";
 import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
@@ -54,7 +52,7 @@ import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit.ts";
-import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
+import { pollRespondBidirectional, type RespondOutcome } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { withdraw } from "../src/flows/withdraw.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
@@ -395,10 +393,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault bearer-transfer
 
       // broadcastEvm waits for one confirmation and throws if the tx
       // reverted; an already-mined tx (rerun) short-circuits.
-      const txHash = await broadcastEvm(context, { transaction: signedWithdrawTransaction });
+      const receipt = await broadcastEvm(context, { transaction: signedWithdrawTransaction });
 
       banner([
-        `Withdraw transaction mined on EVM: ${txHash}`,
+        `Withdraw transaction mined on EVM: ${receipt.hash}`,
         "",
         `The vault's derived account transferred ${WITHDRAW_AMOUNT} base units`,
         `back to ${requireEnv("EVM_USER_ADDRESS")}.`,
@@ -408,7 +406,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault bearer-transfer
   );
 
   // Populated by the poll step below for the settle step.
-  let withdrawAttestation: RespondBidirectionalEvent;
+  let withdrawAttestation: RespondOutcome;
 
   it(
     "pollRespondBidirectional: the MPC attests wallet B's transfer as succeeded",
@@ -423,9 +421,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault bearer-transfer
       });
 
       // The broadcast step saw the transfer mine, so the MPC must attest
-      // success (first output byte 1), not its error sentinel.
+      // success (the 1-byte 0x01 result), not its failure output.
       expect(
-        executionSucceeded(withdrawAttestation.serializedOutput),
+        withdrawAttestation.succeeded,
         "the MPC must attest wallet B's withdraw transfer as succeeded",
       ).toBe(true);
 
