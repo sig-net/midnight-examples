@@ -1,36 +1,10 @@
-// Network identity + endpoint resolution. Pure — no network, no crypto.
+// Reading a node config out of the environment. Pure — no network, no crypto.
+// The primitives these resolve against (network ids, endpoint defaults, the WS
+// derivation) are tested in @midnight-examples/chain-config.
 
 import { describe, expect, it } from "vitest";
 
-import {
-  FAUCET_URLS,
-  getFaucetUrl,
-  getMidnightNodeConfig,
-  isLocalStandaloneNetwork,
-  NETWORK_IDS,
-  type NetworkId,
-} from "../src/index.ts";
-
-describe("network ids", () => {
-  it("includes stagenet", () => {
-    expect(NETWORK_IDS).toContain("stagenet");
-  });
-
-  interface StandaloneCase {
-    networkId: NetworkId;
-    expected: boolean;
-  }
-  const STANDALONE_CASES: StandaloneCase[] = [
-    { networkId: "undeployed", expected: true },
-    { networkId: "stagenet", expected: false },
-    { networkId: "preview", expected: false },
-    { networkId: "preprod", expected: false },
-    { networkId: "mainnet", expected: false },
-  ];
-  it.each(STANDALONE_CASES)("isLocalStandaloneNetwork($networkId) === $expected", ({ networkId, expected }) => {
-    expect(isLocalStandaloneNetwork(networkId)).toBe(expected);
-  });
-});
+import { getFaucetUrl, getMidnightNodeConfig } from "../src/index.ts";
 
 // Stagenet's endpoints are deliberately not published in this repo: the
 // defaults are blank and the environment must supply them.
@@ -56,8 +30,11 @@ describe("getMidnightNodeConfig for stagenet", () => {
     });
   });
 
-  it("publishes no stagenet faucet URL; MIDNIGHT_FAUCET_URL supplies one", () => {
-    expect(FAUCET_URLS.stagenet).toBeUndefined();
+  it("rejects an unknown NETWORK_ID", () => {
+    expect(() => getMidnightNodeConfig({ NETWORK_ID: "nosuchnet" })).toThrow(/Invalid NETWORK_ID/);
+  });
+
+  it("takes MIDNIGHT_FAUCET_URL as the faucet hint, publishing none itself", () => {
     expect(getFaucetUrl({}, "stagenet")).toBeUndefined();
     expect(getFaucetUrl({ MIDNIGHT_FAUCET_URL: "https://faucet.example" }, "stagenet")).toBe(
       "https://faucet.example",

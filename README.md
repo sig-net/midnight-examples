@@ -455,8 +455,15 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
 │       └── other-example.yaml      # One thin caller per example.
 │
 ├── packages/                   # Shared utilities for repository.
+│   ├── chain-config/           # @midnight-examples/chain-config
+│   │   ├── package.json        # ISOMORPHIC config primitives: network ids,
+│   │   ├── tsconfig.json       #   endpoint defaults, the MidnightNodeConfig
+│   │   ├── tsconfig.tests.json #   shape. Runs unchanged in BOTH a browser and
+│   │   └── src/                #   Node: zero runtime deps, no env access. The
+│   │       └── index.ts        #   one shared package a UI may import.
+│   │
 │   ├── lib/                    # @midnight-examples/lib
-│   │   ├── package.json        # Runtime helpers imported by examples
+│   │   ├── package.json        # Node-only runtime helpers imported by examples
 │   │   ├── tsconfig.json       #   (wallet, providers, tx build & submit).
 │   │   └── src/
 │   │       └── index.ts

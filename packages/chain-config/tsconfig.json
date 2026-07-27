@@ -1,0 +1,19 @@
+{
+  // src/ ONLY, and deliberately so. This config gives the sources no Node
+  // types (`types: []` from the base config), which makes `process`, `Buffer`
+  // and every `node:` import a compile error here — one half of this package's
+  // isomorphic guarantee, enforced by the compiler rather than by review.
+  //
+  // The tests are Node and DO read the filesystem, so they compile under
+  // tsconfig.tests.json instead. Never merge the two: giving src/ Node types
+  // to satisfy a test silently removes the guarantee.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // "DOM" is here for the WHATWG `URL` type ONLY, which Node and browsers
+    // both implement and TypeScript ships in no smaller lib. It means DOM
+    // globals type-check in src/ even though they would throw under Node, so
+    // that half of the guarantee is enforced by tests/isomorphic.test.ts.
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src"]
+}

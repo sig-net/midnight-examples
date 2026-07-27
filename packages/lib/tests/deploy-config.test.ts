@@ -2,7 +2,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import { getDeployConfig, type NetworkId } from "../src/index.ts";
+import type { NetworkId } from "@midnight-examples/chain-config";
+
+import { getDeployConfig } from "../src/index.ts";
 
 // The pre-funded genesis mint wallet of the local standalone stack — the
 // documented default when DEPLOYER_SEED is unset.

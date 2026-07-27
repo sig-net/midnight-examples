@@ -3,8 +3,11 @@
 This repository is a single **Yarn workspace** (Yarn 4 via corepack, `nodeLinker:
 node-modules`), split between shared machinery and the examples integrators copy:
 
+- **`packages/chain-config`** — ISOMORPHIC chain configuration primitives
+  (network ids, endpoint defaults, the `MidnightNodeConfig` shape). Data, types
+  and pure functions that MUST run unchanged in both a browser and Node.
 - **`packages/lib`** — runtime helpers imported by examples (wallet,
-  providers, tx build & submit). Kept ruthlessly small.
+  providers, tx build & submit). Node-only. Kept ruthlessly small.
 - **`packages/test-harness`** — test-only machinery (stack bring-up/teardown,
   mpc-keys setup, wallet funding, env/session handling, subprocess helpers).
   Test-only deps live here and never touch an example's manifests.
@@ -243,3 +246,25 @@ in check, and they hold for every `ui` member:
   other way: the UI imports the example's `contract` package, whose export
   surface is environment-agnostic for exactly this reason, and never
   `packages/lib` or `packages/test-harness` (both Node-only).
+
+# `packages/chain-config`
+
+The one shared package an example's `ui` member may import, and simultaneously
+a dependency of `packages/lib` and the Node flows.
+
+- **It MUST run unchanged in BOTH a browser and Node, and that is CRITICAL.**
+  Both halves are load-bearing and both break silently: a bundler stubs a Node
+  builtin rather than failing, and a DOM global type-checks because `lib.dom`
+  supplies the `URL` type. Neither shows up as a red build. The package enforces
+  this itself with a split tsconfig (`src/` compiles with no Node types) and a
+  source scan in its tests.
+- **Its rules live in
+  [packages/chain-config/AGENTS.md](packages/chain-config/AGENTS.md)** (with a
+  one-line `CLAUDE.md` pointing at it, as at the repo root). Read it before
+  adding ANY import to that package, including a devDependency.
+- **This package is a stopgap, and deleting it is the goal.** Its contents
+  duplicate `@sig-net/midnight-contract-deploy`'s `plumbing/` verbatim, and a
+  browser cannot import that package (it pulls in `@effect/platform-node`). The
+  real fix is for the client-agnostic `@sig-net/midnight` to export these
+  primitives. When it does, delete this package and import the SDK's, per the
+  never-duplicate-what-the-SDK-exports rule.

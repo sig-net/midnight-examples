@@ -22,8 +22,7 @@ import {
 } from "@midnightntwrk/wallet-sdk-unshielded-wallet";
 import { InMemoryTransactionHistoryStorage } from "@midnightntwrk/wallet-sdk-abstractions";
 
-import type { MidnightNodeConfig } from "./midnight-node-config.ts";
-import type { NetworkId } from "./network-id.ts";
+import type { MidnightNodeConfig, NetworkId } from "@midnight-examples/chain-config";
 import { parseSeed } from "./seed.ts";
 
 // Consumers hold facades/states we hand them without adding the wallet-sdk

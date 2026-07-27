@@ -11,7 +11,8 @@ import { findDeployedContract, type FoundContract } from "@midnight-ntwrk/midnig
 // takes it explicitly). createVaultContext sets it once per construction.
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 
-import { getMidnightNodeConfig, type MidnightNodeConfig } from "@midnight-examples/lib";
+import type { MidnightNodeConfig } from "@midnight-examples/chain-config";
+import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { requireEnv, type SessionWallet } from "@midnight-examples/test-harness";
 import { SignetRequestResponseReader } from "@sig-net/midnight";
 import {

@@ -14,10 +14,12 @@ index.html          # the single HTML entry Vite serves and bundles
 vite.config.ts      # bundler plugins plus the vitest (jsdom) block
 src/
   main.tsx          # mounts <App/> into #root
-  App.tsx           # the route table, every route inside the shared shell
+  App.tsx           # the provider stack wrapped around the route table
   routes.ts         # RoutePath enum: the single source of truth for paths
   index.css         # Tailwind import and the design tokens
+  vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
   components/       # presentational components: precise props, no fetching
+    contexts/       # app-wide React contexts, all mounted in App.tsx
   pages/            # one component per route
 tests/
   setup.ts          # jest-dom matchers and per-test cleanup
@@ -44,13 +46,27 @@ tests/
 - **Chain access goes through `@midnight-examples/erc20-vault-contract`.** Its
   `src/index.ts` is environment-agnostic precisely so a browser can import it.
   Never reimplement circuit calls, address derivation or encoding that the
-  contract package or `@sig-net/midnight` already exports, and NEVER import
-  `@midnight-examples/lib` or `@midnight-examples/test-harness`: both are
-  Node-only and will not bundle.
+  contract package or `@sig-net/midnight` already exports.
+- **Of the shared packages, ONLY `@midnight-examples/chain-config` may be
+  imported.** It is isomorphic by contract: data, types and pure functions with
+  no runtime dependency, so it bundles here and still runs under Node for the
+  flows and the harness. Anything you add to it must keep BOTH halves working,
+  which is why it has its own AGENTS.md. `@midnight-examples/lib` and
+  `@midnight-examples/test-harness`
+  are Node-only and NEVER appear here: lib's barrel re-exports a deploy module
+  that pulls in `@effect/platform-node` and undici, which a bundler stubs rather
+  than rejects, so the failure surfaces as a runtime error in the browser and
+  not as a red build. Before adding any dependency that might not be
+  browser-safe, bundle it on its own with `vite build` and check the output for
+  "externalized for browser compatibility" warnings.
 - **NEVER read configuration from a hardcoded constant.** Contract addresses,
   indexer and proof-server URLs and network ids enter through `import.meta.env`
-  (`VITE_`-prefixed), typed once, and validated at startup so a missing value
-  fails loudly rather than rendering an empty view.
+  (`VITE_`-prefixed) over the defaults `@midnight-examples/chain-config`
+  publishes, and are validated at startup so a bad value fails loudly rather
+  than rendering an empty view. EVERY variable the app reads is declared in
+  `src/vite-env.d.ts`: Vite types `import.meta.env` with an `any` index
+  signature, so an undeclared variable is a silent `undefined` at runtime rather
+  than a typo the compiler catches.
 - **NEVER fetch in a `useEffect`.** The first feature that reads chain or
   indexer state brings TanStack Query in with it, and every read after that is a
   `useQuery` and every write a `useMutation`. A hand-rolled fetch-and-set-state

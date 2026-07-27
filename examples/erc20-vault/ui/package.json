@@ -11,6 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@midnight-examples/chain-config": "*",
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router": "8.3.0"

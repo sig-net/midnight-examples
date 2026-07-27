@@ -13,8 +13,13 @@ import * as CoinPublicKey from "@midnight-ntwrk/platform-js/effect/CoinPublicKey
 import type { FacadeState } from "@midnightntwrk/wallet-sdk-facade";
 import { Effect, Layer, Option, type Types } from "effect";
 
-import { getFaucetUrl, getMidnightNodeConfig, type MidnightNodeConfig } from "./midnight-node-config.ts";
-import { isLocalStandaloneNetwork, type NetworkId } from "./network-id.ts";
+import {
+  isLocalStandaloneNetwork,
+  type MidnightNodeConfig,
+  type NetworkId,
+} from "@midnight-examples/chain-config";
+
+import { getFaucetUrl, getMidnightNodeConfig } from "./midnight-node-config.ts";
 
 /** Everything needed to perform a contract deploy: which stack to target, and which wallet pays for it. */
 export interface DeployConfig {

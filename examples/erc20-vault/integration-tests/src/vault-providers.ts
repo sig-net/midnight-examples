@@ -13,12 +13,12 @@ import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-pri
 import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
 import type { MidnightProviders } from "@midnight-ntwrk/midnight-js/types";
 
+import type { MidnightNodeConfig } from "@midnight-examples/chain-config";
 import {
   createCrossContractProofServerProvider,
   createWalletAndMidnightProvider,
   makeCompiledContract,
   type AccountKeys,
-  type MidnightNodeConfig,
   type WalletFacade,
 } from "@midnight-examples/lib";
 import { Contract, witnesses, type VaultPrivateState } from "@midnight-examples/erc20-vault-contract";

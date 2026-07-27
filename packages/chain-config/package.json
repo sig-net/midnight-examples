@@ -1,0 +1,20 @@
+{
+  "name": "@midnight-examples/chain-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ISOMORPHIC chain configuration primitives: network ids, endpoint defaults and the MidnightNodeConfig shape. CRITICAL: this package MUST run unchanged in BOTH a browser bundle and Node. Zero runtime dependencies, no environment access, no Node builtin and no DOM global — that is the whole point of it existing, and it is what lets a UI and a Node test harness share one source of truth.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.tests.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.4",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

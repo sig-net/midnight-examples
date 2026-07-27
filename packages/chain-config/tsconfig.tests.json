@@ -1,0 +1,10 @@
+{
+  // The tests are Node: they read src/ off the filesystem to enforce this
+  // package's isomorphic guarantee. Node types therefore belong HERE and
+  // nowhere near src/, which compiles under tsconfig.json without them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src", "tests"]
+}

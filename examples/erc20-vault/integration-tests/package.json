@@ -12,6 +12,7 @@
     "read-state": "tsx scripts/read-state.ts"
   },
   "dependencies": {
+    "@midnight-examples/chain-config": "*",
     "@midnight-examples/erc20-vault-contract": "*",
     "@midnight-examples/lib": "*",
     "@midnight-examples/test-harness": "*",

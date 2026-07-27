@@ -42,13 +42,35 @@ index.html          # the single HTML entry Vite serves and bundles
 vite.config.ts      # bundler plugins plus the vitest (jsdom) block
 src/
   main.tsx          # mounts <App/> into #root
-  App.tsx           # the route table, every route inside the shared shell
+  App.tsx           # the provider stack wrapped around the route table
   routes.ts         # RoutePath enum: the single source of truth for paths
   index.css         # Tailwind import and the design tokens
+  vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
   components/       # the application shell
+    contexts/       # app-wide React contexts
   pages/            # one component per route
 tests/              # Testing Library specs run under vitest
 ```
+
+## Configuration
+
+The app starts on the local standalone stack (`undeployed`) with the endpoint
+defaults published by `@midnight-examples/chain-config`. Put any override in a
+`.env.local` file in this directory. Only `VITE_`-prefixed variables reach the
+browser.
+
+| Variable | Effect |
+| --- | --- |
+| `VITE_MIDNIGHT_NETWORK_ID` | Which network to start on. Startup fails naming the valid ids if this is not one of them. |
+| `VITE_MIDNIGHT_INDEXER_URL` | Indexer GraphQL over HTTP. Setting it also derives the WebSocket URL, so the two cannot point at different hosts. |
+| `VITE_MIDNIGHT_INDEXER_WS_URL` | Indexer GraphQL over WebSocket, when it is not simply the twin of the HTTP URL. |
+| `VITE_MIDNIGHT_NODE_URL` | Midnight node RPC. |
+| `VITE_MIDNIGHT_PROOF_SERVER_URL` | Proof server. Stays local by default: it sees private witness data. |
+
+These set the *starting* config. Switching network in the running app resets
+every endpoint to that network's published defaults, so stagenet (whose
+endpoints this repo deliberately does not publish) has to be selected through
+the environment.
 
 ## Where the chain wiring goes
 
