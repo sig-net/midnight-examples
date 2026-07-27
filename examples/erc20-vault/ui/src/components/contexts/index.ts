@@ -5,6 +5,12 @@ export {
   type EVMChainConfigContextValue,
 } from "./EVMChainConfigContext.tsx";
 export {
+  EVMWalletProvider,
+  useEVMWallet,
+  type EVMWalletContextValue,
+  type InjectedEvmWallet,
+} from "./EVMWalletContext.tsx";
+export {
   MidnightChainConfigProvider,
   useMidnightChainConfig,
   type MidnightChainConfigContextValue,

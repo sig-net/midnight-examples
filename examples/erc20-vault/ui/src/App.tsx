@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from "react-router";
 import { AppLayout } from "./components/AppLayout";
 import {
   EVMChainConfigProvider,
+  EVMWalletProvider,
   MidnightChainConfigProvider,
   MidnightWalletProvider,
 } from "./components/contexts";
@@ -21,14 +22,16 @@ export const App = (): JSX.Element => (
   <MidnightChainConfigProvider>
     <MidnightWalletProvider>
       <EVMChainConfigProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route element={<AppLayout />}>
-              <Route path={RoutePath.Home} element={<HomePage />} />
-              <Route path="*" element={<NotFoundPage />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
+        <EVMWalletProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route element={<AppLayout />}>
+                <Route path={RoutePath.Home} element={<HomePage />} />
+                <Route path="*" element={<NotFoundPage />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </EVMWalletProvider>
       </EVMChainConfigProvider>
     </MidnightWalletProvider>
   </MidnightChainConfigProvider>
