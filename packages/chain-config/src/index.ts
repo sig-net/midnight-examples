@@ -16,3 +16,4 @@
 // import.meta.env.
 export * from "./network-id.ts";
 export * from "./endpoints.ts";
+export * from "./evm.ts";

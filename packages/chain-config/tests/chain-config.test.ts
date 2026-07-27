@@ -3,10 +3,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  caip2ChainId,
   DEFAULT_ENDPOINTS,
   FAUCET_URLS,
   indexerWsUrlFromIndexerUrl,
   isLocalStandaloneNetwork,
+  LOCAL_EVM_CHAIN,
   LOCAL_PROOF_SERVER,
   NETWORK_IDS,
   type NetworkId,
@@ -71,5 +73,34 @@ describe("indexerWsUrlFromIndexerUrl", () => {
 
   it("rejects a non-absolute URL", () => {
     expect(() => indexerWsUrlFromIndexerUrl("/api/v3/graphql")).toThrow();
+  });
+});
+
+describe("EVM chain config", () => {
+  // The compose stack's `evm` service is anvil on its default chain id. These
+  // are the values the e2e suite and the UI both start from, so a change here
+  // silently repoints both.
+  it("defaults to the local anvil dev chain, with no explorer", () => {
+    expect(LOCAL_EVM_CHAIN).toEqual({ chainId: 31337n, rpcUrl: "http://127.0.0.1:8545" });
+  });
+
+  /** A chain id, and the CAIP-2 string an example seals for it. */
+  interface Caip2Case {
+    chainId: bigint;
+    expected: string;
+  }
+  const CAIP2_CASES: Caip2Case[] = [
+    { chainId: 31337n, expected: "eip155:31337" },
+    { chainId: 1n, expected: "eip155:1" },
+    { chainId: 11155111n, expected: "eip155:11155111" },
+  ];
+  it.each(CAIP2_CASES)("caip2ChainId($chainId) === $expected", ({ chainId, expected }) => {
+    expect(caip2ChainId(chainId)).toBe(expected);
+  });
+
+  // The id is sealed into the contract as ASCII and must never carry the
+  // bigint literal's trailing "n".
+  it("emits no bigint suffix", () => {
+    expect(caip2ChainId(31337n)).not.toContain("n");
   });
 });

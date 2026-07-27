@@ -39,6 +39,17 @@ test` runs both.
 | `LOCAL_PROOF_SERVER` | The local proof server URL. It sees private witness data, so it is never remote. |
 | `FAUCET_URLS` | Published faucet URLs, for underfunded-wallet hints. |
 | `indexerWsUrlFromIndexerUrl` | Derives the indexer's WebSocket URL from its HTTP URL, so the two cannot point at different hosts. |
+| `EvmChainConfig` | Everything needed to reach one EVM chain: its id, JSON-RPC endpoint and optional block explorer. |
+| `LOCAL_EVM_CHAIN` | The local dev chain, which is the `evm` compose service running anvil on chain id 31337. |
+| `caip2ChainId` | Derives a chain's CAIP-2 id (`eip155:<id>`), the form an example seals into its contract and the MPC routes on. |
+
+The EVM side is deliberately much smaller than the Midnight side. An EVM chain
+is reached through a single JSON-RPC endpoint, so there is no endpoint set to
+keep consistent and no named-network table to select from. The chain id is the
+one value that carries real weight, since an example seals `eip155:<chainId>`
+at initialize: a config that disagrees with the chain its RPC serves produces
+requests the vault will not honour. Verifying that agreement needs a live
+`eth_chainId` call, so it belongs to the consumer, not here.
 
 ## Relationship to the SDK
 

@@ -66,11 +66,20 @@ browser.
 | `VITE_MIDNIGHT_INDEXER_WS_URL` | Indexer GraphQL over WebSocket, when it is not simply the twin of the HTTP URL. |
 | `VITE_MIDNIGHT_NODE_URL` | Midnight node RPC. |
 | `VITE_MIDNIGHT_PROOF_SERVER_URL` | Proof server. Stays local by default: it sees private witness data. |
+| `VITE_EVM_RPC_URL` | JSON-RPC endpoint of the EVM chain. Defaults to the local anvil compose service. |
+| `VITE_EVM_CHAIN_ID` | The EVM chain id to expect. Defaults to anvil's 31337. |
+| `VITE_EVM_EXPLORER_URL` | Block explorer base URL, for linking transactions and addresses. |
 
-These set the *starting* config. Switching network in the running app resets
-every endpoint to that network's published defaults, so stagenet (whose
+These set the *starting* config. Switching Midnight network in the running app
+resets every endpoint to that network's published defaults, so stagenet (whose
 endpoints this repo deliberately does not publish) has to be selected through
 the environment.
+
+The EVM chain id is not cosmetic: the vault seals `eip155:<chainId>` into its
+contract at initialize, and that is the routing key the MPC signs against.
+Nothing here yet proves the RPC actually serves the chain id you configured,
+so a mismatch is currently undetected. Verifying it needs a live `eth_chainId`
+call, which arrives with the first feature that talks to the chain.
 
 ## Where the chain wiring goes
 

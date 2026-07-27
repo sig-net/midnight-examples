@@ -15,6 +15,12 @@ interface ImportMetaEnv {
   readonly VITE_MIDNIGHT_NODE_URL?: string;
   /** Proof server. Stays local by default: it sees private witness data. */
   readonly VITE_MIDNIGHT_PROOF_SERVER_URL?: string;
+  /** JSON-RPC endpoint of the EVM chain, overriding the local dev chain's. */
+  readonly VITE_EVM_RPC_URL?: string;
+  /** The EVM chain id to expect. Must match what that RPC actually serves. */
+  readonly VITE_EVM_CHAIN_ID?: string;
+  /** Block explorer base URL, for linking transactions and addresses. */
+  readonly VITE_EVM_EXPLORER_URL?: string;
 }
 
 interface ImportMeta {
