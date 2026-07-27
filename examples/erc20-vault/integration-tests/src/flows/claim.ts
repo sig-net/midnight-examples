@@ -1,7 +1,8 @@
 // `claim`: the second half of the deposit flow. Present the MPC's
-// digest-only RespondBidirectionalEvent of the EVM sweep together with the
-// recomputed serialized output to the vault, which re-hashes and verifies
-// them in-circuit against its stored MPC response key and mints shielded
+// signature-only RespondBidirectionalEvent of the EVM sweep together with the
+// recomputed serialized output to the vault, which re-hashes the output into
+// the attestation digest and verifies the signature over it in-circuit
+// against its stored MPC response key, then mints shielded
 // tokens to the caller (or a recipient the caller names) under a fresh
 // RANDOM mint nonce, so the minted coin cannot be linked back to the
 // request.
@@ -45,7 +46,7 @@ export interface ClaimOptions {
  * Call the vault's `claim` circuit for a completed deposit request.
  *
  * Resolves the MPC's attestation for `options.requestId` from the signet
- * contract's unauthenticated log by digest-matching it against the
+ * contract's unauthenticated log by verifying its signature over the
  * independently recomputed sweep output (see
  * {@link fetchAttestedRespondOutcome}), then calls the circuit with the
  * event AND the recomputed output bytes. The circuit re-hashes the bytes,

@@ -1,10 +1,10 @@
-// Respond-output recomputation: the client half of the hash-only attestation
-// protocol. The MPC's RespondBidirectionalEvent carries only the 32-byte
-// attestation digest (keccak256 of requestId ++ serializedOutput) plus the
-// ECDSA signature, never the output itself, so the client obtains the output
-// bytes independently and matches them against the attested digest. Every
-// call recomputes BOTH candidate outputs the protocol allows and matches the
-// posted events against both digests:
+// Respond-output recomputation: the client half of the signature-only
+// attestation protocol. The MPC's RespondBidirectionalEvent carries only the
+// ECDSA signature over the attestation digest (keccak256 of requestId ++
+// serializedOutput), never the digest and never the output itself, so the
+// client obtains the output bytes independently and checks the signature
+// against them. Every call recomputes BOTH candidate outputs the protocol
+// allows and tries the posted events against both:
 //
 //   success candidate -> the fakenet's cached raw traced output (from its
 //                        public /responses/{requestId} helper API), decoded
@@ -15,23 +15,24 @@
 //                        (MPC_FAILURE_OUTPUT), schema-independent by design,
 //                        always a candidate.
 //
-// Candidate selection is by DIGEST EQUALITY alone: the cache's own success
-// flag is unauthenticated and never decides anything, it only gates whether
-// a success candidate can be built at all. Which candidate matched is also
-// what routes settlement (claim / completeWithdraw / refundWithdraw). The
-// fetched output is UNTRUSTED until that match: the matched bytes go into
-// the settle circuit as an argument, where
-// `verifyRespondBidirectionalEvent<N>` re-hashes them and verifies the ECDSA
-// signature in-circuit. That in-circuit check is the authentication gate, so
-// a forged post (or a tampered API response) that happens to carry a
-// matching digest merely wastes a proof, it cannot mint.
+// Candidate selection is by SIGNATURE VERIFICATION alone, against the
+// response key the vault pinned at initialize: the cache's own success flag
+// is unauthenticated and never decides anything, it only gates whether a
+// success candidate can be built at all. With no digest on the event there is
+// nothing else to match on. Which candidate verified is also what routes
+// settlement (claim / completeWithdraw / refundWithdraw). The fetched output
+// is UNTRUSTED until that check: the verified bytes go into the settle
+// circuit as an argument, where `verifyRespondBidirectionalEvent<N>` re-hashes
+// them and verifies the same signature in-circuit. That in-circuit check is
+// the authentication gate, so a forged post merely wastes a proof here, it
+// cannot mint.
 
 import {
   MPC_FAILURE_OUTPUT,
-  calculateSignetAttestationDigest,
   deserializeEvmOutput,
   requestIdBytes,
   serializeRespondOutput,
+  verifyRespondBidirectionalSignature,
   type RespondBidirectionalEvent,
   type RequestIdHex,
 } from "@sig-net/midnight";
@@ -39,12 +40,13 @@ import {
 import { fetchFakenetResponse } from "../fakenet-responses.ts";
 import { ERC20_TRANSFER_RESULT_SCHEMA } from "../mpc-routing.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
+import { readVaultLedger } from "../vault-ledger.ts";
 
-/** What the MPC attested for a request, resolved by digest matching. */
+/** What the MPC attested for a request, resolved by signature verification. */
 export interface RespondOutcome {
-  /** The attested event whose digest matched a recomputed candidate. */
+  /** The attested event whose signature verified over a recomputed candidate. */
   readonly event: RespondBidirectionalEvent;
-  /** The recomputed output bytes the digest matched (a circuit argument). */
+  /** The recomputed output bytes the signature covers (a circuit argument). */
   readonly serializedOutput: Uint8Array;
   /**
    * True only when the SUCCESS candidate matched AND its decoded transfer
@@ -81,8 +83,8 @@ function warnOnce(key: string, message: string): void {
 /**
  * Resolve the attested outcome for `requestId`: fetch the posted
  * RespondBidirectionalEvents, recompute both candidate serialized outputs,
- * and return the first event whose attested digest equals one of the
- * candidates' digests.
+ * and return the first event whose signature verifies over one of the
+ * candidates against the response key the vault pinned at initialize.
  *
  * The failure candidate (the protocol's fixed 5-byte failure output) is
  * always computed. The success candidate (the fakenet's cached raw output,
@@ -91,9 +93,9 @@ function warnOnce(key: string, message: string): void {
  * cache reports an executed transaction with output bytes, and a decode
  * failure (for example empty `0x` return data from a non-bool ERC20) drops
  * it with a warning rather than crashing the poll. The respond log is
- * unauthenticated (anyone may post), so digest matching is what selects a
- * trustworthy record here, and the settle circuits re-verify digest AND
- * signature in-circuit, which remains the actual authentication gate.
+ * unauthenticated (anyone may post), so that signature check is what selects
+ * a trustworthy record here, and the settle circuits run the same check
+ * in-circuit, which remains the actual authentication gate.
  *
  * A fakenet fetch failure inside one call logs once and yields `undefined`,
  * so the caller's poll loop (its own timeoutMs/intervalMs) owns the
@@ -101,8 +103,8 @@ function warnOnce(key: string, message: string): void {
  *
  * @param context - The flow context.
  * @param requestId - The request id to resolve.
- * @returns The matched outcome, or `undefined` when no attestation has been
- *   posted yet, none matches a recomputed digest, or the fakenet's
+ * @returns The verified outcome, or `undefined` when no attestation has been
+ *   posted yet, none verifies over a recomputed candidate, or the fakenet's
  *   /responses API could not serve this tick.
  */
 export async function fetchAttestedRespondOutcome(
@@ -115,9 +117,17 @@ export async function fetchAttestedRespondOutcome(
     return undefined;
   }
 
+  // The key the settle circuit will verify against, read from the vault's own
+  // ledger: checking off-chain against anything else risks accepting a post
+  // that cannot prove.
+  const { mpcResponseKey } = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+
   // An attestation is posted, so the fakenet has already cached the observed
   // result (it caches before posting): fetch it now, with a short per-tick
-  // timeout. UNTRUSTED until the digest match below.
+  // timeout. UNTRUSTED until the signature check below.
   let cached;
   try {
     cached = await fetchFakenetResponse(requestId, FAKENET_FETCH_TICK_TIMEOUT_MS);
@@ -132,8 +142,8 @@ export async function fetchAttestedRespondOutcome(
   // The failure candidate always exists. The success candidate needs cached
   // output bytes, and its decode/re-pack may fail (for example empty `0x`
   // return data from an ERC20 that returns nothing): then only the failure
-  // candidate can match. The success candidate is tried first (a genuine MPC
-  // attests exactly one digest, so order only matters against forged posts).
+  // candidate can verify. The success candidate is tried first (a genuine MPC
+  // signs exactly one output, so order only matters against forged posts).
   const candidates: { serializedOutput: Uint8Array; isFailureOutput: boolean }[] = [];
   let decodedSuccessValue: boolean | undefined;
   if (cached.success && cached.output !== null) {
@@ -155,12 +165,13 @@ export async function fetchAttestedRespondOutcome(
   candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, isFailureOutput: true });
 
   for (const candidate of candidates) {
-    const digest = calculateSignetAttestationDigest(
-      requestIdBytes(requestId),
-      candidate.serializedOutput,
-    );
     const event = events.find((posted) =>
-      Buffer.from(posted.attestationDigest).equals(Buffer.from(digest)),
+      verifyRespondBidirectionalSignature(
+        requestIdBytes(requestId),
+        candidate.serializedOutput,
+        posted,
+        mpcResponseKey,
+      ),
     );
     if (event !== undefined) {
       return {

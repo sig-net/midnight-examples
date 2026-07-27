@@ -298,7 +298,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
         `Found failure attestation for doomed withdraw ${withdrawRequestId}:`,
         "",
         `  succeeded:           false`,
-        `  MPC failure output:  true (digest-matched)`,
+        `  MPC failure output:  true (signature-verified)`,
       ]);
     },
     5 * MINUTE,

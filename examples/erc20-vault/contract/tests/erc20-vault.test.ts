@@ -799,22 +799,22 @@ const OUTPUT_REVERTED = MPC_FAILURE_OUTPUT;
  * Sign a REAL RespondBidirectionalEvent for (requestId, serializedOutput)
  * with `secretKey`: the digest comes from the library's sanctioned TS twin
  * (pinned byte-for-byte against the compiled oracles in signet-midnight's
- * own tests), exactly like the MPC. The event carries ONLY the digest and
- * the stored-form signature (big-endian SEC1, bigR as a full point): the
- * output itself travels as a separate circuit argument.
+ * own tests), exactly like the MPC. The event carries ONLY the stored-form
+ * signature (big-endian SEC1, bigR as a full point): the digest is recomputed
+ * by whoever verifies, and the output travels as a separate circuit argument.
  */
 const respond = (
   secretKey: Uint8Array,
   requestId: Uint8Array,
   serializedOutput: Uint8Array,
-): RespondBidirectionalEvent => {
-  const digest = calculateSignetAttestationDigest(requestId, serializedOutput);
-  const sig = signAttestationDigest(digest, secretKey);
-  return {
-    attestationDigest: digest,
-    signature: ecdsaSignatureToMpcSignature(sig),
-  };
-};
+): RespondBidirectionalEvent => ({
+  signature: ecdsaSignatureToMpcSignature(
+    signAttestationDigest(
+      calculateSignetAttestationDigest(requestId, serializedOutput),
+      secretKey,
+    ),
+  ),
+});
 
 // ---- Complete-withdraw fixtures ----
 
@@ -928,8 +928,9 @@ describe("completeWithdraw settle", () => {
   it("rejects presented output bytes that differ from what was signed", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     // Signed over the FALSE result, presented as a success byte: the digest
-    // checkpoint catches the mismatch. This is the attack the hash-only
-    // event must stop: settling a failed transfer as a success.
+    // recomputed in-circuit is not the one the signature covers. This is the
+    // attack the signature-only event must stop: settling a failed transfer
+    // as a success.
     await expect(
       contract.circuits.completeWithdraw(
         ctx,
@@ -1083,7 +1084,8 @@ describe("refundWithdraw settle", () => {
   it("rejects presented output bytes that differ from what was signed", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     // Signed over some other 5-byte output, presented as the sentinel: the
-    // digest checkpoint catches the mismatch before the sentinel gate.
+    // recomputed digest no longer matches what the signature covers, so the
+    // signature check rejects it before the sentinel gate.
     await expect(
       contract.circuits.refundWithdraw(
         ctx,
@@ -1242,9 +1244,10 @@ describe("claim settle", () => {
   it("rejects presented output bytes that differ from what was signed", async () => {
     const { contract, ctx, requestId } = await depositRequested();
     // Signed over the FALSE result, presented as a success byte: the digest
-    // checkpoint catches the mismatch. This is the attack the hash-only
-    // event must stop: claiming a failed sweep as a success. (The reverse
-    // presentation would trip the return-value assert first.)
+    // recomputed in-circuit is not the one the signature covers. This is the
+    // attack the signature-only event must stop: claiming a failed sweep as a
+    // success. (The reverse presentation would trip the return-value assert
+    // first.)
     await expect(
       contract.circuits.claim(
         ctx,

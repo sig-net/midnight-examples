@@ -22,7 +22,7 @@ export interface CompleteWithdrawOptions {
  * Settle a withdraw request through the vault's settle circuits.
  *
  * Resolves the MPC's attestation for `options.requestId` from the signet
- * contract's unauthenticated log by digest-matching it against the
+ * contract's unauthenticated log by verifying its signature over the
  * independently recomputed transfer output (see
  * {@link fetchAttestedRespondOutcome}), then calls the circuit the outcome's
  * width selects, passing the event AND the recomputed output bytes:
