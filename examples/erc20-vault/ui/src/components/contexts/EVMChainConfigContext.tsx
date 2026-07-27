@@ -1,4 +1,4 @@
-import { caip2ChainId, LOCAL_EVM_CHAIN, type EvmChainConfig } from "@midnight-examples/chain-config";
+import { evmCaip2ChainId, LOCAL_EVM_CHAIN, type EvmChainConfig } from "@midnight-examples/chain-config";
 import {
   createContext,
   useCallback,
@@ -104,7 +104,7 @@ export function EVMChainConfigProvider({ children }: EVMChainConfigProviderProps
   const value = useMemo<EVMChainConfigContextValue>(
     () => ({
       config,
-      caip2Id: caip2ChainId(config.chainId),
+      caip2Id: evmCaip2ChainId(config.chainId),
       setRpcUrl,
       setChainId,
       setExplorerUrl,

@@ -456,11 +456,13 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
 │
 ├── packages/                   # Shared utilities for repository.
 │   ├── chain-config/           # @midnight-examples/chain-config
-│   │   ├── package.json        # ISOMORPHIC config primitives: network ids,
-│   │   ├── tsconfig.json       #   endpoint defaults, the MidnightNodeConfig
-│   │   ├── tsconfig.tests.json #   shape. Runs unchanged in BOTH a browser and
-│   │   └── src/                #   Node: zero runtime deps, no env access. The
-│   │       └── index.ts        #   one shared package a UI may import.
+│   │   ├── package.json        # ISOMORPHIC config primitives, one directory
+│   │   ├── tsconfig.json       #   per chain. Runs unchanged in BOTH a browser
+│   │   ├── tsconfig.tests.json #   and Node: zero runtime deps, no env access.
+│   │   └── src/                #   The one shared package a UI may import.
+│   │       ├── index.ts
+│   │       ├── midnight/       # Network ids, endpoint defaults, MidnightNodeConfig.
+│   │       └── evm/            # EvmChainConfig, the local dev chain, CAIP-2 id.
 │   │
 │   ├── lib/                    # @midnight-examples/lib
 │   │   ├── package.json        # Node-only runtime helpers imported by examples

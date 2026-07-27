@@ -11,7 +11,7 @@ import { findDeployedContract, type FoundContract } from "@midnight-ntwrk/midnig
 // takes it explicitly). createVaultContext sets it once per construction.
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 
-import { caip2ChainId, type MidnightNodeConfig } from "@midnight-examples/chain-config";
+import { evmCaip2ChainId, type MidnightNodeConfig } from "@midnight-examples/chain-config";
 import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { requireEnv, type SessionWallet } from "@midnight-examples/test-harness";
 import { SignetRequestResponseReader } from "@sig-net/midnight";
@@ -115,7 +115,7 @@ export async function createVaultContext(env: NodeJS.ProcessEnv, wallet: Session
     signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
     evmRpcUrl: requireEnv(env, "EVM_RPC_URL"),
     evmChainId,
-    caip2Id: caip2ChainId(evmChainId),
+    caip2Id: evmCaip2ChainId(evmChainId),
     erc20Address,
     evmVaultAddress: requireEnv(env, "EVM_VAULT_ADDRESS"),
     evmUserAddress: requireEnv(env, "EVM_USER_ADDRESS"),

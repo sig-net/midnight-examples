@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  caip2ChainId,
+  evmCaip2ChainId,
   DEFAULT_ENDPOINTS,
   FAUCET_URLS,
   indexerWsUrlFromIndexerUrl,
@@ -94,13 +94,13 @@ describe("EVM chain config", () => {
     { chainId: 1n, expected: "eip155:1" },
     { chainId: 11155111n, expected: "eip155:11155111" },
   ];
-  it.each(CAIP2_CASES)("caip2ChainId($chainId) === $expected", ({ chainId, expected }) => {
-    expect(caip2ChainId(chainId)).toBe(expected);
+  it.each(CAIP2_CASES)("evmCaip2ChainId($chainId) === $expected", ({ chainId, expected }) => {
+    expect(evmCaip2ChainId(chainId)).toBe(expected);
   });
 
   // The id is sealed into the contract as ASCII and must never carry the
   // bigint literal's trailing "n".
   it("emits no bigint suffix", () => {
-    expect(caip2ChainId(31337n)).not.toContain("n");
+    expect(evmCaip2ChainId(31337n)).not.toContain("n");
   });
 });

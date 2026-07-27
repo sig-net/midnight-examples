@@ -32,14 +32,23 @@ export const LOCAL_EVM_CHAIN: EvmChainConfig = {
 };
 
 /**
- * The chain's CAIP-2 identifier (https://chainagnostic.org/CAIPs/caip-2), the
- * form an example seals into its contract and the MPC routes on. Deriving it
- * in one place keeps every caller agreeing on the exact string, since a
- * mismatch here is only visible as an unroutable request.
+ * An EVM chain's CAIP-2 identifier
+ * (https://chainagnostic.org/CAIPs/caip-2), the form an example seals into its
+ * contract and the MPC routes on. Deriving it in one place keeps every caller
+ * agreeing on the exact string, since a mismatch is only ever visible as an
+ * unroutable request.
+ *
+ * This is EVM-specific despite CAIP-2 being a cross-chain standard: the
+ * `eip155` namespace is what makes it so. There is no general
+ * `caip2(namespace, reference)` counterpart here because there would be
+ * nothing else to call it — Midnight's CAIP-2 id is not derived from anything
+ * this package knows. It is the fixed protocol constant
+ * `MIDNIGHT_TESTNET_CHAIN_ID` in `@sig-net/midnight`, which the MPC's key
+ * derivation hashes verbatim, so it is read from the SDK and never rebuilt.
  *
  * @param chainId - The EVM chain id.
  * @returns The CAIP-2 id, as `eip155:<chainId>`.
  */
-export function caip2ChainId(chainId: bigint): string {
+export function evmCaip2ChainId(chainId: bigint): string {
   return `eip155:${chainId}`;
 }

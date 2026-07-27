@@ -1,7 +1,7 @@
 // Midnight node connection config — the endpoint set needed to talk to one
 // Midnight network, plus the per-network defaults.
 
-import type { NetworkId } from "./network-id.ts";
+import type { NetworkId } from "./networks.ts";
 
 /**
  * The set of endpoints (+ network id) needed to reach the chain. Plain data,

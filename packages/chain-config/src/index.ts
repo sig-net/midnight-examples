@@ -14,6 +14,9 @@
 // that happens differs per runtime: getMidnightNodeConfig in
 // @midnight-examples/lib reads process.env, and a ui member reads
 // import.meta.env.
-export * from "./network-id.ts";
-export * from "./endpoints.ts";
-export * from "./evm.ts";
+//
+// One directory per chain. The exports stay flat, so a name that would be
+// ambiguous across chains says which chain it belongs to (see evm/index.ts for
+// why the Midnight names are the exception).
+export * from "./midnight/index.ts";
+export * from "./evm/index.ts";

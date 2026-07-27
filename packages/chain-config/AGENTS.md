@@ -55,6 +55,19 @@ enforcement.
   `indexerWsUrlFromIndexerUrl` is the pattern: the Node reader and the browser
   app both need it, and a second implementation would drift. A helper used by
   exactly one consumer stays with that consumer.
+- **One directory per chain under `src/`, and the exports stay flat.** Since a
+  call site sees a bare name, anything that would be ambiguous across chains
+  says which chain it is: `LOCAL_EVM_CHAIN`, `evmCaip2ChainId`. The Midnight
+  names are the ONE exception and stay unprefixed, matching
+  `@sig-net/midnight-contract-deploy`'s `plumbing/` exports verbatim so that
+  deleting this package stays a change of import path rather than a rename.
+- **NEVER add Midnight's CAIP-2 id here.** `@sig-net/midnight` already exports
+  it as `MIDNIGHT_TESTNET_CHAIN_ID` (`"midnight:testnet"`). It is a fixed
+  protocol constant, NOT a function of the network id: the MPC hashes it
+  verbatim inside `keccak256("<prefix>:<chainId>:<requester>:<path>")`, so a
+  per-network variant would be an identifier the MPC has never seen and would
+  silently derive different keys. `evmCaip2ChainId` exists only because the
+  `eip155` reference genuinely varies per chain.
 
 ## How the guarantee is enforced
 

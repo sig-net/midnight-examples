@@ -42,10 +42,17 @@ const FORBIDDEN_GLOBALS: readonly ForbiddenGlobal[] = [
 ];
 
 describe("chain-config stays isomorphic", () => {
-  const sourceFileNames = readdirSync(SRC_DIR).filter((name) => name.endsWith(".ts"));
+  // Recursive on purpose: src/ is one directory per chain, and a shallow read
+  // would quietly scan nothing but index.ts and report every rule as passing.
+  const sourceFileNames = readdirSync(SRC_DIR, { recursive: true })
+    .map(String)
+    .filter((name) => name.endsWith(".ts"));
 
-  it("has source files to check", () => {
-    expect(sourceFileNames.length).toBeGreaterThan(0);
+  // Guards the guard: if this count ever collapses, the scan below has stopped
+  // seeing the sources rather than the sources having become clean.
+  it("scans every source file, in every chain directory", () => {
+    expect(sourceFileNames.length).toBeGreaterThanOrEqual(5);
+    expect(sourceFileNames.filter((name) => name.includes("/")).length).toBeGreaterThan(0);
   });
 
   it.each(FORBIDDEN_GLOBALS)("no source file uses $description, which breaks $breaks", ({ pattern }) => {
