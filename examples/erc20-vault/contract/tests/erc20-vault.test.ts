@@ -30,6 +30,7 @@ import {
   requestIdBytes,
   requestIdHex,
   secp256k1PublicKeyOf,
+  serializeRespondOutput,
   signAttestationDigest,
   signetFieldNode,
   toSignBidirectionalEventIndex,
@@ -783,13 +784,19 @@ const IMPOSTER_SECRET = bytes(32, 0x43);
 // value is fine for these deterministic simulator tests.
 const MINT_NONCE = bytes(32, 0x2e);
 
+// The vault's respond schema, read from the COMPILED circuit (the contract's
+// own declaration), so the fixtures below run through the same ABI-to-compact
+// pipeline the real client uses: schema -> descriptor -> midnight-serde
+// compactSerialize. Nothing here hand-packs bytes.
+const VAULT_RESPONSE_SCHEMA = pureCircuits.vaultResponseSchema();
+
 // A successful remote execution: the packed bool result at its exact
 // unpadded width, one 0x01 byte (the circuits take it as Bytes<1>).
-const OUTPUT_SUCCESS = Uint8Array.of(1);
+const OUTPUT_SUCCESS = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: true });
 
 // An EXECUTED transfer that returned false: one 0x00 byte. Settles through
 // completeWithdraw's refund branch.
-const OUTPUT_FALSE = Uint8Array.of(0);
+const OUTPUT_FALSE = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: false });
 
 // A NEVER-EXECUTED transfer (reverted or replaced): the protocol's fixed
 // 5-byte failure output. Settles through refundWithdraw (Bytes<5>).
