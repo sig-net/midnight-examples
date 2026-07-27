@@ -104,12 +104,26 @@ yarn build
 
 ## --- Per example ---
 
-# The erc20-vault example (contract + integration-tests packages):
+# The erc20-vault example (contract + integration-tests + ui packages):
 yarn compile:erc20-vault
 yarn compile:erc20-vault:zk  # generates the vault contract's zk keys
 yarn test:erc20-vault        # requires at least 'yarn compile:erc20-vault'
 yarn build:erc20-vault       # requires 'yarn compile:erc20-vault'
+yarn dev:erc20-vault-ui      # serves the vault SPA on http://localhost:5173
 ```
+
+## The example UI
+
+Each example may carry one browser SPA under `examples/<name>/ui`: Vite, React,
+React Router in declarative mode and Tailwind for styling. It is the only kind
+of package here that bundles, since a browser cannot load TypeScript.
+`yarn dev:erc20-vault-ui` serves it with hot reload, and `yarn build:erc20-vault`
+typechecks it and emits a gitignored `dist/`.
+
+The UI reaches the chain only through the example's own `contract` package,
+whose export surface is environment-agnostic for exactly this reason. See the
+[erc20-vault UI README](examples/erc20-vault/ui/README.md) for its layout and
+the environment variables it reads.
 
 ## Integration tests
 
@@ -472,15 +486,29 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
     │   │       ├── erc20-vault.test.ts # Simulator-level unit tests that require no network.
     │   │       └── deploy.test.ts      # Builds a deploy tx from the real managed output (needs compile:zk).
     │   │
-    │   └── integration-tests/  # @midnight-examples/erc20-vault-integration-tests
+    │   ├── integration-tests/  # @midnight-examples/erc20-vault-integration-tests
+    │   │   ├── src/
+    │   │   │   └── flows/      # Example-specific typed flow functions (deposit, withdraw, …):
+    │   │   │                   #   the executable documentation of the example. All generic
+    │   │   │                   #   setup comes from @midnight-examples/test-harness.
+    │   │   ├── scripts/        # Thin tsx entrypoints over src/flows (deposit.ts, claim.ts, …)
+    │   │   │                   #   for hand-driving a live stack step by step.
+    │   │   └── tests/
+    │   │       └── happy-day-e2e.test.ts   # Runs the flows in-process against the local stack.
+    │   │
+    │   └── ui/                 # @midnight-examples/erc20-vault-ui
+    │       ├── package.json        # Vite + React + React Router + Tailwind.
+    │       ├── AGENTS.md           # This UI's agent rules (CLAUDE.md points at it).
+    │       ├── vite.config.ts      # Bundler and vitest (jsdom) config in one file.
+    │       ├── index.html          # The SPA's single HTML entry.
     │       ├── src/
-    │       │   └── flows/      # Example-specific typed flow functions (deposit, withdraw, …):
-    │       │                   #   the executable documentation of the example. All generic
-    │       │                   #   setup comes from @midnight-examples/test-harness.
-    │       ├── scripts/        # Thin tsx entrypoints over src/flows (deposit.ts, claim.ts, …)
-    │       │                   #   for hand-driving a live stack step by step.
-    │       └── tests/
-    │           └── happy-day-e2e.test.ts   # Runs the flows in-process against the local stack.
+    │       │   ├── main.tsx        # Mounts <App/> into #root.
+    │       │   ├── App.tsx         # The route table, every route inside the shared shell.
+    │       │   ├── routes.ts       # RoutePath enum: the paths the SPA serves.
+    │       │   ├── index.css       # Tailwind import + design tokens (@theme, no JS config).
+    │       │   ├── components/     # Presentational components, precise props, no fetching.
+    │       │   └── pages/          # One component per route.
+    │       └── tests/              # Testing Library specs run under vitest's jsdom env.
     │
     └── other-example/          # Minimal examples may be contract-only with simulator tests.
         └── contract/

@@ -17,3 +17,6 @@ package-lock.json
 **/src/managed/
 .env.local
 .env.stagenet
+
+# Playwright MCP scratch output (page snapshots, console logs)
+.playwright-mcp/

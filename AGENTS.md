@@ -8,8 +8,9 @@ node-modules`), split between shared machinery and the examples integrators copy
 - **`packages/test-harness`** — test-only machinery (stack bring-up/teardown,
   mpc-keys setup, wallet funding, env/session handling, subprocess helpers).
   Test-only deps live here and never touch an example's manifests.
-- **`examples/*/*`** — one directory per example, each holding 1–2 workspace
-  packages: `contract` (required) and `integration-tests` (as warranted). An
+- **`examples/*/*`** — one directory per example, each holding up to three
+  workspace packages: `contract` (required), `integration-tests` (as warranted)
+  and `ui` (a browser app over the example, where one earns its keep). An
   example's flows are typed functions in `integration-tests/src/flows/`, run
   in-process by its tests; `integration-tests/scripts/` holds thin `tsx`
   entrypoints over those same flows for hand-driving a live stack.
@@ -96,6 +97,11 @@ exception for that specific case.
   No `dist/`, no `tsc --outDir`, no ts-node loaders, no copy steps. Tests run under
   vitest; entrypoints run under `tsx`. If you think you need a build step, stop and
   ask — a build step is a defect in this workspace, not a missing feature.
+  The ONE exception is a `ui` member: a browser has no way to load TypeScript, so
+  a UI bundles with Vite. Its `build` is `tsc -p tsconfig.json && vite build`, so
+  the typecheck still runs and still governs, and the emitted `dist/` is a
+  gitignored deploy artefact. No other member type gets a bundler. See "UI
+  packages" below for the conditions that keep the exception narrow.
 - **ALWAYS finish a change with `yarn build && yarn test`** in the member you
   touched (or from the root). `tsx` and vitest execute without typechecking — "it
   runs" is NOT verification. If you add a new top-level TS directory to a member,
@@ -170,8 +176,10 @@ exception for that specific case.
 - **Root scripts that target one example are named `<task>:<example-dir>` — the
   example's directory name in full, never a shorthand.** `test:erc20-vault`,
   `compile:erc20-vault` — never `test:vault`: abbreviations save keystrokes once
-  and cost a which-example-was-that lookup forever. Aggregate scripts (`compile` /
-  `build` / `test`) take no suffix. When adding or renaming a root script, grep
+  and cost a which-example-was-that lookup forever. A script that drives ONE
+  member of an example rather than the example as a whole extends the suffix with
+  that member's directory name: `dev:erc20-vault-ui`. Aggregate scripts (`compile`
+  / `build` / `test`) take no suffix. When adding or renaming a root script, grep
   the WHOLE repo for the old name before finishing — CI workflows and READMEs
   quote script names.
 
@@ -214,3 +222,24 @@ apply to all of them:
   deployer package: a generic deployer forces dynamic module loading and witness
   stubs, which break the moment a constructor takes real args — keep deploy logic
   static and fully typed in the example's own contract package.
+
+# UI packages (`examples/*/ui`)
+
+An example may carry one browser SPA. It is the only member type that bundles,
+so it is the only one that can drift into an app framework. Two things keep that
+in check, and they hold for every `ui` member:
+
+- **Each `ui` member owns its rules, in its own `AGENTS.md` beside its
+  `package.json`** (with a one-line `CLAUDE.md` pointing at it, as at the repo
+  root). Stack, layout, routing and test conventions live there, not here: a UI
+  is instructive, not boring infra, so per-example duplication is correct and a
+  hoisted shared ruleset is not. Read
+  [examples/erc20-vault/ui/AGENTS.md](examples/erc20-vault/ui/AGENTS.md) before
+  touching any UI, and use it as the template when adding one to another example.
+- **A `ui` member is a leaf, always.** It has no `exports` field and is never a
+  dependency of another member, so its `dist/` is a deploy artefact and nothing
+  more. Code another member needs moves to the example's `contract` package (or
+  the SDK) rather than being imported out of a bundle. Chain access runs the
+  other way: the UI imports the example's `contract` package, whose export
+  surface is environment-agnostic for exactly this reason, and never
+  `packages/lib` or `packages/test-harness` (both Node-only).

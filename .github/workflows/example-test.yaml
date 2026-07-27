@@ -124,7 +124,7 @@ jobs:
         with:
           path: examples/${{ inputs.example-dir }}/contract/src/managed
           key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
-      - name: Build (typecheck, no emit)
+      - name: Build (typecheck everywhere; a ui member also bundles)
         run: yarn build
       - name: Unit tests (simulator-only; e2e files self-skip without RUN_INTEGRATION_TESTS)
         run: yarn test

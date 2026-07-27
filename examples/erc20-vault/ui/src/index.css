@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Tailwind v4 is configured in CSS: every token below is generated as a
+   utility (bg-surface, text-ink-muted, …). There is no tailwind.config.js. */
+@theme {
+  --color-surface: oklch(0.985 0.004 265);
+  --color-surface-raised: oklch(1 0 0);
+  --color-border-subtle: oklch(0.9 0.008 265);
+  --color-ink: oklch(0.27 0.02 265);
+  --color-ink-muted: oklch(0.53 0.02 265);
+  --color-accent: oklch(0.56 0.16 265);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: oklch(0.19 0.015 265);
+    --color-surface-raised: oklch(0.24 0.018 265);
+    --color-border-subtle: oklch(0.33 0.02 265);
+    --color-ink: oklch(0.95 0.005 265);
+    --color-ink-muted: oklch(0.72 0.015 265);
+    --color-accent: oklch(0.74 0.13 265);
+  }
+}
