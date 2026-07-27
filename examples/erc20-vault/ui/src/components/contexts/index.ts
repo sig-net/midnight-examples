@@ -9,3 +9,10 @@ export {
   useMidnightChainConfig,
   type MidnightChainConfigContextValue,
 } from "./MidnightChainConfigContext.tsx";
+export {
+  availableBrowserWallets,
+  MidnightWalletProvider,
+  useMidnightWallet,
+  type InjectedMidnightWallet,
+  type MidnightWalletContextValue,
+} from "./MidnightWalletContext.tsx";

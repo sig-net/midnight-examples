@@ -707,6 +707,7 @@ __metadata:
   resolution: "@midnight-examples/erc20-vault-ui@workspace:examples/erc20-vault/ui"
   dependencies:
     "@midnight-examples/chain-config": "npm:*"
+    "@midnight-ntwrk/dapp-connector-api": "npm:4.0.1"
     "@midnight-ntwrk/midnight-js": "npm:5.0.0-beta.4"
     "@tailwindcss/vite": "npm:4.3.3"
     "@testing-library/dom": "npm:10.4.1"
@@ -813,6 +814,13 @@ __metadata:
     "@types/object-inspect": "npm:^1.8.1"
     object-inspect: "npm:^1.12.3"
   checksum: 10c0/17716ba48031c577240c954311a2c8b78421c416c7d3164ab13c2038455df0eef4e51baf212e9575855f16582a587327b3123198546011e837f052ee09901229
+  languageName: node
+  linkType: hard
+
+"@midnight-ntwrk/dapp-connector-api@npm:4.0.1":
+  version: 4.0.1
+  resolution: "@midnight-ntwrk/dapp-connector-api@npm:4.0.1"
+  checksum: 10c0/4578035a8752d4138da70d56e89f29026943a361ef6c9edbebd2a1baf15b10057a4b65827afd494f0adc75555aa1f9e0727b269920dde9aacea7d9dedb036b70
   languageName: node
   linkType: hard
 

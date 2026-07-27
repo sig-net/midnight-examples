@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@midnight-examples/chain-config": "*",
+    "@midnight-ntwrk/dapp-connector-api": "4.0.1",
     "@midnight-ntwrk/midnight-js": "5.0.0-beta.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
