@@ -18,10 +18,10 @@ The flow comprises 5 steps:
 1. Client calls a contract on Midnight which requests a signature for a transaction destined for a foreign chain. The signature is made with a key derived for the requesting contract (see [Derived keys](#derived-keys)).
 2. Sig Network MPC honours the request, generating the transaction signature and posting it back to Midnight.
 3. Client extracts the signature, using it to submit the signed transaction to the foreign chain.
-4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: the attestation digest `keccak256(requestId || serializedOutput)` plus its ECDSA signature over that digest. The output itself travels off chain.
+4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: its ECDSA signature over the attestation digest `keccak256(requestId || serializedOutput)`. Both the digest and the output itself travel off chain.
 5. Client obtains the execution output off chain (see the output recovery note below: it broadcast the transaction in step 3, so it can read the result), extracts the posted attestation and submits both back to the Midnight contract, which recomputes the digest from the output bytes and verifies the MPC's signature in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
 
-> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.8.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's digest match and in-circuit signature verification.
+> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.9.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
 ## Derived keys
 
@@ -324,23 +324,24 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
    await new JsonRpcProvider(foreignChainRpcUrl).broadcastTransaction(signedTx.serialized);
    ```
 
-4. Poll the Signet singleton for the MPC's remote execution attestation (posted once the MPC observes the transaction execute on the foreign chain). The event carries only the 32-byte attestation digest, `keccak256(requestId || serializedOutput)`, plus the MPC's ECDSA signature over it: the serialized output itself travels off chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and digest-match it against the posted events. Posts are stored unverified, so treat them as candidates: the authoritative check is your contract's verify circuit in step 5:
+4. Poll the Signet singleton for the MPC's remote execution attestation (posted once the MPC observes the transaction execute on the foreign chain). The event carries only the MPC's ECDSA signature over the attestation digest `keccak256(requestId || serializedOutput)`: neither the digest nor the serialized output goes on chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and select the posted event whose signature verifies over those bytes against your contract's response key. Posts are stored unverified, so that signature check is what makes a candidate meaningful off chain; the authoritative check is your contract's verify circuit in step 5:
 
    ```ts
-   import { calculateSignetAttestationDigest, deserializeEvmOutput, requestIdBytes, serializeRespondOutput } from "@sig-net/midnight";
-
-   const events = await reader.getRespondBidirectionalEvents(requestId);
-   // Empty array: not posted yet, poll again.
+   import { deserializeEvmOutput, serializeRespondOutput } from "@sig-net/midnight";
 
    // Recompute the serialized output from the raw execution output (fetched
-   // off chain, e.g. from the fakenet's /responses API) and select the event
-   // whose attested digest matches.
+   // off chain, e.g. from the fakenet's /responses API), then let the reader
+   // return only a post whose signature covers exactly those bytes. Check
+   // against the SAME key your contract pinned in Setup step 4 (read it back
+   // from your own ledger), so a post accepted here is one that proves.
    const decoded = deserializeEvmOutput(mySchema, rawExecutionOutput);
    const serializedOutput = serializeRespondOutput(mySchema, decoded);
-   const digest = calculateSignetAttestationDigest(requestIdBytes(requestId), serializedOutput);
-   const respondBidirectionalEvent = events.find(
-      (event) => Buffer.from(event.attestationDigest).equals(Buffer.from(digest)),
+   const respondBidirectionalEvent = await reader.getVerifiedRespondBidirectionalEvent(
+      requestId,
+      serializedOutput,
+      mpcResponseKey,
    );
+   // undefined: no attestation of those bytes posted yet, poll again.
    ```
 
 5. Deliver the event AND the recomputed output bytes to your contract, which re-hashes the bytes, verifies the ECDSA signature in-circuit against the response key pinned in Setup step 4, and consumes the request:

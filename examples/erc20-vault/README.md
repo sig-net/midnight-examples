@@ -41,7 +41,7 @@ runs the whole flow twice, once per direction:
 | 4 | MPC attests the execution output back to Midnight | Signed `RespondBidirectionalEvent` for the sweep | The same, for the payout |
 | 5 | Contract verifies the attestation in-circuit and settles | `claim()` mints shielded vault tokens to the depositor | `completeWithdraw()` finalises an executed transfer, or refunds the withdrawer on a false return. `refundWithdraw()` refunds the withdrawer when the transfer never executed (reverted or replaced) |
 
-> **Output recovery (between steps 4 and 5):** the attestation carries only the digest, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), digest matching in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.8.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's digest match and in-circuit signature verification.
+> **Output recovery (between steps 4 and 5):** the attestation carries only the signature, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), signature verification in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.9.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
 # Derived keys and accounts
 
@@ -59,7 +59,7 @@ exactly three derivations:
 |---|---|---|
 | The user's deposit account (EVM) | `userCommitment(callerSecretKey)`, the caller's 32-byte identity commitment | Signs the deposit sweep `transfer(vault, amount)`. The user funds this address with the ERC20 being deposited plus gas ETH. One account per identity: the contract recomputes the commitment in-circuit from the secret-key witness, so the path is never a circuit argument and the MPC can only ever sign with THIS caller's account. |
 | The vault's own account (EVM) | The contract-fixed literal `"vault"` (`pad(32, "vault")`) | Holds the vault's ERC20 balance and signs every withdraw `transfer(destination, amount)`. It also pays the withdraw gas, which is why the whole fee envelope is contract-fixed. |
-| The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id and execution output. It never signs transactions: it is per-client-contract yet independent of any request's own path, and `claim`/`completeWithdraw` verify responses against it in-circuit. |
+| The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id and execution output (the signature is the whole event). It never signs transactions: it is per-client-contract yet independent of any request's own path, and `claim`/`completeWithdraw` verify responses against it in-circuit. |
 
 Deposits and withdrawals therefore move between two MPC-derived accounts on
 the EVM chain, and neither key ever exists anywhere: the MPC network signs
@@ -103,8 +103,8 @@ The contract package's dependency list is the minimal integration surface:
 // contract/package.json
 "dependencies": {
   "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-  "@sig-net/midnight": "0.13.0",
-  "@sig-net/midnight-contract": "0.13.0"
+  "@sig-net/midnight": "0.14.0",
+  "@sig-net/midnight-contract": "0.14.0"
 }
 ```
 
@@ -420,15 +420,16 @@ nonce-burned one throws).
 ### Runtime step 4: poll for the MPC's attestation
 
 Once the MPC observes the mined execution it posts an ECDSA-signed
-`RespondBidirectionalEvent`. The event carries only the 32-byte attestation
-digest, `keccak256(requestId || serializedOutput)`, plus the MPC's signature
-over it. The serialized output itself is never posted on chain: the client
-must reconstruct the exact bytes the MPC hashed, in two moves.
+`RespondBidirectionalEvent`. The event carries only the MPC's signature over
+the attestation digest `keccak256(requestId || serializedOutput)`. Neither
+the digest nor the serialized output is posted on chain: the client must
+reconstruct the exact bytes the MPC hashed, in two moves, and then check the
+signature against them.
 
 **Move 1: fetch the raw execution output.** This is the mined call's raw
 EVM return data (for the sweep: the single ABI-encoded `bool` word that
 `transfer` returned). Any source works, since the bytes stay untrusted
-until the digest match below. With a node that has tracing enabled you can
+until the signature check below. With a node that has tracing enabled you can
 trace the mined transaction via `debug_traceTransaction` (the same RPC
 method the MPC itself uses to extract the output). On the local stack the fakenet
 responder saves you that RPC access: it caches each request's traced output
@@ -443,32 +444,26 @@ the raw return data. It decoded the raw data per the request's
 `outputDeserializationSchema`, then packed the decoded values per its
 `respondSerializationSchema`, and hashed THAT. Run the same two conversions
 (for the vault: the 32-byte ABI `bool` word in, the 1-byte packed result
-out), hash the request id with the re-packed bytes, and the digest selects
-which posted event the MPC attested for this outcome.
+out), and the posted signature verifies over the re-packed bytes only if the
+MPC attested this outcome. With no digest on the event, that check is the
+whole selection.
 
 Everything stays UNTRUSTED here (the respond log is open to anyone, and the
 helper API is unauthenticated): the authoritative check is the in-circuit
-digest + signature verification `claim` runs in step 5.
+signature verification `claim` runs in step 5, against the same response key
+the vault pinned at initialize.
 
 ```ts
-import {
-  calculateSignetAttestationDigest,
-  deserializeEvmOutput,
-  requestIdBytes,
-  serializeRespondOutput,
-} from "@sig-net/midnight";
-
-const events = await reader.getRespondBidirectionalEvents(requestId);
-// Empty array: not posted yet, poll again.
+import { deserializeEvmOutput, serializeRespondOutput } from "@sig-net/midnight";
 
 // Move 1: the raw EVM return data of the mined sweep, here from the
 // fakenet's /responses helper API. Unauthenticated, and any other source
-// (e.g. your own trace RPC) works equally: the digest match below is what
+// (e.g. your own trace RPC) works equally: the signature check below is what
 // makes the bytes meaningful.
 const response = await fetch(`http://localhost:3040/responses/${requestId}`);
 const { success, output } = await response.json();
 // success === false: nothing was returned to fetch (reverted/replaced tx).
-// The candidate to hash is then MPC_FAILURE_OUTPUT instead of `output`.
+// The candidate to check is then MPC_FAILURE_OUTPUT instead of `output`.
 
 // Move 2: raw return data -> the serialized output the MPC hashed. Decode
 // per the output deserialization schema, re-pack per the respond
@@ -477,12 +472,15 @@ const { success, output } = await response.json();
 const decoded = deserializeEvmOutput('[{"name":"success","type":"bool"}]', output);
 const serializedOutput = serializeRespondOutput('[{"name":"success","type":"bool"}]', decoded);
 
-// Digest matching selects WHICH posted event the MPC attested for these bytes.
-const digest = calculateSignetAttestationDigest(requestIdBytes(requestId), serializedOutput);
-const attestation = events.find((event) =>
-  Buffer.from(event.attestationDigest).equals(Buffer.from(digest)),
+// Signature verification selects WHICH posted event the MPC attested for
+// these bytes. mpcResponseKey is the key the vault pinned at initialize,
+// read back from its own ledger, so an accepted post is one that proves.
+const attestation = await reader.getVerifiedRespondBidirectionalEvent(
+  requestId,
+  serializedOutput,
+  mpcResponseKey,
 );
-// undefined: nothing matching posted yet, poll again.
+// undefined: nothing attesting these bytes posted yet, poll again.
 ```
 
 Flow functions:
@@ -494,7 +492,8 @@ attested as the protocol's fixed 5-byte failure output, `0xdeadbeef01`).
 ### Runtime step 5: `claim()` verifies and mints
 
 The depositor presents the attestation AND the recomputed output bytes to
-the vault, which re-hashes the bytes, verifies the signature in-circuit, and
+the vault, which re-hashes the bytes into the digest and verifies the
+signature over it in-circuit, and
 mints shielded vault tokens for the deposited amount, to the caller or to an
 optional alternate recipient's coin public key:
 
@@ -509,9 +508,9 @@ export circuit claim(
   // The EVM result at its exact packed width: one byte, transfer()'s bool.
   assert(serializedOutput as Field == 1 as Field, "ERC20 transfer returned false");
 
-  // The only authentication gate: the recomputed output must hash to the
-  // attested digest, and the in-circuit ECDSA over that digest must verify
-  // against the initialize-pinned response key.
+  // The only authentication gate: the attestation digest is recomputed here
+  // from the presented output, and the event's ECDSA signature over it must
+  // verify against the initialize-pinned response key.
   assert(
     verifyRespondBidirectionalEvent<1>(
       disclosedRequestId,
@@ -601,9 +600,9 @@ const { verified } = await reader.getVerifiedSignatureRespondedEvent(requestId, 
 const signedPayout = await reader.getSignedEvmTransaction(requestId, evmVaultAddress);
 await evmProvider.broadcastTransaction(signedPayout.serialized);
 
-// Runtime step 4: poll and digest-match the MPC's attestation, exactly as in
+// Runtime step 4: poll and signature-verify the MPC's attestation, exactly as in
 // the deposit: fetch the raw output, re-pack per the schema, match.
-const { event, serializedOutput } = /* getRespondBidirectionalEvents + /responses fetch + digest match */;
+const { event, serializedOutput } = /* /responses fetch + getVerifiedRespondBidirectionalEvent */;
 
 // Runtime step 5: settle. The branch (finalise or refund) follows the
 // MPC-attested outcome, never the caller. An executed transfer's 1-byte
@@ -693,8 +692,8 @@ export circuit completeWithdraw(
   serializedOutput: Bytes<1>,  // an EXECUTED transfer's packed bool result
   mintNonce: Bytes<32>,
 ): [] {
-  // Same authentication gate as claim: the recomputed output must hash to
-  // the attested digest, and the in-circuit ECDSA must verify.
+  // Same authentication gate as claim: the digest is recomputed from the
+  // presented output, and the event's ECDSA signature over it must verify.
   assert(
     verifyRespondBidirectionalEvent<1>(
       disclosedRequestId,

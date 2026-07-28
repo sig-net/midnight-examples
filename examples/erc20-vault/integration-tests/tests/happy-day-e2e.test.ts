@@ -20,6 +20,7 @@ import {
   parseSecp256k1PublicKey,
   requestIdBytes,
   stripHexPrefix,
+  verifyRespondBidirectionalSignature,
   type RequestIdHex,
 } from "@sig-net/midnight";
 import { JsonRpcProvider, formatEther, parseEther, parseUnits, type Transaction } from "ethers";
@@ -288,10 +289,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
-      // The attestation carries only the digest of (requestId, output): the
-      // poll fetches the sweep's raw traced output from the fakenet's
-      // /responses API, re-packs it per the schema and digest-matches it
-      // against the posted events.
+      // The attestation carries only the MPC's signature: the poll fetches
+      // the sweep's raw traced output from the fakenet's /responses API,
+      // re-packs it per the schema and verifies the posted events' signatures
+      // over it against the response key the vault pinned.
       const context = await session.vaultContext();
       depositSweepTransactionRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: depositTransactionSignatureRequestId,
@@ -299,28 +300,39 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         timeoutMs: 1 * MINUTE,
       });
 
-      // The digest seals the round trip: recomputing it from the matched
-      // output bytes must reproduce the attested digest byte for byte.
+      // The signature seals the round trip: it only verifies over bytes the
+      // MPC itself produced, so a verified outcome means both sides ran the
+      // same two conversions and got the same payload.
       const outcome = depositSweepTransactionRespondBidirectional;
-      const digest = calculateSignetAttestationDigest(
-        requestIdBytes(depositTransactionSignatureRequestId),
-        outcome.serializedOutput,
+      const { mpcResponseKey } = await readVaultLedger(
+        context.providers.publicDataProvider,
+        context.vaultContractAddress,
       );
       expect(
-        bytesToHex(digest),
-        "the recomputed digest must equal the attested digest",
-      ).toBe(bytesToHex(outcome.event.attestationDigest));
+        verifyRespondBidirectionalSignature(
+          requestIdBytes(depositTransactionSignatureRequestId),
+          outcome.serializedOutput,
+          outcome.event,
+          mpcResponseKey,
+        ),
+        "the attestation must verify over the recomputed output",
+      ).toBe(true);
 
       banner([
-        `Found deposit RespondBidirectionalEvent (digest-matched) on the signet contract: ` +
+        `Found deposit RespondBidirectionalEvent (signature-verified) on the signet contract: ` +
           `success '${outcome.succeeded}' ` +
           `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${outcome.serializedOutput.length} byte(s))`,
         "",
-        `Attested digest: 0x${bytesToHex(outcome.event.attestationDigest)}`,
+        `Recomputed digest: 0x${bytesToHex(
+          calculateSignetAttestationDigest(
+            requestIdBytes(depositTransactionSignatureRequestId),
+            outcome.serializedOutput,
+          ),
+        )}`,
         "",
-        "The output itself never went on-chain: the raw bytes came from the",
-        "fakenet /responses API, were re-packed here, and matched the",
-        "attestation byte for byte.",
+        "Neither the output nor its digest went on-chain: the raw bytes came",
+        "from the fakenet /responses API, were re-packed here, and the posted",
+        "signature verified over them.",
       ]);
     },
     5 * MINUTE,
@@ -583,7 +595,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       ).toBe(true);
 
       banner([
-        `Found withdraw RespondBidirectionalEvent (digest-matched) on the signet contract: ` +
+        `Found withdraw RespondBidirectionalEvent (signature-verified) on the signet contract: ` +
           `success '${withdrawRespondBidirectional.succeeded}' ` +
           `(payload 0x${bytesToHex(withdrawRespondBidirectional.serializedOutput)})`,
       ]);

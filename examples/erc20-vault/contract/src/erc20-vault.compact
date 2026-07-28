@@ -98,8 +98,18 @@ export ledger refundCommitment: Map<RequestId, Bytes<32>>;
 // The ABI-style JSON schema of an ERC20 `transfer` result, used in both directions: it
 // tells the MPC how to deserialise the EVM execution output and how to serialise that
 // output into the RespondBidirectionalEvent it posts back. Exact-width: 34 bytes.
-pure circuit vaultResponseSchema(): Bytes<34> {
+// Exported so off-chain code reads the schema from the compiled circuit, never a TS
+// re-declaration.
+export pure circuit vaultResponseSchema(): Bytes<34> {
   return "[{\"name\":\"success\",\"type\":\"bool\"}]" as Bytes<34>;
+}
+
+// The decoded form of vaultResponseSchema()'s output: the ABI `bool success` of an
+// ERC20 transfer, packed by the MPC to this struct's exact serialized width (1 byte).
+// claim and completeWithdraw unpack the attested bytes back into it with the stdlib
+// deserialize, the true inverse of the MPC's off-chain packing.
+struct VaultResponse {
+  success: Boolean;
 }
 
 // ---- Token model --------------------------------------------------------------------
@@ -280,10 +290,10 @@ export circuit deposit(
 }
 
 // ---- Runtime step 5 (deposit): claim ------------------------------------------------
-// The caller presents the MPC's digest-only RespondBidirectionalEvent together with the
-// full serialized output they recomputed off-chain (the event carries only the
-// attestation digest, never the output), and the vault mints shielded vault tokens for
-// the deposited amount, to the caller or an optionally provided recipient.
+// The caller presents the MPC's signature-only RespondBidirectionalEvent together with
+// the full serialized output they recomputed off-chain (the event carries only the MPC's
+// signature, never the digest or the output), and the vault mints shielded vault tokens
+// for the deposited amount, to the caller or an optionally provided recipient.
 // Depositor-gated, one claim per request. mintNonce must be RANDOM: a nonce derived
 // from the (public) requestId would let any observer link the minted coin to the
 // deposit.
@@ -300,11 +310,13 @@ export circuit claim(
 
   assert(initialized >= 1, "Not initialized");
 
-  // The EVM result at its exact packed width: one byte, transfer()'s bool.
-  assert(serializedOutput as Field == 1 as Field, "ERC20 transfer returned false");
+  // The EVM result at its exact packed width (one byte, transfer()'s bool),
+  // deserialized into the schema's struct: only an attested success mints.
+  const response = deserialize<VaultResponse, 1>(serializedOutput);
+  assert(response.success, "ERC20 transfer returned false");
 
-  // The only authentication gate: the recomputed output must hash to the attested
-  // digest, and the in-circuit ECDSA over that digest must verify against the
+  // The only authentication gate: the attestation digest is recomputed here from the
+  // presented output, and the event's ECDSA signature over it must verify against the
   // initialize-pinned response key (the Signet singleton stores MPC posts unverified).
   assert(
     verifyRespondBidirectionalEvent<1>(
@@ -508,9 +520,9 @@ export circuit completeWithdraw(
 
   assert(initialized >= 1, "Not initialized");
 
-  // Same authentication gate as claim: the recomputed output must hash to the
-  // attested digest, and the in-circuit ECDSA against the initialize-pinned response
-  // key must verify.
+  // Same authentication gate as claim: the digest is recomputed from the presented
+  // output, and the event's ECDSA signature over it must verify against the
+  // initialize-pinned response key.
   assert(
     verifyRespondBidirectionalEvent<1>(
       disclosedRequestId,
@@ -528,9 +540,10 @@ export circuit completeWithdraw(
   const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
   signBidirectionalEventMap.remove(disclosedRequestId);
 
-  // Branch on the EVM result byte: 0x01 is success, 0x00 is a false return.
-  // Disclosed: whether a refund happens is public anyway (a mint is observable).
-  const succeeded = disclose(serializedOutput as Field == 1 as Field);
+  // Branch on the EVM result, deserialized into the schema's struct (0x01 is
+  // success, 0x00 a false return). Disclosed: whether a refund happens is
+  // public anyway (a mint is observable).
+  const succeeded = disclose(deserialize<VaultResponse, 1>(serializedOutput).success);
 
   if (!succeeded) {
     // Refund path only: it mints a private coin, so it is withdrawer-only (the shared
@@ -563,9 +576,9 @@ export circuit refundWithdraw(
 
   assert(initialized >= 1, "Not initialized");
 
-  // Same authentication gate as claim: the recomputed output must hash to the
-  // attested digest, and the in-circuit ECDSA against the initialize-pinned response
-  // key must verify.
+  // Same authentication gate as claim: the digest is recomputed from the presented
+  // output, and the event's ECDSA signature over it must verify against the
+  // initialize-pinned response key.
   assert(
     verifyRespondBidirectionalEvent<5>(
       disclosedRequestId,
