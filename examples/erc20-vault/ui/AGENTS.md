@@ -23,12 +23,15 @@ src/
   vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
   components/       # presentational components: precise props, no fetching
     AppLayout.tsx   # the shell: header controls, outlet, footer
-    WalletMenu.tsx  # one chain's wallet control, chain-agnostic
-    MidnightWalletMenu.tsx  # …bound to the Midnight context
-    EVMWalletMenu.tsx       # …bound to the EVM context
+    WalletMenu.tsx  # one chain's wallet control in the header
+    WalletMark.tsx  # a wallet's own icon, rendered safely
+    StepCard.tsx    # one step of the flow, and the not-built-yet body
+    ConnectWalletsStep.tsx  # step one's rows, one per chain
     ThemeToggle.tsx # light / dark / system
     contexts/       # app-wide React contexts, all mounted in App.tsx
     ui/             # shadcn/ui components, copied in by its CLI
+  hooks/            # the logic the components render
+    useWalletConnections.ts  # both chains, normalised to one shape
   lib/              # non-React modules the components lean on
     utils.ts        # cn(): the class merger every ui/ component imports
     theme.ts        # the theme choice, its storage, and how it is applied
@@ -36,8 +39,10 @@ src/
   pages/            # one component per route
 tests/
   setup.ts          # jest-dom matchers, the matchMedia stub, per-test cleanup
+  fakeWallets.ts    # both chains, faked at the extension boundary
   App.test.tsx      # route table coverage as a typed case table
   AppChrome.test.tsx # the header controls, driven by accessible name
+  HomeSteps.test.tsx # the step sequence and the connect step's three states
 ```
 
 ## Rules
@@ -75,6 +80,26 @@ tests/
   `prefers-color-scheme` from a component, and never add a second theme store:
   the sonner wrapper is edited away from its registry version precisely to stop
   `next-themes` becoming one.
+- **The overview is the flow, as steps, and each step owns its own state.**
+  `HomePage` is an ordered list of `StepCard`s and nothing else: no title, no
+  blurb, no endpoint tables. A step reports where it is in its own accessible
+  name (`"Step 1: Connect wallets (complete)"`), goes green on its ring rather
+  than a border (shadcn's `Card` draws its edge with `ring`, so a `border-*`
+  class there is invisible), and a step that is not built yet says so in its
+  body via `ComingSoon` rather than in a badge, which a card this narrow
+  clips. A control that has done its job stops being a control: a connected
+  wallet row becomes a statement, since a button that would do nothing invites
+  a click that does nothing.
+- **A chain-shaped difference is normalised in a hook, never in a component.**
+  `useWalletConnections` publishes both chains as one `WalletConnection` shape,
+  and the header control and the connect step both just render it. Neither
+  knows that the Midnight list is read on demand while wagmi's arrives by
+  announcement. Reach for the raw contexts only when you need something the
+  normalised shape genuinely cannot carry, and widen the shape first if it can.
+- **Never build a user-facing sentence by concatenating an article.**
+  "Connect a Midnight wallet" and "Connect an EVM wallet" disagree, and picking
+  the article from a chain name is a trick the next chain breaks. Word the
+  label so it does not need one.
 - **A control that reflects a connection lives in the shell, not on a page.**
   A wallet outlives navigation, so a control that unmounted on a route change
   would suggest the connection had too. It also must say which chain it speaks

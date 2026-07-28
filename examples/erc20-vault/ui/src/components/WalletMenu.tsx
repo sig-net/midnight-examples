@@ -1,4 +1,4 @@
-import { CheckIcon, LoaderCircleIcon, WalletIcon } from "lucide-react";
+import { CheckIcon, LoaderCircleIcon } from "lucide-react";
 import type { JSX } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -11,105 +11,29 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-/**
- * One wallet the user could connect: `id` is the handle to connect by, the rest
- * is what makes it recognisable in the list.
- *
- * The two chains identify wallets by different things (a wagmi `uid`, a
- * `window.midnight` key), which is exactly why this is an opaque `id` here: the
- * menu passes it back untouched and never interprets it.
- */
-export interface WalletChoice {
-  readonly id: string;
-  readonly name: string;
-  /** The wallet's own icon, as a URL or data URL, when it published one. */
-  readonly iconUrl: string | undefined;
-}
-
-/** The connected wallet, as much of it as the menu shows. */
-export interface ConnectedWallet {
-  readonly name: string;
-  readonly iconUrl: string | undefined;
-  /** A second line under the name: an address, a network, whatever identifies it. */
-  readonly detail: string | undefined;
-}
+import type { WalletConnection } from "../hooks/useWalletConnections";
+import { WalletMark } from "./WalletMark";
 
 /** Props of {@link WalletMenu}. */
 export interface WalletMenuProps {
-  /** The chain this wallet is for, named in the label and the menu heading. */
-  readonly chainName: string;
-  /** The connected wallet, or null while none is. */
-  readonly connected: ConnectedWallet | null;
-  /** True while a connection prompt is outstanding. */
-  readonly connecting: boolean;
-  /** The wallets available to connect. */
-  readonly choices: readonly WalletChoice[];
-  /**
-   * Called when the menu opens or closes, for a chain whose wallet list has to
-   * be re-read at that moment. Omitted by a chain that publishes its list
-   * reactively and so has nothing to refresh.
-   */
-  readonly onOpenChange?: (open: boolean) => void;
-  /** Called with a {@link WalletChoice.id} when the user picks a wallet. */
-  readonly onConnect: (walletId: string) => void;
-  /** Called when the user disconnects. */
-  readonly onDisconnect: () => void;
-}
-
-/** Props of {@link WalletMark}. */
-interface WalletMarkProps {
-  readonly iconUrl: string | undefined;
-  readonly muted: boolean;
+  /** One chain's connection, from `useMidnightWalletConnection` or its EVM twin. */
+  readonly connection: WalletConnection;
 }
 
 /**
- * A wallet's own icon, falling back to a generic one when it published none.
+ * One chain's wallet control in the header: an icon that shows at a glance
+ * whether that chain is connected, and a menu to connect or disconnect.
  *
- * Rendered as an `img` source and never as markup: both connector APIs hand out
- * an icon the EXTENSION controls, and the Midnight one documents the XSS risk
- * in as many words. An `img` cannot execute what it is pointed at.
+ * Presentational and chain-agnostic. Everything chain-shaped (which context to
+ * read, how a failure is surfaced) lives in the hook behind `connection`, since
+ * the two connector APIs agree on nothing but the concept.
  *
- * Decorative in both places it appears, so its `alt` is empty by design: in the
- * trigger the button's own `aria-label` is the name, and in a menu item the
- * wallet's name follows as text.
- *
- * @param props - The icon to show, and whether to wash it out.
- * @returns The mark, sized to sit inside a button.
- */
-const WalletMark = ({ iconUrl, muted }: WalletMarkProps): JSX.Element => {
-  if (iconUrl === undefined) {
-    return <WalletIcon className={muted ? "opacity-60" : undefined} aria-hidden="true" />;
-  }
-  return (
-    <img
-      src={iconUrl}
-      alt=""
-      aria-hidden="true"
-      className={`size-4 rounded-sm ${muted ? "opacity-60 grayscale" : ""}`}
-    />
-  );
-};
-
-/**
- * One chain's wallet control: an icon in the header that shows at a glance
- * whether that chain is connected, and opens a menu to connect or disconnect.
- *
- * Presentational and chain-agnostic. The wallet-shaped work (which contexts to
- * read, how to surface a failure) belongs to the adapters that wrap this, one
- * per chain, since the two connector APIs agree on nothing but the concept.
- *
- * @param props - The chain, its connection state, and the callbacks that change it.
+ * @param props - The chain's connection.
  * @returns The trigger and its menu.
  */
-export const WalletMenu = ({
-  chainName,
-  connected,
-  connecting,
-  choices,
-  onOpenChange,
-  onConnect,
-  onDisconnect,
-}: WalletMenuProps): JSX.Element => {
+export const WalletMenu = ({ connection }: WalletMenuProps): JSX.Element => {
+  const { chainName, connected, connecting, choices, refreshChoices, connect, disconnect } =
+    connection;
   const isConnected = connected !== null;
 
   // The whole state, in the accessible name. A screen reader gets what the
@@ -119,7 +43,13 @@ export const WalletMenu = ({
   const label = `${chainName} wallet: ${status}`;
 
   return (
-    <DropdownMenu onOpenChange={onOpenChange}>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) {
+          refreshChoices();
+        }
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -154,19 +84,17 @@ export const WalletMenu = ({
 
         {connected === null ? (
           choices.length === 0 ? (
-            <DropdownMenuItem disabled>
-              No {chainName} wallet extension found
-            </DropdownMenuItem>
+            <DropdownMenuItem disabled>No {chainName} wallet extension found</DropdownMenuItem>
           ) : (
             choices.map((choice) => (
               <DropdownMenuItem
                 key={choice.id}
                 disabled={connecting}
                 onSelect={() => {
-                  onConnect(choice.id);
+                  connect(choice.id);
                 }}
               >
-                <WalletMark iconUrl={choice.iconUrl} muted={false} />
+                <WalletMark iconUrl={choice.iconUrl} />
                 Connect {choice.name}
               </DropdownMenuItem>
             ))
@@ -188,7 +116,7 @@ export const WalletMenu = ({
             <DropdownMenuItem
               variant="destructive"
               onSelect={() => {
-                onDisconnect();
+                disconnect();
               }}
             >
               Disconnect

@@ -12,8 +12,15 @@ interface RouteCase {
   readonly heading: string;
 }
 
+// The overview's heading is the flow's current prompt rather than a fixed
+// title, so it names the state the app is in. Under jsdom no wallet extension
+// is injected, which is the "nothing connected yet" case.
 const ROUTE_CASES: readonly RouteCase[] = [
-  { description: "the overview", path: RoutePath.Home, heading: "ERC20 vault" },
+  {
+    description: "the overview",
+    path: RoutePath.Home,
+    heading: "To start you'll need 2 connected wallets",
+  },
   { description: "the not-found view", path: "/no-such-path", heading: "Page not found" },
 ];
 
@@ -34,7 +41,7 @@ describe("App", () => {
     await user.click(screen.getByRole("link", { name: "Back to overview" }));
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "ERC20 vault" }),
+      screen.getByRole("heading", { level: 1, name: "To start you'll need 2 connected wallets" }),
     ).toBeInTheDocument();
   });
 });

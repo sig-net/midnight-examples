@@ -1,10 +1,10 @@
-import type { InitialAPI } from "@midnight-ntwrk/dapp-connector-api";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../src/App";
 import { THEME_STORAGE_KEY } from "../src/lib/theme";
+import { clearMidnightWallets, injectMidnightWallet } from "./fakeWallets";
 
 /**
  * The header controls, driven the way a user drives them: through the app, by
@@ -53,38 +53,17 @@ describe("wallet controls", () => {
   );
 });
 
-/**
- * Inject a Midnight wallet under `window.midnight`, the way an extension does.
- *
- * Only `connect` and the self-description are real: `BrowserWallet.available`
- * reads exactly those, and a connect that rejects never reaches the rest of the
- * connector API.
- *
- * @param name - The wallet name the menu should offer.
- * @param connect - The connect call, whose rejection is what the test is after.
- */
-function injectMidnightWallet(name: string, connect: InitialAPI["connect"]): void {
-  const injected: InitialAPI = {
-    rdns: "network.sig.test-wallet",
-    name,
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>",
-    apiVersion: "4.0.0",
-    connect,
-  };
-  window.midnight = { "test-wallet-key": injected };
-}
-
 afterEach(() => {
-  delete window.midnight;
+  clearMidnightWallets();
 });
 
 describe("wallet connection failures", () => {
   it("offers an injected wallet, and reports a refused connection on a toast", async () => {
     const user = userEvent.setup();
-    injectMidnightWallet(
-      "Test Wallet",
-      vi.fn().mockRejectedValue(new Error("User declined the connection request")),
-    );
+    injectMidnightWallet({
+      name: "Test Wallet",
+      failWith: new Error("User declined the connection request"),
+    });
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Midnight wallet: not connected" }));

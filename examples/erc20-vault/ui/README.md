@@ -4,8 +4,9 @@ The browser front end for the erc20-vault example: a single-page app that will
 let a user connect a Midnight wallet, read the deployed vault's state, and drive
 its deposit and withdrawal circuits.
 
-Today it is the shell. Routing, styling and the test setup are in place and
-green, and the chain wiring is what goes in next.
+The overview presents that as three steps, worked through left to right:
+connect the wallets, check balances, then interact with the vault. Step one is
+live. The other two are signposts, and each says so on its own card.
 
 ## Running it
 
@@ -58,6 +59,13 @@ which one, its address on the EVM side, and a disconnect. A connection that
 fails raises a toast carrying the wallet's own words rather than failing
 silently, so a declined prompt reads as a declined prompt.
 
+The first step card offers the same connections, one row per chain, and is the
+place to start rather than the header. It counts how many of the two are in,
+ticks each row as it connects, and turns green once both are. The page heading
+tracks it: "To start you'll need 2 connected wallets" until both are connected,
+"Wallet connections set" afterwards. Disconnecting stays in the header, so it
+never competes with the step's forward motion.
+
 Theme choice is one of light, dark or system, persisted under
 `erc20-vault-ui.theme`. System is the default and follows the operating system
 live. A short script in `index.html` applies the choice before the first paint,
@@ -80,9 +88,10 @@ src/
   routes.ts         # RoutePath enum: the single source of truth for paths
   index.css         # Tailwind import and shadcn/ui's design tokens
   vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
-  components/       # the application shell and its header controls
+  components/       # the shell, the header controls and the step cards
     contexts/       # app-wide React contexts, including the theme
     ui/             # shadcn/ui components, copied in by its CLI
+  hooks/            # the logic the components render
   lib/              # non-React modules the components lean on
   pages/            # one component per route
 tests/              # Testing Library specs run under vitest
