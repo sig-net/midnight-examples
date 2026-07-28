@@ -41,6 +41,14 @@ export default defineConfig({
       ],
     }),
   ],
+  resolve: {
+    alias: {
+      // The "@/" alias shadcn/ui generates its imports against, declared for
+      // the compiler in tsconfig.json's paths. Resolved off import.meta.url
+      // rather than node:path so this config needs no @types/node.
+      "@": normalizePath(new URL("./src", import.meta.url).pathname),
+    },
+  },
   server: {
     port: 5173,
   },

@@ -45,15 +45,15 @@ interface ConnectionPanelProps {
 const ConnectionPanel = ({ title, subtitle, rows }: ConnectionPanelProps): JSX.Element => (
   <div className="flex flex-col gap-3">
     <h2 className="font-medium">
-      {title} <span className="text-ink-muted">({subtitle})</span>
+      {title} <span className="text-muted-foreground">({subtitle})</span>
     </h2>
-    <dl className="overflow-x-auto rounded-lg border border-border-subtle bg-surface-raised">
+    <dl className="overflow-x-auto rounded-lg border border-border bg-card">
       {rows.map((row) => (
         <div
           key={row.label}
-          className="flex gap-4 border-b border-border-subtle px-4 py-2 text-sm last:border-b-0"
+          className="flex gap-4 border-b border-border px-4 py-2 text-sm last:border-b-0"
         >
-          <dt className="w-28 shrink-0 text-ink-muted">{row.label}</dt>
+          <dt className="w-28 shrink-0 text-muted-foreground">{row.label}</dt>
           <dd className="font-mono">{row.value}</dd>
         </div>
       ))}
@@ -88,7 +88,7 @@ export const HomePage = (): JSX.Element => {
     <section className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <h1 className="text-3xl font-semibold tracking-tight">ERC20 vault</h1>
-        <p className="max-w-prose text-ink-muted">
+        <p className="max-w-prose text-muted-foreground">
           A single-page app over the erc20-vault Compact contract. The shell, routing and styling
           are in place: chain wiring is what goes in next.
         </p>
@@ -98,10 +98,10 @@ export const HomePage = (): JSX.Element => {
         {CAPABILITIES.map((capability) => (
           <li
             key={capability.title}
-            className="rounded-lg border border-border-subtle bg-surface-raised p-4"
+            className="rounded-lg border border-border bg-card p-4"
           >
             <h2 className="font-medium">{capability.title}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{capability.detail}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{capability.detail}</p>
           </li>
         ))}
       </ul>

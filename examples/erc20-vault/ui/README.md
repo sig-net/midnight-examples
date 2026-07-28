@@ -29,7 +29,19 @@ than shipping.
 | UI | React 19 |
 | Routing | React Router 8, declarative mode |
 | Styling | Tailwind 4, configured in CSS via `@theme` in `src/index.css` |
+| Components | shadcn/ui, on the Radix base in the `nova` style |
 | Tests | vitest 4 + Testing Library, in a `jsdom` environment |
+
+Components are not a dependency: `yarn dlx shadcn@latest add <component>` copies
+the source into `src/components/ui/`, and from there it is ordinary code in this
+repository, to read and to edit. `components.json` records the base and style so
+a component added later matches the ones already here.
+
+Colours come from shadcn's tokens: `bg-background`, `text-muted-foreground`,
+`border-border` and the rest, with the values in the `:root` and `.dark` blocks
+of `src/index.css`. Restyle the app by editing those values. Dark mode follows
+the operating system, applied as a `dark` class on `<html>` by a short script in
+`index.html` so the first paint is already the right theme.
 
 This is the only package in the workspace that bundles: a browser has no way to
 load TypeScript. `yarn build` emits a gitignored `dist/`, which is a deploy
@@ -39,15 +51,18 @@ artefact and not something other packages import.
 
 ```
 index.html          # the single HTML entry Vite serves and bundles
-vite.config.ts      # bundler plugins plus the vitest (jsdom) block
+vite.config.ts      # bundler plugins, the "@/" alias, the vitest (jsdom) block
+components.json     # shadcn/ui's config: base, style and the "@/" aliases
 src/
   main.tsx          # mounts <App/> into #root
   App.tsx           # the provider stack wrapped around the route table
   routes.ts         # RoutePath enum: the single source of truth for paths
-  index.css         # Tailwind import and the design tokens
+  index.css         # Tailwind import and shadcn/ui's design tokens
   vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
   components/       # the application shell
     contexts/       # app-wide React contexts
+    ui/             # shadcn/ui components, copied in by its CLI
+  lib/              # non-React modules the components lean on
   pages/            # one component per route
 tests/              # Testing Library specs run under vitest
 ```

@@ -11,13 +11,13 @@ import { RoutePath } from "../routes";
  * @returns The chrome wrapping the active route's view.
  */
 export const AppLayout = (): JSX.Element => (
-  <div className="flex min-h-screen flex-col bg-surface text-ink">
-    <header className="border-b border-border-subtle bg-surface-raised">
+  <div className="flex min-h-screen flex-col bg-background text-foreground">
+    <header className="border-b border-border bg-card">
       <div className="mx-auto flex w-full max-w-3xl items-baseline gap-3 px-6 py-4">
         <Link to={RoutePath.Home} className="text-lg font-semibold tracking-tight">
           ERC20 vault
         </Link>
-        <span className="text-sm text-ink-muted">Midnight example</span>
+        <span className="text-sm text-muted-foreground">Midnight example</span>
       </div>
     </header>
 
@@ -25,7 +25,7 @@ export const AppLayout = (): JSX.Element => (
       <Outlet />
     </main>
 
-    <footer className="border-t border-border-subtle px-6 py-4 text-center text-sm text-ink-muted">
+    <footer className="border-t border-border px-6 py-4 text-center text-sm text-muted-foreground">
       Bridging ERC20 assets to Midnight shielded UTXOs via the Signature Network.
     </footer>
   </div>

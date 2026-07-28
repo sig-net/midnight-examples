@@ -11,15 +11,19 @@ into an app framework. These rules keep it an example.
 
 ```
 index.html          # the single HTML entry Vite serves and bundles
-vite.config.ts      # bundler plugins plus the vitest (jsdom) block
+vite.config.ts      # bundler plugins, the "@/" alias, the vitest (jsdom) block
+components.json     # shadcn/ui's config: base, style and the "@/" aliases
 src/
   main.tsx          # mounts <App/> into #root
   App.tsx           # the provider stack wrapped around the route table
   routes.ts         # RoutePath enum: the single source of truth for paths
-  index.css         # Tailwind import and the design tokens
+  index.css         # Tailwind import and shadcn/ui's design tokens
   vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
   components/       # presentational components: precise props, no fetching
     contexts/       # app-wide React contexts, all mounted in App.tsx
+    ui/             # shadcn/ui components, copied in by its CLI
+  lib/              # non-React modules the components lean on
+    utils.ts        # cn(): the class merger every ui/ component imports
   pages/            # one component per route
 tests/
   setup.ts          # jest-dom matchers and per-test cleanup
@@ -34,10 +38,49 @@ tests/
   `@theme` in `src/index.css` (Tailwind v4 has no `tailwind.config.js`, and
   adding one is a regression). Reach for a global client-state library only when
   component state has genuinely run out, and say in the commit why.
+- **Components come from shadcn/ui, and they land in the repository.**
+  `yarn dlx shadcn@latest add <component>` copies the source into
+  `src/components/ui/`, where it becomes ordinary owned code: edit it in place,
+  and never re-derive it at runtime. `components.json` pins the base (`radix`)
+  and style (`nova`) the CLI generates against, so a component added months from
+  now still matches the ones already here. Its imports resolve through the `@/`
+  alias, which is declared TWICE and must stay in step: `paths` in
+  `tsconfig.json` for the typecheck, `resolve.alias` in `vite.config.ts` for the
+  bundle. Write an unstyled element by hand only where the registry has nothing
+  that fits.
+- **shadcn/ui's colour vocabulary is the only one.** `bg-background`,
+  `text-foreground`, `bg-card`, `text-muted-foreground`, `border-border`,
+  `text-primary`, with the values living in the `:root` and `.dark` blocks of
+  `src/index.css`. Restyle by editing those values, never by adding a second
+  token set beside them: two names for one colour is how a component ends up
+  matching neither. Dark mode hangs off a `dark` class that the inline script in
+  `index.html` mirrors from the OS preference before first paint, so a `dark:`
+  variant works with no theme provider in the tree, and a component must not
+  read `prefers-color-scheme` for itself.
 - **NEVER install a dependency ahead of its first consumer.** A package with
   nothing importing it is scaffold leftover, and the workspace's no-dead-code
   rule applies to manifests as much as to source. Add it in the same change as
   the feature that needs it.
+
+  shadcn/ui is the single exception, and it is deliberate. `shadcn init` and
+  `shadcn add` install what their registry generates against (`radix-ui`,
+  `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`,
+  `tw-animate-css`, `shadcn` itself for `shadcn/tailwind.css`), and a component
+  under `src/components/ui/` may sit unimported until the feature that renders
+  it arrives. Leave both alone.
+
+  Pruning them is not a tidy-up, and the failure is delayed rather than loud.
+  Most registry items declare NO dependencies of their own while still
+  importing from `lucide-react`, so the CLI installs nothing and trusts what
+  init left behind. Removing `lucide-react` today costs nothing until someone
+  runs `shadcn add checkbox` months from now: the component is written, the CLI
+  reports success, and the build then fails on `TS2307: Cannot find module
+  'lucide-react'` in a file that person did not write. Verified by doing
+  exactly that, on 2026-07-28.
+
+  The exception covers ONLY what the shadcn CLI itself writes. A package you
+  install by hand, including one you noticed because a shadcn component
+  happened to use it, is governed by the rule above.
 - **`build` is `tsc -p tsconfig.json && vite build`, in that order.** The
   typecheck still governs; the emitted `dist/` is a gitignored deploy artefact.
   NOTHING may import from it: this package has no `exports` field and is never a

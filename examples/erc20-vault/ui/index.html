@@ -6,6 +6,20 @@
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>ERC20 vault</title>
+    <script>
+      // shadcn/ui gates its dark tokens on a `dark` class rather than on a
+      // media query, so mirror the OS preference onto <html> here. Inline and
+      // in <head> because a module script would only run after first paint,
+      // flashing the light theme. There is deliberately no in-app override:
+      // the app follows the OS, and adding a toggle means adding a store for
+      // the choice, which is more than an example needs.
+      (() => {
+        const dark = window.matchMedia("(prefers-color-scheme: dark)");
+        const apply = () => document.documentElement.classList.toggle("dark", dark.matches);
+        apply();
+        dark.addEventListener("change", apply);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

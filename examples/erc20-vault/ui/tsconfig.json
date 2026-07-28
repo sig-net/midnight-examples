@@ -3,7 +3,14 @@
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // The "@/" alias shadcn/ui generates its imports against. Mirrored in
+    // vite.config.ts, which is what actually resolves it at bundle time.
+    // No "baseUrl": TypeScript 7 removed it, and paths now resolve relative
+    // to this file, which is what the shadcn docs' baseUrl was buying anyway.
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src", "tests", "vite.config.ts"]
 }

@@ -11,8 +11,8 @@ import { RoutePath } from "../routes";
 export const NotFoundPage = (): JSX.Element => (
   <section className="flex flex-col items-start gap-4">
     <h1 className="text-3xl font-semibold tracking-tight">Page not found</h1>
-    <p className="text-ink-muted">That path is not part of this app.</p>
-    <Link to={RoutePath.Home} className="font-medium text-accent underline underline-offset-4">
+    <p className="text-muted-foreground">That path is not part of this app.</p>
+    <Link to={RoutePath.Home} className="font-medium text-primary underline underline-offset-4">
       Back to overview
     </Link>
   </section>
