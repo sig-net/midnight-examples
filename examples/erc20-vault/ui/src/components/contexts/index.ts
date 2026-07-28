@@ -16,9 +16,8 @@ export {
   type MidnightChainConfigContextValue,
 } from "./MidnightChainConfigContext.tsx";
 export {
-  availableBrowserWallets,
+  MidnightWalletConnectBusyError,
   MidnightWalletProvider,
   useMidnightWallet,
-  type InjectedMidnightWallet,
   type MidnightWalletContextValue,
 } from "./MidnightWalletContext.tsx";

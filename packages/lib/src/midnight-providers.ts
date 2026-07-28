@@ -7,6 +7,12 @@
 // provider set (indexer / proof server / zk-config / private-state store)
 // lives with each contract package, since it depends on that package's
 // compiled assets.
+//
+// Exported both from the package root and as the "./midnight-providers"
+// subpath: the root re-exports deploy.ts, whose node-only imports
+// (@effect/platform-node, compact-js-node) a browser bundle cannot carry, so
+// browser apps (the erc20-vault UI) import this module via the subpath.
+// Keep this module free of node-only and non-type wallet-sdk imports.
 
 import {
   createProofProvider,

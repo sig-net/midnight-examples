@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Shared runtime plumbing imported by the examples — wallet, providers, deploy tx build & submit. Kept ruthlessly small.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./midnight-providers": "./src/midnight-providers.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -14,10 +15,10 @@
   "dependencies": {
     "@effect/platform-node": "^0.108.0",
     "@midnight-examples/chain-config": "*",
-    "@midnight-ntwrk/compact-js": "2.5.5-rc.6",
-    "@midnight-ntwrk/compact-js-node": "2.5.5-rc.6",
-    "@midnight-ntwrk/midnight-js": "5.0.0-beta.4",
-    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "5.0.0-beta.4",
+    "@midnight-ntwrk/compact-js": "2.5.5-rc.7",
+    "@midnight-ntwrk/compact-js-node": "2.5.5-rc.7",
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "5.0.0-beta.6",
     "@midnight-ntwrk/platform-js": "^3.0.0",
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
     "@midnightntwrk/wallet-sdk-abstractions": "3.0.0-beta.0",

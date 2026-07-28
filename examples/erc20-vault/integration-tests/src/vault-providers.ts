@@ -89,7 +89,7 @@ export function buildVaultProviders(
   // Retrieves the ZK artifacts of a contract needed to create proofs.
   // Key methods: getProverKey(id), getVerifierKey(id), getZKIR(id) — id is
   // typed to the circuit-name union.
-  const zkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(managedPath);
+  const vaultZkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(managedPath);
 
   // The callee (signet contract) circuits, resolved for the cross-contract
   // proof provider so deposit's whole call tree proves.
@@ -144,7 +144,8 @@ export function buildVaultProviders(
       subscriptionURL: config.indexerWsUrl,
     }),
 
-    zkConfigProvider,
+    // (The field name is the SDK's contract: its record holds exactly one.)
+    zkConfigProvider: vaultZkConfigProvider,
 
     // Creates proven, unbalanced transactions (proves the contract-call
     // transcript). This is NOT the wallet's proving config: the facade's
@@ -153,7 +154,7 @@ export function buildVaultProviders(
     // vault AND the signet contract so deposit's cross-contract call
     // resolves keys for the whole call tree.
     proofProvider: createCrossContractProofServerProvider(config.proofServerUrl, [
-      zkConfigProvider,
+      vaultZkConfigProvider,
       signetZkConfigProvider,
     ]),
 
