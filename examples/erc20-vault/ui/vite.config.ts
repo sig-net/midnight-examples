@@ -62,8 +62,18 @@ export default defineConfig({
     exclude: ["@midnightntwrk/ledger-v9", "@midnightntwrk/onchain-runtime-v4"],
   },
   build: {
-    // Fail the build rather than ship a chunk that stalls first paint.
-    chunkSizeWarningLimit: 600,
+    // A tripwire for a dependency quietly bloating first paint, NOT a hard
+    // gate: vite only warns past this and still exits 0, so it catches the
+    // next unnoticed jump rather than preventing one.
+    //
+    // Raised from 600 when the shadcn/ui runtime arrived and put the entry
+    // chunk at ~660 kB (~180 kB gzipped). Attributed with the build's own
+    // sourcemap, the additions are tailwind-merge, sonner, @radix-ui/react-menu
+    // and floating-ui, roughly 160 kB between them. radix-ui and lucide-react
+    // both tree-shake: only the menu primitive and the icons actually used
+    // reach the bundle. Move this number again only alongside the same
+    // measurement, and say what pushed it.
+    chunkSizeWarningLimit: 800,
     sourcemap: true,
   },
   test: {

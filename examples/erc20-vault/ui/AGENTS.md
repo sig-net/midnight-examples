@@ -10,9 +10,11 @@ into an app framework. These rules keep it an example.
 ## Shape
 
 ```
-index.html          # the single HTML entry Vite serves and bundles
+index.html          # the HTML entry, and the pre-paint theme script
 vite.config.ts      # bundler plugins, the "@/" alias, the vitest (jsdom) block
 components.json     # shadcn/ui's config: base, style and the "@/" aliases
+public/             # served verbatim at the site root
+  sig-network.png   # the Signature Network mark, in the header
 src/
   main.tsx          # mounts <App/> into #root
   App.tsx           # the provider stack wrapped around the route table
@@ -20,14 +22,22 @@ src/
   index.css         # Tailwind import and shadcn/ui's design tokens
   vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
   components/       # presentational components: precise props, no fetching
+    AppLayout.tsx   # the shell: header controls, outlet, footer
+    WalletMenu.tsx  # one chain's wallet control, chain-agnostic
+    MidnightWalletMenu.tsx  # …bound to the Midnight context
+    EVMWalletMenu.tsx       # …bound to the EVM context
+    ThemeToggle.tsx # light / dark / system
     contexts/       # app-wide React contexts, all mounted in App.tsx
     ui/             # shadcn/ui components, copied in by its CLI
   lib/              # non-React modules the components lean on
     utils.ts        # cn(): the class merger every ui/ component imports
+    theme.ts        # the theme choice, its storage, and how it is applied
+    errorMessage.ts # describeError(): a rejection, made fit to render
   pages/            # one component per route
 tests/
-  setup.ts          # jest-dom matchers and per-test cleanup
+  setup.ts          # jest-dom matchers, the matchMedia stub, per-test cleanup
   App.test.tsx      # route table coverage as a typed case table
+  AppChrome.test.tsx # the header controls, driven by accessible name
 ```
 
 ## Rules
@@ -53,10 +63,31 @@ tests/
   `text-primary`, with the values living in the `:root` and `.dark` blocks of
   `src/index.css`. Restyle by editing those values, never by adding a second
   token set beside them: two names for one colour is how a component ends up
-  matching neither. Dark mode hangs off a `dark` class that the inline script in
-  `index.html` mirrors from the OS preference before first paint, so a `dark:`
-  variant works with no theme provider in the tree, and a component must not
-  read `prefers-color-scheme` for itself.
+  matching neither.
+- **The theme is decided in exactly two places, and a component is neither.**
+  `src/lib/theme.ts` owns the choice, its storage key and how it reaches the
+  DOM. `ThemeContext` owns it from mount onwards and is what a component reads,
+  through `useTheme`. The inline script in `index.html` is the only exception,
+  and only for the first paint: it cannot import the module (a module script
+  runs after first paint and would flash the wrong theme), so it duplicates the
+  storage key and the light/dark decision in a few lines, with a comment on
+  each side pointing at the other. Keep the two in step. Never read
+  `prefers-color-scheme` from a component, and never add a second theme store:
+  the sonner wrapper is edited away from its registry version precisely to stop
+  `next-themes` becoming one.
+- **A control that reflects a connection lives in the shell, not on a page.**
+  A wallet outlives navigation, so a control that unmounted on a route change
+  would suggest the connection had too. It also must say which chain it speaks
+  for: two wallet glyphs side by side are indistinguishable, which is why the
+  chain name is on the control itself and drops only below `sm`, where the
+  accessible name still carries it. State goes in the accessible name too
+  (`"Midnight wallet: connected"`), so a screen reader gets what the coloured
+  dot conveys to everyone else and the tests have something honest to query.
+- **A wallet's name and icon are the EXTENSION's strings, not yours.** Render
+  the name as a text node and the icon as an `img` source, never as markup: the
+  connector APIs document the XSS risk in as many words. A failed connect goes
+  to a `sonner` toast carrying the connector's own message, never to a
+  swallowed promise and never to `alert`.
 - **NEVER install a dependency ahead of its first consumer.** A package with
   nothing importing it is scaffold leftover, and the workspace's no-dead-code
   rule applies to manifests as much as to source. Add it in the same change as
@@ -77,6 +108,13 @@ tests/
   reports success, and the build then fails on `TS2307: Cannot find module
   'lucide-react'` in a file that person did not write. Verified by doing
   exactly that, on 2026-07-28.
+
+  What makes those dangerous is that they are UNDECLARED. A dependency a
+  registry item does declare is a different case: the CLI reinstalls it on the
+  next `add`, so it can be removed once nothing imports it. That is why
+  `next-themes` is gone. It arrived declared by `sonner`, and the sonner
+  wrapper now reads this app's own ThemeContext instead, which leaves it with
+  no importer and a CLI that would bring it back if it were ever needed again.
 
   The exception covers ONLY what the shadcn CLI itself writes. A package you
   install by hand, including one you noticed because a shadcn component

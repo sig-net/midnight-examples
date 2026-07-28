@@ -39,9 +39,29 @@ a component added later matches the ones already here.
 
 Colours come from shadcn's tokens: `bg-background`, `text-muted-foreground`,
 `border-border` and the rest, with the values in the `:root` and `.dark` blocks
-of `src/index.css`. Restyle the app by editing those values. Dark mode follows
-the operating system, applied as a `dark` class on `<html>` by a short script in
-`index.html` so the first paint is already the right theme.
+of `src/index.css`. Restyle the app by editing those values.
+
+## The header
+
+The header carries the whole control surface, since a connection outlives
+navigation:
+
+| Control | What it shows |
+| --- | --- |
+| Midnight wallet | Grey dot and a washed-out icon until connected, then the wallet's own icon and a green dot |
+| EVM wallet | The same, over wagmi's EIP-6963 discovery |
+| Theme | Light, dark, or system |
+
+Opening a wallet control lists the wallet extensions the browser announced, and
+connecting is one click from there. With a wallet connected the same menu shows
+which one, its address on the EVM side, and a disconnect. A connection that
+fails raises a toast carrying the wallet's own words rather than failing
+silently, so a declined prompt reads as a declined prompt.
+
+Theme choice is one of light, dark or system, persisted under
+`erc20-vault-ui.theme`. System is the default and follows the operating system
+live. A short script in `index.html` applies the choice before the first paint,
+which is what stops a reload flashing the wrong theme.
 
 This is the only package in the workspace that bundles: a browser has no way to
 load TypeScript. `yarn build` emits a gitignored `dist/`, which is a deploy
@@ -50,17 +70,18 @@ artefact and not something other packages import.
 ## Layout
 
 ```
-index.html          # the single HTML entry Vite serves and bundles
+index.html          # the HTML entry, and the pre-paint theme script
 vite.config.ts      # bundler plugins, the "@/" alias, the vitest (jsdom) block
 components.json     # shadcn/ui's config: base, style and the "@/" aliases
+public/             # served verbatim at the site root, including the SIG mark
 src/
   main.tsx          # mounts <App/> into #root
   App.tsx           # the provider stack wrapped around the route table
   routes.ts         # RoutePath enum: the single source of truth for paths
   index.css         # Tailwind import and shadcn/ui's design tokens
   vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
-  components/       # the application shell
-    contexts/       # app-wide React contexts
+  components/       # the application shell and its header controls
+    contexts/       # app-wide React contexts, including the theme
     ui/             # shadcn/ui components, copied in by its CLI
   lib/              # non-React modules the components lean on
   pages/            # one component per route

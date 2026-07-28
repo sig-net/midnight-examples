@@ -7,7 +7,9 @@ import {
   EVMWalletProvider,
   MidnightChainConfigProvider,
   MidnightWalletProvider,
+  ThemeProvider,
 } from "./components/contexts";
+import { Toaster } from "./components/ui/sonner";
 import { HomePage } from "./pages/HomePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { RoutePath } from "./routes";
@@ -19,20 +21,27 @@ import { RoutePath } from "./routes";
  * @returns The whole app, ready to render into the `#root` element.
  */
 export const App = (): JSX.Element => (
-  <MidnightChainConfigProvider>
-    <MidnightWalletProvider>
-      <EVMChainConfigProvider>
-        <EVMWalletProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route element={<AppLayout />}>
-                <Route path={RoutePath.Home} element={<HomePage />} />
-                <Route path="*" element={<NotFoundPage />} />
-              </Route>
-            </Routes>
-          </BrowserRouter>
-        </EVMWalletProvider>
-      </EVMChainConfigProvider>
-    </MidnightWalletProvider>
-  </MidnightChainConfigProvider>
+  // ThemeProvider outermost: the toaster reads the theme, and so may anything
+  // added later, so nothing below it should have to ask twice.
+  <ThemeProvider>
+    <MidnightChainConfigProvider>
+      <MidnightWalletProvider>
+        <EVMChainConfigProvider>
+          <EVMWalletProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route element={<AppLayout />}>
+                  <Route path={RoutePath.Home} element={<HomePage />} />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Route>
+              </Routes>
+            </BrowserRouter>
+            {/* Outside the router: a toast raised by a connect must survive the
+                navigation that a connect can trigger. */}
+            <Toaster position="bottom-right" richColors closeButton />
+          </EVMWalletProvider>
+        </EVMChainConfigProvider>
+      </MidnightWalletProvider>
+    </MidnightChainConfigProvider>
+  </ThemeProvider>
 );

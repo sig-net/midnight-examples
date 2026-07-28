@@ -21,3 +21,4 @@ export {
   useMidnightWallet,
   type MidnightWalletContextValue,
 } from "./MidnightWalletContext.tsx";
+export { ThemeProvider, useTheme, type ThemeContextValue } from "./ThemeContext.tsx";

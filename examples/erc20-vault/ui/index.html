@@ -7,17 +7,30 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>ERC20 vault</title>
     <script>
-      // shadcn/ui gates its dark tokens on a `dark` class rather than on a
-      // media query, so mirror the OS preference onto <html> here. Inline and
-      // in <head> because a module script would only run after first paint,
-      // flashing the light theme. There is deliberately no in-app override:
-      // the app follows the OS, and adding a toggle means adding a store for
-      // the choice, which is more than an example needs.
+      // shadcn/ui gates its dark tokens on a `dark` class, so the theme is this
+      // one class on <html>. Applied here, inline and in <head>, because this
+      // has to happen BEFORE the first paint: a module script runs after it,
+      // and the page would flash the wrong theme on every load.
+      //
+      // Which makes this the one thing that cannot import src/lib/theme.ts,
+      // and so the one place its storage key and its light/dark decision are
+      // duplicated. Keep the two in step. Everything after the first paint,
+      // including switching the theme and following the OS while it is open,
+      // belongs to ThemeContext and does not go here.
       (() => {
-        const dark = window.matchMedia("(prefers-color-scheme: dark)");
-        const apply = () => document.documentElement.classList.toggle("dark", dark.matches);
-        apply();
-        dark.addEventListener("change", apply);
+        // Keep in step with THEME_STORAGE_KEY in src/lib/theme.ts.
+        const STORAGE_KEY = "erc20-vault-ui.theme";
+        let stored = null;
+        try {
+          stored = window.localStorage.getItem(STORAGE_KEY);
+        } catch {
+          // Storage blocked. Fall through to the operating system.
+        }
+        const dark =
+          stored === "dark" ||
+          (stored !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
       })();
     </script>
   </head>
