@@ -5,8 +5,26 @@ let a user connect a Midnight wallet, read the deployed vault's state, and drive
 its deposit and withdrawal circuits.
 
 The overview presents that as three steps, worked through left to right:
-connect the wallets, check balances, then interact with the vault. Step one is
-live. The other two are signposts, and each says so on its own card.
+connect the wallets, derive the deposit address, then interact with the vault.
+Steps one and two are live. The third is a signpost, and says so on its card.
+The cards are compact, equal-height summaries over one view area below them:
+selecting a card (its title is the control) puts that step's full details in
+the view area, and the selection follows the user's progress until a card is
+chosen by hand.
+
+Step two establishes the caller's vault identity. The Midnight wallet is asked
+to sign a fixed message (`signet-wallet-erc20-vault-demo`), the secret key is
+the SHA-256 hash of that signature, and only its commitment (the compiled
+`userCommitment` circuit) ever reaches the ledger. From the commitment the app
+derives the caller's EVM deposit address: the account only the MPC network can
+sign for, whose derivation combines the MPC root public key, the vault
+contract's address, and the commitment as the derivation path. The secret is
+stored in the browser (encrypted, scoped per wallet account), and a key found
+there with a derived address is already enough to proceed to the vault
+interactions. A found key can also be regenerated (re-signed and overwritten),
+but only behind a tick box acknowledging the loss: unless the wallet signs
+deterministically, the new signature derives a different key, and unclaimed
+deposits or pending refunds tied to the old commitment go with it.
 
 ## Running it
 
@@ -114,6 +132,7 @@ browser.
 | `VITE_EVM_RPC_URL` | JSON-RPC endpoint of the EVM chain. Defaults to the local anvil compose service. |
 | `VITE_EVM_CHAIN_ID` | The EVM chain id to expect. Defaults to anvil's 31337. |
 | `VITE_EVM_EXPLORER_URL` | Block explorer base URL, for linking transactions and addresses. |
+| `VITE_MPC_SECP256K1_PUBKEY` | The MPC network's root secp256k1 public key (hex, compressed or uncompressed, `0x` optional). Deposit addresses derive from it; unset, everything else works and the app says the address cannot be derived. The local fakenet's key is generated per machine, printed as `MPC_SECP256K1_PUBKEY` in the repo-root `.env` by the integration setup. |
 
 These set the *starting* config. Switching Midnight network in the running app
 resets every endpoint to that network's published defaults, so stagenet (whose

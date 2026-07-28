@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import { useEVMWallet, useMidnightWallet } from "../components/contexts";
 import { describeError } from "../lib/errorMessage";
+import { shortenAddress } from "../lib/shortenAddress";
 
 /**
  * One wallet the user could connect: `id` is the handle to connect by, the rest
@@ -122,19 +123,6 @@ export function useMidnightWalletConnection(): WalletConnection {
     }),
     [browserWallet, connecting, injected, refreshChoices, connect, disconnectBrowserWallet],
   );
-}
-
-/**
- * An EVM address, short enough for a menu but still recognisable.
- *
- * Both ends are kept: an address is compared by its ends in practice, and a
- * prefix alone matches far too many.
- *
- * @param address - The full checksummed address.
- * @returns The shortened form.
- */
-function shortenAddress(address: string): string {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
 /**

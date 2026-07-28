@@ -22,6 +22,13 @@ export interface StepCardProps {
   readonly status: StepStatus;
   /** A short flag beside the title, for a step that is not built yet. */
   readonly badge?: string;
+  /**
+   * True when this step's details fill the view area below the cards. Only
+   * meaningful alongside {@link StepCardProps.onSelect}.
+   */
+  readonly selected?: boolean;
+  /** Put this step's details in the view area. Makes the card selectable. */
+  readonly onSelect?: () => void;
   /** The step's own content. */
   readonly children: ReactNode;
 }
@@ -42,9 +49,29 @@ export const StepCard = ({
   title,
   status,
   badge,
+  selected = false,
+  onSelect,
   children,
 }: StepCardProps): JSX.Element => {
   const complete = status === "complete";
+
+  // The number-or-tick marker plus the title: the card's whole identity, and
+  // (when the card is selectable) exactly what the select button wraps.
+  const heading = (
+    <>
+      {complete ? (
+        <CheckCircle2Icon className="size-4 shrink-0 text-emerald-500" aria-hidden="true" />
+      ) : (
+        <span
+          aria-hidden="true"
+          className="flex size-4 shrink-0 items-center justify-center rounded-full border border-current text-[0.625rem] text-muted-foreground"
+        >
+          {stepNumber}
+        </span>
+      )}
+      <span className="min-w-0 truncate">{title}</span>
+    </>
+  );
 
   return (
     <Card
@@ -52,27 +79,35 @@ export const StepCard = ({
       // and to a test, rather than a div that happens to contain a heading.
       role="group"
       aria-label={`Step ${stepNumber}: ${title} (${status})`}
-      // The outline is the progress bar. Card draws its edge with `ring`, not
-      // `border`, so the green goes on the ring or it does not show at all.
-      // Only a complete step goes green: a half-done one reads as not done,
-      // which is what it is.
-      className={`gap-3 ${complete ? "ring-2 ring-emerald-500/60" : ""} ${
-        status === "pending" ? "opacity-70" : ""
-      }`}
+      // Card-level click is a convenience enlargement of the title button's
+      // target for mouse users; keyboard and assistive access go through the
+      // button itself. Clicks on inner controls bubble here too, which is
+      // wanted: acting inside a step is reason enough to show its details.
+      onClick={onSelect}
+      // The outline is the progress bar, and selection borrows it: the
+      // selected card takes the ring in the theme's ring colour, a complete
+      // unselected one keeps the green, and Card draws its edge with `ring`,
+      // not `border`, so anything else would not show at all.
+      // h-full: the cards sit in one grid row, whose items stretch, so filling
+      // the row is what makes every card the height of the tallest.
+      className={`h-full gap-3 ${
+        selected ? "ring-2 ring-ring/70" : complete ? "ring-2 ring-emerald-500/60" : ""
+      } ${status === "pending" ? "opacity-70" : ""} ${onSelect ? "cursor-pointer" : ""}`}
     >
       <CardHeader className="gap-0">
         <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          {complete ? (
-            <CheckCircle2Icon className="size-4 shrink-0 text-emerald-500" aria-hidden="true" />
+          {onSelect === undefined ? (
+            heading
           ) : (
-            <span
-              aria-hidden="true"
-              className="flex size-4 shrink-0 items-center justify-center rounded-full border border-current text-[0.625rem] text-muted-foreground"
+            <button
+              type="button"
+              aria-pressed={selected}
+              onClick={onSelect}
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
-              {stepNumber}
-            </span>
+              {heading}
+            </button>
           )}
-          <span className="min-w-0 truncate">{title}</span>
           {badge === undefined ? null : (
             <Badge variant="secondary" className="ml-auto shrink-0 text-xs font-normal">
               {badge}

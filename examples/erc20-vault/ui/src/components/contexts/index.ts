@@ -1,5 +1,13 @@
 // The app-wide React contexts, mounted once in App.tsx.
 export {
+  CallerIdentityStatus,
+  ERC20VaultContextProvider,
+  IDENTITY_SIGNING_MESSAGE,
+  useERC20Vault,
+  type CallerIdentity,
+  type ERC20VaultContextValue,
+} from "./ERC20VaultContext.tsx";
+export {
   EVMChainConfigProvider,
   useEVMChainConfig,
   type EVMChainConfigContextValue,

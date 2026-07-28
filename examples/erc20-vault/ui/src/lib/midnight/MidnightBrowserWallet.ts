@@ -27,6 +27,8 @@ import type {
     ConnectedAPI,
     HistoryEntry,
     InitialAPI,
+    Signature,
+    SignDataOptions,
 } from "@midnight-ntwrk/dapp-connector-api";
 import type { MidnightProvider, UnboundTransaction, WalletProvider } from "@midnight-ntwrk/midnight-js/types";
 import * as ledger from "@midnightntwrk/ledger-v9";
@@ -108,6 +110,10 @@ interface Connected {
     // Read back at connect time to check the network, and kept: the URIs in it
     // are the wallet user's own service preferences.
     configuration: Configuration;
+    // Read once at connect time and kept: the connector call is async, but the
+    // WalletProvider interface reads the keys synchronously, so they have to be
+    // in hand before the wallet is published as connected.
+    shieldedAddresses: Awaited<ReturnType<ConnectedAPI["getShieldedAddresses"]>>;
 }
 
 export class BrowserWallet implements MidnightProvider, WalletProvider {
@@ -167,12 +173,26 @@ export class BrowserWallet implements MidnightProvider, WalletProvider {
         throw new Error("Method not implemented.");
     }
 
+    /**
+     * The wallet's shielded coin public key, as the Bech32m string the
+     * connector reports (`ledger.CoinPublicKey` is a bare `string`).
+     *
+     * Consumed today only as an account-scoping identifier by the private
+     * state provider, which any stable string satisfies. If a consumer that
+     * needs the raw-hex form ever arrives (the SDK's call-tx path, once
+     * {@link balanceTx} is implemented), decode through
+     * `@midnightntwrk/wallet-sdk-address-format` at that point.
+     */
     getCoinPublicKey(): ledger.CoinPublicKey {
-        throw new Error("Method not implemented.");
+        return this.requireConnected().shieldedAddresses.shieldedCoinPublicKey;
     }
 
+    /**
+     * The wallet's shielded encryption public key, as the Bech32m string the
+     * connector reports. Same format caveat as {@link getCoinPublicKey}.
+     */
     getEncryptionPublicKey(): ledger.EncPublicKey {
-        throw new Error("Method not implemented.");
+        return this.requireConnected().shieldedAddresses.shieldedEncryptionPublicKey;
     }
 
     /**
@@ -227,12 +247,14 @@ export class BrowserWallet implements MidnightProvider, WalletProvider {
                 this.config.networkId,
             );
         }
+        const shieldedAddresses = await api.getShieldedAddresses();
 
         const { connect, ...selfDescription } = injected;
         this.connected = {
             api,
             info: { walletKey: this.walletKey, ...selfDescription },
             configuration,
+            shieldedAddresses,
         };
     }
 
@@ -278,5 +300,25 @@ export class BrowserWallet implements MidnightProvider, WalletProvider {
     /** A page of the wallet's transaction history (0-indexed page number). */
     async getTxHistory(pageNumber: number, pageSize: number): Promise<HistoryEntry[]> {
         return this.requireConnected().api.getTxHistory(pageNumber, pageSize);
+    }
+
+    /**
+     * Ask the wallet to sign `data` with the key named in `options`, raising
+     * its signing prompt.
+     *
+     * The connector's types promise nothing about determinism: whether the
+     * same data and key produce the same signature twice is the WALLET
+     * implementation's choice, so a caller deriving anything from the
+     * signature must verify reproducibility rather than assume it.
+     *
+     * @param data - The data to sign, encoded as `options.encoding` says.
+     * @param options - The encoding of `data` and which key signs.
+     * @returns The signature, with the signed data and verifying key.
+     * @throws {BrowserWalletNotConnectedError} before {@link connect}, or the
+     *   connector's own `APIError` (`code: 'Rejected'`) when the user declines
+     *   the signing prompt, propagated untouched.
+     */
+    async signData(data: string, options: SignDataOptions): Promise<Signature> {
+        return this.requireConnected().api.signData(data, options);
     }
 }

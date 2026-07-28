@@ -6,6 +6,7 @@ import {
   useContext,
   useMemo,
   useRef,
+  useState,
   type JSX,
   type ReactNode,
 } from "react";
@@ -37,11 +38,6 @@ import { useEVMChainConfig } from "./EVMChainConfigContext.tsx";
  * name as a text node and the icon as an `img` source, never as markup.
  */
 export type InjectedEvmWallet = Pick<Connector, "uid" | "id" | "name" | "icon">;
-
-// One QueryClient for the app. Every wagmi hook is a TanStack Query query or
-// mutation underneath, so a QueryClientProvider has to sit above them. Module
-// scope, not component scope, so a re-render cannot swap the cache out.
-const queryClient = new QueryClient();
 
 /**
  * Build the wagmi config for one EVM chain.
@@ -252,6 +248,13 @@ interface EVMWalletProviderProps {
 export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Element {
   const { config } = useEVMChainConfig();
   const wagmiConfig = useMemo<Config>(() => createWagmiConfig(config), [config]);
+
+  // One QueryClient per provider mount. Every wagmi hook (and the vault
+  // context's queries) is a TanStack Query query or mutation underneath, so a
+  // QueryClientProvider has to sit above them. Lazy component state rather
+  // than module scope: a re-render still cannot swap the cache out, while
+  // separate app mounts (each test renders its own) do not share one cache.
+  const [queryClient] = useState(() => new QueryClient());
 
   return (
     <WagmiProvider config={wagmiConfig}>

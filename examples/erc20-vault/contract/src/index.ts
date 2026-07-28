@@ -5,6 +5,7 @@
 
 export * from "./managed/erc20-vault/contract/index.js";
 export * from "./witnesses.ts";
+export * from "./mpc-path.ts";
 
 // THIS contract's signet ledger layout (declaration order in
 // erc20-vault.compact): the SignBidirectionalEventMap at field 0, then the

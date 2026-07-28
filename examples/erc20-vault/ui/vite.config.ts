@@ -11,6 +11,9 @@ const contractManagedDir = normalizePath(
   new URL("../contract/src/managed", import.meta.url).pathname,
 );
 
+// The workspace's hoisted node_modules, for the polyfill aliases below.
+const rootNodeModules = normalizePath(new URL("../../../node_modules", import.meta.url).pathname);
+
 export default defineConfig({
   plugins: [
     react(),
@@ -47,6 +50,20 @@ export default defineConfig({
       // the compiler in tsconfig.json's paths. Resolved off import.meta.url
       // rather than node:path so this config needs no @types/node.
       "@": normalizePath(new URL("./src", import.meta.url).pathname),
+      // Node builtins two of the private-state store's dependencies import:
+      // abstract-level extends `events`' EventEmitter at module scope, and
+      // @subsquid/scale-codec (via midnight-js-utils) asserts with `assert`.
+      // Vite only warns ("externalized for browser compatibility") and stubs
+      // them, which crashes at runtime in the browser. `events` is pinned to
+      // its npm polyfill (an absolute path: a bare same-name replacement
+      // would re-enter the alias); `assert` gets the one owned function the
+      // callers actually use, since the npm assert polyfill reads
+      // `process.env` at module scope and crashes the page itself. Extend
+      // this list ONLY on the same evidence, a new externalized-module
+      // warning from `vite build`, and prefer the smallest shim that
+      // satisfies the real call sites.
+      events: `${rootNodeModules}/events/events.js`,
+      assert: normalizePath(new URL("./src/lib/polyfills/assert.ts", import.meta.url).pathname),
     },
   },
   server: {
@@ -73,12 +90,38 @@ export default defineConfig({
     // both tree-shake: only the menu primitive and the icons actually used
     // reach the bundle. Move this number again only alongside the same
     // measurement, and say what pushed it.
-    chunkSizeWarningLimit: 800,
+    //
+    // Raised again from 800 when the vault context became reachable from App
+    // (the deposit-address step) and put the entry chunk at ~1620 kB (~440 kB
+    // gzipped): the compiled contract plus compact-js and compact-runtime,
+    // @sig-net/midnight's ethers + @noble/curves, the level private-state
+    // store, and TanStack Query. The two wasm blobs are separate assets and
+    // never counted here.
+    chunkSizeWarningLimit: 1700,
     sourcemap: true,
   },
   test: {
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    // The deposit-address tests chain several genuinely slow operations
+    // (wallet signing, the store's password key derivation, circuit calls),
+    // each already allowed up to 5s by the Testing Library timeout raised in
+    // tests/setup.ts: the per-test budget must fit a few of them in sequence.
+    testTimeout: 20_000,
+    env: {
+      // A valid MPC root key for tests, so deposit addresses derive: the
+      // secp256k1 generator point (the public key of secret 1), well known
+      // and never holding value. Any valid point would do.
+      VITE_MPC_SECP256K1_PUBKEY:
+        "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+    },
+    // The private-state store note: vitest resolves `level` with Node's
+    // rules (no `browser` condition), so tests run it on classic-level,
+    // which writes a real ./midnight-level-db directory at the current
+    // working directory. tests/setup.ts gives every test its own tmp
+    // working directory to keep those stores isolated. The browser backend
+    // is no alternative here: vitest's jsdom realm split breaks
+    // browser-level's binary encoding checks and corrupts what it stores.
   },
 });

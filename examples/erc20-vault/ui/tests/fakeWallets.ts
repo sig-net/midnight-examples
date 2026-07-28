@@ -19,6 +19,14 @@ export interface FakeMidnightWalletOptions {
    * on whatever network the app asks for.
    */
   readonly failWith?: Error;
+  /**
+   * What `signData` answers as the signature, given the data and how many
+   * signing calls came before this one (0-based). Defaults to a DETERMINISTIC
+   * function of the data alone, mirroring the deterministic signer the app's
+   * identity derivation assumes. A test probing the non-deterministic case
+   * passes one that varies with the call index.
+   */
+  readonly signDataSignature?: (data: string, callIndex: number) => string;
 }
 
 /**
@@ -29,9 +37,18 @@ export interface FakeMidnightWalletOptions {
  * the wallet. Echoing rather than hardcoding keeps this fake correct whatever
  * network the app is configured for.
  *
- * @param options - The wallet's name, and whether connecting fails.
+ * @param options - The wallet's name, whether connecting fails, and how it
+ *   signs.
  */
-export function injectMidnightWallet({ name, failWith }: FakeMidnightWalletOptions): void {
+export function injectMidnightWallet({
+  name,
+  failWith,
+  signDataSignature,
+}: FakeMidnightWalletOptions): void {
+  // Outside connect, so the count spans reconnects: what matters to the
+  // non-determinism probe is how many signatures this WALLET has ever issued.
+  let signDataCalls = 0;
+
   const injected: InitialAPI = {
     rdns: "network.sig.test-midnight-wallet",
     name,
@@ -41,6 +58,26 @@ export function injectMidnightWallet({ name, failWith }: FakeMidnightWalletOptio
       failWith === undefined
         ? Promise.resolve({
             getConfiguration: () => Promise.resolve({ networkId }),
+            // The Bech32m strings a real connector reports. The app treats
+            // them as opaque identifiers (storage scoping), so stable
+            // stand-ins suffice.
+            getShieldedAddresses: () =>
+              Promise.resolve({
+                shieldedAddress: `mn_shield-addr_test1${name}`,
+                shieldedCoinPublicKey: `mn_shield-cpk_test1${name}`,
+                shieldedEncryptionPublicKey: `mn_shield-esk_test1${name}`,
+              }),
+            signData: (data: string) => {
+              const callIndex = signDataCalls;
+              signDataCalls += 1;
+              return Promise.resolve({
+                data,
+                signature: (
+                  signDataSignature ?? ((signed: string) => `signed:${name}:${signed}`)
+                )(data, callIndex),
+                verifyingKey: `verifying-key:${name}`,
+              });
+            },
           } as unknown as ConnectedAPI)
         : Promise.reject(failWith),
   };

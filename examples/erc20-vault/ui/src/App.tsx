@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router";
 
 import { AppLayout } from "./components/AppLayout";
 import {
+  ERC20VaultContextProvider,
   EVMChainConfigProvider,
   EVMWalletProvider,
   MidnightChainConfigProvider,
@@ -28,17 +29,19 @@ export const App = (): JSX.Element => (
       <MidnightWalletProvider>
         <EVMChainConfigProvider>
           <EVMWalletProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route element={<AppLayout />}>
-                  <Route path={RoutePath.Home} element={<HomePage />} />
-                  <Route path="*" element={<NotFoundPage />} />
-                </Route>
-              </Routes>
-            </BrowserRouter>
-            {/* Outside the router: a toast raised by a connect must survive the
-                navigation that a connect can trigger. */}
-            <Toaster position="bottom-right" richColors closeButton />
+            <ERC20VaultContextProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route element={<AppLayout />}>
+                    <Route path={RoutePath.Home} element={<HomePage />} />
+                    <Route path="*" element={<NotFoundPage />} />
+                  </Route>
+                </Routes>
+              </BrowserRouter>
+              {/* Outside the router: a toast raised by a connect must survive the
+                  navigation that a connect can trigger. */}
+              <Toaster position="bottom-right" richColors closeButton />
+            </ERC20VaultContextProvider>
           </EVMWalletProvider>
         </EVMChainConfigProvider>
       </MidnightWalletProvider>

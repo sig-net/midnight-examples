@@ -4,7 +4,7 @@
 // (`VAULT_USER_SECRET_KEY`, defaulting to the `USER_SEED` bytes).
 
 import { bytesToHex } from "@sig-net/midnight";
-import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
+import { pathStringOfBytes, pureCircuits } from "@midnight-examples/erc20-vault-contract";
 import { parseIdentitySecretKey } from "@midnight-examples/lib";
 import { resolveUserSeed } from "@midnight-examples/test-harness";
 
@@ -29,18 +29,6 @@ export interface UserIdentity {
    * off-chain must apply the exact same (lossy but deterministic) reading.
    */
   readonly pathString: string;
-}
-
-/**
- * Read 32 opaque path bytes the way the MPC's epsilon derivation does:
- * decode as UTF-8 (invalid sequences become U+FFFD, deterministically) and
- * strip NUL bytes. Mirror of the fakenet responder's `getPath`.
- *
- * @param path - The 32 path bytes as stored in the event record.
- * @returns The derivation path string.
- */
-export function pathStringOfBytes(path: Uint8Array): string {
-  return Buffer.from(path).toString("utf8").replace(/\0/g, "");
 }
 
 /**

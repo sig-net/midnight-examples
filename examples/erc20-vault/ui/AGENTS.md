@@ -25,24 +25,27 @@ src/
     AppLayout.tsx   # the shell: header controls, outlet, footer
     WalletMenu.tsx  # one chain's wallet control in the header
     WalletMark.tsx  # a wallet's own icon, rendered safely
-    StepCard.tsx    # one step of the flow, and the not-built-yet body
+    StepCard.tsx    # one selectable step of the flow, and the not-built-yet body
     ConnectWalletsStep.tsx  # step one's rows, one per chain
+    DepositAddressStep.tsx  # step two: card summary + view-area body
     ThemeToggle.tsx # light / dark / system
     contexts/       # app-wide React contexts, all mounted in App.tsx
     ui/             # shadcn/ui components, copied in by its CLI
   hooks/            # the logic the components render
     useWalletConnections.ts  # both chains, normalised to one shape
+    useDepositAddress.ts     # step two's model: vault context + toasts
   lib/              # non-React modules the components lean on
     utils.ts        # cn(): the class merger every ui/ component imports
     theme.ts        # the theme choice, its storage, and how it is applied
     errorMessage.ts # describeError(): a rejection, made fit to render
+    shortenAddress.ts # an EVM address, shortened but recognisable
   pages/            # one component per route
 tests/
-  setup.ts          # jest-dom matchers, the matchMedia stub, per-test cleanup
+  setup.ts          # jest-dom matchers, realm + store sandboxing, per-test cleanup
   fakeWallets.ts    # both chains, faked at the extension boundary
   App.test.tsx      # route table coverage as a typed case table
   AppChrome.test.tsx # the header controls, driven by accessible name
-  HomeSteps.test.tsx # the step sequence and the connect step's three states
+  HomeSteps.test.tsx # the step sequence and each step's states
 ```
 
 ## Rules
@@ -80,16 +83,22 @@ tests/
   `prefers-color-scheme` from a component, and never add a second theme store:
   the sonner wrapper is edited away from its registry version precisely to stop
   `next-themes` becoming one.
-- **The overview is the flow, as steps, and each step owns its own state.**
-  `HomePage` is an ordered list of `StepCard`s and nothing else: no title, no
-  blurb, no endpoint tables. A step reports where it is in its own accessible
-  name (`"Step 1: Connect wallets (complete)"`), goes green on its ring rather
-  than a border (shadcn's `Card` draws its edge with `ring`, so a `border-*`
-  class there is invisible), and a step that is not built yet says so in its
-  body via `ComingSoon` rather than in a badge, which a card this narrow
-  clips. A control that has done its job stops being a control: a connected
-  wallet row becomes a statement, since a button that would do nothing invites
-  a click that does nothing.
+- **The overview is the flow: a row of compact step cards over ONE view
+  area.** `HomePage` is an ordered list of `StepCard`s and a single view area
+  below them, nothing else: no blurb, no endpoint tables. Cards stay compact
+  summaries at all times (the grid row plus `h-full` keeps them one equal
+  height), and the SELECTED step's full details render in the view area. A
+  card selects through its title button (`aria-pressed`), the view-area
+  section is named `"<title> details"`, and selection follows the user's
+  progress until a card is chosen by hand. A step reports where it is in its
+  own accessible name (`"Step 1: Connect wallets (complete)"`), takes the
+  ring in the theme's ring colour while selected and green once complete
+  (shadcn's `Card` draws its edge with `ring`, so a `border-*` class there is
+  invisible), and a step that is not built yet says so in its body via
+  `ComingSoon` rather than in a badge, which a card this narrow clips. A
+  control that has done its job stops being a control: a connected wallet row
+  becomes a statement, since a button that would do nothing invites a click
+  that does nothing.
 - **A chain-shaped difference is normalised in a hook, never in a component.**
   `useWalletConnections` publishes both chains as one `WalletConnection` shape,
   and the header control and the connect step both just render it. Neither

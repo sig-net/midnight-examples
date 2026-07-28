@@ -1,25 +1,83 @@
-import type { JSX } from "react";
+import { CircleDashedIcon, WalletIcon } from "lucide-react";
+import { useState, type JSX } from "react";
 
 import { ConnectWalletsStep } from "../components/ConnectWalletsStep";
+import { DepositAddressSummary, DepositAddressView } from "../components/DepositAddressStep";
 import { ComingSoon, StepCard, type StepStatus } from "../components/StepCard";
+import { Card, CardContent } from "../components/ui/card";
+import { useDepositAddress } from "../hooks/useDepositAddress";
 import { useWalletConnections } from "../hooks/useWalletConnections";
 
+/** The vault flow's steps, in the order the cards present them. */
+enum VaultStep {
+  ConnectWallets = 1,
+  DeriveDepositAddress = 2,
+  InteractWithVault = 3,
+}
+
+/** The step titles, shared by each card and the view area's heading. */
+const STEP_TITLES: Record<VaultStep, string> = {
+  [VaultStep.ConnectWallets]: "Connect wallets",
+  [VaultStep.DeriveDepositAddress]: "Derive the deposit address",
+  [VaultStep.InteractWithVault]: "Interact with the vault",
+};
+
+/** Props of {@link ConnectWalletsView}. */
+interface ConnectWalletsViewProps {
+  /** True once both wallets are connected. */
+  readonly allConnected: boolean;
+}
+
 /**
- * The overview route: the vault flow, as the sequence of steps a user works
- * through.
+ * The connect step's view-area body. The card itself carries the working
+ * controls (one row per chain), so the view states the goal rather than
+ * repeating them.
  *
- * There is no separate introduction above it. The steps say what the app does
- * better than a paragraph about them would, and the first one is immediately
- * actionable, which a paragraph never is.
+ * @param props - The connection progress.
+ * @returns The view's body.
+ */
+const ConnectWalletsView = ({ allConnected }: ConnectWalletsViewProps): JSX.Element => (
+  <div className="flex flex-col items-center gap-3 py-6 text-sm text-muted-foreground">
+    <WalletIcon className="size-10" aria-hidden="true" />
+    <p>
+      {allConnected
+        ? "Both wallets are connected: carry on to deriving your deposit address."
+        : "Connect both wallets (in the first card) to begin."}
+    </p>
+  </div>
+);
+
+/**
+ * The interact step's view-area body: a signpost until the step is built.
+ *
+ * @returns The view's body.
+ */
+const InteractComingSoonView = (): JSX.Element => (
+  <div className="flex flex-col items-center gap-3 py-6 text-sm text-muted-foreground">
+    <CircleDashedIcon className="size-10" aria-hidden="true" />
+    <p>Coming soon: deposit and withdraw, following each MPC request to settlement.</p>
+  </div>
+);
+
+/**
+ * The overview route: the vault flow as a row of equal-height step cards over
+ * ONE view area, whose contents are the selected step's details.
+ *
+ * Selection follows the user's progress (the connect step until both wallets
+ * are in, then the deposit-address step) until a card is chosen by hand, and
+ * the deposit view's "proceed" hands the view area to the interact step.
  *
  * @returns The landing view rendered at the root path.
  */
 export const HomePage = (): JSX.Element => {
   const { connections, connectedCount, requiredCount, allConnected } = useWalletConnections();
+  const depositAddress = useDepositAddress();
 
-  // Steps two and three are signposts until they are built. They stay `pending`
-  // rather than becoming `current` when the wallets are in, since nothing here
-  // would let the user act on them yet.
+  // null = no explicit choice yet: follow progress.
+  const [chosenStep, setChosenStep] = useState<VaultStep | null>(null);
+  const activeStep =
+    chosenStep ?? (allConnected ? VaultStep.DeriveDepositAddress : VaultStep.ConnectWallets);
+
   const connectStatus: StepStatus = allConnected ? "complete" : "current";
 
   return (
@@ -33,31 +91,72 @@ export const HomePage = (): JSX.Element => {
       <ol className="grid list-none gap-4 sm:grid-cols-3">
         <li>
           <StepCard
-            stepNumber={1}
-            title="Connect wallets"
+            stepNumber={VaultStep.ConnectWallets}
+            title={STEP_TITLES[VaultStep.ConnectWallets]}
             status={connectStatus}
             badge={allConnected ? undefined : `${connectedCount}/${requiredCount}`}
+            selected={activeStep === VaultStep.ConnectWallets}
+            onSelect={() => {
+              setChosenStep(VaultStep.ConnectWallets);
+            }}
           >
             <ConnectWalletsStep connections={connections} />
           </StepCard>
         </li>
 
         <li>
-          <StepCard stepNumber={2} title="Balance checks" status="pending">
-            <ComingSoon>
-              Read the vault's ledger and each wallet's balance on both chains.
-            </ComingSoon>
+          <StepCard
+            stepNumber={VaultStep.DeriveDepositAddress}
+            title={STEP_TITLES[VaultStep.DeriveDepositAddress]}
+            status={depositAddress.stepStatus}
+            selected={activeStep === VaultStep.DeriveDepositAddress}
+            onSelect={() => {
+              setChosenStep(VaultStep.DeriveDepositAddress);
+            }}
+          >
+            <DepositAddressSummary
+              status={depositAddress.status}
+              identity={depositAddress.identity}
+            />
           </StepCard>
         </li>
 
         <li>
-          <StepCard stepNumber={3} title="Interact with the vault" status="pending">
-            <ComingSoon>
-              Deposit and withdraw, following each MPC request to settlement.
-            </ComingSoon>
+          <StepCard
+            stepNumber={VaultStep.InteractWithVault}
+            title={STEP_TITLES[VaultStep.InteractWithVault]}
+            status="pending"
+            selected={activeStep === VaultStep.InteractWithVault}
+            onSelect={() => {
+              setChosenStep(VaultStep.InteractWithVault);
+            }}
+          >
+            <ComingSoon>Deposit and withdraw.</ComingSoon>
           </StepCard>
         </li>
       </ol>
+
+      {/* The ONE view area: the selected step's details, full width. A card
+          stays a compact summary at all times, and this is where its whole
+          story lives. */}
+      <section aria-label={`${STEP_TITLES[activeStep]} details`}>
+        <Card>
+          <CardContent className="max-w-2xl">
+            {activeStep === VaultStep.ConnectWallets && (
+              <ConnectWalletsView allConnected={allConnected} />
+            )}
+            {activeStep === VaultStep.DeriveDepositAddress && (
+              <DepositAddressView
+                {...depositAddress}
+                onProceed={() => {
+                  setChosenStep(VaultStep.InteractWithVault);
+                }}
+              />
+            )}
+            {activeStep === VaultStep.InteractWithVault && <InteractComingSoonView />}
+          </CardContent>
+        </Card>
+      </section>
     </section>
   );
 };
