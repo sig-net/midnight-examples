@@ -97,7 +97,13 @@ export default defineConfig({
     // @sig-net/midnight's ethers + @noble/curves, the level private-state
     // store, and TanStack Query. The two wasm blobs are separate assets and
     // never counted here.
-    chunkSizeWarningLimit: 1700,
+    // Raised again from 1700 when the vault-interaction step started reading
+    // balances and put the entry chunk at ~1746 kB (~481 kB gzipped), up from
+    // ~1632 kB (~448 kB): viem's public actions and its ABI encode/decode path
+    // were not reachable before, since nothing had yet read from the EVM
+    // chain. viem's own lazy paths (ccip, the batch gateway, secp256k1) split
+    // out into separate chunks and are not in this number.
+    chunkSizeWarningLimit: 1800,
     sourcemap: true,
   },
   test: {

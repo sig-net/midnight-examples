@@ -221,7 +221,7 @@ describe("the deposit address step", () => {
     expect(
       screen.getByRole("region", { name: "Interact with the vault details" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Coming soon: deposit and withdraw/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Vault address balances" })).toBeInTheDocument();
   });
 
   it("finds the stored key on a fresh mount: proceeding needs no regenerate, which stays tick-box gated", async () => {

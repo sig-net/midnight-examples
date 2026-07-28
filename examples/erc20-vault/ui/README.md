@@ -6,8 +6,9 @@ its deposit and withdrawal circuits.
 
 The overview presents that as three steps, worked through left to right:
 connect the wallets, derive the deposit address, then interact with the vault.
-Steps one and two are live. The third is a signpost, and says so on its card.
-The cards are compact, equal-height summaries over one view area below them:
+The third step reads today and will write later: it shows what every account in
+the flow holds, and its card says that depositing and withdrawing are still to
+come. The cards are compact, equal-height summaries over one view area below them:
 selecting a card (its title is the control) puts that step's full details in
 the view area, and the selection follows the user's progress until a card is
 chosen by hand.
@@ -25,6 +26,28 @@ interactions. A found key can also be regenerated (re-signed and overwritten),
 but only behind a tick box acknowledging the loss: unless the wallet signs
 deterministically, the new signature derives a different key, and unclaimed
 deposits or pending refunds tied to the old commitment go with it.
+
+Step three is where the value shows up. A deposit moves ERC20 value from your
+own derived account into the vault's and mints a shielded token against it, and
+a withdrawal runs the same path backwards, so four accounts across two chains
+decide whether any of it worked:
+
+| Account | Where it comes from |
+| --- | --- |
+| EVM browser wallet | The connected wallet: what funds a deposit's gas and its tokens |
+| Your deposit address | Derived in step two: the account the MPC signs a deposit's transfer from |
+| Vault address | The vault's own EVM account, read from its ledger (the contract pins it at initialize) |
+| Midnight browser wallet | The connected wallet's shielded and unshielded balances, plus its dust |
+
+The vault handles any ERC20 and its ledger names none of them, so there is no
+token list to offer: paste the addresses you care about and each EVM panel adds
+a row per token. A token that answers no `name()` or `symbol()` reads as
+Unknown, and one that answers no `decimals()` leaves its balance in atomic
+units rather than guessing a scale. Midnight amounts stay in atomic units
+throughout: a token type there is an opaque id with no metadata behind it.
+
+Depositing and withdrawing are not built yet, which is what the third card's
+"Coming soon" says.
 
 ## Running it
 
@@ -141,18 +164,26 @@ the environment.
 
 The EVM chain id is not cosmetic: the vault seals `eip155:<chainId>` into its
 contract at initialize, and that is the routing key the MPC signs against.
-Nothing here yet proves the RPC actually serves the chain id you configured,
-so a mismatch is currently undetected. Verifying it needs a live `eth_chainId`
-call, which arrives with the first feature that talks to the chain.
+Nothing here yet proves the RPC actually serves the chain id you configured, so
+a mismatch is currently undetected: the balance reads go out over whatever the
+RPC is, and a wrong chain id shows as balances that do not match the wallet's
+own. Detecting it needs a live `eth_chainId` call compared against the config,
+and that check has still to be written.
 
 ## Where the chain wiring goes
 
-The shell is deliberately free of chain code, so the first real feature has a
-clean seam to land against:
+Every read is a TanStack Query query, and a component never fetches for itself:
 
-1. Add the wallet connection and expose the connected address through a hook.
-2. Add a query over the deployed contract's state, keyed by its address.
-3. Add deposit and withdrawal mutations that refresh that state on success.
+1. Both wallet connections are contexts, published to components through
+   `useWalletConnections` as one shape per chain.
+2. Contract state is a query keyed by the deployed address:
+   `useVaultEvmAddress` reads the vault's own EVM account out of its ledger.
+3. EVM chain reads go through wagmi's client for the configured chain
+   (`useTrackedTokens` for what a token says about itself,
+   `useAccountBalances` for what an account holds).
+4. Still to come: deposit and withdrawal mutations, each refreshing the
+   balances above on success.
 
-All of it reaches the chain through `@midnight-examples/erc20-vault-contract`,
-whose export surface is environment-agnostic so a browser can import it directly.
+The Midnight side reaches the chain through
+`@midnight-examples/erc20-vault-contract`, whose export surface is
+environment-agnostic so a browser can import it directly.

@@ -303,6 +303,43 @@ export class BrowserWallet implements MidnightProvider, WalletProvider {
     }
 
     /**
+     * The wallet's shielded token balances, keyed by token type, in atomic
+     * units. A token type is opaque: the wallet carries no name, symbol or
+     * decimals for it, and neither does anything downstream of this.
+     *
+     * @returns The balances, empty when the wallet holds no shielded token.
+     * @throws {BrowserWalletNotConnectedError} before {@link connect}.
+     */
+    async getShieldedBalances(): ReturnType<ConnectedAPI["getShieldedBalances"]> {
+        return this.requireConnected().api.getShieldedBalances();
+    }
+
+    /**
+     * The wallet's unshielded token balances (Night among them), keyed by
+     * token type, in atomic units. Same opacity as
+     * {@link getShieldedBalances}.
+     *
+     * @returns The balances, empty when the wallet holds no unshielded token.
+     * @throws {BrowserWalletNotConnectedError} before {@link connect}.
+     */
+    async getUnshieldedBalances(): ReturnType<ConnectedAPI["getUnshieldedBalances"]> {
+        return this.requireConnected().api.getUnshieldedBalances();
+    }
+
+    /**
+     * The wallet's dust: what it can spend now, and the ceiling generation is
+     * working towards. Dust is generated from the wallet's Night rather than
+     * held as a token, so the balance moves on its own between two reads and
+     * only means anything beside its cap.
+     *
+     * @returns The spendable balance and the cap, in atomic units.
+     * @throws {BrowserWalletNotConnectedError} before {@link connect}.
+     */
+    async getDustBalance(): ReturnType<ConnectedAPI["getDustBalance"]> {
+        return this.requireConnected().api.getDustBalance();
+    }
+
+    /**
      * Ask the wallet to sign `data` with the key named in `options`, raising
      * its signing prompt.
      *

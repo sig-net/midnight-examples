@@ -28,12 +28,16 @@ src/
     StepCard.tsx    # one selectable step of the flow, and the not-built-yet body
     ConnectWalletsStep.tsx  # step one's rows, one per chain
     DepositAddressStep.tsx  # step two: card summary + view-area body
+    InteractWithVaultStep.tsx # step three's view-area body: tracked assets + balances
     ThemeToggle.tsx # light / dark / system
     contexts/       # app-wide React contexts, all mounted in App.tsx
     ui/             # shadcn/ui components, copied in by its CLI
   hooks/            # the logic the components render
     useWalletConnections.ts  # both chains, normalised to one shape
     useDepositAddress.ts     # step two's model: vault context + toasts
+    useTrackedTokens.ts      # the ERC20s to follow, and what each says about itself
+    useAccountBalances.ts    # both chains' balances, normalised to one shape
+    useVaultEvmAddress.ts    # the vault's own EVM account, read from its ledger
   lib/              # non-React modules the components lean on
     utils.ts        # cn(): the class merger every ui/ component imports
     theme.ts        # the theme choice, its storage, and how it is applied
@@ -46,6 +50,7 @@ tests/
   App.test.tsx      # route table coverage as a typed case table
   AppChrome.test.tsx # the header controls, driven by accessible name
   HomeSteps.test.tsx # the step sequence and each step's states
+  InteractWithVault.test.tsx # step three's panels, tracking, and wallet balances
 ```
 
 ## Rules

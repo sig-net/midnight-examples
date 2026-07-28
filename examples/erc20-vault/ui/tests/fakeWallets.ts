@@ -27,7 +27,24 @@ export interface FakeMidnightWalletOptions {
    * passes one that varies with the call index.
    */
   readonly signDataSignature?: (data: string, callIndex: number) => string;
+  /**
+   * The shielded token balances it reports, keyed by token type. Defaults to
+   * one holding, so a test that only cares that balances render has one.
+   */
+  readonly shieldedBalances?: Record<string, bigint>;
+  /** The unshielded token balances it reports. Defaults to one holding. */
+  readonly unshieldedBalances?: Record<string, bigint>;
+  /** The dust it reports. Defaults to a balance under its cap. */
+  readonly dustBalance?: { cap: bigint; balance: bigint };
 }
+
+/** The token type the fake's default shielded holding is denominated in. */
+export const FAKE_SHIELDED_TOKEN_TYPE =
+  "0100000000000000000000000000000000000000000000000000000000000001";
+
+/** The token type the fake's default unshielded holding is denominated in. */
+export const FAKE_UNSHIELDED_TOKEN_TYPE =
+  "0200000000000000000000000000000000000000000000000000000000000002";
 
 /**
  * Inject a Midnight wallet under `window.midnight`, the way an extension does.
@@ -44,6 +61,9 @@ export function injectMidnightWallet({
   name,
   failWith,
   signDataSignature,
+  shieldedBalances = { [FAKE_SHIELDED_TOKEN_TYPE]: 1_500n },
+  unshieldedBalances = { [FAKE_UNSHIELDED_TOKEN_TYPE]: 2_500n },
+  dustBalance = { cap: 9_000n, balance: 3_500n },
 }: FakeMidnightWalletOptions): void {
   // Outside connect, so the count spans reconnects: what matters to the
   // non-determinism probe is how many signatures this WALLET has ever issued.
@@ -67,6 +87,9 @@ export function injectMidnightWallet({
                 shieldedCoinPublicKey: `mn_shield-cpk_test1${name}`,
                 shieldedEncryptionPublicKey: `mn_shield-esk_test1${name}`,
               }),
+            getShieldedBalances: () => Promise.resolve(shieldedBalances),
+            getUnshieldedBalances: () => Promise.resolve(unshieldedBalances),
+            getDustBalance: () => Promise.resolve(dustBalance),
             signData: (data: string) => {
               const callIndex = signDataCalls;
               signDataCalls += 1;

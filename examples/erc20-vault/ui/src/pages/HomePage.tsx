@@ -1,8 +1,9 @@
-import { CircleDashedIcon, WalletIcon } from "lucide-react";
+import { WalletIcon } from "lucide-react";
 import { useState, type JSX } from "react";
 
 import { ConnectWalletsStep } from "../components/ConnectWalletsStep";
 import { DepositAddressSummary, DepositAddressView } from "../components/DepositAddressStep";
+import { InteractWithVaultView } from "../components/InteractWithVaultStep";
 import { ComingSoon, StepCard, type StepStatus } from "../components/StepCard";
 import { Card, CardContent } from "../components/ui/card";
 import { useDepositAddress } from "../hooks/useDepositAddress";
@@ -44,18 +45,6 @@ const ConnectWalletsView = ({ allConnected }: ConnectWalletsViewProps): JSX.Elem
         ? "Both wallets are connected: carry on to deriving your deposit address."
         : "Connect both wallets (in the first card) to begin."}
     </p>
-  </div>
-);
-
-/**
- * The interact step's view-area body: a signpost until the step is built.
- *
- * @returns The view's body.
- */
-const InteractComingSoonView = (): JSX.Element => (
-  <div className="flex flex-col items-center gap-3 py-6 text-sm text-muted-foreground">
-    <CircleDashedIcon className="size-10" aria-hidden="true" />
-    <p>Coming soon: deposit and withdraw, following each MPC request to settlement.</p>
   </div>
 );
 
@@ -153,7 +142,7 @@ export const HomePage = (): JSX.Element => {
                 }}
               />
             )}
-            {activeStep === VaultStep.InteractWithVault && <InteractComingSoonView />}
+            {activeStep === VaultStep.InteractWithVault && <InteractWithVaultView />}
           </CardContent>
         </Card>
       </section>
