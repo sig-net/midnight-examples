@@ -41,7 +41,7 @@ runs the whole flow twice, once per direction:
 | 4 | MPC attests the execution output back to Midnight | Signed `RespondBidirectionalEvent` for the sweep | The same, for the payout |
 | 5 | Contract verifies the attestation in-circuit and settles | `claim()` mints shielded vault tokens to the depositor | `completeWithdraw()` finalises an executed transfer, or refunds the withdrawer on a false return. `refundWithdraw()` refunds the withdrawer when the transfer never executed (reverted or replaced) |
 
-> **Output recovery (between steps 4 and 5):** the attestation carries only the signature, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), signature verification in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.9.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's in-circuit signature verification.
+> **Output recovery (between steps 4 and 5):** the attestation carries only the signature, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), signature verification in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.10.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
 # Derived keys and accounts
 
@@ -103,8 +103,8 @@ The contract package's dependency list is the minimal integration surface:
 // contract/package.json
 "dependencies": {
   "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-  "@sig-net/midnight": "0.14.0",
-  "@sig-net/midnight-contract": "0.14.0"
+  "@sig-net/midnight": "0.15.0",
+  "@sig-net/midnight-contract": "0.15.0"
 }
 ```
 
@@ -150,10 +150,10 @@ singleton reference, the response key) plus its own state:
 // The request map the MPC reads deposit and withdraw events back from.
 // Sized for an ERC20 transfer(address,uint256): 2 calldata words, no access
 // list, and the vault's exact 34-byte response schema. This declaration is
-// ledger FIELD 0: the request circuits name this position in their
-// notifications and the MPC locates the map by position, so it must stay
-// first and never move after the first deploy. No other field's position
-// carries meaning.
+// ledger FIELD 0, so its resolved ledger-tree path is [0]: the request
+// circuits pack this path into their notifications and the MPC follows it
+// to locate the map, so it must stay first and never move after the first
+// deploy. No other field's position carries meaning.
 export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // The Signet singleton the request circuits notify, pinned at deploy.
@@ -179,8 +179,13 @@ constructor(deployerCommitment: Bytes<32>, signetContract: SignetSigner) {
 
 Two vault-specific points:
 
-- The contract package exports the event map's position as
-  `VAULT_REQUESTS_INDEX_FIELD` so off-chain readers cannot drift from it.
+- The contract package exports the event map's resolved ledger-tree path as
+  `VAULT_REQUESTS_PATH` so off-chain readers cannot drift from it. The vault
+  has 15 or fewer ledger fields, so the map at field 0 has the depth-1 path
+  `[0]`, and the request circuits pack it into their notifications as
+  `requestsPathDepth` 1 + `requestsPath` [0, 0, 0, 0]. The compiler records
+  the same path as the field's "index" in the compiled
+  `contract-info.json`.
 - The deploy tooling ([`contract/deploy.ts`](contract/deploy.ts)) computes
   `deployerCommitment` off-chain by calling the compiled `userCommitment`
   circuit over the deployer's secret, never a TypeScript re-implementation.
@@ -260,14 +265,14 @@ user's deposit account, derived from the caller's identity commitment:
 ```ts
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { deriveEvmAddress, SignetRequestResponseReader } from "@sig-net/midnight";
-import { pureCircuits, VAULT_REQUESTS_INDEX_FIELD } from "@midnight-examples/erc20-vault-contract";
+import { pureCircuits, VAULT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
 
 const reader = new SignetRequestResponseReader({
   // The deployed vault contract.
   requesterContractAddress: vaultContractAddress,
 
-  // signBidirectionalEventMap sits at ledger field 0 (Setup step 3).
-  requesterRequestsIndexField: VAULT_REQUESTS_INDEX_FIELD,
+  // signBidirectionalEventMap sits at ledger field 0, path [0] (Setup step 3).
+  requesterRequestsPath: VAULT_REQUESTS_PATH,
 
   // The Signet singleton contract.
   signetContractAddress,
@@ -351,10 +356,15 @@ export circuit deposit(
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
-  // ...and notify it, naming the map's field position (0, Setup step 3).
+  // ...and notify it, carrying the map's ledger-tree path ([0] at depth 1,
+  // Setup step 3).
   return signetSigner.signBidirectional(
     requestId,
-    constructSignBidirectionalEventNotificationV1(kernel.self(), 0 as Uint<8>),
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(),
+      1 as Uint<8>,                        // requestsPathDepth
+      [0, 0, 0, 0] as Vector<4, Uint<8>>,  // requestsPath, zero padded
+    ),
   );
 }
 ```
