@@ -104,8 +104,8 @@ The contract package's dependency list is the minimal integration surface:
 // contract/package.json
 "dependencies": {
   "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-  "@sig-net/midnight": "0.15.0",
-  "@sig-net/midnight-contract": "0.15.0"
+  "@sig-net/midnight": "0.16.0",
+  "@sig-net/midnight-contract": "0.16.0"
 }
 ```
 
@@ -131,7 +131,7 @@ cross-contract call:
 ```sh
 COMPACT_PATH=../../../node_modules compact compile --feature-zkir-v3 \
   src/erc20-vault.compact src/managed/erc20-vault
-ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/src/managed \
+ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed \
   src/managed/SignetSigner
 ```
 
