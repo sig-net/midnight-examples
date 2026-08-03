@@ -32,7 +32,7 @@ import {
   secp256k1PublicKeyOf,
   serializeRespondOutput,
   signAttestationDigest,
-  signetFieldNode,
+  signetFieldNodeByPath,
   toSignBidirectionalEventIndex,
   type RespondBidirectionalEvent,
   type SignBidirectionalEventLedgerMap,
@@ -47,8 +47,8 @@ import {
   createVaultPrivateState,
   ledger,
   pureCircuits,
-  VAULT_NONCE_FIELD,
-  VAULT_REQUESTS_INDEX_FIELD,
+  VAULT_NONCE_PATH,
+  VAULT_REQUESTS_PATH,
   witnesses,
   type VaultPrivateState,
 } from "../src/index.ts";
@@ -269,17 +269,17 @@ describe("erc20-vault ledger shape", () => {
     expect(toSignBidirectionalEventIndex(ledgerMap).size).toBe(0);
   });
 
-  it("MPC-style: finds the event map in RAW state by position, no ledger()", async () => {
+  it("MPC-style: finds the event map in RAW state by ledger-tree path, no ledger()", async () => {
     const { ctx } = await deployContract();
 
     const rawState = ctx.callContext.currentQueryContext.state;
-    const node = signetFieldNode(rawState, VAULT_REQUESTS_INDEX_FIELD);
+    const node = signetFieldNodeByPath(rawState, VAULT_REQUESTS_PATH);
     expect(node.type()).toBe("map");
 
     const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(
       rawState,
-      VAULT_REQUESTS_INDEX_FIELD,
-      VAULT_NONCE_FIELD,
+      VAULT_REQUESTS_PATH,
+      VAULT_NONCE_PATH,
     );
     const typedIndex = toSignBidirectionalEventIndex(
       ledger(ctx.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -376,8 +376,8 @@ describe("deposit round-trip", () => {
     // Read 2: MPC-style raw read, no compiled contract involved.
     const rawLedger = readSignetRequestsLedgerFromState(
       state,
-      VAULT_REQUESTS_INDEX_FIELD,
-      VAULT_NONCE_FIELD,
+      VAULT_REQUESTS_PATH,
+      VAULT_NONCE_PATH,
     );
 
     expect(typedIndex.size).toBe(1);

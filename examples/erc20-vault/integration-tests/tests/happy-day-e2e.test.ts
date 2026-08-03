@@ -198,12 +198,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       });
 
       // callerAddress points at the vault (the contract whose authenticated
-      // ledger holds the request); the event map is at field 0. The V1
-      // payload itself no longer carries a request id: the registry keys the
-      // notification under it, which is what the poll above matched on.
+      // ledger holds the request); the event map's resolved ledger-tree path
+      // is [0]. The V1 payload itself no longer carries a request id: the
+      // registry keys the notification under it, which is what the poll
+      // above matched on.
       expect(decoded.version).toBe(1);
       expect(decoded.callerAddress).toBe(stripHexPrefix(vaultAddress).toLowerCase());
-      expect(decoded.requestsIndexField).toBe(0);
+      expect(decoded.requestsPath).toEqual([0]);
 
       banner([
         "Golden SignBidirectionalEventNotification decoded from the live indexer:",
@@ -211,7 +212,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         `  version:            ${decoded.version}`,
         `  callerAddress:      ${decoded.callerAddress}`,
         `  registered under:   ${depositTransactionSignatureRequestId}`,
-        `  requestsIndexField: ${decoded.requestsIndexField}`,
+        `  requestsPath:       [${decoded.requestsPath.join(', ')}]`,
       ]);
     },
     2 * MINUTE,
@@ -493,7 +494,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       });
 
       expect(decoded.callerAddress).toBe(stripHexPrefix(vaultAddress).toLowerCase());
-      expect(decoded.requestsIndexField).toBe(0);
+      expect(decoded.requestsPath).toEqual([0]);
 
       banner([
         "Notification observed for the withdraw request:",

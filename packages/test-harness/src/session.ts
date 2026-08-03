@@ -61,12 +61,13 @@ export interface E2eSessionOptions {
    */
   requesterAddressEnvVar: string;
   /**
-   * Ledger field position of the requester contract's request index — the
-   * same position the contract passes as `requestsIndexField` in its
-   * notifications. A contract is free to declare the index at any field, so
+   * Resolved ledger-tree path of the requester contract's request index — the
+   * same path the contract packs as `requestsPath` in its notifications
+   * (`[0]` for a flat contract's field 0, longer once the compiler chunks
+   * past 15 fields). A contract is free to declare the index at any field, so
    * the reader cannot assume one.
    */
-  requesterRequestsIndexField: number;
+  requesterRequestsPath: readonly number[];
 }
 
 /**
@@ -110,7 +111,7 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
         const nodeConfig = getMidnightNodeConfig(env);
         sharedReader = new SignetRequestResponseReader({
           requesterContractAddress: requireEnv(env, options.requesterAddressEnvVar),
-          requesterRequestsIndexField: options.requesterRequestsIndexField,
+          requesterRequestsPath: options.requesterRequestsPath,
           signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
           publicDataProvider: indexerPublicDataProvider({
             queryURL: nodeConfig.indexerUrl,
