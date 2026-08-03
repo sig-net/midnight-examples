@@ -17,10 +17,15 @@ import {
   MPC_FAILURE_OUTPUT,
   MPCDestination,
   MPCSignatureAlgorithm,
+  SignetEventName,
   TxParamType,
   asciiPadded,
+  bytesToHex,
   calculateRequestId,
   calculateSignetAttestationDigest,
+  decodeSignBidirectionalEventNotificationPayload,
+  decodeSignBidirectionalNotification,
+  decodeSignetLogEvents,
   ecdsaSignatureToMpcSignature,
   evmAddressAbiWord,
   numericAbiWord,
@@ -366,7 +371,7 @@ describe("deposit round-trip", () => {
   it("stores a fully contract-composed event readable identically via ledger(), the shared parser, and the RAW reader", async () => {
     const { contract, ctx } = await deployInitialized();
 
-    const { result, context: next } = await deposit(contract, ctx, VALID_DEPOSIT);
+    const { context: next } = await deposit(contract, ctx, VALID_DEPOSIT);
     const state = next.callContext.currentQueryContext.state;
 
     // Read 1: generated ledger().
@@ -387,9 +392,22 @@ describe("deposit round-trip", () => {
 
     const [idHex, record] = [...typedIndex.entries()][0];
 
-    // The cross-contract call's return value: the notification landed under
-    // (requestId, 0) in the signet singleton's registry.
-    expect(result).toEqual({ count: 0n, requestId: requestIdBytes(idHex) });
+    // The cross-contract call's observable effect: the signet contract
+    // emitted the notification event, its payload naming THIS vault and the
+    // field-0 request map (decoded through the shared library's decoders,
+    // the same read the MPC's discovery feed performs).
+    const notificationEvents = decodeSignetLogEvents(next.events, SIGNET_ADDRESS);
+    expect(notificationEvents).toHaveLength(1);
+    expect(notificationEvents[0].name).toBe(SignetEventName.SignBidirectionalEvent);
+    expect(
+      decodeSignBidirectionalNotification(
+        decodeSignBidirectionalEventNotificationPayload(notificationEvents[0].payload),
+      ),
+    ).toEqual({
+      version: 1,
+      callerAddress: bytesToHex(VAULT_ADDRESS_BYTES),
+      requestsPath: [0],
+    });
 
     // The contract-composed envelope: the deposit's token on the
     // initialize-pinned chain, no ETH value, the caller's nonce + gas args.
@@ -602,7 +620,7 @@ describe("withdraw round-trip", () => {
   it("burns the coin and stores a vault-path event with a contract-fixed envelope", async () => {
     const { contract, ctx } = await deployInitialized();
 
-    const { result, context: next } = await withdraw(contract, ctx, VALID_WITHDRAW);
+    const { context: next } = await withdraw(contract, ctx, VALID_WITHDRAW);
     const state = next.callContext.currentQueryContext.state;
 
     const index = toSignBidirectionalEventIndex(
@@ -611,9 +629,19 @@ describe("withdraw round-trip", () => {
     expect(index.size).toBe(1);
     const [idHex, record] = [...index.entries()][0];
 
-    // The cross-contract call's return value: the notification landed under
-    // (requestId, 0) in the signet singleton's registry.
-    expect(result).toEqual({ count: 0n, requestId: requestIdBytes(idHex) });
+    // The cross-contract call's observable effect: the signet contract
+    // emitted the notification event naming this vault's field-0 request map.
+    const [notificationEvent] = decodeSignetLogEvents(next.events, SIGNET_ADDRESS);
+    expect(notificationEvent.name).toBe(SignetEventName.SignBidirectionalEvent);
+    expect(
+      decodeSignBidirectionalNotification(
+        decodeSignBidirectionalEventNotificationPayload(notificationEvent.payload),
+      ),
+    ).toEqual({
+      version: 1,
+      callerAddress: bytesToHex(VAULT_ADDRESS_BYTES),
+      requestsPath: [0],
+    });
 
     // The derivation path is the contract-fixed 32-byte literal "vault": the
     // MPC signs with the VAULT's derived EVM account, not the caller's. The

@@ -13,7 +13,10 @@ import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 
 import { getMidnightNodeConfig, type MidnightNodeConfig } from "@midnight-examples/lib";
 import { requireEnv, type SessionWallet } from "@midnight-examples/test-harness";
-import { SignetRequestResponseReader } from "@sig-net/midnight";
+import {
+  SignetRequestResponseReader,
+  signetEventSourceFromPublicDataProvider,
+} from "@sig-net/midnight";
 import {
   createVaultPrivateState,
   VAULT_REQUESTS_PATH,
@@ -141,5 +144,8 @@ export function createResponseReader(context: VaultContext): SignetRequestRespon
     requesterRequestsPath: VAULT_REQUESTS_PATH,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,
+    // The MPC's responses are read from the contract events the signet
+    // contract emits, through the same provider.
+    eventSource: signetEventSourceFromPublicDataProvider(context.providers.publicDataProvider),
   });
 }

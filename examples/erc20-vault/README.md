@@ -21,7 +21,8 @@ What this example demonstrates, end to end:
   later attesting the EVM outcome with an ECDSA-signed
   `RespondBidirectionalEvent`, signed by a response key derived for THIS
   contract (from the MPC root key, the vault's own address and the fixed path
-  `"midnight response key"`). Both responses are posted back on Midnight.
+  `"midnight response key"`). Both responses are emitted as contract events
+  on Midnight.
 - The vault verifying that response in-circuit against the response key it
   pinned at `initialize` time, and minting or burning shielded vault tokens
   accordingly, including a refund branch for when the EVM leg fails.
@@ -41,7 +42,7 @@ runs the whole flow twice, once per direction:
 | 4 | MPC attests the execution output back to Midnight | Signed `RespondBidirectionalEvent` for the sweep | The same, for the payout |
 | 5 | Contract verifies the attestation in-circuit and settles | `claim()` mints shielded vault tokens to the depositor | `completeWithdraw()` finalises an executed transfer, or refunds the withdrawer on a false return. `refundWithdraw()` refunds the withdrawer when the transfer never executed (reverted or replaced) |
 
-> **Output recovery (between steps 4 and 5):** the attestation carries only the signature, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), signature verification in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.10.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's in-circuit signature verification.
+> **Output recovery (between steps 4 and 5):** the attestation event carries the request id it answers and the MPC's signature, never the output, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), signature verification in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.10.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
 # Derived keys and accounts
 
@@ -59,7 +60,7 @@ exactly three derivations:
 |---|---|---|
 | The user's deposit account (EVM) | `userCommitment(callerSecretKey)`, the caller's 32-byte identity commitment | Signs the deposit sweep `transfer(vault, amount)`. The user funds this address with the ERC20 being deposited plus gas ETH. One account per identity: the contract recomputes the commitment in-circuit from the secret-key witness, so the path is never a circuit argument and the MPC can only ever sign with THIS caller's account. |
 | The vault's own account (EVM) | The contract-fixed literal `"vault"` (`pad(32, "vault")`) | Holds the vault's ERC20 balance and signs every withdraw `transfer(destination, amount)`. It also pays the withdraw gas, which is why the whole fee envelope is contract-fixed. |
-| The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id and execution output (the signature is the whole event). It never signs transactions: it is per-client-contract yet independent of any request's own path, and `claim`/`completeWithdraw` verify responses against it in-circuit. |
+| The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id and execution output (the event carries the id it answers plus the signature, nothing else). It never signs transactions: it is per-client-contract yet independent of any request's own path, and `claim`/`completeWithdraw` verify responses against it in-circuit. |
 
 Deposits and withdrawals therefore move between two MPC-derived accounts on
 the EVM chain, and neither key ever exists anywhere: the MPC network signs
@@ -130,7 +131,7 @@ cross-contract call:
 ```sh
 COMPACT_PATH=../../../node_modules compact compile --feature-zkir-v3 \
   src/erc20-vault.compact src/managed/erc20-vault
-ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed \
+ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/src/managed \
   src/managed/SignetSigner
 ```
 
@@ -264,8 +265,18 @@ user's deposit account, derived from the caller's identity commitment:
 
 ```ts
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
-import { deriveEvmAddress, SignetRequestResponseReader } from "@sig-net/midnight";
+import {
+  deriveEvmAddress,
+  signetEventSourceFromPublicDataProvider,
+  SignetRequestResponseReader,
+} from "@sig-net/midnight";
 import { pureCircuits, VAULT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
+
+// Provider to index the Midnight blockchain.
+const publicDataProvider = indexerPublicDataProvider({
+  queryURL: indexerUrl,
+  subscriptionURL: indexerWsUrl,
+});
 
 const reader = new SignetRequestResponseReader({
   // The deployed vault contract.
@@ -277,11 +288,12 @@ const reader = new SignetRequestResponseReader({
   // The Signet singleton contract.
   signetContractAddress,
 
-  // Provider to index the Midnight blockchain.
-  publicDataProvider: indexerPublicDataProvider({
-    queryURL: indexerUrl,
-    subscriptionURL: indexerWsUrl,
-  }),
+  // Raw contract state: the vault's authenticated request map.
+  publicDataProvider,
+
+  // The contract events the singleton emits (the MPC's responses), read
+  // through the same provider.
+  eventSource: signetEventSourceFromPublicDataProvider(publicDataProvider),
 });
 
 // The MPC reads the 32 opaque path bytes as UTF-8 with NULs stripped (see
@@ -319,7 +331,7 @@ export circuit deposit(
   maxPriorityFeePerGas: Uint<128>,
   keyVersion: Uint<8>,
   depositRequest: DepositRequest  // { erc20Address: Bytes<20>, amount: Uint<128> }
-): SignetMapKey {
+): [] {
   // The request's derivation path IS the caller's identity commitment.
   const caller = disclose(userCommitment(callerSecretKey()));
 
@@ -358,7 +370,7 @@ export circuit deposit(
 
   // ...and notify it, carrying the map's ledger-tree path ([0] at depth 1,
   // Setup step 3).
-  return signetSigner.signBidirectional(
+  signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
       kernel.self(),
@@ -398,9 +410,11 @@ appears as a ledger map key after the call.
 
 ### Runtime step 2: poll for the MPC's signature
 
-The singleton's signature response log is unauthenticated (anyone can post),
-so use the verifying getter: it only returns a post whose signature recovers
-to the user's deposit account over the sweep's signing hash:
+The MPC's signature response is emitted as a contract event carrying the
+request id it answers. That id is unauthenticated routing data on an open
+event log (anyone can post), so use the verifying getter: it only returns a
+post whose signature recovers to the user's deposit account over the sweep's
+signing hash:
 
 ```ts
 const { verified } = await reader.getVerifiedSignatureRespondedEvent(requestId, evmUserAddress);
@@ -429,12 +443,12 @@ nonce-burned one throws).
 
 ### Runtime step 4: poll for the MPC's attestation
 
-Once the MPC observes the mined execution it posts an ECDSA-signed
-`RespondBidirectionalEvent`. The event carries only the MPC's signature over
-the attestation digest `keccak256(requestId || serializedOutput)`. Neither
-the digest nor the serialized output is posted on chain: the client must
-reconstruct the exact bytes the MPC hashed, in two moves, and then check the
-signature against them.
+Once the MPC observes the mined execution it emits an ECDSA-signed
+`RespondBidirectionalEvent`. The event carries the request id it answers and
+the MPC's signature over the attestation digest
+`keccak256(requestId || serializedOutput)`. Neither the digest nor the
+serialized output goes on chain: the client must reconstruct the exact bytes
+the MPC hashed, in two moves, and then check the signature against them.
 
 **Move 1: fetch the raw execution output.** This is the mined call's raw
 EVM return data (for the sweep: the single ABI-encoded `bool` word that
@@ -458,8 +472,8 @@ out), and the posted signature verifies over the re-packed bytes only if the
 MPC attested this outcome. With no digest on the event, that check is the
 whole selection.
 
-Everything stays UNTRUSTED here (the respond log is open to anyone, and the
-helper API is unauthenticated): the authoritative check is the in-circuit
+Everything stays UNTRUSTED here (the respond events are open to anyone, and
+the helper API is unauthenticated): the authoritative check is the in-circuit
 signature verification `claim` runs in step 5, against the same response key
 the vault pinned at initialize.
 
@@ -643,7 +657,7 @@ export circuit withdraw(
   keyVersion: Uint<8>,
   withdrawRequest: WithdrawRequest, // { erc20Address, amount, destEvmAddress }
   coin: ShieldedCoinInfo
-): SignetMapKey {
+): [] {
   // The coin must be the vault token for THIS ERC20, of exactly `amount`.
   const color = tokenType(
     vaultTokenDomainSeparator(disclose(withdrawRequest.erc20Address)),
@@ -670,9 +684,14 @@ export circuit withdraw(
   signBidirectionalEventMap.insert(requestId, disclose(request));
   refundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
 
-  return signetSigner.signBidirectional(
+  // Notify the MPC, carrying the map's ledger-tree path ([0] at depth 1).
+  signetSigner.signBidirectional(
     requestId,
-    constructSignBidirectionalEventNotificationV1(kernel.self(), 0 as Uint<8>),
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(),
+      1 as Uint<8>,                        // requestsPathDepth
+      [0, 0, 0, 0] as Vector<4, Uint<8>>,  // requestsPath, zero padded
+    ),
   );
 }
 ```

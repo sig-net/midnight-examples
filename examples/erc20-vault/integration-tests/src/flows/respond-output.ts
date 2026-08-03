@@ -92,7 +92,7 @@ function warnOnce(key: string, message: string): void {
  * conversions the responder ran on its side) is attempted only when the
  * cache reports an executed transaction with output bytes, and a decode
  * failure (for example empty `0x` return data from a non-bool ERC20) drops
- * it with a warning rather than crashing the poll. The respond log is
+ * it with a warning rather than crashing the poll. The respond events are
  * unauthenticated (anyone may post), so that signature check is what selects
  * a trustworthy record here, and the settle circuits run the same check
  * in-circuit, which remains the actual authentication gate.

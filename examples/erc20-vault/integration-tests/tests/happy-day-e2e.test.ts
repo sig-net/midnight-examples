@@ -172,8 +172,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         "",
         `  request id: ${depositTransactionSignatureRequestId}`,
         "",
-        "The response server (fakenet compose service, MIDNIGHT_SIGNET_CONTRACT_ADDRESS set)",
-        "polls the signet contract's notification registry and should pick it up",
+        "The response server (MIDNIGHT_SIGNET_CONTRACT_ADDRESS set) polls the",
+        "signet contract's emitted notification events and should pick it up",
         "on its next poll — resolving it from THIS vault's ledger — and sign the EVM tx.",
       ]);
     },
@@ -181,27 +181,28 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   it(
-    "golden notification: the vault's deposit registered a decodable notification in the signet registry",
+    "golden notification: the vault's deposit emitted a decodable notification event on the signet contract",
     async () => {
       // Pins the SignBidirectionalNotification payload layout against a LIVE
-      // indexer, read exactly the way the MPC reads it — raw signet state by
-      // field position through the hand-composed descriptors. The vault's
-      // deposit cross-contract-called signBidirectionalEvent to
-      // register this.
+      // indexer, read exactly the way the MPC reads it — the signet
+      // contract's emitted Misc events through the shared event decoders.
+      // The vault's deposit cross-contract-called signBidirectional to emit
+      // this.
       expect(depositTransactionSignatureRequestId).toBeDefined();
       const vaultAddress = requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS");
 
       const decoded = await pollSignetNotification({
         env,
-        requestId: depositTransactionSignatureRequestId,
+        callerAddress: vaultAddress,
+        requestsPath: [0],
         description: `for request ${depositTransactionSignatureRequestId}`,
       });
 
       // callerAddress points at the vault (the contract whose authenticated
       // ledger holds the request); the event map's resolved ledger-tree path
-      // is [0]. The V1 payload itself no longer carries a request id: the
-      // registry keys the notification under it, which is what the poll
-      // above matched on.
+      // is [0]. The notification carries no request id: it is a doorbell
+      // saying WHERE to look, and the MPC reads every request from the
+      // vault's own authenticated ledger.
       expect(decoded.version).toBe(1);
       expect(decoded.callerAddress).toBe(stripHexPrefix(vaultAddress).toLowerCase());
       expect(decoded.requestsPath).toEqual([0]);
@@ -209,10 +210,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       banner([
         "Golden SignBidirectionalEventNotification decoded from the live indexer:",
         "",
-        `  version:            ${decoded.version}`,
-        `  callerAddress:      ${decoded.callerAddress}`,
-        `  registered under:   ${depositTransactionSignatureRequestId}`,
-        `  requestsPath:       [${decoded.requestsPath.join(', ')}]`,
+        `  version:       ${decoded.version}`,
+        `  callerAddress: ${decoded.callerAddress}`,
+        `  requestsPath:  [${decoded.requestsPath.join(', ')}]`,
       ]);
     },
     2 * MINUTE,
@@ -479,17 +479,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   it(
-    "watch withdraw signature request: the withdraw registered a notification in the signet registry",
+    "watch withdraw signature request: the withdraw emitted a notification event on the signet contract",
     async () => {
-      // The same registry poll the MPC runs for discovery: withdraw
-      // cross-contract-called signBidirectionalEvent to register
-      // this.
+      // The same event poll the MPC runs for discovery: withdraw
+      // cross-contract-called signBidirectional to emit this.
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
       const vaultAddress = requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS");
 
       const decoded = await pollSignetNotification({
         env,
-        requestId: withdrawTransactionSignatureRequestId,
+        callerAddress: vaultAddress,
+        requestsPath: [0],
         description: `for withdraw request ${withdrawTransactionSignatureRequestId}`,
       });
 
@@ -497,10 +497,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(decoded.requestsPath).toEqual([0]);
 
       banner([
-        "Notification observed for the withdraw request:",
+        "Notification event observed for the withdraw request:",
         "",
-        `  callerAddress:    ${decoded.callerAddress}`,
-        `  registered under: ${withdrawTransactionSignatureRequestId}`,
+        `  callerAddress: ${decoded.callerAddress}`,
+        `  requestsPath:  [${decoded.requestsPath.join(', ')}]`,
       ]);
     },
     2 * MINUTE,
