@@ -44,8 +44,9 @@ import "@sig-net/midnight/src/Signet";
 // state tree's root array). The request circuits pack this path into their
 // notifications, and the MPC follows it to locate the map. The compiled path is
 // recorded as this field's "index" in managed/erc20-vault/compiler/contract-info.json.
-// The map must stay first and never move after the first deploy. No other field's
-// position carries meaning, so no other field is numbered.
+// The map must stay first and never move after the first deploy. General rule: any field a
+// notification names by position must hold that position — swapEventMap (field 11) is the
+// other such field, since the swap notification hardcodes its path [11, 0, 0, 0].
 export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // The Signet singleton, pinned at deploy. The request circuits cross-contract call it
@@ -202,7 +203,7 @@ constructor(
 // own address, chain or key.
 export circuit initialize(
   vaultEvm: Bytes<20>,
-  router: Bytes<20>,
+  swapRouter: Bytes<20>,
   chainId: Uint<64>,
   chainCaip2Id: Bytes<32>,
   responseKey: Secp256k1Point
@@ -210,10 +211,10 @@ export circuit initialize(
   assert(initialized == 0, "Already initialized");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
   assert(chainId > 0 as Uint<64>, "Chain ID must be positive");
-  assert(router as Field != 0 as Field, "Router cannot be zero");
+  assert(swapRouter as Field != 0 as Field, "Router cannot be zero");
   initialized.increment(1);
   vaultEvmAddress = disclose(vaultEvm);
-  uniswapRouter = disclose(router);
+  uniswapRouter = disclose(swapRouter);
   evmChainId = disclose(chainId);
   caip2Id = disclose(chainCaip2Id);
   mpcResponseKey = disclose(responseKey);
@@ -754,7 +755,7 @@ struct SwapRequest {
 // signed with the VAULT's account and broadcast off-chain. The router pulls tokenIn from
 // the vault (via the approveRouter allowance) and sends tokenOut BACK to the vault
 // (recipient is contract-pinned), keeping pool balance == shielded supply per token. On
-// success completeSwap mints the attested amountOut of tokenOut; on EVM failure refundSwap
+// success completeSwap mints the attested amountOut of tokenOut; on EVM failure refund
 // re-mints the surrendered tokenIn. The coin spend IS the authorisation.
 export circuit swap(
   evmNonce: Uint<64>,
@@ -851,7 +852,7 @@ export circuit swap(
 // the router enforces the floor) or reverts, so a Bytes<32> attested output means success
 // and carries the packed uint256 amountOut. Mints that amountOut of the tokenOut vault
 // coin to the swapper. Swapper-gated (it mints a private coin), one settle per request.
-// A swap whose transaction never executed settles through refundSwap: the MPC's fixed
+// A swap whose transaction never executed settles through refund: the MPC's fixed
 // 5-byte failure output cannot type-fit this circuit's Bytes<32>.
 export circuit completeSwap(
   requestId: RequestId,
