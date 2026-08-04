@@ -26,3 +26,11 @@ export const VAULT_REQUESTS_PATH: readonly number[] = [0];
 
 /** Resolved ledger-tree path of `signetRequestNonce` (ledger field 3). */
 export const VAULT_NONCE_PATH: readonly number[] = [3];
+
+/**
+ * Resolved ledger-tree path of `swapEventMap` (ledger field 11). Swaps register
+ * their notification in this SEPARATE map (sized for a 7-word exactInputSingle),
+ * so the swap flow reads MPC responses from this path, not [0]. Matches the
+ * `requestsPath` [11, 0, 0, 0] the swap circuit packs into its notification.
+ */
+export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [11];
