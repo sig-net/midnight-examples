@@ -437,7 +437,7 @@ export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<voi
   }
   console.log("fakenet-responder container is running");
   console.log(" ➜ watch it: `docker logs -f fakenet-responder` — healthy startup prints");
-  console.log('   "MidnightMonitor: polling signet contract registry at <signet address>"');
+  console.log('   "MidnightMonitor: polling signet contract events at <signet address>"');
 }
 
 /**
@@ -490,7 +490,7 @@ export function printMpcServerConfig(env: NodeJS.ProcessEnv, pipelineKeys: reado
     `  MPC_ROOT_KEY=${rootKey}`,
     `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS")}`,
     "  # 💡 The responder DISCOVERS requesters by polling this signet",
-    "  #    contract's notification registry — no requester contract list needed.",
+    "  #    contract's emitted notification events — no requester contract list needed.",
     "",
     ...(managed
       ? [

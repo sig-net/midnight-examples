@@ -49,14 +49,14 @@ import "@sig-net/midnight/src/Signet";
 export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // The Signet singleton, pinned at deploy. The request circuits cross-contract call it
-// to register the notifications the MPC polls.
+// to emit the notification events the MPC polls.
 sealed ledger signetSigner: SignetSigner;
 
 // The MPC RESPONSE key for this contract, derived off-chain from the MPC root key +
 // THIS contract's address + the fixed path "midnight response key". It never signs
 // transactions: it is the key claim, completeWithdraw and refundWithdraw accept
 // RespondBidirectionalEvents from, and their only authentication gate (the Signet
-// singleton stores MPC posts unverified). It depends on the contract's own address, so
+// singleton emits MPC posts unverified). It depends on the contract's own address, so
 // it is set in initialize() (Setup step 4), not the constructor.
 export ledger mpcResponseKey: Secp256k1Point;
 
@@ -215,7 +215,7 @@ export circuit deposit(
   maxPriorityFeePerGas: Uint<128>,
   keyVersion: Uint<8>,
   depositRequest: DepositRequest
-): SignetMapKey {
+): [] {
   assert(initialized >= 1, "Not initialized");
   assert(depositRequest.erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
   assert(depositRequest.amount > 0 as Uint<128>, "Amount must be positive");
@@ -280,11 +280,10 @@ export circuit deposit(
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
-  // Notify the MPC via the Signet singleton's registry. The path arguments carry the
-  // resolved ledger-tree path of signBidirectionalEventMap: depth 1, path [0], as the
-  // map is ledger field 0 (see its declaration). The returned SignetMapKey names the
-  // notification's (requestId, count) slot.
-  return signetSigner.signBidirectional(
+  // Notify the MPC via the Signet singleton's notification event. The path arguments
+  // carry the resolved ledger-tree path of signBidirectionalEventMap: depth 1, path
+  // [0], as the map is ledger field 0 (see its declaration).
+  signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
       kernel.self(),
@@ -322,7 +321,7 @@ export circuit claim(
 
   // The only authentication gate: the attestation digest is recomputed here from the
   // presented output, and the event's ECDSA signature over it must verify against the
-  // initialize-pinned response key (the Signet singleton stores MPC posts unverified).
+  // initialize-pinned response key (the Signet singleton emits MPC posts unverified).
   assert(
     verifyRespondBidirectionalEvent<1>(
       disclosedRequestId,
@@ -383,7 +382,7 @@ export circuit withdraw(
   keyVersion: Uint<8>,
   withdrawRequest: WithdrawRequest,
   coin: ShieldedCoinInfo
-): SignetMapKey {
+): [] {
   assert(initialized >= 1, "Not initialized");
   assert(withdrawRequest.erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
   assert(withdrawRequest.amount > 0 as Uint<128>, "Amount must be positive");
@@ -464,7 +463,7 @@ export circuit withdraw(
 
   // Notify the MPC (ledger-tree path [0] at depth 1 = signBidirectionalEventMap, see
   // its declaration).
-  return signetSigner.signBidirectional(
+  signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
       kernel.self(),
