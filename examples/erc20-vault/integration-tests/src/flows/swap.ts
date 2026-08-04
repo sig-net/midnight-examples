@@ -242,9 +242,11 @@ export async function runSwapRoundTrip(
   const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
   const requestId = await swap(context, { tokenOut: opts.tokenOut, fee: opts.fee, amountIn: opts.amountIn, amountOutMin, evmNonce });
 
-  // The swap tx is signed by the VAULT's account (it holds the pooled funds).
+  // The swap tx is signed by the VAULT's account (it holds the pooled funds). tolerateRevert:
+  // an on-chain revert (slippage / liquidity / an impossible amountOutMin) is a valid outcome
+  // the MPC attests as a failure and completeSwap settles via refund — not a broadcast error.
   const signed = await pollSignatureResponse(context, { requestId, intervalMs: 1000, timeoutMs: 3 * MINUTE, expectedSigner: context.evmVaultAddress, requestsPath: VAULT_SWAP_REQUESTS_PATH });
-  await broadcastEvm(context, { transaction: signed });
+  await broadcastEvm(context, { transaction: signed, tolerateRevert: true });
   const { amountOut, refunded } = await completeSwap(context, requestId);
   return { requestId, amountOut, refunded };
 }
