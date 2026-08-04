@@ -393,17 +393,19 @@ describe("deposit round-trip", () => {
     const [idHex, record] = [...typedIndex.entries()][0];
 
     // The cross-contract call's observable effect: the signet contract
-    // emitted the notification event, its payload naming THIS vault and the
-    // field-0 request map (decoded through the shared library's decoders,
-    // the same read the MPC's discovery feed performs).
+    // emitted the notification event, its payload declaring the stored
+    // event's id and naming THIS vault and the field-0 request map (decoded
+    // through the shared library's decoders, the same read the MPC's
+    // discovery feed performs).
     const notificationEvents = decodeSignetLogEvents(next.events, SIGNET_ADDRESS);
     expect(notificationEvents).toHaveLength(1);
     expect(notificationEvents[0].name).toBe(SignetEventName.SignBidirectionalEvent);
-    expect(
-      decodeSignBidirectionalNotification(
-        decodeSignBidirectionalEventNotificationPayload(notificationEvents[0].payload),
-      ),
-    ).toEqual({
+    const notificationPost = decodeSignBidirectionalEventNotificationPayload(
+      notificationEvents[0].payload,
+    );
+    // The declared id IS the stored map key: the MPC looks it up directly.
+    expect(requestIdHex(notificationPost.requestId)).toBe(idHex);
+    expect(decodeSignBidirectionalNotification(notificationPost.event)).toEqual({
       version: 1,
       callerAddress: bytesToHex(VAULT_ADDRESS_BYTES),
       requestsPath: [0],
@@ -630,14 +632,16 @@ describe("withdraw round-trip", () => {
     const [idHex, record] = [...index.entries()][0];
 
     // The cross-contract call's observable effect: the signet contract
-    // emitted the notification event naming this vault's field-0 request map.
+    // emitted the notification event declaring the stored event's id and
+    // naming this vault's field-0 request map.
     const [notificationEvent] = decodeSignetLogEvents(next.events, SIGNET_ADDRESS);
     expect(notificationEvent.name).toBe(SignetEventName.SignBidirectionalEvent);
-    expect(
-      decodeSignBidirectionalNotification(
-        decodeSignBidirectionalEventNotificationPayload(notificationEvent.payload),
-      ),
-    ).toEqual({
+    const notificationPost = decodeSignBidirectionalEventNotificationPayload(
+      notificationEvent.payload,
+    );
+    // The declared id IS the stored map key: the MPC looks it up directly.
+    expect(requestIdHex(notificationPost.requestId)).toBe(idHex);
+    expect(decodeSignBidirectionalNotification(notificationPost.event)).toEqual({
       version: 1,
       callerAddress: bytesToHex(VAULT_ADDRESS_BYTES),
       requestsPath: [0],
