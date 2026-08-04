@@ -305,11 +305,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
   );
 
   it(
-    "completeWithdraw: routes to refundWithdraw and consumes the request + refund marker",
+    "completeWithdraw: routes to refund and consumes the request + refund marker",
     async () => {
       // Final leg: the request is on the vault ledger and the MPC's FAILURE
       // attestation is posted (previous steps). The settle flow routes the
-      // fixed 5-byte failure output to the refundWithdraw circuit, which
+      // fixed 5-byte failure output to the refund circuit, which
       // re-verifies the attestation in-circuit (digest equality + ECDSA
       // against the stored MPC response key), checks the sentinel bytes, and
       // re-mints the escrowed shielded value to the withdrawer (this
@@ -317,7 +317,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
       // of leaving it burned. The request + its pending-withdrawal marker
       // are consumed (double-settle protection). The refunded shielded
       // balance itself is not publicly observable; the marker consumption is
-      // (present before, absent after), and refundWithdraw is the only
+      // (present before, absent after), and refund is the only
       // circuit a failure attestation can settle through.
       expect(withdrawRequestId).toBeDefined();
       expect(withdrawAttestation).toBeDefined();
@@ -345,11 +345,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → wit
       const after = await readLedger();
       expect(
         after.signBidirectionalEventMap.member(requestKey),
-        "refundWithdraw must consume the request from the ledger",
+        "refund must consume the request from the ledger",
       ).toBe(false);
       expect(
         after.refundCommitment.member(requestKey),
-        "refundWithdraw must consume the pending-withdrawal marker",
+        "refund must consume the pending-withdrawal marker",
       ).toBe(false);
 
       banner([

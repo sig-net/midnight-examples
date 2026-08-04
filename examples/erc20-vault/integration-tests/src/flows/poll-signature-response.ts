@@ -29,6 +29,12 @@ export interface PollSignatureResponseOptions {
    * request kinds, and which account signs is the caller's knowledge.
    */
   readonly expectedSigner: string;
+  /**
+   * The resolved ledger-tree path of the request map. Defaults to [0]
+   * (deposit/withdraw); swaps pass VAULT_SWAP_REQUESTS_PATH ([11], the
+   * swapEventMap), since a swap request is registered in that separate map.
+   */
+  readonly requestsPath?: readonly number[];
 }
 
 /**
@@ -67,7 +73,7 @@ export async function pollSignatureResponse(
   console.log(`expected signer:    ${options.expectedSigner}`);
   console.log(`poll:               every ${options.intervalMs}ms, up to ${options.timeoutMs}ms`);
 
-  const reader = createResponseReader(context);
+  const reader = createResponseReader(context, options.requestsPath);
 
   // The reader is single-shot; this loop owns the cadence and the give-up
   // timeout. Rejected posts are immutable emitted events, so warn each post

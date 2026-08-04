@@ -20,8 +20,8 @@
 // is unauthenticated and never decides anything, it only gates whether a
 // success candidate can be built at all. With no digest on the event there is
 // nothing else to match on. Which candidate verified is also what routes
-// settlement (claim / completeWithdraw / refundWithdraw). The fetched output
-// is UNTRUSTED until that check: the verified bytes go into the settle
+// settlement (claim / completeWithdraw / completeSwap / refund). The fetched
+// output is UNTRUSTED until that check: the verified bytes go into the settle
 // circuit as an argument, where `verifyRespondBidirectionalEvent<N>` re-hashes
 // them and verifies the same signature in-circuit. That in-circuit check is
 // the authentication gate, so a forged post merely wastes a proof here, it
