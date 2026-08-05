@@ -14,7 +14,10 @@ import {
   type AccountKeys,
   type WalletFacade,
 } from "@midnight-examples/lib";
-import { SignetRequestResponseReader } from "@sig-net/midnight";
+import {
+  SignetRequestResponseReader,
+  signetEventSourceFromPublicDataProvider,
+} from "@sig-net/midnight";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { requireEnv } from "./e2e-env.ts";
 
@@ -61,12 +64,13 @@ export interface E2eSessionOptions {
    */
   requesterAddressEnvVar: string;
   /**
-   * Ledger field position of the requester contract's request index — the
-   * same position the contract passes as `requestsIndexField` in its
-   * notifications. A contract is free to declare the index at any field, so
+   * Resolved ledger-tree path of the requester contract's request index — the
+   * same path the contract packs as `requestsPath` in its notifications
+   * (`[0]` for a flat contract's field 0, longer once the compiler chunks
+   * past 15 fields). A contract is free to declare the index at any field, so
    * the reader cannot assume one.
    */
-  requesterRequestsIndexField: number;
+  requesterRequestsPath: readonly number[];
 }
 
 /**
@@ -108,14 +112,18 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
     responseReader(): SignetRequestResponseReader {
       if (!sharedReader) {
         const nodeConfig = getMidnightNodeConfig(env);
+        const publicDataProvider = indexerPublicDataProvider({
+          queryURL: nodeConfig.indexerUrl,
+          subscriptionURL: nodeConfig.indexerWsUrl,
+        });
         sharedReader = new SignetRequestResponseReader({
           requesterContractAddress: requireEnv(env, options.requesterAddressEnvVar),
-          requesterRequestsIndexField: options.requesterRequestsIndexField,
+          requesterRequestsPath: options.requesterRequestsPath,
           signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
-          publicDataProvider: indexerPublicDataProvider({
-            queryURL: nodeConfig.indexerUrl,
-            subscriptionURL: nodeConfig.indexerWsUrl,
-          }),
+          publicDataProvider,
+          // The MPC's responses are read from the contract events the
+          // signet contract emits, through the same provider.
+          eventSource: signetEventSourceFromPublicDataProvider(publicDataProvider),
         });
       }
       return sharedReader;

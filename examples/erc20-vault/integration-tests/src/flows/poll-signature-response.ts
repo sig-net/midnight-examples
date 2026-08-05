@@ -1,7 +1,7 @@
 // `pollSignatureResponse` — stage 1 of the MPC round trip: poll the central
-// signet contract's signature response log by request id until the MPC's
-// ECDSA signature over a request's EVM transaction appears, verifying every
-// post on the way. There is deliberately no push/websocket alternative.
+// signet contract's emitted signature response events by request id until the
+// MPC's ECDSA signature over a request's EVM transaction appears, verifying
+// every post on the way. There is deliberately no push/websocket alternative.
 
 import type { Transaction } from "ethers";
 
@@ -33,17 +33,17 @@ export interface PollSignatureResponseOptions {
 
 /**
  * Poll the signet contract until a VALID signature response for
- * `options.requestId` appears in its response log, then reconstruct and
- * return the fully signed EVM transaction as a typed ethers
+ * `options.requestId` appears among its emitted response events, then
+ * reconstruct and return the fully signed EVM transaction as a typed ethers
  * {@link Transaction}, ready to hand straight to `broadcastEvm`. Serialize
  * it (`.serialized`) only at the edge — for stdout or
  * `eth_sendRawTransaction`.
  *
  * Enumeration and verification are delegated to signet-midnight's
- * `SignetRequestResponseReader`: each tick reads the response log at
- * `requestId` and, the log being unauthenticated, judges every post by
- * whether its signature recovers to the request's MPC-derived sender (see
- * {@link PollSignatureResponseOptions.expectedSigner}) over the requested
+ * `SignetRequestResponseReader`: each tick reads the response events declared
+ * under `requestId` and, the event log being unauthenticated, judges every
+ * post by whether its signature recovers to the request's MPC-derived sender
+ * (see {@link PollSignatureResponseOptions.expectedSigner}) over the requested
  * transaction's signing hash. The first valid post wins. The signed
  * transaction is assembled from the request record and that response via
  * {@link signBidirectionalEventToSignedEvmTransaction}. This flow owns
@@ -56,8 +56,7 @@ export interface PollSignatureResponseOptions {
  * @param options - What to poll for and how patiently.
  * @returns The broadcast-ready signed EVM transaction.
  * @throws Error when a contract has no state on-chain, the request is not on
- *   the vault's ledger, the responses ledger is inconsistent, or `timeoutMs`
- *   elapses with no valid response posted.
+ *   the vault's ledger, or `timeoutMs` elapses with no valid response posted.
  */
 export async function pollSignatureResponse(
   context: VaultContext,
@@ -71,8 +70,8 @@ export async function pollSignatureResponse(
   const reader = createResponseReader(context);
 
   // The reader is single-shot; this loop owns the cadence and the give-up
-  // timeout. Rejected posts are immutable log entries, so warn each count
-  // once across the loop's lifetime, not every tick.
+  // timeout. Rejected posts are immutable emitted events, so warn each post
+  // index once across the loop's lifetime, not every tick.
   const warned = new Set<bigint>();
   const giveUp = new AbortController();
   const timer = setTimeout(() => giveUp.abort(), options.timeoutMs);
@@ -83,16 +82,16 @@ export async function pollSignatureResponse(
         options.expectedSigner,
       );
       for (const verdict of verdicts) {
-        if (verdict.rejectedReason !== undefined && !warned.has(verdict.count)) {
-          warned.add(verdict.count);
-          console.warn(`ignoring response post ${verdict.count}: ${verdict.rejectedReason}`);
+        if (verdict.rejectedReason !== undefined && !warned.has(verdict.index)) {
+          warned.add(verdict.index);
+          console.warn(`ignoring response post ${verdict.index}: ${verdict.rejectedReason}`);
         }
       }
       if (verified !== undefined) {
-        const validCount = verdicts.find(
+        const validIndex = verdicts.find(
           (verdict) => verdict.rejectedReason === undefined,
-        )?.count;
-        console.log(`valid response found (post ${validCount})`);
+        )?.index;
+        console.log(`valid response found (post ${validIndex})`);
         // Reconstruct the broadcast-ready signed transaction from the request
         // record and this response. The reader's request fetch is cached (its
         // verification already fetched it), so this adds no extra query.

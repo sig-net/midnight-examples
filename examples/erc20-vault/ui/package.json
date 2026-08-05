@@ -23,7 +23,7 @@
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
     "@midnightntwrk/wallet-sdk-address-format": "4.0.0-beta.2",
     "@midnightntwrk/wallet-sdk-facade": "5.0.0-beta.2",
-    "@sig-net/midnight": "0.14.0",
+    "@sig-net/midnight": "0.18.0",
     "@tanstack/react-query": "5.101.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
