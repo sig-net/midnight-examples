@@ -134,7 +134,7 @@ kept contracts.
 The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
 `docker-compose.yaml`, built from
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
-stand-in: it polls the signet contract's notification registry via the
+stand-in: it polls the signet contract's emitted notification events via the
 indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and
 posts responses through the proof server. It also serves the public
 `/responses/{requestId}` helper API on port 3040 (mapped to localhost by the
@@ -153,7 +153,7 @@ raw traced EVM output from it, so a poll that times out with
   it, and a plain `docker compose down` does NOT remove it — use
   `docker compose --profile fakenet down` to tear the whole stack down.
 - **Healthy startup check:** `docker logs fakenet-responder` prints
-  `MidnightMonitor: polling signet contract registry at <signet address>` —
+  `MidnightMonitor: polling signet contract events at <signet address>` —
   verify the address matches your `.env`.
 - **Responder development:** set `FAKENET_MANAGED=0` so setup leaves the
   responder — and `.env` — alone, and run it yourself (`yarn response` in a
