@@ -1,6 +1,6 @@
 // EVM chain connection config. Deliberately far smaller than the Midnight
 // side: an EVM chain is reached through ONE JSON-RPC endpoint, so there is no
-// endpoint set to keep consistent and no named-network table to select from.
+// endpoint set to keep consistent, only the named-chain table below.
 
 /**
  * Everything needed to reach one EVM chain.
@@ -30,6 +30,49 @@ export const LOCAL_EVM_CHAIN: EvmChainConfig = {
   chainId: 31337n,
   rpcUrl: "http://127.0.0.1:8545",
 };
+
+/** One named EVM chain: an {@link EvmChainConfig} plus the name a picker shows. */
+export interface NamedEvmChain extends EvmChainConfig {
+  /** Human-readable chain name, for pickers and labels. */
+  readonly name: string;
+}
+
+/**
+ * The EVM chains this repository knows by name, for a consumer that offers a
+ * chain picker. Each entry's `rpcUrl` is a public endpoint (verified answering
+ * `eth_chainId` on 2026-08-06), good enough for reads: anything
+ * latency-sensitive should bring its own endpoint via configuration. The
+ * local anvil chain leads, as the chain the examples develop against.
+ *
+ * A chain absent here is still fully usable: this table feeds pickers and
+ * per-chain defaults, it does not gate what a consumer may configure.
+ */
+export const EVM_CHAINS: readonly NamedEvmChain[] = [
+  { name: "Local anvil", ...LOCAL_EVM_CHAIN },
+  {
+    name: "Ethereum",
+    chainId: 1n,
+    rpcUrl: "https://ethereum-rpc.publicnode.com",
+    explorerUrl: "https://etherscan.io",
+  },
+  {
+    name: "Sepolia",
+    chainId: 11155111n,
+    rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
+    explorerUrl: "https://sepolia.etherscan.io",
+  },
+];
+
+/**
+ * Look up a named chain by id.
+ *
+ * @param chainId - The EVM chain id.
+ * @returns The named chain, or undefined when {@link EVM_CHAINS} has no entry
+ *   for it.
+ */
+export function evmChainById(chainId: bigint): NamedEvmChain | undefined {
+  return EVM_CHAINS.find((chain) => chain.chainId === chainId);
+}
 
 /**
  * An EVM chain's CAIP-2 identifier

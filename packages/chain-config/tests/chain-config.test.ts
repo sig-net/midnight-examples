@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   evmCaip2ChainId,
+  evmChainById,
   DEFAULT_ENDPOINTS,
+  EVM_CHAINS,
   FAUCET_URLS,
   indexerWsUrlFromIndexerUrl,
   isLocalStandaloneNetwork,
@@ -102,5 +104,33 @@ describe("EVM chain config", () => {
   // bigint literal's trailing "n".
   it("emits no bigint suffix", () => {
     expect(evmCaip2ChainId(31337n)).not.toContain("n");
+  });
+});
+
+describe("named EVM chains", () => {
+  // The examples develop against the local chain, so a picker fed by this
+  // table must offer it first.
+  it("leads with the local anvil chain", () => {
+    expect(EVM_CHAINS[0]).toEqual({ name: "Local anvil", ...LOCAL_EVM_CHAIN });
+  });
+
+  it("has a unique chain id per entry", () => {
+    const ids = EVM_CHAINS.map((chain) => chain.chainId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  /** A chain id, and the named chain expected back (undefined for unknown). */
+  interface ChainByIdCase {
+    chainId: bigint;
+    expectedName: string | undefined;
+  }
+  const CHAIN_BY_ID_CASES: ChainByIdCase[] = [
+    { chainId: 31337n, expectedName: "Local anvil" },
+    { chainId: 1n, expectedName: "Ethereum" },
+    { chainId: 11155111n, expectedName: "Sepolia" },
+    { chainId: 424242n, expectedName: undefined },
+  ];
+  it.each(CHAIN_BY_ID_CASES)("evmChainById($chainId) -> $expectedName", ({ chainId, expectedName }) => {
+    expect(evmChainById(chainId)?.name).toBe(expectedName);
   });
 });
