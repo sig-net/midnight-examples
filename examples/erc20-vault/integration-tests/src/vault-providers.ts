@@ -8,23 +8,26 @@
 
 import { fileURLToPath } from "node:url";
 
-import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
-import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
-import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
-import type { MidnightProviders } from "@midnight-ntwrk/midnight-js/types";
-
 import {
+  Contract,
+  type VaultPrivateState,
+  witnesses,
+} from "@midnight-examples/erc20-vault-contract";
+import {
+  type AccountKeys,
   createCrossContractProofServerProvider,
   createWalletAndMidnightProvider,
   makeCompiledContract,
-  type AccountKeys,
   type MidnightNodeConfig,
   type WalletFacade,
 } from "@midnight-examples/lib";
-import { Contract, witnesses, type VaultPrivateState } from "@midnight-examples/erc20-vault-contract";
+import type { MidnightProviders } from "@midnight-ntwrk/midnight-js/types";
+import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
+import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
 
 /** The vault's provable circuit ids, straight from the generated contract. */
-export type VaultCircuitId = keyof InstanceType<typeof Contract>["provableCircuits"] & string;
+export type VaultCircuitId = keyof InstanceType<typeof Contract>["provableCircuits"];
 
 /**
  * Literal of the private-state storage key. Just a string, but a
@@ -58,20 +61,22 @@ export type VaultProviders = MidnightProviders<
 // script). Resolved RELATIVE to this file: the contract package is this
 // example's sibling, and an integrator copies the whole example directory
 // together.
-const managedPath = fileURLToPath(new URL("../../contract/src/managed/erc20-vault", import.meta.url));
-const signetManagedPath = fileURLToPath(new URL("../../contract/src/managed/SignetSigner", import.meta.url));
+const managedPath = fileURLToPath(
+  new URL("../../contract/src/managed/erc20-vault", import.meta.url),
+);
+const signetManagedPath = fileURLToPath(
+  new URL("../../contract/src/managed/SignetSigner", import.meta.url),
+);
 
 /**
  * The vault's compact-js compiled-contract binding: generated module + real
  * witnesses + the contract package's compiled assets. Consumed by
  * `findDeployedContract` (and usable by deploy tooling).
  */
-export const vaultCompiledContract = makeCompiledContract<Contract<VaultPrivateState>, VaultPrivateState>(
-  "erc20-vault",
-  Contract,
-  witnesses,
-  managedPath,
-);
+export const vaultCompiledContract = makeCompiledContract<
+  Contract<VaultPrivateState>,
+  VaultPrivateState
+>("erc20-vault", Contract, witnesses, managedPath);
 
 /**
  * Build the midnight-js provider set for the vault.

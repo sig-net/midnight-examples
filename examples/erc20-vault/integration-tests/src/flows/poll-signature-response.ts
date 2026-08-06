@@ -3,13 +3,12 @@
 // MPC's ECDSA signature over a request's EVM transaction appears, verifying
 // every post on the way. There is deliberately no push/websocket alternative.
 
-import type { Transaction } from "ethers";
-
 import {
+  type RequestIdHex,
   signBidirectionalEventToSignedEvmTransaction,
   sleepUnlessAborted,
-  type RequestIdHex,
 } from "@sig-net/midnight";
+import type { Transaction } from "ethers";
 
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 
@@ -55,7 +54,7 @@ export interface PollSignatureResponseOptions {
  * @param context - The flow context.
  * @param options - What to poll for and how patiently.
  * @returns The broadcast-ready signed EVM transaction.
- * @throws Error when a contract has no state on-chain, the request is not on
+ * @throws {Error} When a contract has no state on-chain, the request is not on
  *   the vault's ledger, or `timeoutMs` elapses with no valid response posted.
  */
 export async function pollSignatureResponse(
@@ -65,7 +64,9 @@ export async function pollSignatureResponse(
   console.log(`signet contract:   ${context.signetContractAddress}`);
   console.log(`request id:         ${options.requestId}`);
   console.log(`expected signer:    ${options.expectedSigner}`);
-  console.log(`poll:               every ${options.intervalMs}ms, up to ${options.timeoutMs}ms`);
+  console.log(
+    `poll:               every ${String(options.intervalMs)}ms, up to ${String(options.timeoutMs)}ms`,
+  );
 
   const reader = createResponseReader(context);
 
@@ -74,7 +75,9 @@ export async function pollSignatureResponse(
   // index once across the loop's lifetime, not every tick.
   const warned = new Set<bigint>();
   const giveUp = new AbortController();
-  const timer = setTimeout(() => giveUp.abort(), options.timeoutMs);
+  const timer = setTimeout(() => {
+    giveUp.abort();
+  }, options.timeoutMs);
   try {
     while (!giveUp.signal.aborted) {
       const { verified, verdicts } = await reader.getVerifiedSignatureRespondedEvent(
@@ -84,14 +87,14 @@ export async function pollSignatureResponse(
       for (const verdict of verdicts) {
         if (verdict.rejectedReason !== undefined && !warned.has(verdict.index)) {
           warned.add(verdict.index);
-          console.warn(`ignoring response post ${verdict.index}: ${verdict.rejectedReason}`);
+          console.warn(
+            `ignoring response post ${String(verdict.index)}: ${verdict.rejectedReason}`,
+          );
         }
       }
       if (verified !== undefined) {
-        const validIndex = verdicts.find(
-          (verdict) => verdict.rejectedReason === undefined,
-        )?.index;
-        console.log(`valid response found (post ${validIndex})`);
+        const validIndex = verdicts.find((verdict) => verdict.rejectedReason === undefined)?.index;
+        console.log(`valid response found (post ${String(validIndex ?? "unknown")})`);
         // Reconstruct the broadcast-ready signed transaction from the request
         // record and this response. The reader's request fetch is cached (its
         // verification already fetched it), so this adds no extra query.
@@ -101,7 +104,7 @@ export async function pollSignatureResponse(
       await sleepUnlessAborted(options.intervalMs, giveUp.signal);
     }
     throw new Error(
-      `timed out after ${options.timeoutMs}ms waiting for a valid response to request ${options.requestId}`,
+      `timed out after ${String(options.timeoutMs)}ms waiting for a valid response to request ${options.requestId}`,
     );
   } finally {
     clearTimeout(timer);

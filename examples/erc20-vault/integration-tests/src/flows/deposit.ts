@@ -6,28 +6,27 @@
 // off-chain with the library's TS twin of the request-id circuit and asserted
 // against the ledger map key before it is returned.
 
+import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
 import {
+  calculateRequestId,
   evmAddressAbiWord,
   hexToBytes,
   numericAbiWord,
   requestIdBytes,
-  requestIdHex,
-  stripHexPrefix,
-  SIGNET_DEFAULT_KEY_VERSION,
-  TxParamType,
-  calculateRequestId,
-  toSignBidirectionalEventIndex,
-  type SignBidirectionalEvent,
   type RequestIdHex,
+  requestIdHex,
+  type SignBidirectionalEvent,
+  SIGNET_DEFAULT_KEY_VERSION,
+  stripHexPrefix,
+  toSignBidirectionalEventIndex,
+  TxParamType,
 } from "@sig-net/midnight";
 
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
-
 import {
-  ERC20_TRANSFER_SELECTOR,
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
   ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
+  ERC20_TRANSFER_SELECTOR,
   evmAddressBytes,
 } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
@@ -67,25 +66,33 @@ export interface DepositOptions {
  * @param context - The flow context.
  * @param options - The deposit arguments.
  * @returns The request id as 64-char lowercase hex.
- * @throws If an option is invalid, the vault is uninitialized, or the
+ * @throws {Error} If an option is invalid, the vault is uninitialized, or the
  *   recomputed id does not appear on the ledger.
  */
-export async function deposit(context: VaultContext, options: DepositOptions): Promise<RequestIdHex> {
+export async function deposit(
+  context: VaultContext,
+  options: DepositOptions,
+): Promise<RequestIdHex> {
   if (options.amount <= 0n) {
-    throw new Error(`amount must be a positive integer; got ${options.amount}.`);
+    throw new Error(`amount must be a positive integer; got ${String(options.amount)}.`);
   }
   if (options.evmNonce < 0n) {
-    throw new Error(`evmNonce must be non-negative; got ${options.evmNonce}.`);
+    throw new Error(`evmNonce must be non-negative; got ${String(options.evmNonce)}.`);
   }
   const erc20 = evmAddressBytes(context.erc20Address);
   console.log(`vault contract:    ${context.vaultContractAddress}`);
   console.log(`erc20:             ${context.erc20Address}`);
-  console.log(`amount:            ${options.amount} (evm nonce ${options.evmNonce})`);
+  console.log(
+    `amount:            ${String(options.amount)} (evm nonce ${String(options.evmNonce)})`,
+  );
   console.log(`caller commitment: ${context.identity.commitmentHex}`);
 
   // Pre-call ledger read: the request nonce the contract will use, the sealed
   // vault EVM address its calldata will pay to, and the pinned chain config.
-  const before = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+  const before = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
   if (!before.initialized) {
     throw new Error("vault is not initialized, run the initialize flow first");
   }
@@ -127,10 +134,7 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
         value: {
           selector: ERC20_TRANSFER_SELECTOR,
           noWords: 2n,
-          words: [
-            evmAddressAbiWord(vaultEvmAddress),
-            numericAbiWord(options.amount),
-          ],
+          words: [evmAddressAbiWord(vaultEvmAddress), numericAbiWord(options.amount)],
         },
       },
     },
@@ -153,7 +157,10 @@ export async function deposit(context: VaultContext, options: DepositOptions): P
   // The ledger map key IS the record's keccak256 hash: recomputing it
   // off-chain and finding it on the ledger proves both sides agree on every
   // byte of the event.
-  const after = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+  const after = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
   const index = toSignBidirectionalEventIndex(after.signBidirectionalEventMap);
   if (!index.has(expectedIdHex)) {
     throw new Error(
@@ -225,7 +232,7 @@ export interface DepositRoundTripResult {
  * @param session - The flow file's shared session.
  * @param opts - Deposit amount and optional resume id.
  * @returns The request id and whether this run executed the claim.
- * @throws If any leg times out, the MPC attests the sweep as failed, or the
+ * @throws {Error} If any leg times out, the MPC attests the sweep as failed, or the
  *   sweep transaction reverts on-chain.
  */
 export async function runDepositRoundTrip(
@@ -283,7 +290,10 @@ export async function runDepositRoundTrip(
   // Rerun against a kept contract address: a prior run may have already
   // claimed this request (claiming consumes it from the ledger) — the minted
   // tokens are already in the wallet, so skip instead of failing.
-  const ledger = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+  const ledger = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
   if (!ledger.signBidirectionalEventMap.member(requestIdBytes(requestId))) {
     logSkip("claim", `request ${requestId} already claimed (not on the ledger)`);
   } else {

@@ -12,20 +12,20 @@ import {
   hexToBytes,
   numericAbiWord,
   PATH_BYTES,
+  type RequestIdHex,
   requestIdHex,
-  stripHexPrefix,
+  type SignBidirectionalEvent,
   SIGNET_DEFAULT_KEY_VERSION,
+  stripHexPrefix,
   toSignBidirectionalEventIndex,
   TxParamType,
-  type RequestIdHex,
-  type SignBidirectionalEvent,
 } from "@sig-net/midnight";
 
 import {
-  ERC20_TRANSFER_SELECTOR,
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
   ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
+  ERC20_TRANSFER_SELECTOR,
   evmAddressBytes,
 } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
@@ -68,27 +68,35 @@ const VAULT_PATH = asciiPadded("vault", PATH_BYTES);
  * @param context - The flow context.
  * @param options - The withdraw arguments.
  * @returns The request id as 64-char lowercase hex.
- * @throws If an option is invalid, the vault is uninitialized, the caller's
+ * @throws {Error} If an option is invalid, the vault is uninitialized, the caller's
  *   shielded balance cannot cover `options.amount`, or the recomputed id
  *   does not appear on the ledger.
  */
-export async function withdraw(context: VaultContext, options: WithdrawOptions): Promise<RequestIdHex> {
+export async function withdraw(
+  context: VaultContext,
+  options: WithdrawOptions,
+): Promise<RequestIdHex> {
   if (options.amount <= 0n) {
-    throw new Error(`amount must be a positive integer; got ${options.amount}.`);
+    throw new Error(`amount must be a positive integer; got ${String(options.amount)}.`);
   }
   if (options.evmNonce < 0n) {
-    throw new Error(`evmNonce must be non-negative; got ${options.evmNonce}.`);
+    throw new Error(`evmNonce must be non-negative; got ${String(options.evmNonce)}.`);
   }
   const destEvmAddress = evmAddressBytes(options.destEvmAddress);
   const erc20 = evmAddressBytes(context.erc20Address);
   console.log(`vault contract: ${context.vaultContractAddress}`);
   console.log(`erc20:          ${context.erc20Address}`);
   console.log(`destination:    ${options.destEvmAddress}`);
-  console.log(`amount:         ${options.amount} (vault evm nonce ${options.evmNonce})`);
+  console.log(
+    `amount:         ${String(options.amount)} (vault evm nonce ${String(options.evmNonce)})`,
+  );
 
   // Pre-call ledger read: the request nonce the contract will use and the
   // pinned chain config.
-  const before = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+  const before = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
   if (!before.initialized) {
     throw new Error("vault is not initialized, run the initialize flow first");
   }
@@ -133,10 +141,7 @@ export async function withdraw(context: VaultContext, options: WithdrawOptions):
         value: {
           selector: ERC20_TRANSFER_SELECTOR,
           noWords: 2n,
-          words: [
-            evmAddressAbiWord(destEvmAddress),
-            numericAbiWord(options.amount),
-          ],
+          words: [evmAddressAbiWord(destEvmAddress), numericAbiWord(options.amount)],
         },
       },
     },
@@ -158,7 +163,10 @@ export async function withdraw(context: VaultContext, options: WithdrawOptions):
   // The ledger map key IS the record's keccak256 hash: recomputing it
   // off-chain and finding it on the ledger proves both sides agree on every
   // byte of the event.
-  const after = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+  const after = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
   const index = toSignBidirectionalEventIndex(after.signBidirectionalEventMap);
   if (!index.has(expectedIdHex)) {
     throw new Error(

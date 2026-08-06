@@ -28,13 +28,13 @@
 // cannot mint.
 
 import {
-  MPC_FAILURE_OUTPUT,
   deserializeEvmOutput,
+  MPC_FAILURE_OUTPUT,
   requestIdBytes,
+  type RequestIdHex,
+  type RespondBidirectionalEvent,
   serializeRespondOutput,
   verifyRespondBidirectionalSignature,
-  type RespondBidirectionalEvent,
-  type RequestIdHex,
 } from "@sig-net/midnight";
 
 import { fetchFakenetResponse } from "../fakenet-responses.ts";

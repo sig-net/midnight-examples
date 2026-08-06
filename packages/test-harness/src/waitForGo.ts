@@ -20,14 +20,11 @@ import fs from "node:fs";
  * @param index - 1-based position of the next step/test in its sequence.
  * @param total - Total number of steps/tests in the sequence.
  * @param name - The name of the step/test about to run.
+ * @returns A promise resolving once the operator has hit Enter.
  */
-export async function waitForGo(
-    index: number,
-    total: number,
-    name: string,
-): Promise<void> {
+export function waitForGo(index: number, total: number, name: string): Promise<void> {
   console.log(
-    `\n${"━".repeat(72)}\n⏸️   PAUSED (step through mode active)\n▶️    Hit enter to run next test:\n▶  TEST ${index}/${total} "${name}".`,
+    `\n${"━".repeat(72)}\n⏸️   PAUSED (step through mode active)\n▶️    Hit enter to run next test:\n▶  TEST ${String(index)}/${String(total)} "${name}".`,
   );
 
   const fd = fs.openSync("/dev/tty", "r");
@@ -41,4 +38,7 @@ export async function waitForGo(
   } finally {
     fs.closeSync(fd);
   }
+  // The read is fully synchronous; the Promise return type is what the
+  // step-through call sites await.
+  return Promise.resolve();
 }
