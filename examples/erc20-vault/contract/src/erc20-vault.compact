@@ -110,6 +110,15 @@ export ledger swapEventMap: SignBidirectionalEventMap<EvmType2TxParams<7, 0, 0>,
 // (kept separate so a swap requestId can never be settled through a withdraw circuit).
 export ledger swapRefundCommitment: Map<RequestId, Bytes<32>>;
 
+// In-flight dedup keyed by the request identity WITHOUT the signing nonce (so two
+// otherwise-identical requests collide here even though signetRequestNonce gives them
+// distinct requestIds). Blocks the concurrent double-mint: a caller cannot have two
+// requests for the SAME EVM transaction in flight, so one landed transfer can be attested
+// (and minted) at most once. Inserted at request time, removed when the request settles.
+// Declared last so it takes the highest ledger index and leaves fields 0/3/11 (the paths
+// the notifications hardcode) unmoved.
+export ledger pendingRequestKeys: Set<Bytes<32>>;
+
 // ---- Fixed MPC routing --------------------------------------------------------------
 // This vault does exactly one thing: have the MPC sign ERC20 `transfer` calls on an EVM
 // chain. The event fields that follow from that are contract CONSTANTS, never circuit
@@ -304,9 +313,16 @@ export circuit deposit(
   // by design, so disclose it (and its id) explicitly at the write site.
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
 
+  // Dedup on the request identity WITHOUT the signing nonce: same tx + same depositor path
+  // hash to the same key, so a second identical request in flight is rejected here (blocks
+  // the concurrent double-mint). The requestId itself still carries the nonce for staleness.
+  const dedupKey = disclose(persistentHash<Vector<2, Bytes<32>>>([persistentHash<EvmType2TxParams<2, 0, 0>>(txParams), caller]));
+  assert(!pendingRequestKeys.member(dedupKey), "Identical request already pending");
+
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
+  pendingRequestKeys.insert(dedupKey);
 
   // Notify the MPC via the Signet singleton's notification event. The path arguments
   // carry the resolved ledger-tree path of signBidirectionalEventMap: depth 1, path
@@ -364,6 +380,7 @@ export circuit claim(
   assert(signBidirectionalEventMap.member(disclosedRequestId), "Request not found");
   const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
   signBidirectionalEventMap.remove(disclosedRequestId);
+  pendingRequestKeys.remove(disclose(persistentHash<Vector<2, Bytes<32>>>([persistentHash<EvmType2TxParams<2, 0, 0>>(signatureRequest.txParams), signatureRequest.path])));
 
   // Depositor gate: the caller's recomputed commitment must match the request's
   // derivation path (deposit stored the depositor's commitment there).
@@ -477,6 +494,11 @@ export circuit withdraw(
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
 
+  // Dedup on the nonce-free request identity (tx + path): blocks a second in-flight request
+  // for the same withdrawal transaction (concurrent double-mint via the refund path).
+  const dedupKey = disclose(persistentHash<Vector<2, Bytes<32>>>([persistentHash<EvmType2TxParams<2, 0, 0>>(txParams), path]));
+  assert(!pendingRequestKeys.member(dedupKey), "Identical request already pending");
+
   // The surrendered value is BURNED here: the receive obliges the transaction to pay
   // the coin to this contract, and the contract deliberately never records it, so it
   // can never be spent. Vault tokens are IOUs, and a refund MINTS fresh ones. No
@@ -488,6 +510,7 @@ export circuit withdraw(
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
   refundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
+  pendingRequestKeys.insert(dedupKey);
 
   // Notify the MPC (ledger-tree path [0] at depth 1 = signBidirectionalEventMap, see
   // its declaration).
@@ -573,6 +596,7 @@ export circuit completeWithdraw(
   assert(refundCommitment.member(disclosedRequestId), "Withdrawal not found");
   const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
   signBidirectionalEventMap.remove(disclosedRequestId);
+  pendingRequestKeys.remove(disclose(persistentHash<Vector<2, Bytes<32>>>([persistentHash<EvmType2TxParams<2, 0, 0>>(signatureRequest.txParams), signatureRequest.path])));
 
   // Branch on the EVM result, deserialized into the schema's struct (0x01 is
   // success, 0x00 a false return). Disclosed: whether a refund happens is
@@ -637,6 +661,7 @@ export circuit refund(
     // caller-chosen random mintNonce (completeWithdraw's failure branch verbatim).
     const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
     signBidirectionalEventMap.remove(disclosedRequestId);
+    pendingRequestKeys.remove(disclose(persistentHash<Vector<2, Bytes<32>>>([persistentHash<EvmType2TxParams<2, 0, 0>>(signatureRequest.txParams), signatureRequest.path])));
     refundSurrenderedValue(disclosedRequestId, signatureRequest, mintNonce);
     refundCommitment.remove(disclosedRequestId);
   } else {
@@ -644,6 +669,7 @@ export circuit refund(
     assert(swapRefundCommitment.member(disclosedRequestId), "Request not found");
     const signatureRequest = swapEventMap.lookup(disclosedRequestId);
     swapEventMap.remove(disclosedRequestId);
+    pendingRequestKeys.remove(disclose(persistentHash<Vector<2, Bytes<32>>>([persistentHash<EvmType2TxParams<7, 0, 0>>(signatureRequest.txParams), signatureRequest.path])));
     assert(
       withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
         == swapRefundCommitment.lookup(disclosedRequestId),
@@ -829,12 +855,18 @@ export circuit swap(
   const requestId = disclose(calculateRequestId<EvmType2TxParams<7, 0, 0>, 39, 39>(request));
   assert(!swapEventMap.member(requestId), "Request already exists");
 
+  // Dedup on the nonce-free request identity (tx + path): blocks a second in-flight request
+  // for the same swap transaction (concurrent double-mint).
+  const dedupKey = disclose(persistentHash<Vector<2, Bytes<32>>>([persistentHash<EvmType2TxParams<7, 0, 0>>(txParams), path]));
+  assert(!pendingRequestKeys.member(dedupKey), "Identical request already pending");
+
   // Burn the surrendered tokenIn value (see withdraw): received, never recorded.
   receiveShielded(disclose(coin));
 
   signetRequestNonce.increment(1);
   swapEventMap.insert(requestId, disclose(request));
   swapRefundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
+  pendingRequestKeys.insert(dedupKey);
 
   // Notify the MPC (ledger-tree path [11] at depth 1 = swapEventMap).
   signetSigner.signBidirectional(
@@ -881,6 +913,7 @@ export circuit completeSwap(
   assert(swapRefundCommitment.member(disclosedRequestId), "Swap not found");
   const signatureRequest = swapEventMap.lookup(disclosedRequestId);
   swapEventMap.remove(disclosedRequestId);
+  pendingRequestKeys.remove(disclose(persistentHash<Vector<2, Bytes<32>>>([persistentHash<EvmType2TxParams<7, 0, 0>>(signatureRequest.txParams), signatureRequest.path])));
 
   // Swapper gate: minting tokenOut to the swapper, so prove the swap-time commitment.
   assert(

@@ -524,14 +524,24 @@ describe("deposit validation", () => {
     ).rejects.toThrow(/Not initialized/);
   });
 
-  it("identical deposits get DISTINCT ids: requestNonce differentiates them", async () => {
-    // The dedup assert (!member) is a belt-and-braces invariant: it cannot
-    // trip in the normal flow, as the nonce is part of the hashed record and
-    // an identical resubmission is therefore a NEW request. Document that here.
+  it("dedupes an in-flight identical request, but a different evmNonce is distinct", async () => {
+    // Same tx (same evmNonce/path/params) hashes to the same nonce-free dedup key, so a
+    // second identical request in flight is REJECTED — the concurrent double-mint guard.
+    // A different evmNonce is a different EVM transaction, so it gets a distinct id and
+    // both land. (The signing nonce still differentiates the two requestIds for staleness.)
     const { contract, ctx } = await deployInitialized();
 
     const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
-    const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
+
+    // Identical tx while the first is still pending -> rejected as a duplicate.
+    await expect(deposit(contract, afterFirst, VALID_DEPOSIT)).rejects.toThrow(
+      /Identical request already pending/,
+    );
+
+    // A different evmNonce is a distinct transaction -> distinct id, both in the map.
+    const afterSecond = (
+      await deposit(contract, afterFirst, { ...VALID_DEPOSIT, evmNonce: 1n })
+    ).context;
 
     const index = toSignBidirectionalEventIndex(
       ledger(afterSecond.callContext.currentQueryContext.state)
