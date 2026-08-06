@@ -45,6 +45,20 @@ globalThis.ArrayBuffer = nodeArrayBuffer;
 globalThis.TextEncoder = NodeTextEncoder as typeof globalThis.TextEncoder;
 globalThis.TextDecoder = NodeTextDecoder as typeof globalThis.TextDecoder;
 
+// jsdom implements neither the pointer-capture API, nor scrollIntoView, nor
+// ResizeObserver, and radix's Select and Tooltip call all of them on open.
+// No-ops at module scope, like the binary intrinsics above: every browser the
+// app actually runs in has them.
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.setPointerCapture ??= () => {};
+Element.prototype.releasePointerCapture ??= () => {};
+Element.prototype.scrollIntoView ??= () => {};
+globalThis.ResizeObserver ??= class {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+};
+
 // jsdom implements no CSS media queries at all, so `window.matchMedia` is
 // simply absent and the theme's first read throws. Stubbed rather than guarded
 // for in src/lib/theme.ts: every browser the app actually runs in has had this

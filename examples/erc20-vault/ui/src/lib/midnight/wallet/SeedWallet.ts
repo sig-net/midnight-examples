@@ -193,6 +193,8 @@ export class SeedWallet implements Wallet {
     readonly kind = WalletKind.Seed;
     readonly name = "Seed wallet";
     readonly iconUrl = undefined;
+    /** A seed wallet has no service preferences of its own: it runs on the config it was given. */
+    readonly configuration = null;
 
     /** Build and start a SeedWallet in one call (does NOT wait for sync). */
     static async Initialise(config: MidnightNodeConfig, seed: string): Promise<SeedWallet> {

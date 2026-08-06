@@ -5,7 +5,7 @@
 // discovery on EVM), so what these tests exercise is the app's own code rather
 // than a mock of it. That is also why the fakes are this small: the app
 // touches very little of either connector.
-import type { ConnectedAPI, InitialAPI } from "@midnight-ntwrk/dapp-connector-api";
+import type { Configuration, ConnectedAPI, InitialAPI } from "@midnight-ntwrk/dapp-connector-api";
 
 /** The `window.midnight` key the fake Midnight wallet is injected under. */
 export const FAKE_MIDNIGHT_WALLET_KEY = "test-midnight-wallet";
@@ -19,6 +19,12 @@ export interface FakeMidnightWalletOptions {
    * on whatever network the app asks for.
    */
   readonly failWith?: Error;
+  /**
+   * Service endpoints the wallet reports as its own configuration (the
+   * network id is always the echoed one). Omitted for a wallet that reports
+   * none, which is what keeps the config panel free of mismatch warnings.
+   */
+  readonly configuration?: Partial<Omit<Configuration, "networkId">>;
   /**
    * What `signData` answers as the signature, given the data and how many
    * signing calls came before this one (0-based). Defaults to a DETERMINISTIC
@@ -60,6 +66,7 @@ export const FAKE_UNSHIELDED_TOKEN_TYPE =
 export function injectMidnightWallet({
   name,
   failWith,
+  configuration,
   signDataSignature,
   shieldedBalances = { [FAKE_SHIELDED_TOKEN_TYPE]: 1_500n },
   unshieldedBalances = { [FAKE_UNSHIELDED_TOKEN_TYPE]: 2_500n },
@@ -77,7 +84,7 @@ export function injectMidnightWallet({
     connect: (networkId: string): Promise<ConnectedAPI> =>
       failWith === undefined
         ? Promise.resolve({
-            getConfiguration: () => Promise.resolve({ networkId }),
+            getConfiguration: () => Promise.resolve({ networkId, ...configuration }),
             // The Bech32m strings a real connector reports. The app treats
             // them as opaque identifiers (storage scoping), so stable
             // stand-ins suffice.

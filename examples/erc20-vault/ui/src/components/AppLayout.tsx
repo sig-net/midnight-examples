@@ -3,6 +3,7 @@ import { Link, Outlet } from "react-router";
 
 import { useEVMWalletConnection, useMidnightWalletConnection } from "../hooks/useWalletConnections";
 import { RoutePath } from "../routes";
+import { ConfigMenu } from "./ConfigMenu";
 import { ThemeToggle } from "./ThemeToggle";
 import { WalletMenu } from "./WalletMenu";
 
@@ -39,6 +40,7 @@ export const AppLayout = (): JSX.Element => {
         <span className="hidden text-sm text-muted-foreground sm:inline">Midnight example</span>
 
         <div className="ml-auto flex items-center gap-0.5">
+          <ConfigMenu />
           <WalletMenu connection={midnight} />
           <WalletMenu connection={evm} />
           <ThemeToggle />

@@ -1,4 +1,9 @@
-import { evmCaip2ChainId, LOCAL_EVM_CHAIN, type EvmChainConfig } from "@midnight-examples/chain-config";
+import {
+  evmCaip2ChainId,
+  evmChainById,
+  LOCAL_EVM_CHAIN,
+  type EvmChainConfig,
+} from "@midnight-examples/chain-config";
 import {
   createContext,
   useCallback,
@@ -64,9 +69,14 @@ export interface EVMChainConfigContextValue {
   readonly caip2Id: string;
   /** Point at a different JSON-RPC endpoint. */
   readonly setRpcUrl: (rpcUrl: string) => void;
-  /** Expect a different chain id. */
+  /**
+   * Expect a different chain id. A chain the named-chain table knows brings
+   * its default RPC and explorer URLs with it, mirroring how selecting a
+   * Midnight network resets its endpoints. An unknown id changes the id
+   * alone, keeping whatever endpoints are configured.
+   */
   readonly setChainId: (chainId: bigint) => void;
-  /** Point at a different block explorer. */
+  /** Point at a different block explorer, or forget it with an empty string. */
   readonly setExplorerUrl: (explorerUrl: string) => void;
 }
 
@@ -89,16 +99,34 @@ interface EVMChainConfigProviderProps {
 export function EVMChainConfigProvider({ children }: EVMChainConfigProviderProps): JSX.Element {
   const [config, setConfig] = useState<EvmChainConfig>(INITIAL_CONFIG);
 
+  // Each setter validates BEFORE queueing the state update: a throw inside a
+  // setState updater fires during the next render and crashes the tree, while
+  // a throw here surfaces at the call site, where the caller can report it.
   const setRpcUrl = useCallback((rpcUrl: string): void => {
-    setConfig((current) => ({ ...current, rpcUrl: new URL(rpcUrl).toString() }));
+    const normalised = new URL(rpcUrl).toString();
+    setConfig((current) => ({ ...current, rpcUrl: normalised }));
   }, []);
 
   const setChainId = useCallback((chainId: bigint): void => {
-    setConfig((current) => ({ ...current, chainId }));
+    setConfig((current) => {
+      const named = evmChainById(chainId);
+      if (named === undefined) {
+        return { ...current, chainId };
+      }
+      return {
+        chainId: named.chainId,
+        rpcUrl: named.rpcUrl,
+        ...(named.explorerUrl === undefined ? {} : { explorerUrl: named.explorerUrl }),
+      };
+    });
   }, []);
 
   const setExplorerUrl = useCallback((explorerUrl: string): void => {
-    setConfig((current) => ({ ...current, explorerUrl: new URL(explorerUrl).toString() }));
+    const normalised = explorerUrl.trim() === "" ? undefined : new URL(explorerUrl).toString();
+    setConfig((current) => {
+      const { explorerUrl: dropped, ...rest } = current;
+      return normalised === undefined ? rest : { ...rest, explorerUrl: normalised };
+    });
   }, []);
 
   const value = useMemo<EVMChainConfigContextValue>(

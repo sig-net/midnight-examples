@@ -34,11 +34,22 @@ describe("EVMChainConfigProvider", () => {
       expected: { rpcUrl: "https://rpc.example/" },
     },
     {
-      description: "setChainId replaces only the expected chain",
+      description: "setChainId to a named chain brings that chain's defaults",
       apply: (value) => {
         value.setChainId(11155111n);
       },
-      expected: { chainId: 11155111n },
+      expected: {
+        chainId: 11155111n,
+        rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
+        explorerUrl: "https://sepolia.etherscan.io",
+      },
+    },
+    {
+      description: "setChainId to an unknown chain replaces the id alone",
+      apply: (value) => {
+        value.setChainId(424242n);
+      },
+      expected: { chainId: 424242n },
     },
     {
       description: "setExplorerUrl replaces only the explorer",

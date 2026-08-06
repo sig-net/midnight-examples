@@ -1,17 +1,21 @@
+import type { EvmChainConfig } from "@midnight-examples/chain-config";
 import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type JSX,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
 
+import { describeError } from "../../lib/errorMessage.ts";
 import { BrowserWallet, type BrowserWalletInfo } from "../../lib/evm/wallet/BrowserWallet.ts";
 import { SeedWallet } from "../../lib/evm/wallet/SeedWallet.ts";
-import { WalletError, type Wallet } from "../../lib/evm/wallet/Wallet.ts";
+import { WalletError, WalletKind, type Wallet } from "../../lib/evm/wallet/Wallet.ts";
 import { useEVMChainConfig } from "./EVMChainConfigContext.tsx";
 
 /**
@@ -214,11 +218,43 @@ export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Ele
     [config, wallet, establishWallet],
   );
 
+  // The seed and config behind the held seed wallet. A seed wallet has no
+  // extension owning its RPC endpoint, so the app's config IS its config, and
+  // remembering both is what lets a config edit rebuild it below.
+  const installedSeedRef = useRef<{ seed: string; config: EvmChainConfig } | null>(null);
+
   const installSeedWallet = useCallback(
     (seed: string): Promise<Wallet> =>
-      establishWallet("the seed wallet", () => SeedWallet.Initialise(config, seed)),
+      establishWallet("the seed wallet", () => SeedWallet.Initialise(config, seed)).then(
+        (built) => {
+          installedSeedRef.current = { seed, config };
+          return built;
+        },
+      ),
     [config, establishWallet],
   );
+
+  // A seed wallet follows the app's config. Guarded on the config the held
+  // wallet was BUILT with, so the rebuild it triggers (a new wallet, same
+  // config) does not trigger another. A browser wallet is left alone: its
+  // extension owns its endpoints, and the connect path already enforces the
+  // chain.
+  useEffect(() => {
+    const installed = installedSeedRef.current;
+    if (
+      wallet === null ||
+      wallet.kind !== WalletKind.Seed ||
+      installed === null ||
+      installed.config === config
+    ) {
+      return;
+    }
+    installSeedWallet(installed.seed).catch((error: unknown) => {
+      toast.error("Could not move the EVM seed wallet to the new configuration", {
+        description: describeError(error),
+      });
+    });
+  }, [config, wallet, installSeedWallet]);
 
   const disconnect = useCallback((): void => {
     setWallet((previous) => {

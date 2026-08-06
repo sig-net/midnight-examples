@@ -157,8 +157,10 @@ function buildProviders(
     };
 }
 
-// Where the erc20vault contract is deployed on each network.
-// An empty string means "not deployed there (yet)".
+// Where the erc20vault contract is deployed on each network, as the app
+// STARTS believing it: the per-network default behind
+// {@link ERC20VaultContextValue.setContractAddress}. An empty string means
+// "not deployed there (yet)".
 // TODO: optionally load this from the environment
 const networkAddressIdx: Record<NetworkId, string> = {
     undeployed: "ad7b29265a84e8a4fa08c257213d0090375dcae695aed7e08532c0b3b57a728f",
@@ -182,33 +184,45 @@ const networkAddressIdx: Record<NetworkId, string> = {
 export const IDENTITY_SIGNING_MESSAGE = "signet-wallet-erc20-vault-demo";
 
 /**
+ * Validate an MPC root public key and normalise it to 0x-prefixed hex (the
+ * derivation's ethers plumbing requires the prefix).
+ *
+ * @param input - The key as supplied, hex with the 0x prefix optional.
+ * @returns The key as 0x-prefixed hex.
+ * @throws If the input is not a 33-byte compressed or 65-byte uncompressed
+ *   secp256k1 point in hex, so a typo fails loudly rather than deriving
+ *   addresses from garbage.
+ */
+function parseMpcSecp256k1Pubkey(input: string): string {
+    const hex = input.startsWith("0x") ? input.slice(2) : input;
+    if (!/^(0[23][0-9a-fA-F]{64}|04[0-9a-fA-F]{128})$/.test(hex)) {
+        throw new Error(
+            "Invalid MPC public key: expected a compressed (33-byte) or uncompressed (65-byte) secp256k1 public key in hex, 0x prefix optional.",
+        );
+    }
+    return `0x${hex}`;
+}
+
+/**
  * The MPC root public key from `VITE_MPC_SECP256K1_PUBKEY`, or null when
  * unset (deposit addresses then cannot derive, and the UI says so).
  *
  * @param env - The build-time environment, normally `import.meta.env`.
- * @returns The key normalised to 0x-prefixed hex (the derivation's ethers
- *   plumbing requires the prefix), or null.
- * @throws If the variable is set but is not a 33-byte compressed or 65-byte
- *   uncompressed secp256k1 point in hex, so a typo fails at startup rather
- *   than deriving addresses from garbage.
+ * @returns The key normalised via {@link parseMpcSecp256k1Pubkey}, or null.
+ * @throws If the variable is set but does not validate.
  */
 function readMpcSecp256k1Pubkey(env: ImportMetaEnv): string | null {
     const configured = env.VITE_MPC_SECP256K1_PUBKEY?.trim();
     if (configured === undefined || configured === "") {
         return null;
     }
-    const hex = configured.startsWith("0x") ? configured.slice(2) : configured;
-    if (!/^(0[23][0-9a-fA-F]{64}|04[0-9a-fA-F]{128})$/.test(hex)) {
-        throw new Error(
-            "Invalid VITE_MPC_SECP256K1_PUBKEY: expected a compressed (33-byte) or uncompressed (65-byte) secp256k1 public key in hex, 0x prefix optional.",
-        );
-    }
-    return `0x${hex}`;
+    return parseMpcSecp256k1Pubkey(configured);
 }
 
 // Resolved once at module load, like the chain endpoints: a bad value should
-// fail at startup, not on the first derivation.
-const MPC_SECP256K1_PUBKEY: string | null = readMpcSecp256k1Pubkey(import.meta.env);
+// fail at startup, not on the first derivation. Runtime edits land in the
+// provider's state, which starts from this.
+const INITIAL_MPC_SECP256K1_PUBKEY: string | null = readMpcSecp256k1Pubkey(import.meta.env);
 
 /**
  * The caller's vault identity, every form of it the UI needs: the secret
@@ -278,10 +292,16 @@ async function secretKeyOfWalletSignature(wallet: Wallet): Promise<Uint8Array> {
  * @param secretKey - The caller's 32-byte identity secret.
  * @param contractAddress - The vault's Midnight address, the derivation's
  *   requester.
+ * @param mpcPubkey - The MPC root public key as 0x-prefixed hex, or null when
+ *   not configured.
  * @returns The identity, with `depositEvmAddress` null when the MPC root key
  *   is not configured.
  */
-function buildCallerIdentity(secretKey: Uint8Array, contractAddress: string): CallerIdentity {
+function buildCallerIdentity(
+    secretKey: Uint8Array,
+    contractAddress: string,
+    mpcPubkey: string | null,
+): CallerIdentity {
     const commitment = ERC20Vault.pureCircuits.userCommitment(secretKey);
     const pathString = ERC20Vault.pathStringOfBytes(commitment);
     return {
@@ -290,9 +310,7 @@ function buildCallerIdentity(secretKey: Uint8Array, contractAddress: string): Ca
         commitmentHex: bytesToHex(commitment),
         pathString,
         depositEvmAddress:
-            MPC_SECP256K1_PUBKEY === null
-                ? null
-                : deriveEvmAddress(MPC_SECP256K1_PUBKEY, contractAddress, pathString),
+            mpcPubkey === null ? null : deriveEvmAddress(mpcPubkey, contractAddress, pathString),
     };
 }
 
@@ -304,6 +322,35 @@ export interface ERC20VaultContextValue {
      * private state, so it waits for one).
      */
     readonly contract: FoundContract<ERC20VaultContract> | null;
+    /**
+     * The vault's Midnight address on the selected network, or null while it
+     * has none there. Starts from the per-network deployment table and moves
+     * with {@link ERC20VaultContextValue.setContractAddress}.
+     */
+    readonly contractAddress: string | null;
+    /**
+     * Point at a different vault deployment on the CURRENT network. The
+     * override is per network: switching network shows that network's own
+     * address again. An empty string means "not deployed there".
+     *
+     * @param address - The vault's Midnight contract address, as hex.
+     */
+    readonly setContractAddress: (address: string) => void;
+    /**
+     * The MPC root secp256k1 public key deposit addresses derive from, as
+     * 0x-prefixed hex, or null while unset (deposit addresses then cannot
+     * derive, and the UI says so).
+     */
+    readonly mpcPubkey: string | null;
+    /**
+     * Replace the MPC root public key, or forget it with an empty string.
+     * Deposit addresses re-derive from the new key.
+     *
+     * @param pubkeyHex - The key in hex, 0x prefix optional, or empty.
+     * @throws If the input is neither empty nor a valid compressed or
+     *   uncompressed secp256k1 point in hex.
+     */
+    readonly setMpcPubkey: (pubkeyHex: string) => void;
     /** Read the vault's public ledger state. */
     readonly readContractState: () => Promise<ERC20Vault.Ledger>;
     /** How far the caller's identity has got. */
@@ -367,9 +414,31 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
     const { wallet } = useMidnightWallet();
     const queryClient = useQueryClient();
 
+    // One address override per network, starting from the deployment table:
+    // switching network therefore defaults to that network's own address, and
+    // an edit only moves the network it was made on.
+    const [contractAddressIdx, setContractAddressIdx] =
+        useState<Record<NetworkId, string>>(networkAddressIdx);
+    const [mpcPubkey, setMpcPubkeyState] = useState<string | null>(INITIAL_MPC_SECP256K1_PUBKEY);
+
     // Config.networkId is the SDK's bare string type, but its values always
     // come from the app's Network union.
-    const contractAddress = networkAddressIdx[config.networkId as NetworkId] || null;
+    const contractAddress = contractAddressIdx[config.networkId as NetworkId] || null;
+
+    const setContractAddress = useCallback(
+        (address: string): void => {
+            setContractAddressIdx((current) => ({
+                ...current,
+                [config.networkId as NetworkId]: address.trim(),
+            }));
+        },
+        [config.networkId],
+    );
+
+    const setMpcPubkey = useCallback((pubkeyHex: string): void => {
+        const trimmed = pubkeyHex.trim();
+        setMpcPubkeyState(trimmed === "" ? null : parseMpcSecp256k1Pubkey(trimmed));
+    }, []);
 
     const providers = useMemo<ERC20VaultProviders | null>(
         () => (wallet ? buildProviders(config, wallet) : null),
@@ -377,15 +446,18 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
     );
 
     // Everything below is keyed by wallet + network + deployment: switching
-    // any of them is a different storage scope, so a different identity.
+    // any of them is a different storage scope, so a different identity. The
+    // MPC key is in the key too, since the derived deposit address is part of
+    // the query's result.
     const identityQueryKey = useMemo(
         () => [
             "erc20vault-identity",
             config.networkId,
             wallet?.id ?? null,
             contractAddress,
+            mpcPubkey,
         ],
-        [config.networkId, wallet, contractAddress],
+        [config.networkId, wallet, contractAddress, mpcPubkey],
     );
 
     // The stored identity, read from the (wallet-scoped, encrypted) private
@@ -408,7 +480,9 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
             // so the address must be set before any read or write.
             providers.privateStateProvider.setContractAddress(contractAddress);
             const stored = await providers.privateStateProvider.get(PRIVATE_STATE_ID);
-            return stored === null ? null : buildCallerIdentity(stored.secretKey, contractAddress);
+            return stored === null
+                ? null
+                : buildCallerIdentity(stored.secretKey, contractAddress, mpcPubkey);
         },
     });
 
@@ -430,9 +504,9 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
                 PRIVATE_STATE_ID,
                 ERC20Vault.createVaultPrivateState(secretKey),
             );
-            return buildCallerIdentity(secretKey, contractAddr);
+            return buildCallerIdentity(secretKey, contractAddr, mpcPubkey);
         },
-        [],
+        [mpcPubkey],
     );
 
     const publishFreshIdentity = useCallback(
@@ -539,6 +613,10 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
 
     const value = useMemo<ERC20VaultContextValue>(() => ({
         contract: contractQuery.data ?? null,
+        contractAddress,
+        setContractAddress,
+        mpcPubkey,
+        setMpcPubkey,
         readContractState,
         identityStatus,
         identity,
@@ -550,6 +628,10 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
         regenerating: regenerateMutation.isPending,
     }), [
         contractQuery.data,
+        contractAddress,
+        setContractAddress,
+        mpcPubkey,
+        setMpcPubkey,
         readContractState,
         identityStatus,
         identity,

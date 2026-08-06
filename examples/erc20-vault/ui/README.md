@@ -90,6 +90,7 @@ navigation:
 
 | Control | What it shows |
 | --- | --- |
+| Configuration | A gear opening every configurable value: the vault's MPC key and contract address, then each chain's network and endpoints |
 | Midnight wallet | Grey dot and a washed-out icon until connected, then the wallet's own icon and a green dot |
 | EVM wallet | The same, over EIP-6963 discovery |
 | Theme | Light, dark, or system |
@@ -143,7 +144,12 @@ tests/              # Testing Library specs run under vitest
 The app starts on the local standalone stack (`undeployed`) with the endpoint
 defaults published by `@midnight-examples/chain-config`. Put any override in a
 `.env.local` file in this directory. Only `VITE_`-prefixed variables reach the
-browser.
+browser. Every value here can also be edited at runtime through the header's
+configuration panel (an edit lasts until the page reloads). Each field in the
+panel explains itself on its info icon, a Midnight browser wallet whose own
+endpoints differ from the app's gets a warning there, and an installed seed
+wallet follows edits automatically: an extension's endpoints are its own, and
+the app cannot change them.
 
 | Variable | Effect |
 | --- | --- |

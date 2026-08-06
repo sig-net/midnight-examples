@@ -23,6 +23,7 @@ src/
   vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
   components/       # presentational components: precise props, no fetching
     AppLayout.tsx   # the shell: header controls, outlet, footer
+    ConfigMenu.tsx  # the header's gear: every configurable value, in one panel
     WalletMenu.tsx  # one chain's wallet control in the header
     WalletMark.tsx  # a wallet's own icon, rendered safely
     StepCard.tsx    # one selectable step of the flow, and the not-built-yet body
@@ -34,6 +35,7 @@ src/
     contexts/       # app-wide React contexts, all mounted in App.tsx
     ui/             # shadcn/ui components, copied in by its CLI
   hooks/            # the logic the components render
+    useAppConfig.ts          # every configurable value, normalised for the panel
     useWalletConnections.ts  # both chains, normalised to one shape
     useDepositAddress.ts     # step two's model: vault context + toasts
     useTrackedTokens.ts      # the ERC20s to follow, and what each says about itself

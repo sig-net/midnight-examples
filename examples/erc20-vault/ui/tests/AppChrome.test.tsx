@@ -137,6 +137,138 @@ describe("the seed wallet entry", () => {
   });
 });
 
+describe("the configuration panel", () => {
+  it("shows every configurable value, grouped by surface", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Configuration" }));
+
+    for (const textField of [
+      "MPC public key",
+      "Contract address",
+      "Indexer URL",
+      "Indexer WebSocket URL",
+      "Node URL",
+      "Proof server URL",
+      "RPC URL",
+      "Explorer URL",
+    ]) {
+      expect(await screen.findByRole("textbox", { name: textField })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("combobox", { name: "Network" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Chain" })).toBeInTheDocument();
+
+    // The local defaults, so the panel provably shows the STORED config.
+    expect(screen.getByRole("textbox", { name: "Node URL" })).toHaveValue("http://127.0.0.1:9944");
+    expect(screen.getByRole("textbox", { name: "RPC URL" })).toHaveValue("http://127.0.0.1:8545");
+  });
+
+  it("switching the Midnight network resets its endpoints to that network's defaults", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Configuration" }));
+    await user.click(screen.getByRole("combobox", { name: "Network" }));
+    await user.click(await screen.findByRole("option", { name: "preview" }));
+
+    expect(screen.getByRole("textbox", { name: "Indexer URL" })).toHaveValue(
+      "https://indexer.preview.midnight.network/api/v3/graphql",
+    );
+
+    // Back to the local stack, so the SDK-global network id this switch moves
+    // does not leak into later tests.
+    await user.click(screen.getByRole("combobox", { name: "Network" }));
+    await user.click(await screen.findByRole("option", { name: "undeployed" }));
+    expect(screen.getByRole("textbox", { name: "Indexer URL" })).toHaveValue(
+      "http://127.0.0.1:8088/api/v3/graphql",
+    );
+  });
+
+  it("switching the EVM chain brings that chain's default endpoints", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Configuration" }));
+    await user.click(screen.getByRole("combobox", { name: "Chain" }));
+    await user.click(await screen.findByRole("option", { name: "Sepolia (11155111)" }));
+
+    expect(screen.getByRole("textbox", { name: "RPC URL" })).toHaveValue(
+      "https://ethereum-sepolia-rpc.publicnode.com",
+    );
+    expect(screen.getByRole("textbox", { name: "Explorer URL" })).toHaveValue(
+      "https://sepolia.etherscan.io",
+    );
+  });
+
+  it("rejects an invalid URL on a toast and keeps the stored value", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Configuration" }));
+    const nodeUrl = screen.getByRole("textbox", { name: "Node URL" });
+    await user.clear(nodeUrl);
+    await user.type(nodeUrl, "not-a-url");
+    await user.tab();
+
+    expect(await screen.findByText("Could not apply Node URL")).toBeInTheDocument();
+
+    // Reopening drops the rejected draft and shows the value still stored.
+    // Closed by clicking outside: an Escape can land on the info tooltip the
+    // blur's focus move opened, leaving the panel itself up.
+    await user.click(screen.getByRole("banner"));
+    await user.click(screen.getByRole("button", { name: "Configuration" }));
+    expect(await screen.findByRole("textbox", { name: "Node URL" })).toHaveValue(
+      "http://127.0.0.1:9944",
+    );
+  });
+
+  it("warns where the connected wallet's own configuration differs", async () => {
+    const user = userEvent.setup();
+    injectMidnightWallet({
+      name: "Test Wallet",
+      configuration: { indexerUri: "https://indexer.elsewhere.example/graphql" },
+    });
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Midnight wallet: not connected" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Connect Test Wallet/ }));
+    await screen.findByRole("button", { name: "Midnight wallet: connected" });
+
+    await user.click(screen.getByRole("button", { name: "Configuration" }));
+
+    // The differing endpoint warns, while one the wallet does not report
+    // keeps its plain info icon.
+    expect(
+      await screen.findByRole("button", { name: "Indexer URL differs from the connected wallet" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "About Node URL" })).toBeInTheDocument();
+  });
+
+  it("keeps an EVM seed wallet connected across an RPC URL change", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "EVM wallet: not connected" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Use a seed wallet" }));
+    const dialog = await screen.findByRole("dialog", { name: "Use a seed wallet" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Seed" }), `0x${"22".repeat(32)}`);
+    await user.click(within(dialog).getByRole("button", { name: "Install seed wallet" }));
+    await screen.findByRole("button", { name: "EVM wallet: connected" });
+
+    // The seed wallet follows the app's config: the context rebuilds it for
+    // the new RPC URL rather than leaving it on the old one, and the
+    // connection reads as unbroken throughout.
+    await user.click(screen.getByRole("button", { name: "Configuration" }));
+    const rpcUrl = screen.getByRole("textbox", { name: "RPC URL" });
+    await user.clear(rpcUrl);
+    await user.type(rpcUrl, "http://127.0.0.1:9999{Enter}");
+    await user.keyboard("{Escape}");
+
+    expect(await screen.findByRole("button", { name: "EVM wallet: connected" })).toBeInTheDocument();
+  });
+});
+
 describe("theme control", () => {
   it("follows the system by default, and says so", async () => {
     const user = userEvent.setup();

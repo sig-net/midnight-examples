@@ -102,6 +102,13 @@ export interface MidnightChainConfigContextValue {
   readonly setNetworkId: (networkId: NetworkId) => void;
   /** Point at a different indexer. The WebSocket twin is derived from it. */
   readonly setIndexerUrl: (indexerUrl: string) => void;
+  /**
+   * Point the indexer's WebSocket at its own URL, for the rare stack where it
+   * is not simply the HTTP URL's twin. A later
+   * {@link MidnightChainConfigContextValue.setIndexerUrl} re-derives the twin
+   * and overwrites this.
+   */
+  readonly setIndexerWsUrl: (indexerWsUrl: string) => void;
   /** Point at a different Midnight node RPC. */
   readonly setNodeUrl: (nodeUrl: string) => void;
   /** Point at a different proof server. */
@@ -135,23 +142,32 @@ export function MidnightChainConfigProvider({
     setNetworkIdState(next);
   }, []);
 
+  // Each setter validates BEFORE queueing the state update: a throw inside a
+  // setState updater fires during the next render and crashes the tree, while
+  // a throw here surfaces at the call site, where the caller can report it.
   const setIndexerUrl = useCallback((indexerUrl: string): void => {
+    const normalised = new URL(indexerUrl).toString();
+    const derivedWsUrl = indexerWsUrlFromIndexerUrl(indexerUrl);
     setEndpoints((current) => ({
       ...current,
-      indexerUrl: new URL(indexerUrl).toString(),
-      indexerWsUrl: indexerWsUrlFromIndexerUrl(indexerUrl),
+      indexerUrl: normalised,
+      indexerWsUrl: derivedWsUrl,
     }));
+  }, []);
+
+  const setIndexerWsUrl = useCallback((indexerWsUrl: string): void => {
+    const normalised = new URL(indexerWsUrl).toString();
+    setEndpoints((current) => ({ ...current, indexerWsUrl: normalised }));
   }, []);
 
   const setNodeUrl = useCallback((nodeUrl: string): void => {
-    setEndpoints((current) => ({ ...current, nodeUrl: new URL(nodeUrl).toString() }));
+    const normalised = new URL(nodeUrl).toString();
+    setEndpoints((current) => ({ ...current, nodeUrl: normalised }));
   }, []);
 
   const setProofServerUrl = useCallback((proofServerUrl: string): void => {
-    setEndpoints((current) => ({
-      ...current,
-      proofServerUrl: new URL(proofServerUrl).toString(),
-    }));
+    const normalised = new URL(proofServerUrl).toString();
+    setEndpoints((current) => ({ ...current, proofServerUrl: normalised }));
   }, []);
 
   const value = useMemo<MidnightChainConfigContextValue>(
@@ -159,10 +175,11 @@ export function MidnightChainConfigProvider({
       config: { ...endpoints, networkId },
       setNetworkId,
       setIndexerUrl,
+      setIndexerWsUrl,
       setNodeUrl,
       setProofServerUrl,
     }),
-    [endpoints, networkId, setNetworkId, setIndexerUrl, setNodeUrl, setProofServerUrl],
+    [endpoints, networkId, setNetworkId, setIndexerUrl, setIndexerWsUrl, setNodeUrl, setProofServerUrl],
   );
 
   return (

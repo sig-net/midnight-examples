@@ -6,7 +6,7 @@
 // outside this folder branches on which kind it holds. The one place the kind
 // matters is choosing how to obtain a wallet in the first place: connecting an
 // extension versus installing from a seed, which is the wallet context's job.
-import type { Signature, SignDataOptions } from "@midnight-ntwrk/dapp-connector-api";
+import type { Configuration, Signature, SignDataOptions } from "@midnight-ntwrk/dapp-connector-api";
 import type { MidnightProvider, WalletProvider } from "@midnight-ntwrk/midnight-js/types";
 
 /**
@@ -71,6 +71,15 @@ export interface Wallet extends MidnightProvider, WalletProvider {
   readonly name: string;
   /** The wallet's own icon as a URL or data URL, when it published one. */
   readonly iconUrl: string | undefined;
+  /**
+   * The services the wallet itself uses (indexer, node, prover URIs), when it
+   * has preferences of its own: a browser wallet reports its extension's
+   * configuration, whose endpoints may legitimately differ from the app's
+   * while addressing the same network. Null for a wallet with none (a seed
+   * wallet runs on the config it was installed with, which the wallet
+   * context keeps in step with the app's).
+   */
+  readonly configuration: Configuration | null;
 
   /**
    * Sign `data` with the key named in `options`.
