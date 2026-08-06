@@ -13,7 +13,8 @@ import { BaseSequencer, type TestSpecification } from "vitest/node";
 
 // Explicit flow order. New flow files must be appended here; unknown files
 // run last, name-ordered. happy-day runs first: it initializes the vault and
-// cycles the funds later flows build on.
+// cycles the funds later flows build on. deploy-only runs last: it drives no
+// flow, only asserting what the setup pipeline delivered.
 const FILE_ORDER = [
   "happy-day-e2e.test.ts",
   "deposit-withdrawal-failure-refund.test.ts",
@@ -21,6 +22,7 @@ const FILE_ORDER = [
   "benchmark.test.ts",
   "false-claimer.test.ts",
   "bearer-transfer.test.ts",
+  "deploy-only.test.ts",
 ];
 
 const rank = (moduleId: string): number => {

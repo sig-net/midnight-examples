@@ -342,6 +342,54 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
 // responder yourself (e.g. `yarn response` in a solana-signet-program
 // checkout for responder development) — both steps then skip.
 
+/**
+ * Persist env keys to the repo-root `.env`, append-only. Each key is checked
+ * against the FILE (not the process env): already there with the run's value
+ * means nothing to do, absent means appended under a provenance comment, and
+ * present with a DIFFERENT value is a hard error, since `.env` is read by
+ * later runs and by docker compose, which would quietly run against the
+ * stale value.
+ *
+ * @param env - The suite's env accumulator (holds the run's values).
+ * @param keys - The env-var names to persist.
+ * @param provenance - The comment line written above the appended block.
+ * @returns The keys actually appended (empty when the file already agrees).
+ * @throws If a key in `.env` conflicts with the run's value, or a key is
+ *   absent from `env`.
+ */
+export function persistEnvKeysToDotEnv(
+  env: NodeJS.ProcessEnv,
+  keys: readonly string[],
+  provenance: string,
+): string[] {
+  const fileEnv = loadRepoDotEnv();
+  const toAppend: Record<string, string> = {};
+  for (const key of keys) {
+    const runValue = requireEnv(env, key);
+    const fileValue = fileEnv[key];
+    if (fileValue === runValue) {
+      continue;
+    }
+    if (fileValue !== undefined) {
+      throw new Error(
+        `${key} conflicts: this run uses ${runValue} (from your shell environment) but .env holds ${fileValue}.` +
+          ` Later runs and docker compose read .env, so they would run against the stale value.` +
+          ` Reconcile the two (usually: update .env and unset the shell override), then rerun.`,
+      );
+    }
+    toAppend[key] = runValue;
+  }
+  const appended = Object.keys(toAppend);
+  if (appended.length === 0) {
+    return appended;
+  }
+  appendRepoDotEnv(toAppend, provenance);
+  for (const [key, value] of Object.entries(toAppend)) {
+    console.log(`appended ${key}=${value} to .env`);
+  }
+  return appended;
+}
+
 /** The env keys docker compose interpolates into the fakenet service — the hand-off payload. */
 const FAKENET_HANDOFF_KEYS = ["MPC_ROOT_KEY", "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"] as const;
 
@@ -370,32 +418,16 @@ export function persistFakenetHandoffToDotEnv(env: NodeJS.ProcessEnv): void {
     logSkip("persist fakenet hand-off to .env", "FAKENET_MANAGED=0 — you manage the responder and its config yourself");
     return;
   }
-  const fileEnv = loadRepoDotEnv();
-  const toAppend: Record<string, string> = {};
-  for (const key of FAKENET_HANDOFF_KEYS) {
-    const runValue = requireEnv(env, key);
-    const fileValue = fileEnv[key];
-    if (fileValue === runValue) {
-      continue;
-    }
-    if (fileValue !== undefined) {
-      throw new Error(
-        `${key} conflicts: this run uses ${runValue} (from your shell environment) but .env holds ${fileValue}.` +
-          ` docker compose reads .env, so the fakenet responder would start against the stale value.` +
-          ` Reconcile the two (usually: update .env and unset the shell override), then rerun.`,
-      );
-    }
-    toAppend[key] = runValue;
-  }
-  if (Object.keys(toAppend).length === 0) {
+  const appended = persistEnvKeysToDotEnv(
+    env,
+    FAKENET_HANDOFF_KEYS,
+    `appended by the test-harness setup (${new Date().toISOString()}) — fakenet responder hand-off`,
+  );
+  if (appended.length === 0) {
     logSkip("persist fakenet hand-off to .env", `${FAKENET_HANDOFF_KEYS.join(" and ")} are already in .env`);
     return;
   }
-  appendRepoDotEnv(toAppend, `appended by the test-harness setup (${new Date().toISOString()}) — fakenet responder hand-off`);
   fakenetHandoffAppended = true;
-  for (const [key, value] of Object.entries(toAppend)) {
-    console.log(`appended ${key}=${value} to .env`);
-  }
   console.log(` ➜ docker compose interpolates the fakenet service's environment from .env`);
   console.log(` ➜ append-only: existing .env lines are never modified`);
 }
@@ -441,13 +473,13 @@ export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<voi
 }
 
 /**
- * Fund the example's derived EVM accounts from the dev funder — local dev
+ * Fund the example's EVM accounts from the dev funder — local dev
  * chain only; on any other chain the operator funds them manually (the
  * derive steps print what to fund).
  *
  * @param env - The suite's env accumulator.
- * @param addressEnvVars - The env-var names holding the derived EVM
- *   addresses to top up (e.g. the example's user and vault accounts).
+ * @param addressEnvVars - The env-var names holding the EVM addresses to top
+ *   up (e.g. the example's user, vault and seed-wallet accounts).
  */
 export async function fundLocalEvmAccounts(
   env: NodeJS.ProcessEnv,

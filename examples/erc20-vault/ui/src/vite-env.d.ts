@@ -29,6 +29,13 @@ interface ImportMetaEnv {
    * app renders everything except derived EVM addresses.
    */
   readonly VITE_MPC_SECP256K1_PUBKEY?: string;
+  /**
+   * The vault's Midnight contract address on the STARTING network,
+   * overriding the per-network deployment table. A local deploy mints a
+   * fresh address (`MIDNIGHT_VAULT_CONTRACT_ADDRESS` in the repo-root .env),
+   * so a local run sets this to it.
+   */
+  readonly VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS?: string;
 }
 
 interface ImportMeta {

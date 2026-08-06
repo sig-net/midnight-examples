@@ -838,8 +838,9 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `benchmark` | 13 | Per-leg wall-clock report of both round trips (`BENCHMARK_TIMINGS_JSON` greppable line) | `BENCHMARK_DEPOSIT_REQUEST_ID`, `BENCHMARK_WITHDRAW_REQUEST_ID` |
 | `false-claimer` | 6 | A deposit recorded for identity A is NOT claimable by identity B, even with the valid MPC attestation | `FALSE_CLAIMER_DEPOSIT_REQUEST_ID` |
 | `bearer-transfer` | 11 | Shielded vault tokens are bearer assets: a plain Midnight transfer hands the claim to wallet B, the emptied wallet A can no longer withdraw, and B completes a full withdraw on the transferred balance | `BEARER_TRANSFER_DEPOSIT_REQUEST_ID`, `BEARER_TRANSFER_WITHDRAW_REQUEST_ID` |
+| `deploy-only` | 3 | The setup pipeline delivered everything the UI demo needs and the vault is initialized (no deposit or withdrawal runs, so selecting just this file is the fastest way to stand the contracts up) | none |
 
-60 tests total. A rerun against kept contract addresses (a populated `.env`)
+63 tests total. A rerun against kept contract addresses (a populated `.env`)
 completes in roughly 25–35 minutes on a laptop. A fresh deployment adds the
 setup pipeline's deploys (a few minutes) on top, and a cold clone adds the
 ~10 minute zk key generation. The claim/settle proofs are the heavy legs: the

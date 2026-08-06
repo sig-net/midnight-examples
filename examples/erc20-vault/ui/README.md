@@ -63,6 +63,56 @@ Within this package the scripts are `dev`, `build`, `preview` and `test`.
 `build` runs `tsc` before `vite build`, so a type error fails the bundle rather
 than shipping.
 
+## From a fresh clone to the running demo
+
+The app is only interesting against a chain with a deployed vault, and the
+repository carries everything needed to stand one up locally. The prerequisite
+details (Node 20+, Yarn 4 via Corepack, the exact compact toolchain version, a
+docker engine with 16 GB of RAM allocated) live in the repository root's
+[README](../../../README.md). The whole path from there is, from the
+repository root:
+
+```sh
+corepack enable
+yarn install
+compact update 0.33.0-rc.2   # the exact toolchain version the contracts compile with
+yarn compile                 # generates each contract's TypeScript bindings
+docker compose up -d         # Midnight node + indexer + proof server + local EVM chain
+yarn test:erc20-vault:e2e tests/deploy-only.test.ts
+```
+
+That last command runs the e2e suite's setup pipeline and no deposit or
+withdrawal flows: it generates and funds wallets, deploys the test ERC20
+(TestUSDC), the signet contract and the vault, initializes the vault, starts
+the local MPC responder, and appends what the demo needs to the repo-root
+`.env`. The first run takes a while (the vault's proving keys compile,
+roughly ten minutes), and reruns skip everything already in `.env`.
+
+Then wire this app to what it produced. Open the repo-root `.env` and create
+`examples/erc20-vault/ui/.env.local` mirroring two values:
+
+```
+VITE_MPC_SECP256K1_PUBKEY=<the .env's MPC_SECP256K1_PUBKEY>
+VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS=<the .env's MIDNIGHT_VAULT_CONTRACT_ADDRESS>
+```
+
+Start the app with `yarn dev:erc20-vault-ui`, open http://localhost:5173, and
+walk the steps:
+
+1. **Connect wallets.** Both rows offer "Use a seed wallet": paste the
+   `.env`'s `USER_SEED` into BOTH dialogs. The setup funded that seed on both
+   chains: its Midnight wallet holds Night and dust, and the EVM account it
+   derives holds 10 ETH and 1000 TestUSDC. The Midnight side syncs against
+   the indexer, so its first balance read can take a moment.
+2. **Derive the deposit address.** With a seed wallet the signature happens
+   in-app, no prompt.
+3. **Interact with the vault.** To see the ERC20 balances, track the test
+   token: paste the `.env`'s `ERC20_ADDRESS` into the tracked-tokens field.
+
+The MPC responder the setup started is only exercised when a deposit or
+withdrawal actually runs: browsing balances and deriving the deposit address
+need nothing beyond the compose stack.
+
 ## The stack
 
 | Piece | Choice |
@@ -161,7 +211,8 @@ the app cannot change them.
 | `VITE_EVM_RPC_URL` | JSON-RPC endpoint of the EVM chain. Defaults to the local anvil compose service. |
 | `VITE_EVM_CHAIN_ID` | The EVM chain id to expect. Defaults to anvil's 31337. |
 | `VITE_EVM_EXPLORER_URL` | Block explorer base URL, for linking transactions and addresses. |
-| `VITE_MPC_SECP256K1_PUBKEY` | The MPC network's root secp256k1 public key (hex, compressed or uncompressed, `0x` optional). Deposit addresses derive from it; unset, everything else works and the app says the address cannot be derived. The local fakenet's key is generated per machine, printed as `MPC_SECP256K1_PUBKEY` in the repo-root `.env` by the integration setup. |
+| `VITE_MPC_SECP256K1_PUBKEY` | The MPC network's root secp256k1 public key (hex, compressed or uncompressed, `0x` optional). Deposit addresses derive from it; unset, everything else works and the app says the address cannot be derived. The local fakenet's key is generated per machine and appended as `MPC_SECP256K1_PUBKEY` to the repo-root `.env` by the setup pipeline. |
+| `VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS` | The vault's Midnight contract address on the starting network, overriding the per-network deployment table. A local deploy mints a fresh address, appended as `MIDNIGHT_VAULT_CONTRACT_ADDRESS` to the repo-root `.env` by the setup pipeline. |
 
 These set the *starting* config. Switching Midnight network in the running app
 resets every endpoint to that network's published defaults, so stagenet (whose

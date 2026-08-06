@@ -159,9 +159,9 @@ function buildProviders(
 
 // Where the erc20vault contract is deployed on each network, as the app
 // STARTS believing it: the per-network default behind
-// {@link ERC20VaultContextValue.setContractAddress}. An empty string means
-// "not deployed there (yet)".
-// TODO: optionally load this from the environment
+// {@link ERC20VaultContextValue.setContractAddress}, with
+// VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS overriding the starting network's
+// entry. An empty string means "not deployed there (yet)".
 const networkAddressIdx: Record<NetworkId, string> = {
     undeployed: "ad7b29265a84e8a4fa08c257213d0090375dcae695aed7e08532c0b3b57a728f",
     preview: "",
@@ -169,6 +169,22 @@ const networkAddressIdx: Record<NetworkId, string> = {
     mainnet: "",
     stagenet: "",
 }
+
+/**
+ * The starting network's contract-address override from
+ * `VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS`, or null when unset (the deployment
+ * table then stands as-is).
+ *
+ * @param env - The build-time environment, normally `import.meta.env`.
+ * @returns The address override, or null.
+ */
+function readInitialVaultAddress(env: ImportMetaEnv): string | null {
+    const configured = env.VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS?.trim();
+    return configured === undefined || configured === "" ? null : configured;
+}
+
+// Resolved once at module load, like the chain endpoints and the MPC key.
+const INITIAL_VAULT_ADDRESS_OVERRIDE: string | null = readInitialVaultAddress(import.meta.env);
 
 /**
  * The fixed message the Midnight wallet signs to derive the caller's identity
@@ -414,11 +430,16 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
     const { wallet } = useMidnightWallet();
     const queryClient = useQueryClient();
 
-    // One address override per network, starting from the deployment table:
-    // switching network therefore defaults to that network's own address, and
-    // an edit only moves the network it was made on.
-    const [contractAddressIdx, setContractAddressIdx] =
-        useState<Record<NetworkId, string>>(networkAddressIdx);
+    // One address override per network, starting from the deployment table
+    // with the environment's override laid over the STARTING network (the
+    // network in hand at mount is the starting one): switching network
+    // therefore defaults to that network's own address, and an edit only
+    // moves the network it was made on.
+    const [contractAddressIdx, setContractAddressIdx] = useState<Record<NetworkId, string>>(() =>
+        INITIAL_VAULT_ADDRESS_OVERRIDE === null
+            ? networkAddressIdx
+            : { ...networkAddressIdx, [config.networkId as NetworkId]: INITIAL_VAULT_ADDRESS_OVERRIDE },
+    );
     const [mpcPubkey, setMpcPubkeyState] = useState<string | null>(INITIAL_MPC_SECP256K1_PUBKEY);
 
     // Config.networkId is the SDK's bare string type, but its values always

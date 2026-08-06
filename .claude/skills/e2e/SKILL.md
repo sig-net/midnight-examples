@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository —
 follow the quickstart top to bottom and a bare checkout ends at a green
-six-spec suite (60 tests). The pipeline itself (globalSetup steps + flow test files)
+seven-spec suite (63 tests). The pipeline itself (globalSetup steps + flow test files)
 lives in `examples/erc20-vault/integration-tests/`; setup (compile, deploy,
 key and address derivation, responder hand-off) runs in vitest globalSetup
 before ANY flow file — including single-file runs — and flow files run one at
@@ -99,8 +99,12 @@ kept contracts.
   order: it stops at the first failure.
 - Expected per-spec test counts, in run order: `happy-day-e2e` **15**,
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
-  **6**, `benchmark` **13**, `false-claimer` **6**, `bearer-transfer` **11**
-  — 60 total.
+  **6**, `benchmark` **13**, `false-claimer` **6**, `bearer-transfer` **11**,
+  `deploy-only` **3** — 63 total. `deploy-only` runs no deposit or
+  withdrawal: selecting just that file
+  (`yarn test:erc20-vault:e2e tests/deploy-only.test.ts`) runs the setup
+  pipeline, initializes the vault and stops, which is the fastest way to
+  stand the contracts up for the UI demo.
 - **Wallets are role wallets funded from ROOT at setup.** The setup's
   wallet steps resolve/generate `ROOT_SEED` plus the role seeds
   (`DEPLOYER_SEED`, `USER_SEED`, `MPC_RESPONDER_SEED`, `BEARER_SEED`),
