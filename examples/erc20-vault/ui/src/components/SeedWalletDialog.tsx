@@ -25,7 +25,7 @@ export interface SeedWalletDialogProps {
 }
 
 /**
- * The seed entry for installing an in-app Midnight wallet: one field, one
+ * The seed entry for installing one chain's in-app wallet: one field, one
  * submit. Presentational; validation happens in the wallet the seed is handed
  * to, and a rejection comes back on a toast rather than inline, matching how
  * a refused extension connect is surfaced.

@@ -11,8 +11,8 @@ import { clearMidnightWallets, injectMidnightWallet } from "./fakeWallets";
  * accessible name. Nothing here reaches for a context or a component directly.
  *
  * No wallet extension is injected under jsdom, which is the honest disconnected
- * case: `window.midnight` is absent and wagmi announces no connectors, so the
- * menus show what a visitor without a wallet installed actually sees.
+ * case: `window.midnight` is absent and nothing answers the EIP-6963 request,
+ * so the menus show what a visitor without a wallet installed actually sees.
  */
 
 /** One wallet control, and the state it must report with no extension present. */
@@ -82,34 +82,58 @@ describe("wallet connection failures", () => {
 });
 
 describe("the seed wallet entry", () => {
-  it("offers a seed wallet with no extension installed, and reports a bad seed on a toast", async () => {
-    const user = userEvent.setup();
-    render(<App />);
+  /** One chain's seed entry, and the toast title its failures carry. */
+  interface SeedCase {
+    readonly chainName: string;
+    readonly toastTitle: string;
+  }
 
-    await user.click(screen.getByRole("button", { name: "Midnight wallet: not connected" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Use a seed wallet" }));
+  const SEED_CASES: readonly SeedCase[] = [
+    { chainName: "Midnight", toastTitle: "Could not install the Midnight seed wallet" },
+    { chainName: "EVM", toastTitle: "Could not install the EVM seed wallet" },
+  ];
 
-    const dialog = await screen.findByRole("dialog", { name: "Use a seed wallet" });
-    await user.type(within(dialog).getByRole("textbox", { name: "Seed" }), "not-hex");
-    await user.click(within(dialog).getByRole("button", { name: "Install seed wallet" }));
+  it.each(SEED_CASES)(
+    "offers a $chainName seed wallet with no extension installed, and reports a bad seed on a toast",
+    async ({ chainName, toastTitle }) => {
+      const user = userEvent.setup();
+      render(<App />);
 
-    // The parse rejection surfaces as a toast carrying the wallet's own
-    // words, and the control still reads as disconnected.
-    expect(await screen.findByText("Could not install the seed wallet")).toBeInTheDocument();
-    expect(await screen.findByText(/The seed must be hex/)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Midnight wallet: not connected" }),
-    ).toBeInTheDocument();
-  });
+      await user.click(screen.getByRole("button", { name: `${chainName} wallet: not connected` }));
+      await user.click(await screen.findByRole("menuitem", { name: "Use a seed wallet" }));
 
-  it("offers no seed wallet for the EVM chain", async () => {
+      const dialog = await screen.findByRole("dialog", { name: "Use a seed wallet" });
+      await user.type(within(dialog).getByRole("textbox", { name: "Seed" }), "not-hex");
+      await user.click(within(dialog).getByRole("button", { name: "Install seed wallet" }));
+
+      // The parse rejection surfaces as a toast carrying the wallet's own
+      // words, and the control still reads as disconnected.
+      expect(await screen.findByText(toastTitle)).toBeInTheDocument();
+      expect(await screen.findByText(/The seed must be hex/)).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: `${chainName} wallet: not connected` }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("installs an EVM seed wallet and shows its derived address", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "EVM wallet: not connected" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Use a seed wallet" }));
 
+    const dialog = await screen.findByRole("dialog", { name: "Use a seed wallet" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Seed" }), `0x${"11".repeat(32)}`);
+    await user.click(within(dialog).getByRole("button", { name: "Install seed wallet" }));
+
+    // Deriving the account is all local work, so the wallet arrives without
+    // any RPC behind it, and the menu names it with its derived address.
+    await user.click(await screen.findByRole("button", { name: "EVM wallet: connected" }));
     const menu = await screen.findByRole("menu");
-    expect(within(menu).queryByText("Use a seed wallet")).not.toBeInTheDocument();
+    expect(within(menu).getByText("Seed wallet")).toBeInTheDocument();
+    expect(within(menu).getByText(/^0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}$/)).toBeInTheDocument();
+    expect(within(menu).getByText("Disconnect")).toBeInTheDocument();
   });
 });
 

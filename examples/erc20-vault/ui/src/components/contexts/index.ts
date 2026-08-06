@@ -13,10 +13,10 @@ export {
   type EVMChainConfigContextValue,
 } from "./EVMChainConfigContext.tsx";
 export {
+  EVMWalletConnectBusyError,
   EVMWalletProvider,
   useEVMWallet,
   type EVMWalletContextValue,
-  type InjectedEvmWallet,
 } from "./EVMWalletContext.tsx";
 export {
   MidnightChainConfigProvider,

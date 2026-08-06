@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { erc20Abi, formatUnits, type Address } from "viem";
-import { usePublicClient } from "wagmi";
 
 import { useMidnightWallet } from "../components/contexts";
 import { describeError } from "../lib/errorMessage";
 import { shortenAddress } from "../lib/shortenAddress";
+import { useEvmPublicClient, type EvmPublicClient } from "./useEvmPublicClient.ts";
 import type { TrackedToken } from "./useTrackedTokens";
 
 /**
@@ -38,9 +38,6 @@ export interface AccountBalances {
   /** Read the balances again. */
   readonly refresh: () => void;
 }
-
-/** The viem client wagmi builds for the app's chain, as the reads below need it. */
-type EvmPublicClient = NonNullable<ReturnType<typeof usePublicClient>>;
 
 /**
  * What one EVM account holds, before anything is decided about how to show it.
@@ -98,18 +95,18 @@ export function useEvmAccountBalances(
   account: Address | null,
   tokens: readonly TrackedToken[],
 ): AccountBalances {
-  const client = usePublicClient();
+  const client = useEvmPublicClient();
   const addresses = useMemo(() => tokens.map((token) => token.address), [tokens]);
 
   const query = useQuery<AccountHoldings>({
-    queryKey: ["evm-account-balances", client?.chain.id ?? null, account, addresses],
-    enabled: client !== undefined && account !== null,
+    queryKey: ["evm-account-balances", client.chain.id, account, addresses],
+    enabled: account !== null,
     // A chain read is one round trip to one endpoint: worth a second attempt,
     // not worth the default's four before the view admits anything is wrong.
     retry: 1,
     queryFn: async () => {
-      if (client === undefined || account === null) {
-        throw new Error("Cannot read balances: no EVM chain client or no account.");
+      if (account === null) {
+        throw new Error("Cannot read balances: no account.");
       }
       const [native, amounts] = await Promise.all([
         client.getBalance({ address: account }),
@@ -140,10 +137,10 @@ export function useEvmAccountBalances(
   // Baked into the query result, a balance read before `symbol()` answered
   // would keep calling the token by its address until something else forced a
   // refetch.
-  const nativeCurrency = client?.chain.nativeCurrency ?? null;
+  const nativeCurrency = client.chain.nativeCurrency;
   const balances = useMemo<readonly AssetBalance[]>(() => {
     const holdings = query.data;
-    if (holdings === undefined || nativeCurrency === null) {
+    if (holdings === undefined) {
       return [];
     }
     return [

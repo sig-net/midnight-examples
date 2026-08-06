@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "erc20-vault-ui",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["dev:erc20-vault-ui"],
+      "port": 5173
+    }
+  ]
+}

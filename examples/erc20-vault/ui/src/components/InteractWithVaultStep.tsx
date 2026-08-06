@@ -226,7 +226,8 @@ const BalancesPanel = ({
  * @returns The view's body.
  */
 export const InteractWithVaultView = (): JSX.Element => {
-  const { account } = useEVMWallet();
+  const { wallet: evmWallet } = useEVMWallet();
+  const account = evmWallet?.account ?? null;
   const { wallet } = useMidnightWallet();
   const { identity } = useERC20Vault();
   const tracked = useTrackedTokens();

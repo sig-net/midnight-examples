@@ -1,5 +1,3 @@
-import type { EvmChainConfig } from "@midnight-examples/chain-config";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createContext,
   useCallback,
@@ -10,222 +8,109 @@ import {
   type JSX,
   type ReactNode,
 } from "react";
-import { defineChain, type Address } from "viem";
-import {
-  createConfig,
-  http,
-  useConnect,
-  useConnection,
-  useConnectors,
-  useDisconnect,
-  WagmiProvider,
-  type Config,
-  type Connector,
-} from "wagmi";
 
+import { BrowserWallet, type BrowserWalletInfo } from "../../lib/evm/wallet/BrowserWallet.ts";
+import { SeedWallet } from "../../lib/evm/wallet/SeedWallet.ts";
+import { WalletError, type Wallet } from "../../lib/evm/wallet/Wallet.ts";
 import { useEVMChainConfig } from "./EVMChainConfigContext.tsx";
 
 /**
- * A wallet the browser announced, as much of it as a picker needs: `uid` is the
- * handle to connect by, `name` and `icon` are what the user recognises.
+ * A connect was asked for while a connect to a DIFFERENT wallet was still
+ * outstanding.
  *
- * Picked off wagmi's `Connector` rather than restated, so the two cannot drift.
- * The connector's own connect/disconnect calls are deliberately not part of
- * this shape: connecting goes through the context, which is what makes it
- * concurrency-safe and chain-checked.
- *
- * `name` and `icon` come from the extension, so render them defensively: the
- * name as a text node and the icon as an `img` source, never as markup.
+ * Raised here rather than in the wallet classes: one wallet object only ever
+ * speaks for the one wallet it was built with, so which wallet the app as a
+ * whole is connecting is this context's question to answer.
  */
-export type InjectedEvmWallet = Pick<Connector, "uid" | "id" | "name" | "icon">;
-
-/**
- * Build the wagmi config for one EVM chain.
- *
- * The chain's name and native currency are display metadata that
- * {@link EvmChainConfig} does not carry and nothing here depends on: what
- * matters is the chain id, which is the routing key an example seals into its
- * contract, and the RPC URL behind it.
- *
- * No connectors are configured. Wallets announce themselves under EIP-6963,
- * which wagmi discovers on its own, so the wallet list is whatever the browser
- * actually has rather than a hardcoded roster. MetaMask has announced itself
- * this way for years. A wallet reachable some other way (mobile deep-linking,
- * WalletConnect) needs its own connector here, and its own dependency.
- *
- * @param config - The EVM chain the app runs against.
- * @returns A wagmi config over that one chain.
- */
-function createWagmiConfig(config: EvmChainConfig): Config {
-  const chain = defineChain({
-    id: Number(config.chainId),
-    name: `EVM chain ${config.chainId}`,
-    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-    rpcUrls: { default: { http: [config.rpcUrl] } },
-    ...(config.explorerUrl === undefined
-      ? {}
-      : { blockExplorers: { default: { name: "Explorer", url: config.explorerUrl } } }),
-  });
-  return createConfig({
-    chains: [chain],
-    multiInjectedProviderDiscovery: true,
-    transports: { [chain.id]: http(config.rpcUrl) },
-  });
+export class EVMWalletConnectBusyError extends WalletError {
+  constructor(
+    readonly inFlightTarget: string,
+    readonly requestedTarget: string,
+  ) {
+    super(
+      `Already connecting ${inFlightTarget}: wait for that to settle before connecting ${requestedTarget}.`,
+    );
+  }
 }
 
-/** The connected EVM browser wallet, and the operations that change it. */
+/** The app's EVM wallet, and the operations that change it. */
 export interface EVMWalletContextValue {
   /**
-   * The connected wallet, or null while none is. Non-null ONLY once the
-   * connection is fully established, so a wallet mid-connect or mid-reconnect
-   * never leaks out as though it were ready.
+   * The wallet in hand, or null while none is. Non-null ONLY once the wallet
+   * is fully established (a browser wallet connected and confirmed to be on
+   * the app's chain, a seed wallet's account derived), so a wallet
+   * mid-connect, or one pointed at a different chain, never leaks out as
+   * though it were ready.
    */
-  readonly browserWallet: Connector | null;
-  /** The connected account's address, or null while no wallet is connected. */
-  readonly account: Address | null;
-  /**
-   * The chain id the wallet is currently on, or null while none is connected.
-   *
-   * Confirmed to be the app's chain at connect time. The user can still switch
-   * chain in the wallet afterwards, which lands here, so a consumer that signs
-   * against the app's chain compares this first.
-   */
-  readonly chainId: number | null;
-  /** Every wallet the browser announced, in wagmi's discovery order. */
-  readonly availableWallets: readonly InjectedEvmWallet[];
-  /** True while a connection prompt is outstanding. */
+  readonly wallet: Wallet | null;
+  /** True while a connect or install is outstanding. */
   readonly connecting: boolean;
   /**
-   * Connect the wallet announced under `walletUid` (from
-   * {@link EVMWalletContextValue.availableWallets}).
+   * Every EVM wallet currently announced to the page under EIP-6963, each
+   * with the `rdns` to hand to
+   * {@link EVMWalletContextValue.connectBrowserWallet}.
+   *
+   * Read on demand, not reactive: each call takes a fresh snapshot, so an
+   * extension that announced late shows up on the next one.
+   *
+   * @returns The announced wallets, or an empty array when no extension is
+   *   installed and enabled.
+   */
+  readonly availableBrowserWallets: () => BrowserWalletInfo[];
+  /**
+   * Connect the browser wallet announced under `rdns` (from
+   * {@link EVMWalletContextValue.availableBrowserWallets}) and store it,
+   * replacing (and disconnecting) whatever wallet was held before.
    *
    * Concurrency-safe, so a double-clicked button or a StrictMode double render
-   * cannot raise two prompts: calls for the wallet already connected resolve to
-   * it without prompting, and calls made while a connect for the same wallet is
-   * in flight share that one prompt.
+   * cannot raise two prompts: calls for the wallet already held resolve to it
+   * without prompting, and calls made while a connect for the same rdns is in
+   * flight share that one prompt.
    *
-   * A wallet that comes back on the wrong chain is disconnected again and the
-   * call rejects, so {@link EVMWalletContextValue.browserWallet} is never a
-   * wallet that connected to a different chain.
+   * A wallet is stored only once confirmed to be on the app's chain, so
+   * {@link EVMWalletContextValue.wallet} is never a wallet pointed at a
+   * different chain. A stored wallet whose extension later reports a changed
+   * account or chain is dropped, so a stale connection never lingers as
+   * though it were live.
    *
-   * @param walletUid - The `uid` of the wallet to connect.
+   * @param rdns - The EIP-6963 rdns of the wallet to connect.
    * @returns The connected wallet, also published as
-   *   {@link EVMWalletContextValue.browserWallet}.
-   * @throws If no wallet is announced under `walletUid`, if the user declines
-   *   the prompt, if the wallet connected on a different chain, or if a connect
-   *   to a DIFFERENT wallet is already in flight.
+   *   {@link EVMWalletContextValue.wallet}.
+   * @throws {EVMWalletConnectBusyError} if a connect to a DIFFERENT wallet is
+   *   already in flight.
+   * @throws {BrowserWalletNotAnnouncedError} if nothing is announced under
+   *   `rdns`, {@link BrowserWalletChainMismatchError} if the wallet stayed on
+   *   a different chain, or the provider's own EIP-1193 error (`code: 4001`)
+   *   when the user declines the prompt.
    */
-  readonly connectBrowserWallet: (walletUid: string) => Promise<Connector>;
-  /** Disconnect the wallet and forget it. */
-  readonly disconnectBrowserWallet: () => void;
+  readonly connectBrowserWallet: (rdns: string) => Promise<Wallet>;
+  /**
+   * Derive a seed wallet from `seed` and store it, replacing (and
+   * disconnecting) whatever wallet was held before. Shares the same
+   * concurrency guard as
+   * {@link EVMWalletContextValue.connectBrowserWallet}.
+   *
+   * The wallet runs in-app: its keys live in this page's memory for as long
+   * as it is held, and nothing prompts before signing. Meant for development
+   * against a local stack, where the funded seeds are hex constants. The
+   * seed is this chain's own, fully independent of the Midnight wallet's.
+   *
+   * @param seed - The wallet seed as hex (16-64 bytes, 0x optional).
+   * @returns The installed wallet, also published as
+   *   {@link EVMWalletContextValue.wallet}.
+   * @throws {EVMWalletConnectBusyError} if a connect to a different wallet is
+   *   already in flight, or {@link SeedWalletParseError} when the seed is not
+   *   valid hex.
+   */
+  readonly installSeedWallet: (seed: string) => Promise<Wallet>;
+  /**
+   * Forget the held wallet (a browser extension still regards the site as
+   * connected, and reconnecting it may not prompt again).
+   */
+  readonly disconnect: () => void;
 }
 
 const EVMWalletContext = createContext<EVMWalletContextValue | null>(null);
-
-/** Props of {@link EVMWalletBridge}. */
-interface EVMWalletBridgeProps {
-  readonly children: ReactNode;
-}
-
-/**
- * Publishes wagmi's connection state as {@link EVMWalletContextValue}.
- *
- * A separate component from the provider below on purpose: wagmi's hooks only
- * work underneath `WagmiProvider`, so the component reading them cannot be the
- * one mounting it.
- *
- * @param props - The subtree that can read the wallet.
- * @returns The context provider wrapping that subtree.
- */
-function EVMWalletBridge({ children }: EVMWalletBridgeProps): JSX.Element {
-  const { config } = useEVMChainConfig();
-  const connection = useConnection();
-  const connectors = useConnectors();
-  const { mutateAsync: connectWallet, isPending: connecting } = useConnect();
-  const { mutate: disconnectWallet, mutateAsync: disconnectWalletAsync } = useDisconnect();
-
-  // wagmi carries the chain id as a number; the app's config carries it as a
-  // bigint, since that is what the contract and the MPC routing key use.
-  const expectedChainId = Number(config.chainId);
-
-  // Only the fully-connected shape has an address and a connector to hand out.
-  const connected = connection.status === "connected" ? connection : null;
-
-  // The in-flight connect, so concurrent calls share one prompt instead of
-  // racing two of them. A ref, not state, so a second call in the same tick
-  // sees it: a state update would not land until the next render, which is
-  // exactly when the race happens.
-  const inFlightRef = useRef<{ walletUid: string; promise: Promise<Connector> } | null>(null);
-
-  const connectBrowserWallet = useCallback(
-    (walletUid: string): Promise<Connector> => {
-      const inFlight = inFlightRef.current;
-      if (inFlight !== null) {
-        if (inFlight.walletUid !== walletUid) {
-          return Promise.reject(
-            new Error(
-              `Already connecting a wallet: wait for that to settle before connecting ${walletUid}.`,
-            ),
-          );
-        }
-        return inFlight.promise;
-      }
-      if (connected !== null && connected.connector.uid === walletUid) {
-        return Promise.resolve(connected.connector);
-      }
-
-      const connector = connectors.find((candidate) => candidate.uid === walletUid);
-      if (connector === undefined) {
-        return Promise.reject(
-          new Error(
-            `No EVM wallet announced under uid ${walletUid}: is the extension installed and enabled?`,
-          ),
-        );
-      }
-
-      const promise = connectWallet({ connector, chainId: expectedChainId })
-        .then(async (result): Promise<Connector> => {
-          // Passing chainId asks the wallet to switch, it does not compel it:
-          // a wallet that cannot switch connects on whatever chain it was on.
-          // Undo such a connection rather than publish it, so a mismatch is a
-          // failed connect instead of transactions signed for another chain.
-          if (result.chainId !== expectedChainId) {
-            await disconnectWalletAsync({ connector });
-            throw new Error(
-              `Wallet ${connector.name} connected to chain ${result.chainId}, but this app runs against chain ${expectedChainId}: switch the wallet's network and connect again.`,
-            );
-          }
-          return connector;
-        })
-        .finally(() => {
-          inFlightRef.current = null;
-        });
-
-      inFlightRef.current = { walletUid, promise };
-      return promise;
-    },
-    [connectWallet, disconnectWalletAsync, connectors, connected, expectedChainId],
-  );
-
-  const disconnectBrowserWallet = useCallback((): void => {
-    disconnectWallet();
-  }, [disconnectWallet]);
-
-  const value = useMemo<EVMWalletContextValue>(
-    () => ({
-      browserWallet: connected?.connector ?? null,
-      account: connected?.address ?? null,
-      chainId: connected?.chainId ?? null,
-      availableWallets: connectors,
-      connecting,
-      connectBrowserWallet,
-      disconnectBrowserWallet,
-    }),
-    [connected, connectors, connecting, connectBrowserWallet, disconnectBrowserWallet],
-  );
-
-  return <EVMWalletContext.Provider value={value}>{children}</EVMWalletContext.Provider>;
-}
 
 /** Props of {@link EVMWalletProvider}. */
 interface EVMWalletProviderProps {
@@ -233,40 +118,135 @@ interface EVMWalletProviderProps {
 }
 
 /**
- * Owns the app's connection to an EVM browser wallet (MetaMask and anything
- * else the browser announces), over wagmi. Mounted once at the root, inside the
- * chain config provider whose chain it connects to (see
- * {@link useEVMChainConfig}), and read through {@link useEVMWallet}.
+ * Owns the app's EVM wallet. Mounted once at the root, inside the chain
+ * config provider whose chain it connects to (see {@link useEVMChainConfig}),
+ * and read through {@link useEVMWallet}.
  *
- * The wagmi config is rebuilt whenever the app's chain config changes, which
- * drops any live connection with it: a wallet connected to the previous chain
- * is exactly what the connect path refuses to hand out.
+ * The wallet itself is a {@link Wallet}: a browser extension connection or an
+ * in-app seed wallet, behind one interface. This context only decides WHICH
+ * wallet the app holds: it builds one per connect or install, keeps the one
+ * that succeeds, and republishes it to React. The two entry points are the
+ * only place the kind matters; everything downstream reads the interface.
+ *
+ * The wallet lives in memory only: reconnecting after a reload is the user's
+ * call, since it means a wallet prompt (or re-entering a seed). A wallet is
+ * built against the chain config in hand when it connects, so reconfiguring
+ * the chain does not move a held wallet; the connect path refuses a
+ * wrong-chain wallet, which is what keeps the two consistent.
  *
  * @param props - The subtree that can read the wallet.
  * @returns The provider wrapping that subtree.
  */
 export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Element {
   const { config } = useEVMChainConfig();
-  const wagmiConfig = useMemo<Config>(() => createWagmiConfig(config), [config]);
 
-  // One QueryClient per provider mount. Every wagmi hook (and the vault
-  // context's queries) is a TanStack Query query or mutation underneath, so a
-  // QueryClientProvider has to sit above them. Lazy component state rather
-  // than module scope: a re-render still cannot swap the cache out, while
-  // separate app mounts (each test renders its own) do not share one cache.
-  const [queryClient] = useState(() => new QueryClient());
+  const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [connecting, setConnecting] = useState<boolean>(false);
 
-  return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <EVMWalletBridge>{children}</EVMWalletBridge>
-      </QueryClientProvider>
-    </WagmiProvider>
+  // The in-flight connect, so concurrent calls share one attempt instead of
+  // building two wallets that each raise one. A ref, not state, so a second
+  // call in the same tick sees it: a state update would not land until the
+  // next render, which is exactly when the race happens. The target labels
+  // which wallet is being built, so a colliding call for a DIFFERENT wallet
+  // rejects rather than silently receiving the wrong one.
+  const inFlightRef = useRef<{ target: string; promise: Promise<Wallet> } | null>(null);
+
+  // Shared tail of both entry points: the busy guard, the in-flight bookkeeping,
+  // and swapping the built wallet in (disconnecting the one it replaces).
+  const establishWallet = useCallback(
+    (target: string, build: () => Promise<Wallet>): Promise<Wallet> => {
+      const inFlight = inFlightRef.current;
+      if (inFlight !== null) {
+        if (inFlight.target !== target) {
+          return Promise.reject(new EVMWalletConnectBusyError(inFlight.target, target));
+        }
+        return inFlight.promise;
+      }
+
+      const promise = build()
+        .then((built) => {
+          setWallet((previous) => {
+            if (previous !== null && previous !== built) {
+              // Fire-and-forget: the replaced wallet's teardown failing leaves
+              // nothing the user could act on.
+              void previous.disconnect().catch(() => {});
+            }
+            return built;
+          });
+          return built;
+        })
+        .finally(() => {
+          inFlightRef.current = null;
+          setConnecting(false);
+        });
+
+      inFlightRef.current = { target, promise };
+      setConnecting(true);
+      return promise;
+    },
+    [],
   );
+
+  const connectBrowserWallet = useCallback(
+    (rdns: string): Promise<Wallet> => {
+      if (wallet instanceof BrowserWallet && wallet.id === rdns) {
+        return Promise.resolve(wallet);
+      }
+      // A fresh wallet per attempt, so a failed connect leaves nothing behind:
+      // the one that reaches the context is the one that came back on the
+      // app's chain.
+      return establishWallet(`the ${rdns} wallet`, () => {
+        const built: BrowserWallet = new BrowserWallet(config, rdns, () => {
+          // The extension reported a changed account or chain, so the
+          // published wallet is stale: drop it rather than let reads and
+          // signatures run against a session it no longer describes. The
+          // identity check keeps a callback from an already-replaced wallet
+          // from clearing its successor.
+          setWallet((previous) => {
+            if (previous !== built) return previous;
+            void built.disconnect().catch(() => {});
+            return null;
+          });
+        });
+        return built.connect().then(() => built);
+      });
+    },
+    [config, wallet, establishWallet],
+  );
+
+  const installSeedWallet = useCallback(
+    (seed: string): Promise<Wallet> =>
+      establishWallet("the seed wallet", () => SeedWallet.Initialise(config, seed)),
+    [config, establishWallet],
+  );
+
+  const disconnect = useCallback((): void => {
+    setWallet((previous) => {
+      if (previous !== null) {
+        // Fire-and-forget, as above: a teardown failure is not actionable.
+        void previous.disconnect().catch(() => {});
+      }
+      return null;
+    });
+  }, []);
+
+  const value = useMemo<EVMWalletContextValue>(
+    () => ({
+      wallet,
+      connecting,
+      availableBrowserWallets: BrowserWallet.available,
+      connectBrowserWallet,
+      installSeedWallet,
+      disconnect,
+    }),
+    [wallet, connecting, connectBrowserWallet, installSeedWallet, disconnect],
+  );
+
+  return <EVMWalletContext.Provider value={value}>{children}</EVMWalletContext.Provider>;
 }
 
 /**
- * Read the connected EVM browser wallet.
+ * Read the app's EVM wallet.
  *
  * @returns The wallet and the operations that change it.
  * @throws If called outside an {@link EVMWalletProvider}, since there is no

@@ -39,6 +39,7 @@ src/
     useTrackedTokens.ts      # the ERC20s to follow, and what each says about itself
     useAccountBalances.ts    # both chains' balances, normalised to one shape
     useVaultEvmAddress.ts    # the vault's own EVM account, read from its ledger
+    useEvmPublicClient.ts    # the viem client the EVM read hooks share
   lib/              # non-React modules the components lean on
     utils.ts        # cn(): the class merger every ui/ component imports
     theme.ts        # the theme choice, its storage, and how it is applied
@@ -48,6 +49,12 @@ src/
       Wallet.ts       #   the interface everything outside the folder codes against
       BrowserWallet.ts #  a Wallet over the dapp-connector extension API
       SeedWallet.ts   #   a Wallet over the wallet-sdk facade, from a hex seed
+    evm/              # the EVM chain modules
+      chain.ts        #   the app's EvmChainConfig as a viem Chain
+      wallet/         #   the EVM wallet abstraction, mirroring midnight/wallet/
+        Wallet.ts     #     the interface everything outside the folder codes against
+        BrowserWallet.ts #  a Wallet over an EIP-6963 announced extension
+        SeedWallet.ts #     a Wallet over a viem local account, from a hex seed
     polyfills/        # browser stand-ins for Node globals, aliased in vite.config.ts
   pages/            # one component per route
 tests/
@@ -113,9 +120,10 @@ tests/
 - **A chain-shaped difference is normalised in a hook, never in a component.**
   `useWalletConnections` publishes both chains as one `WalletConnection` shape,
   and the header control and the connect step both just render it. Neither
-  knows that the Midnight list is read on demand while wagmi's arrives by
-  announcement. Reach for the raw contexts only when you need something the
-  normalised shape genuinely cannot carry, and widen the shape first if it can.
+  knows that one chain's wallets are read off `window.midnight` while the
+  other's answer an EIP-6963 event exchange. Reach for the raw contexts only
+  when you need something the normalised shape genuinely cannot carry, and
+  widen the shape first if it can.
 - **Never build a user-facing sentence by concatenating an article.**
   "Connect a Midnight wallet" and "Connect an EVM wallet" disagree, and picking
   the article from a chain name is a trick the next chain breaks. Word the

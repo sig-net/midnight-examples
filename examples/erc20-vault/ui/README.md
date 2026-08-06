@@ -91,7 +91,7 @@ navigation:
 | Control | What it shows |
 | --- | --- |
 | Midnight wallet | Grey dot and a washed-out icon until connected, then the wallet's own icon and a green dot |
-| EVM wallet | The same, over wagmi's EIP-6963 discovery |
+| EVM wallet | The same, over EIP-6963 discovery |
 | Theme | Light, dark, or system |
 
 Opening a wallet control lists the wallet extensions the browser announced, and
@@ -178,7 +178,7 @@ Every read is a TanStack Query query, and a component never fetches for itself:
    `useWalletConnections` as one shape per chain.
 2. Contract state is a query keyed by the deployed address:
    `useVaultEvmAddress` reads the vault's own EVM account out of its ledger.
-3. EVM chain reads go through wagmi's client for the configured chain
+3. EVM chain reads go through a viem client for the configured chain
    (`useTrackedTokens` for what a token says about itself,
    `useAccountBalances` for what an account holds).
 4. Still to come: deposit and withdrawal mutations, each refreshing the

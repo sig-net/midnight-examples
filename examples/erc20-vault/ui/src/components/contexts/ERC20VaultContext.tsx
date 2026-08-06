@@ -356,7 +356,7 @@ interface ERC20VaultContextProviderProps {
 /**
  * Owns the app's view of the deployed vault contract and the caller's
  * identity. Mounted once in App.tsx, inside the Midnight wallet provider it
- * reads and inside the EVM wallet provider whose QueryClient it uses, and read
+ * reads and inside the app's QueryClientProvider whose cache it uses, and read
  * through {@link useERC20Vault}.
  *
  * @param props - The subtree that can read the vault.

@@ -2,10 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { erc20Abi, getAddress, isAddress, type Address } from "viem";
-import { usePublicClient } from "wagmi";
 
-/** The viem client wagmi builds for the app's chain, as the reads below need it. */
-type EvmPublicClient = NonNullable<ReturnType<typeof usePublicClient>>;
+import { useEvmPublicClient, type EvmPublicClient } from "./useEvmPublicClient.ts";
 
 /**
  * One ERC20 the user asked the app to follow, with whatever the token says
@@ -84,7 +82,7 @@ async function readTrackedToken(client: EvmPublicClient, address: Address): Prom
  * @returns The list and the operations that change it.
  */
 export function useTrackedTokens(): TrackedTokens {
-  const client = usePublicClient();
+  const client = useEvmPublicClient();
   const [addresses, setAddresses] = useState<readonly Address[]>([]);
 
   const track = useCallback(
@@ -114,14 +112,10 @@ export function useTrackedTokens(): TrackedTokens {
   // Keyed by the chain as well as the list: the same address is a different
   // token on a different chain, and the app's chain can be reconfigured.
   const metadataQuery = useQuery<readonly TrackedToken[]>({
-    queryKey: ["erc20-metadata", client?.chain.id ?? null, addresses],
-    enabled: client !== undefined && addresses.length > 0,
-    queryFn: async () => {
-      if (client === undefined) {
-        throw new Error("No EVM chain client: the app's chain config is not resolved.");
-      }
-      return Promise.all(addresses.map((address) => readTrackedToken(client, address)));
-    },
+    queryKey: ["erc20-metadata", client.chain.id, addresses],
+    enabled: addresses.length > 0,
+    queryFn: async () =>
+      Promise.all(addresses.map((address) => readTrackedToken(client, address))),
   });
 
   const tokens = useMemo<readonly TrackedToken[]>(() => {

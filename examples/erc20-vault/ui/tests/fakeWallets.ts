@@ -1,10 +1,10 @@
 // Wallet extensions, faked at the boundary the app actually talks to.
 //
-// Neither chain is stubbed at the module level: the Midnight side really goes
-// through BrowserWallet and the EVM side really goes through wagmi's EIP-6963
-// discovery, so what these tests exercise is the app's own code rather than a
-// mock of it. That is also why the fakes are this small: the app touches very
-// little of either connector.
+// Neither chain is stubbed at the module level: each side really goes through
+// its own BrowserWallet (`window.midnight` injection on Midnight, EIP-6963
+// discovery on EVM), so what these tests exercise is the app's own code rather
+// than a mock of it. That is also why the fakes are this small: the app
+// touches very little of either connector.
 import type { ConnectedAPI, InitialAPI } from "@midnight-ntwrk/dapp-connector-api";
 
 /** The `window.midnight` key the fake Midnight wallet is injected under. */
@@ -112,14 +112,14 @@ export function clearMidnightWallets(): void {
   delete window.midnight;
 }
 
-/** An EIP-1193 provider, as much of one as wagmi's connect path calls. */
+/** An EIP-1193 provider, as much of one as the app's connect path calls. */
 interface FakeEip1193Provider {
-  request: (args: { method: string }) => Promise<unknown>;
+  request: (args: { method: string; params?: unknown }) => Promise<unknown>;
   on: () => void;
   removeListener: () => void;
 }
 
-/** How the fake EVM wallet answers wagmi. */
+/** How the fake EVM wallet answers the app. */
 export interface FakeEvmWalletOptions {
   /** The name the UI should offer and, once connected, show. */
   readonly name: string;
@@ -135,10 +135,10 @@ export type StopAnnouncing = () => void;
 /**
  * Announce an EVM wallet under EIP-6963, the way an extension does.
  *
- * wagmi discovers wallets by dispatching `eip6963:requestProvider` and
- * listening for the announcements that answer it, so a fake has to do both:
- * announce once now, for a store that is already listening, and again whenever
- * a later store asks.
+ * The app's BrowserWallet discovers wallets by dispatching
+ * `eip6963:requestProvider` and collecting the announcements that answer it
+ * synchronously, so a fake has to do both: announce once now, for a listener
+ * already in place, and again whenever a later snapshot asks.
  *
  * @param options - The wallet's name, chain and account.
  * @returns A function that stops it answering further requests.
@@ -148,21 +148,11 @@ export function announceEvmWallet({
   chainId,
   address,
 }: FakeEvmWalletOptions): StopAnnouncing {
-  // A wallet the user has not approved yet. The distinction matters: wagmi
-  // tests for a prior approval with `eth_accounts`, and a wallet that answers
-  // that with an account is one the app silently reconnects to. A fake that
-  // always returned the account would therefore arrive already connected and
-  // no test could ever exercise the connect click.
-  let approved = false;
-
   const provider: FakeEip1193Provider = {
     request: ({ method }) => {
       switch (method) {
         case "eth_requestAccounts":
-          approved = true;
           return Promise.resolve([address]);
-        case "eth_accounts":
-          return Promise.resolve(approved ? [address] : []);
         case "eth_chainId":
           return Promise.resolve(`0x${chainId.toString(16)}`);
         // The app asks the wallet to switch to its chain. This one is already

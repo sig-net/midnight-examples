@@ -9,7 +9,7 @@ import { shortenAddress } from "../lib/shortenAddress";
  * One wallet the user could connect: `id` is the handle to connect by, the rest
  * is what makes it recognisable.
  *
- * The two chains identify wallets by different things (a wagmi `uid`, a
+ * The two chains identify wallets by different things (an EIP-6963 `rdns`, a
  * `window.midnight` key), which is why this is an opaque `id`: everything above
  * these hooks passes it back untouched and never interprets it.
  */
@@ -56,8 +56,8 @@ export interface WalletConnection {
   readonly connect: (walletId: string) => void;
   /**
    * Install an in-app wallet from a pasted seed, reporting a failure on a
-   * toast. Present only for a chain that supports one (Midnight); the
-   * controls offer a seed entry exactly when this is set.
+   * toast. Present only for a chain that supports one; the controls offer a
+   * seed entry exactly when this is set.
    */
   readonly installFromSeed?: (seed: string) => void;
   /** Disconnect and forget the wallet. */
@@ -114,7 +114,7 @@ export function useMidnightWalletConnection(): WalletConnection {
   const installFromSeed = useCallback(
     (seed: string): void => {
       installSeedWallet(seed).catch((error: unknown) => {
-        toast.error("Could not install the seed wallet", {
+        toast.error("Could not install the Midnight seed wallet", {
           description: describeError(error),
         });
       });
@@ -151,17 +151,38 @@ export function useMidnightWalletConnection(): WalletConnection {
  */
 export function useEVMWalletConnection(): WalletConnection {
   const {
-    browserWallet,
-    account,
-    availableWallets,
+    wallet,
     connecting,
+    availableBrowserWallets,
     connectBrowserWallet,
-    disconnectBrowserWallet,
+    installSeedWallet,
+    disconnect,
   } = useEVMWallet();
 
+  // Announced wallets are read on demand rather than subscribed to: the
+  // context snapshots the EIP-6963 announcements per call. Snapshot once on
+  // mount, and again whenever a consumer asks.
+  const [announced, setAnnounced] = useState<readonly WalletChoice[]>([]);
+
+  const refreshChoices = useCallback((): void => {
+    setAnnounced(
+      availableBrowserWallets().map((announcedWallet) => ({
+        id: announcedWallet.rdns,
+        name: announcedWallet.name,
+        iconUrl: announcedWallet.icon,
+      })),
+    );
+  }, [availableBrowserWallets]);
+
+  // Reading the announced wallets is a synchronous exchange of window events,
+  // not a fetch: there is nothing to cache, retry or race.
+  useEffect(() => {
+    refreshChoices();
+  }, [refreshChoices]);
+
   const connect = useCallback(
-    (walletUid: string): void => {
-      connectBrowserWallet(walletUid).catch((error: unknown) => {
+    (rdns: string): void => {
+      connectBrowserWallet(rdns).catch((error: unknown) => {
         toast.error("Could not connect the EVM wallet", {
           description: describeError(error),
         });
@@ -170,38 +191,36 @@ export function useEVMWalletConnection(): WalletConnection {
     [connectBrowserWallet],
   );
 
-  // wagmi discovers wallets under EIP-6963 and republishes the list as they
-  // announce, so unlike the Midnight side there is nothing to re-read.
-  const refreshChoices = useCallback((): void => {}, []);
-
-  const choices = useMemo<readonly WalletChoice[]>(
-    () =>
-      availableWallets.map((wallet) => ({
-        id: wallet.uid,
-        name: wallet.name,
-        iconUrl: wallet.icon,
-      })),
-    [availableWallets],
+  const installFromSeed = useCallback(
+    (seed: string): void => {
+      installSeedWallet(seed).catch((error: unknown) => {
+        toast.error("Could not install the EVM seed wallet", {
+          description: describeError(error),
+        });
+      });
+    },
+    [installSeedWallet],
   );
 
   return useMemo<WalletConnection>(
     () => ({
       chainName: "EVM",
       connected:
-        browserWallet === null
+        wallet === null
           ? null
           : {
-              name: browserWallet.name,
-              iconUrl: browserWallet.icon,
-              detail: account === null ? undefined : shortenAddress(account),
+              name: wallet.name,
+              iconUrl: wallet.iconUrl,
+              detail: shortenAddress(wallet.account),
             },
       connecting,
-      choices,
+      choices: announced,
       refreshChoices,
       connect,
-      disconnect: disconnectBrowserWallet,
+      installFromSeed,
+      disconnect,
     }),
-    [browserWallet, account, connecting, choices, refreshChoices, connect, disconnectBrowserWallet],
+    [wallet, connecting, announced, refreshChoices, connect, installFromSeed, disconnect],
   );
 }
 

@@ -88,13 +88,14 @@ describe("the connect step", () => {
   it("says so when a chain has no wallet extension at all", () => {
     render(<App />);
 
-    // The Midnight row never dead-ends: with no extension the in-app seed
-    // wallet is still a way in, so it becomes the row's control. The EVM
-    // chain has no seed path, so its row is a statement.
+    // Neither row dead-ends: with no extension each chain's in-app seed
+    // wallet is still a way in, so it becomes the row's control.
     expect(
       within(connectStep()).getByRole("button", { name: /Use a seed wallet \(Midnight\)/ }),
     ).toBeInTheDocument();
-    expect(within(connectStep()).getByText("No EVM wallet found")).toBeInTheDocument();
+    expect(
+      within(connectStep()).getByRole("button", { name: /Use a seed wallet \(EVM\)/ }),
+    ).toBeInTheDocument();
   });
 
   it("with one wallet connected, still asks for two", async () => {
