@@ -1,9 +1,4 @@
 import {
-  BrowserWallet,
-  BrowserWalletError,
-  type BrowserWalletInfo,
-} from "../../lib/midnight/MidnightBrowserWallet.ts";
-import {
   createContext,
   useCallback,
   useContext,
@@ -14,39 +9,41 @@ import {
   type ReactNode,
 } from "react";
 
+import { BrowserWallet, type BrowserWalletInfo } from "../../lib/midnight/wallet/BrowserWallet.ts";
+import { SeedWallet } from "../../lib/midnight/wallet/SeedWallet.ts";
+import { WalletError, type Wallet } from "../../lib/midnight/wallet/Wallet.ts";
 import { useMidnightChainConfig } from "./MidnightChainConfigContext.tsx";
 
 /**
- * A connect was asked for while a connect to a DIFFERENT injected wallet was
- * still outstanding.
+ * A connect was asked for while a connect to a DIFFERENT wallet was still
+ * outstanding.
  *
- * Raised here rather than in {@link BrowserWallet}: one wallet object only ever
- * speaks to the one injected wallet it was built with, so which wallet the app
- * as a whole is connecting is this context's question to answer.
+ * Raised here rather than in the wallet classes: one wallet object only ever
+ * speaks for the one wallet it was built with, so which wallet the app as a
+ * whole is connecting is this context's question to answer.
  */
-export class MidnightWalletConnectBusyError extends BrowserWalletError {
+export class MidnightWalletConnectBusyError extends WalletError {
   constructor(
-    readonly inFlightWalletKey: string,
-    readonly requestedWalletKey: string,
+    readonly inFlightTarget: string,
+    readonly requestedTarget: string,
   ) {
     super(
-      `Already connecting to window.midnight.${inFlightWalletKey}: wait for that to settle before connecting to ${requestedWalletKey}.`,
+      `Already connecting ${inFlightTarget}: wait for that to settle before connecting ${requestedTarget}.`,
     );
   }
 }
 
-/** The connected browser wallet, and the operations that change it. */
+/** The app's Midnight wallet, and the operations that change it. */
 export interface MidnightWalletContextValue {
   /**
-   * The connected wallet, or null while none is. Non-null ONLY once the
-   * connection is fully established and confirmed to be on the app's network,
-   * so a wallet mid-connect, or one pointed at a different chain, never leaks
-   * out as though it were ready.
+   * The wallet in hand, or null while none is. Non-null ONLY once the wallet
+   * is fully established (a browser wallet connected and confirmed to be on
+   * the app's network, a seed wallet's facade started), so a wallet
+   * mid-connect, or one pointed at a different chain, never leaks out as
+   * though it were ready.
    */
-  readonly browserWallet: BrowserWallet | null;
-  /** The `window.midnight` key the wallet was connected through, or null. */
-  readonly browserWalletKey: string | null;
-  /** True while a connection prompt is outstanding. */
+  readonly wallet: Wallet | null;
+  /** True while a connect or install is outstanding. */
   readonly connecting: boolean;
   /**
    * Every Midnight wallet currently injected into the page, each with the
@@ -61,37 +58,55 @@ export interface MidnightWalletContextValue {
    */
   readonly availableBrowserWallets: () => BrowserWalletInfo[];
   /**
-   * Connect the wallet injected under `walletKey` (an opaque key from
-   * {@link MidnightWalletContextValue.availableBrowserWallets}) and store it.
+   * Connect the browser wallet injected under `walletKey` (an opaque key from
+   * {@link MidnightWalletContextValue.availableBrowserWallets}) and store it,
+   * replacing (and disconnecting) whatever wallet was held before.
    *
    * Concurrency-safe, so a double-clicked button or a StrictMode double render
-   * cannot raise two prompts: calls for the wallet already connected resolve to
-   * it without prompting, and calls made while a connect for the same key is in
+   * cannot raise two prompts: calls for the wallet already held resolve to it
+   * without prompting, and calls made while a connect for the same key is in
    * flight share that one prompt.
    *
    * A wallet is stored only once confirmed to be on the app's network, so
-   * {@link MidnightWalletContextValue.browserWallet} is never a wallet pointed
-   * at a different chain.
+   * {@link MidnightWalletContextValue.wallet} is never a wallet pointed at a
+   * different chain.
    *
    * @param walletKey - The `window.midnight` key of the wallet to connect.
    * @returns The connected wallet, also published as
-   *   {@link MidnightWalletContextValue.browserWallet}.
-   * @throws {MidnightWalletConnectBusyError} if a connect to a DIFFERENT wallet
-   *   is already in flight.
+   *   {@link MidnightWalletContextValue.wallet}.
+   * @throws {MidnightWalletConnectBusyError} if a connect to a DIFFERENT
+   *   wallet is already in flight.
    * @throws {BrowserWalletNotInjectedError} if nothing is injected under
    *   `walletKey`, {@link BrowserWalletNetworkMismatchError} if the wallet
    *   connected on a different network, or the connector's own `APIError`
    *   (`code: 'Rejected'`) when the user declines the prompt.
    */
-  readonly connectBrowserWallet: (walletKey: string) => Promise<BrowserWallet>;
+  readonly connectBrowserWallet: (walletKey: string) => Promise<Wallet>;
   /**
-   * Forget the connected wallet.
+   * Derive a seed wallet from `seed`, start it, and store it, replacing (and
+   * disconnecting) whatever wallet was held before. Shares the same
+   * concurrency guard as
+   * {@link MidnightWalletContextValue.connectBrowserWallet}.
    *
-   * The connector API has no disconnect call, so this drops the app's reference
-   * and nothing more: the extension still regards the site as connected, and
-   * reconnecting the same wallet may not prompt again.
+   * The wallet runs in-app: its keys live in this page's memory for as long
+   * as it is held, and nothing prompts before signing. Meant for development
+   * against a local stack, where the funded genesis seeds are hex constants.
+   *
+   * @param seed - The wallet seed as hex (16-64 bytes, 0x optional).
+   * @returns The installed wallet, also published as
+   *   {@link MidnightWalletContextValue.wallet}.
+   * @throws {MidnightWalletConnectBusyError} if a connect to a different
+   *   wallet is already in flight, {@link SeedWalletParseError} when the seed
+   *   is not valid hex, or whatever the facade start raises (an unreachable
+   *   indexer or node surfaces here).
    */
-  readonly disconnectBrowserWallet: () => void;
+  readonly installSeedWallet: (seed: string) => Promise<Wallet>;
+  /**
+   * Forget the held wallet, releasing whatever it holds open (a seed
+   * wallet's facade connections; a browser extension still regards the site
+   * as connected, and reconnecting it may not prompt again).
+   */
+  readonly disconnect: () => void;
 }
 
 const MidnightWalletContext = createContext<MidnightWalletContextValue | null>(null);
@@ -102,17 +117,19 @@ interface MidnightWalletProviderProps {
 }
 
 /**
- * Owns the app's connection to a Midnight browser wallet. Mounted once at the
- * root, inside the chain config provider whose network id it connects with (see
+ * Owns the app's Midnight wallet. Mounted once at the root, inside the chain
+ * config provider whose network id it connects with (see
  * {@link useMidnightChainConfig}), and read through {@link useMidnightWallet}.
  *
- * The connection itself lives in a {@link BrowserWallet}, which is what talks to
- * the extension and what consumers hand to the Midnight providers. This context
- * only decides WHICH wallet the app holds: it builds one per connect, keeps the
- * one that succeeds, and republishes it to React.
+ * The wallet itself is a {@link Wallet}: a browser extension connection or an
+ * in-app seed wallet, behind one interface, and what consumers hand to the
+ * Midnight providers. This context only decides WHICH wallet the app holds:
+ * it builds one per connect or install, keeps the one that succeeds, and
+ * republishes it to React. The two entry points are the only place the kind
+ * matters; everything downstream reads the interface.
  *
- * The connection lives in memory only: reconnecting after a reload is the
- * user's call, since it means a wallet prompt.
+ * The wallet lives in memory only: reconnecting after a reload is the user's
+ * call, since it means a wallet prompt (or re-entering a seed).
  *
  * @param props - The subtree that can read the wallet.
  * @returns The provider wrapping that subtree.
@@ -120,67 +137,94 @@ interface MidnightWalletProviderProps {
 export function MidnightWalletProvider({ children }: MidnightWalletProviderProps): JSX.Element {
   const { config } = useMidnightChainConfig();
 
-  const [connected, setConnected] = useState<BrowserWallet | null>(null);
+  const [wallet, setWallet] = useState<Wallet | null>(null);
   const [connecting, setConnecting] = useState<boolean>(false);
 
-  // The in-flight connect, so concurrent calls share one prompt instead of
-  // building two wallets that each raise one. A ref, not state, so a second call
-  // in the same tick sees it: a state update would not land until the next
-  // render, which is exactly when the race happens.
-  const inFlightRef = useRef<{ walletKey: string; promise: Promise<BrowserWallet> } | null>(null);
+  // The in-flight connect, so concurrent calls share one attempt instead of
+  // building two wallets that each raise one. A ref, not state, so a second
+  // call in the same tick sees it: a state update would not land until the
+  // next render, which is exactly when the race happens. The target labels
+  // which wallet is being built, so a colliding call for a DIFFERENT wallet
+  // rejects rather than silently receiving the wrong one.
+  const inFlightRef = useRef<{ target: string; promise: Promise<Wallet> } | null>(null);
 
-  const connectBrowserWallet = useCallback(
-    (walletKey: string): Promise<BrowserWallet> => {
+  // Shared tail of both entry points: the busy guard, the in-flight bookkeeping,
+  // and swapping the built wallet in (disconnecting the one it replaces).
+  const establishWallet = useCallback(
+    (target: string, build: () => Promise<Wallet>): Promise<Wallet> => {
       const inFlight = inFlightRef.current;
       if (inFlight !== null) {
-        if (inFlight.walletKey !== walletKey) {
-          return Promise.reject(new MidnightWalletConnectBusyError(inFlight.walletKey, walletKey));
+        if (inFlight.target !== target) {
+          return Promise.reject(new MidnightWalletConnectBusyError(inFlight.target, target));
         }
         return inFlight.promise;
       }
-      if (connected !== null && connected.info.walletKey === walletKey) {
-        return Promise.resolve(connected);
-      }
 
-      // A fresh wallet per attempt, so a failed connect leaves nothing behind:
-      // the one that reaches `setConnected` is the one that came back on the
-      // app's network.
-      const wallet = new BrowserWallet(config, walletKey);
-      const promise = wallet
-        .connect()
-        .then(() => {
-          setConnected(wallet);
-          return wallet;
+      const promise = build()
+        .then((built) => {
+          setWallet((previous) => {
+            if (previous !== null && previous !== built) {
+              // Fire-and-forget: the replaced wallet's teardown failing leaves
+              // nothing the user could act on.
+              void previous.disconnect().catch(() => {});
+            }
+            return built;
+          });
+          return built;
         })
         .finally(() => {
           inFlightRef.current = null;
           setConnecting(false);
         });
 
-      inFlightRef.current = { walletKey, promise };
+      inFlightRef.current = { target, promise };
       setConnecting(true);
       return promise;
     },
-    [config, connected],
+    [],
   );
 
-  const disconnectBrowserWallet = useCallback((): void => {
-    setConnected((wallet) => {
-      wallet?.disconnect();
+  const connectBrowserWallet = useCallback(
+    (walletKey: string): Promise<Wallet> => {
+      if (wallet instanceof BrowserWallet && wallet.id === walletKey) {
+        return Promise.resolve(wallet);
+      }
+      // A fresh wallet per attempt, so a failed connect leaves nothing behind:
+      // the one that reaches the context is the one that came back on the
+      // app's network.
+      return establishWallet(`window.midnight.${walletKey}`, () =>
+        BrowserWallet.Connect(config, walletKey),
+      );
+    },
+    [config, wallet, establishWallet],
+  );
+
+  const installSeedWallet = useCallback(
+    (seed: string): Promise<Wallet> =>
+      establishWallet("the seed wallet", () => SeedWallet.Initialise(config, seed)),
+    [config, establishWallet],
+  );
+
+  const disconnect = useCallback((): void => {
+    setWallet((previous) => {
+      if (previous !== null) {
+        // Fire-and-forget, as above: a teardown failure is not actionable.
+        void previous.disconnect().catch(() => {});
+      }
       return null;
     });
   }, []);
 
   const value = useMemo<MidnightWalletContextValue>(
     () => ({
-      browserWallet: connected,
-      browserWalletKey: connected?.info.walletKey ?? null,
+      wallet,
       connecting,
       availableBrowserWallets: BrowserWallet.available,
       connectBrowserWallet,
-      disconnectBrowserWallet,
+      installSeedWallet,
+      disconnect,
     }),
-    [connected, connecting, connectBrowserWallet, disconnectBrowserWallet],
+    [wallet, connecting, connectBrowserWallet, installSeedWallet, disconnect],
   );
 
   return (
@@ -189,7 +233,7 @@ export function MidnightWalletProvider({ children }: MidnightWalletProviderProps
 }
 
 /**
- * Read the connected Midnight browser wallet.
+ * Read the app's Midnight wallet.
  *
  * @returns The wallet and the operations that change it.
  * @throws If called outside a {@link MidnightWalletProvider}, since there is no

@@ -1,15 +1,17 @@
-import { CheckCircle2Icon, CircleIcon, LoaderCircleIcon } from "lucide-react";
-import type { JSX } from "react";
+import { CheckCircle2Icon, CircleIcon, KeyRoundIcon, LoaderCircleIcon } from "lucide-react";
+import { useState, type JSX } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
 import type { WalletConnection } from "../hooks/useWalletConnections";
+import { SeedWalletDialog } from "./SeedWalletDialog";
 import { WalletMark } from "./WalletMark";
 
 /** Props of {@link ConnectWalletRow}. */
@@ -29,7 +31,18 @@ interface ConnectWalletRowProps {
  * @returns The row.
  */
 const ConnectWalletRow = ({ connection }: ConnectWalletRowProps): JSX.Element => {
-  const { chainName, connected, connecting, choices, refreshChoices, connect } = connection;
+  const { chainName, connected, connecting, choices, refreshChoices, connect, installFromSeed } =
+    connection;
+  const [seedDialogOpen, setSeedDialogOpen] = useState(false);
+
+  const seedDialog =
+    installFromSeed === undefined ? null : (
+      <SeedWalletDialog
+        open={seedDialogOpen}
+        onOpenChange={setSeedDialogOpen}
+        onInstall={installFromSeed}
+      />
+    );
 
   const tick =
     connected === null ? (
@@ -61,20 +74,42 @@ const ConnectWalletRow = ({ connection }: ConnectWalletRowProps): JSX.Element =>
     );
   }
 
-  // Nothing announced itself for this chain. Not a control: there is nothing to
-  // connect to until an extension is installed.
   if (choices.length === 0) {
+    // Nothing announced itself for this chain. Without a seed entry there is
+    // nothing to connect to until an extension is installed, so the row is a
+    // statement; with one, the seed IS the way in.
+    if (installFromSeed === undefined) {
+      return (
+        <div className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground">
+          <WalletMark iconUrl={undefined} muted />
+          <span className="min-w-0 truncate">No {chainName} wallet found</span>
+          {tick}
+        </div>
+      );
+    }
     return (
-      <div className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground">
-        <WalletMark iconUrl={undefined} muted />
-        <span className="min-w-0 truncate">No {chainName} wallet found</span>
-        {tick}
-      </div>
+      <>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start px-2 font-normal"
+          onClick={() => {
+            setSeedDialogOpen(true);
+          }}
+        >
+          <KeyRoundIcon className="size-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">Use a seed wallet ({chainName})</span>
+          {tick}
+        </Button>
+        {seedDialog}
+      </>
     );
   }
 
   // Exactly one wallet is the ordinary case, and it deserves one click rather
-  // than a menu of one.
+  // than a menu of one. The seed entry deliberately does not force a menu
+  // here: the step is forward motion and the extension is the primary path,
+  // while the header's wallet menu always carries the seed entry too.
   if (choices.length === 1) {
     const only = choices[0]!;
     return (
@@ -94,37 +129,53 @@ const ConnectWalletRow = ({ connection }: ConnectWalletRowProps): JSX.Element =>
   }
 
   return (
-    <DropdownMenu
-      onOpenChange={(open) => {
-        if (open) {
-          refreshChoices();
-        }
-      }}
-    >
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="w-full justify-start px-2 font-normal">
-          <WalletMark iconUrl={undefined} muted />
-          {/* No article before the chain: "a Midnight wallet" and "an EVM
-              wallet" disagree, and deriving the article from a chain name is a
-              trick waiting to be got wrong by the next chain. */}
-          <span className="min-w-0 truncate">Connect {chainName} wallet</span>
-          {tick}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
-        {choices.map((choice) => (
-          <DropdownMenuItem
-            key={choice.id}
-            onSelect={() => {
-              connect(choice.id);
-            }}
-          >
-            <WalletMark iconUrl={choice.iconUrl} />
-            Connect {choice.name}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (open) {
+            refreshChoices();
+          }
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" className="w-full justify-start px-2 font-normal">
+            <WalletMark iconUrl={undefined} muted />
+            {/* No article before the chain: "a Midnight wallet" and "an EVM
+                wallet" disagree, and deriving the article from a chain name is a
+                trick waiting to be got wrong by the next chain. */}
+            <span className="min-w-0 truncate">Connect {chainName} wallet</span>
+            {tick}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          {choices.map((choice) => (
+            <DropdownMenuItem
+              key={choice.id}
+              onSelect={() => {
+                connect(choice.id);
+              }}
+            >
+              <WalletMark iconUrl={choice.iconUrl} />
+              Connect {choice.name}
+            </DropdownMenuItem>
+          ))}
+          {installFromSeed === undefined ? null : (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => {
+                  setSeedDialogOpen(true);
+                }}
+              >
+                <KeyRoundIcon aria-hidden="true" />
+                Use a seed wallet
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {seedDialog}
+    </>
   );
 };
 

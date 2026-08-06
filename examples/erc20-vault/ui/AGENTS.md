@@ -27,6 +27,7 @@ src/
     WalletMark.tsx  # a wallet's own icon, rendered safely
     StepCard.tsx    # one selectable step of the flow, and the not-built-yet body
     ConnectWalletsStep.tsx  # step one's rows, one per chain
+    SeedWalletDialog.tsx    # the seed entry behind "Use a seed wallet"
     DepositAddressStep.tsx  # step two: card summary + view-area body
     InteractWithVaultStep.tsx # step three's view-area body: tracked assets + balances
     ThemeToggle.tsx # light / dark / system
@@ -43,6 +44,11 @@ src/
     theme.ts        # the theme choice, its storage, and how it is applied
     errorMessage.ts # describeError(): a rejection, made fit to render
     shortenAddress.ts # an EVM address, shortened but recognisable
+    midnight/wallet/  # the Midnight wallet abstraction
+      Wallet.ts       #   the interface everything outside the folder codes against
+      BrowserWallet.ts #  a Wallet over the dapp-connector extension API
+      SeedWallet.ts   #   a Wallet over the wallet-sdk facade, from a hex seed
+    polyfills/        # browser stand-ins for Node globals, aliased in vite.config.ts
   pages/            # one component per route
 tests/
   setup.ts          # jest-dom matchers, realm + store sandboxing, per-test cleanup

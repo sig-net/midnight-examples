@@ -81,6 +81,38 @@ describe("wallet connection failures", () => {
   });
 });
 
+describe("the seed wallet entry", () => {
+  it("offers a seed wallet with no extension installed, and reports a bad seed on a toast", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Midnight wallet: not connected" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Use a seed wallet" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Use a seed wallet" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Seed" }), "not-hex");
+    await user.click(within(dialog).getByRole("button", { name: "Install seed wallet" }));
+
+    // The parse rejection surfaces as a toast carrying the wallet's own
+    // words, and the control still reads as disconnected.
+    expect(await screen.findByText("Could not install the seed wallet")).toBeInTheDocument();
+    expect(await screen.findByText(/The seed must be hex/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Midnight wallet: not connected" }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no seed wallet for the EVM chain", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "EVM wallet: not connected" }));
+
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByText("Use a seed wallet")).not.toBeInTheDocument();
+  });
+});
+
 describe("theme control", () => {
   it("follows the system by default, and says so", async () => {
     const user = userEvent.setup();

@@ -1,5 +1,5 @@
-import { CheckIcon, LoaderCircleIcon } from "lucide-react";
-import type { JSX } from "react";
+import { CheckIcon, KeyRoundIcon, LoaderCircleIcon } from "lucide-react";
+import { useState, type JSX } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 import type { WalletConnection } from "../hooks/useWalletConnections";
+import { SeedWalletDialog } from "./SeedWalletDialog";
 import { WalletMark } from "./WalletMark";
 
 /** Props of {@link WalletMenu}. */
@@ -26,15 +27,27 @@ export interface WalletMenuProps {
  *
  * Presentational and chain-agnostic. Everything chain-shaped (which context to
  * read, how a failure is surfaced) lives in the hook behind `connection`, since
- * the two connector APIs agree on nothing but the concept.
+ * the two connector APIs agree on nothing but the concept. A chain that
+ * supports installing a wallet from a seed says so by setting
+ * `installFromSeed`, and the menu then offers the seed entry alongside the
+ * injected extensions.
  *
  * @param props - The chain's connection.
  * @returns The trigger and its menu.
  */
 export const WalletMenu = ({ connection }: WalletMenuProps): JSX.Element => {
-  const { chainName, connected, connecting, choices, refreshChoices, connect, disconnect } =
-    connection;
+  const {
+    chainName,
+    connected,
+    connecting,
+    choices,
+    refreshChoices,
+    connect,
+    installFromSeed,
+    disconnect,
+  } = connection;
   const isConnected = connected !== null;
+  const [seedDialogOpen, setSeedDialogOpen] = useState(false);
 
   // The whole state, in the accessible name. A screen reader gets what the
   // colour of the dot conveys to everyone else, and the tests have something
@@ -43,87 +56,113 @@ export const WalletMenu = ({ connection }: WalletMenuProps): JSX.Element => {
   const label = `${chainName} wallet: ${status}`;
 
   return (
-    <DropdownMenu
-      onOpenChange={(open) => {
-        if (open) {
-          refreshChoices();
-        }
-      }}
-    >
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={label}
-          title={label}
-          // Washed out until connected, full strength once it is.
-          className={isConnected ? undefined : "text-muted-foreground"}
-        >
-          {connecting ? (
-            <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
-          ) : (
-            <WalletMark iconUrl={connected?.iconUrl} muted={!isConnected} />
-          )}
-          {/* The chain, on the control itself. Two wallet glyphs side by side
-              are indistinguishable without it, and which chain is connected is
-              the entire question this control answers. It drops below `sm`,
-              where the accessible name and the tooltip still carry it. */}
-          <span className="hidden sm:inline">{chainName}</span>
-          <span
-            aria-hidden="true"
-            className={`size-1.5 shrink-0 rounded-full ${
-              isConnected ? "bg-emerald-500" : "bg-muted-foreground/50 ring-1 ring-border"
-            }`}
-          />
-        </Button>
-      </DropdownMenuTrigger>
+    <>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (open) {
+            refreshChoices();
+          }
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={label}
+            title={label}
+            // Washed out until connected, full strength once it is.
+            className={isConnected ? undefined : "text-muted-foreground"}
+          >
+            {connecting ? (
+              <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
+            ) : (
+              <WalletMark iconUrl={connected?.iconUrl} muted={!isConnected} />
+            )}
+            {/* The chain, on the control itself. Two wallet glyphs side by side
+                are indistinguishable without it, and which chain is connected is
+                the entire question this control answers. It drops below `sm`,
+                where the accessible name and the tooltip still carry it. */}
+            <span className="hidden sm:inline">{chainName}</span>
+            <span
+              aria-hidden="true"
+              className={`size-1.5 shrink-0 rounded-full ${
+                isConnected ? "bg-emerald-500" : "bg-muted-foreground/50 ring-1 ring-border"
+              }`}
+            />
+          </Button>
+        </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel>{chainName} wallet</DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        <DropdownMenuContent align="end" className="w-64">
+          <DropdownMenuLabel>{chainName} wallet</DropdownMenuLabel>
+          <DropdownMenuSeparator />
 
-        {connected === null ? (
-          choices.length === 0 ? (
-            <DropdownMenuItem disabled>No {chainName} wallet extension found</DropdownMenuItem>
+          {connected === null ? (
+            <>
+              {choices.length === 0 ? (
+                <DropdownMenuItem disabled>No {chainName} wallet extension found</DropdownMenuItem>
+              ) : (
+                choices.map((choice) => (
+                  <DropdownMenuItem
+                    key={choice.id}
+                    disabled={connecting}
+                    onSelect={() => {
+                      connect(choice.id);
+                    }}
+                  >
+                    <WalletMark iconUrl={choice.iconUrl} />
+                    Connect {choice.name}
+                  </DropdownMenuItem>
+                ))
+              )}
+              {installFromSeed === undefined ? null : (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={connecting}
+                    onSelect={() => {
+                      setSeedDialogOpen(true);
+                    }}
+                  >
+                    <KeyRoundIcon aria-hidden="true" />
+                    Use a seed wallet
+                  </DropdownMenuItem>
+                </>
+              )}
+            </>
           ) : (
-            choices.map((choice) => (
+            <>
+              <DropdownMenuItem disabled className="opacity-100">
+                <CheckIcon className="text-emerald-500" aria-hidden="true" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate">{connected.name}</span>
+                  {connected.detail === undefined ? null : (
+                    <span className="truncate font-mono text-xs text-muted-foreground">
+                      {connected.detail}
+                    </span>
+                  )}
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
-                key={choice.id}
-                disabled={connecting}
+                variant="destructive"
                 onSelect={() => {
-                  connect(choice.id);
+                  disconnect();
                 }}
               >
-                <WalletMark iconUrl={choice.iconUrl} />
-                Connect {choice.name}
+                Disconnect
               </DropdownMenuItem>
-            ))
-          )
-        ) : (
-          <>
-            <DropdownMenuItem disabled className="opacity-100">
-              <CheckIcon className="text-emerald-500" aria-hidden="true" />
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate">{connected.name}</span>
-                {connected.detail === undefined ? null : (
-                  <span className="truncate font-mono text-xs text-muted-foreground">
-                    {connected.detail}
-                  </span>
-                )}
-              </span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onSelect={() => {
-                disconnect();
-              }}
-            >
-              Disconnect
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {installFromSeed === undefined ? null : (
+        <SeedWalletDialog
+          open={seedDialogOpen}
+          onOpenChange={setSeedDialogOpen}
+          onInstall={installFromSeed}
+        />
+      )}
+    </>
   );
 };

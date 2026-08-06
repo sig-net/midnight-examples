@@ -33,7 +33,7 @@ export interface VaultEvmAddress {
  */
 export function useVaultEvmAddress(): VaultEvmAddress {
   const { config } = useMidnightChainConfig();
-  const { browserWallet } = useMidnightWallet();
+  const { wallet } = useMidnightWallet();
   const { identityStatus, readContractState } = useERC20Vault();
 
   // The read goes through the wallet's providers against the deployed
@@ -46,7 +46,7 @@ export function useVaultEvmAddress(): VaultEvmAddress {
     queryKey: [
       "vault-evm-address",
       config.networkId,
-      browserWallet === null ? null : browserWallet.info.walletKey,
+      wallet === null ? null : wallet.id,
     ],
     enabled: !noWallet && !notDeployed,
     // One indexer round trip: worth a second attempt, not worth the default's

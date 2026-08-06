@@ -25,7 +25,7 @@ const BALANCE_PANELS = [
   "EVM browser wallet",
   "Your deposit address",
   "Vault address",
-  "Midnight browser wallet",
+  "Midnight wallet",
 ] as const;
 
 /** A token address to track: valid, and answering nothing under test. */
@@ -136,7 +136,7 @@ describe("the vault interaction step", () => {
       await screen.findByRole("button", { name: /Connect Test Lace/ }),
     );
     const view = await openInteractView(user);
-    const panel = within(view).getByRole("region", { name: "Midnight browser wallet balances" });
+    const panel = within(view).getByRole("region", { name: "Midnight wallet balances" });
 
     // Every asset the connector reports: shielded, unshielded, and the dust
     // pair, in the wallet's own atomic units.

@@ -227,7 +227,7 @@ const BalancesPanel = ({
  */
 export const InteractWithVaultView = (): JSX.Element => {
   const { account } = useEVMWallet();
-  const { browserWallet } = useMidnightWallet();
+  const { wallet } = useMidnightWallet();
   const { identity } = useERC20Vault();
   const tracked = useTrackedTokens();
   const vaultEvmAddress = useVaultEvmAddress();
@@ -285,10 +285,10 @@ export const InteractWithVaultView = (): JSX.Element => {
       />
 
       <BalancesPanel
-        title="Midnight browser wallet"
+        title="Midnight wallet"
         address={null}
         unavailable={
-          browserWallet === null ? "Connect the Midnight wallet to read its balances." : null
+          wallet === null ? "Connect the Midnight wallet to read its balances." : null
         }
         balances={midnightBalances}
       />

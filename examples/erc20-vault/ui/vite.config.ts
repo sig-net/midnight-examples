@@ -64,6 +64,13 @@ export default defineConfig({
       // satisfies the real call sites.
       events: `${rootNodeModules}/events/events.js`,
       assert: normalizePath(new URL("./src/lib/polyfills/assert.ts", import.meta.url).pathname),
+      // The wallet-sdk packages need Buffer twice over: most reach for the
+      // bare global (satisfied by src/lib/polyfills/buffer.ts, imported by
+      // SeedWallet.ts), and wallet-sdk-capabilities' validation module
+      // imports the `buffer` builtin by name, which dev-mode pre-bundling
+      // stubs with a warning shim unless pinned here. Same npm polyfill
+      // serves both.
+      buffer: `${rootNodeModules}/buffer/index.js`,
     },
   },
   server: {
@@ -103,7 +110,12 @@ export default defineConfig({
     // were not reachable before, since nothing had yet read from the EVM
     // chain. viem's own lazy paths (ccip, the batch gateway, secp256k1) split
     // out into separate chunks and are not in this number.
-    chunkSizeWarningLimit: 1800,
+    // Raised again from 1800 when the in-app seed wallet arrived and put the
+    // entry chunk at ~2926 kB (~898 kB gzipped): the wallet-sdk facade and its
+    // shielded/unshielded/dust sub-wallets, the effect runtime they run on,
+    // and the indexer GraphQL client were not reachable before, since only
+    // the browser-extension connector had been.
+    chunkSizeWarningLimit: 3000,
     sourcemap: true,
   },
   test: {

@@ -54,6 +54,12 @@ export interface WalletConnection {
   readonly refreshChoices: () => void;
   /** Connect the wallet under `walletId`, reporting a failure on a toast. */
   readonly connect: (walletId: string) => void;
+  /**
+   * Install an in-app wallet from a pasted seed, reporting a failure on a
+   * toast. Present only for a chain that supports one (Midnight); the
+   * controls offer a seed entry exactly when this is set.
+   */
+  readonly installFromSeed?: (seed: string) => void;
   /** Disconnect and forget the wallet. */
   readonly disconnect: () => void;
 }
@@ -65,11 +71,12 @@ export interface WalletConnection {
  */
 export function useMidnightWalletConnection(): WalletConnection {
   const {
-    browserWallet,
+    wallet,
     connecting,
     availableBrowserWallets,
     connectBrowserWallet,
-    disconnectBrowserWallet,
+    installSeedWallet,
+    disconnect,
   } = useMidnightWallet();
 
   // Injected wallets are read on demand rather than subscribed to: extensions
@@ -79,10 +86,10 @@ export function useMidnightWalletConnection(): WalletConnection {
 
   const refreshChoices = useCallback((): void => {
     setInjected(
-      availableBrowserWallets().map((wallet) => ({
-        id: wallet.walletKey,
-        name: wallet.name,
-        iconUrl: wallet.icon,
+      availableBrowserWallets().map((injectedWallet) => ({
+        id: injectedWallet.walletKey,
+        name: injectedWallet.name,
+        iconUrl: injectedWallet.icon,
       })),
     );
   }, [availableBrowserWallets]);
@@ -104,24 +111,36 @@ export function useMidnightWalletConnection(): WalletConnection {
     [connectBrowserWallet],
   );
 
+  const installFromSeed = useCallback(
+    (seed: string): void => {
+      installSeedWallet(seed).catch((error: unknown) => {
+        toast.error("Could not install the seed wallet", {
+          description: describeError(error),
+        });
+      });
+    },
+    [installSeedWallet],
+  );
+
   return useMemo<WalletConnection>(
     () => ({
       chainName: "Midnight",
       connected:
-        browserWallet === null
+        wallet === null
           ? null
           : {
-              name: browserWallet.info.name,
-              iconUrl: browserWallet.info.icon,
+              name: wallet.name,
+              iconUrl: wallet.iconUrl,
               detail: undefined,
             },
       connecting,
       choices: injected,
       refreshChoices,
       connect,
-      disconnect: disconnectBrowserWallet,
+      installFromSeed,
+      disconnect,
     }),
-    [browserWallet, connecting, injected, refreshChoices, connect, disconnectBrowserWallet],
+    [wallet, connecting, injected, refreshChoices, connect, installFromSeed, disconnect],
   );
 }
 

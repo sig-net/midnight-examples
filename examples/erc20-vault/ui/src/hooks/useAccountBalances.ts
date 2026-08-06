@@ -198,23 +198,20 @@ export function useEvmAccountBalances(
  * @returns The balances and the state of the read.
  */
 export function useMidnightAccountBalances(): AccountBalances {
-  const { browserWallet } = useMidnightWallet();
+  const { wallet } = useMidnightWallet();
 
   const query = useQuery<readonly AssetBalance[]>({
-    queryKey: [
-      "midnight-account-balances",
-      browserWallet === null ? null : browserWallet.getCoinPublicKey(),
-    ],
-    enabled: browserWallet !== null,
+    queryKey: ["midnight-account-balances", wallet === null ? null : wallet.id],
+    enabled: wallet !== null,
     retry: 1,
     queryFn: async () => {
-      if (browserWallet === null) {
+      if (wallet === null) {
         throw new Error("Cannot read balances: no Midnight wallet is connected.");
       }
       const [shielded, unshielded, dust] = await Promise.all([
-        browserWallet.getShieldedBalances(),
-        browserWallet.getUnshieldedBalances(),
-        browserWallet.getDustBalance(),
+        wallet.getShieldedBalances(),
+        wallet.getUnshieldedBalances(),
+        wallet.getDustBalance(),
       ]);
       return [
         ...Object.entries(shielded).map(([tokenType, amount]) => ({
@@ -231,9 +228,12 @@ export function useMidnightAccountBalances(): AccountBalances {
         })),
         // Dust is neither: it is generated from the wallet's Night rather than
         // held as a token, so it comes with the ceiling that generation is
-        // working towards, and the two only mean anything together.
+        // working towards. A wallet that reports no cap gets no cap row: an
+        // invented ceiling would read as a balance that exists.
         { key: "dust", label: "Dust", detail: "spendable", amount: dust.balance.toString() },
-        { key: "dust-cap", label: "Dust", detail: "cap", amount: dust.cap.toString() },
+        ...(dust.cap === null
+          ? []
+          : [{ key: "dust-cap", label: "Dust", detail: "cap", amount: dust.cap.toString() }]),
       ];
     },
   });

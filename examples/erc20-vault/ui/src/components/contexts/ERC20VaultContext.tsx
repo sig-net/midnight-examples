@@ -15,7 +15,7 @@ import {
     type NetworkId,
 } from "@midnight-examples/chain-config";
 import { useMidnightWallet } from "./MidnightWalletContext";
-import { BrowserWallet } from "../../lib/midnight/MidnightBrowserWallet";
+import type { Wallet } from "../../lib/midnight/wallet/Wallet";
 import { describeError } from "../../lib/errorMessage";
 
 // Base path under which the compiled ZK assets (the contract's `keys/` and
@@ -63,7 +63,7 @@ const compiledContract = CompiledContract.make<ERC20VaultContract>(
 
 function buildProviders(
     config: MidnightNodeConfig,
-    wallet: BrowserWallet,
+    wallet: Wallet,
 ): ERC20VaultProviders {
     // fetchFunc must be explicitly bound: the SDK's default (cross-fetch)
     // resolves to window.fetch unbound and every request then throws
@@ -258,7 +258,7 @@ export enum CallerIdentityStatus {
  * @throws The connector's own `APIError` (`code: 'Rejected'`) when the user
  *   declines the signing prompt.
  */
-async function secretKeyOfWalletSignature(wallet: BrowserWallet): Promise<Uint8Array> {
+async function secretKeyOfWalletSignature(wallet: Wallet): Promise<Uint8Array> {
     const signature = await wallet.signData(IDENTITY_SIGNING_MESSAGE, {
         encoding: "text",
         keyType: "unshielded",
@@ -364,7 +364,7 @@ interface ERC20VaultContextProviderProps {
  */
 export function ERC20VaultContextProvider({ children }: ERC20VaultContextProviderProps): JSX.Element {
     const { config } = useMidnightChainConfig();
-    const { browserWallet } = useMidnightWallet();
+    const { wallet } = useMidnightWallet();
     const queryClient = useQueryClient();
 
     // Config.networkId is the SDK's bare string type, but its values always
@@ -372,8 +372,8 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
     const contractAddress = networkAddressIdx[config.networkId as NetworkId] || null;
 
     const providers = useMemo<ERC20VaultProviders | null>(
-        () => (browserWallet ? buildProviders(config, browserWallet) : null),
-        [config, browserWallet],
+        () => (wallet ? buildProviders(config, wallet) : null),
+        [config, wallet],
     );
 
     // Everything below is keyed by wallet + network + deployment: switching
@@ -382,10 +382,10 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
         () => [
             "erc20vault-identity",
             config.networkId,
-            browserWallet?.info.walletKey ?? null,
+            wallet?.id ?? null,
             contractAddress,
         ],
-        [config.networkId, browserWallet, contractAddress],
+        [config.networkId, wallet, contractAddress],
     );
 
     // The stored identity, read from the (wallet-scoped, encrypted) private
@@ -445,7 +445,7 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
 
     const generateMutation = useMutation<CallerIdentity>({
         mutationFn: async () => {
-            if (!(providers && contractAddress && browserWallet)) {
+            if (!(providers && contractAddress && wallet)) {
                 throw new Error(
                     "Cannot generate an identity: a connected Midnight wallet and a deployed network are required.",
                 );
@@ -459,7 +459,7 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
                     "An identity secret is already stored for this wallet: refusing to overwrite it.",
                 );
             }
-            const secretKey = await secretKeyOfWalletSignature(browserWallet);
+            const secretKey = await secretKeyOfWalletSignature(wallet);
             return persistIdentity(secretKey, contractAddress, providers);
         },
         onSuccess: publishFreshIdentity,
@@ -470,12 +470,12 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
     // tick box): this mutation trusts it has been collected.
     const regenerateMutation = useMutation<CallerIdentity>({
         mutationFn: async () => {
-            if (!(providers && contractAddress && browserWallet)) {
+            if (!(providers && contractAddress && wallet)) {
                 throw new Error(
                     "Cannot regenerate an identity: a connected Midnight wallet and a deployed network are required.",
                 );
             }
-            const secretKey = await secretKeyOfWalletSignature(browserWallet);
+            const secretKey = await secretKeyOfWalletSignature(wallet);
             // Storage keys are scoped `${contractAddress}:${privateStateId}`,
             // so the address must be set before any read or write.
             providers.privateStateProvider.setContractAddress(contractAddress);
@@ -492,7 +492,7 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
         queryKey: [
             "erc20vault-contract",
             config.networkId,
-            browserWallet?.info.walletKey ?? null,
+            wallet?.id ?? null,
             contractAddress,
         ],
         enabled: providers !== null && contractAddress !== null && identity !== null,
@@ -522,7 +522,7 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
     }, [providers, contractAddress]);
 
     const identityStatus: CallerIdentityStatus =
-        browserWallet === null
+        wallet === null
             ? CallerIdentityStatus.NoWallet
             : contractAddress === null
                 ? CallerIdentityStatus.NotDeployed

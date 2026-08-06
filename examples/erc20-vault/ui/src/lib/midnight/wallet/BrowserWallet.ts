@@ -1,5 +1,6 @@
-// BrowserWallet: a wallet backed by a connected browser-extension wallet
-// (e.g. Lace Midnight), via the dapp-connector API injected at `window.midnight`.
+// BrowserWallet: a {@link Wallet} backed by a connected browser-extension
+// wallet (e.g. Lace Midnight), via the dapp-connector API injected at
+// `window.midnight`.
 //
 // Importing `@midnight-ntwrk/dapp-connector-api` also pulls in its global
 // augmentation, so `window.midnight?.<key>` is typed as `InitialAPI`.
@@ -30,8 +31,10 @@ import type {
     Signature,
     SignDataOptions,
 } from "@midnight-ntwrk/dapp-connector-api";
-import type { MidnightProvider, UnboundTransaction, WalletProvider } from "@midnight-ntwrk/midnight-js/types";
+import type { UnboundTransaction } from "@midnight-ntwrk/midnight-js/types";
 import * as ledger from "@midnightntwrk/ledger-v9";
+
+import { WalletError, WalletKind, type DustBalance, type Wallet } from "./Wallet.ts";
 
 /**
  * An injected wallet's self-description (`rdns`, `name`, `icon`, `apiVersion`,
@@ -51,20 +54,10 @@ export type BrowserWalletInfo = Omit<InitialAPI, "connect"> & {
 };
 
 /**
- * Base of every error this module raises, so a caller can tell a wallet failure
- * from a bug in its own code with one `instanceof`.
- *
- * The connector's own failures are NOT of this kind and pass through untouched:
- * they are plain `Error`s tagged `type: 'DAppConnectorAPIError'` with a `code`
- * (`'Rejected'` when the user declines the prompt). They are not a class, so
- * they can only be recognised by that tag, never by `instanceof`.
+ * Base of every error this module raises, a {@link WalletError} so one
+ * `instanceof` catches failures from either wallet kind.
  */
-export class BrowserWalletError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = new.target.name;
-    }
-}
+export class BrowserWalletError extends WalletError {}
 
 /** Nothing is injected under the `window.midnight` key the wallet was built with. */
 export class BrowserWalletNotInjectedError extends BrowserWalletError {
@@ -116,7 +109,9 @@ interface Connected {
     shieldedAddresses: Awaited<ReturnType<ConnectedAPI["getShieldedAddresses"]>>;
 }
 
-export class BrowserWallet implements MidnightProvider, WalletProvider {
+export class BrowserWallet implements Wallet {
+    readonly kind = WalletKind.Browser;
+
     /** Connect to the injected wallet identified by `walletKey` in one call. */
     static async Connect(config: MidnightNodeConfig, walletKey: string): Promise<BrowserWallet> {
         const wallet = new BrowserWallet(config, walletKey);
@@ -167,7 +162,7 @@ export class BrowserWallet implements MidnightProvider, WalletProvider {
      * @param _tx The transaction to balance.
      * @param _ttl
      *
-     * NOTE: for MidnightProvider interface implementation.
+     * NOTE: for WalletProvider interface implementation.
      */
     balanceTx(_tx: UnboundTransaction, _ttl?: Date): Promise<ledger.FinalizedTransaction> {
         throw new Error("Method not implemented.");
@@ -265,7 +260,7 @@ export class BrowserWallet implements MidnightProvider, WalletProvider {
      * reference and nothing more: the extension still regards the site as
      * connected, and reconnecting may well not prompt the user again.
      */
-    disconnect(): void {
+    async disconnect(): Promise<void> {
         this.connected = undefined;
     }
 
@@ -280,6 +275,25 @@ export class BrowserWallet implements MidnightProvider, WalletProvider {
             throw new BrowserWalletNotConnectedError();
         }
         return this.connected;
+    }
+
+    /**
+     * The `window.midnight` key the wallet was connected through: stable per
+     * extension install, so reconnecting the same extension scopes to the
+     * same storage and queries.
+     */
+    get id(): string {
+        return this.requireConnected().info.walletKey;
+    }
+
+    /** The extension's own display name. */
+    get name(): string {
+        return this.requireConnected().info.name;
+    }
+
+    /** The extension's own icon, as a URL or data URL. */
+    get iconUrl(): string | undefined {
+        return this.requireConnected().info.icon;
     }
 
     /** The injected wallet's self-description (key, rdns, name, icon, version). */
@@ -310,7 +324,7 @@ export class BrowserWallet implements MidnightProvider, WalletProvider {
      * @returns The balances, empty when the wallet holds no shielded token.
      * @throws {BrowserWalletNotConnectedError} before {@link connect}.
      */
-    async getShieldedBalances(): ReturnType<ConnectedAPI["getShieldedBalances"]> {
+    async getShieldedBalances(): Promise<Record<string, bigint>> {
         return this.requireConnected().api.getShieldedBalances();
     }
 
@@ -322,20 +336,17 @@ export class BrowserWallet implements MidnightProvider, WalletProvider {
      * @returns The balances, empty when the wallet holds no unshielded token.
      * @throws {BrowserWalletNotConnectedError} before {@link connect}.
      */
-    async getUnshieldedBalances(): ReturnType<ConnectedAPI["getUnshieldedBalances"]> {
+    async getUnshieldedBalances(): Promise<Record<string, bigint>> {
         return this.requireConnected().api.getUnshieldedBalances();
     }
 
     /**
-     * The wallet's dust: what it can spend now, and the ceiling generation is
-     * working towards. Dust is generated from the wallet's Night rather than
-     * held as a token, so the balance moves on its own between two reads and
-     * only means anything beside its cap.
+     * The wallet's dust, with the cap the connector reports alongside it.
      *
      * @returns The spendable balance and the cap, in atomic units.
      * @throws {BrowserWalletNotConnectedError} before {@link connect}.
      */
-    async getDustBalance(): ReturnType<ConnectedAPI["getDustBalance"]> {
+    async getDustBalance(): Promise<DustBalance> {
         return this.requireConnected().api.getDustBalance();
     }
 
