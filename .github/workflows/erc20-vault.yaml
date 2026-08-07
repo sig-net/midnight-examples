@@ -49,8 +49,8 @@ jobs:
     secrets: inherit
     with:
       example-dir: erc20-vault
-      # PR/push gate: happy-day (deposit+withdraw) plus BOTH refund branches
-      # (withdraw-failure refund and swap-failure refund). The full five-spec
-      # suite stays opt-in via workflow_dispatch.
-      gate-spec: "tests/happy-day-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/swap-refund-e2e.test.ts"
+      # PR/push gate: happy-day (deposit+withdraw), the swap success path (exactOutput
+      # mints tokenOut + change), and BOTH refund branches (withdraw-failure and
+      # swap-failure). The full five-spec suite stays opt-in via workflow_dispatch.
+      gate-spec: "tests/happy-day-e2e.test.ts tests/swap-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/swap-refund-e2e.test.ts"
       full-suite: ${{ github.event_name == 'workflow_dispatch' && inputs.full-suite == true }}
