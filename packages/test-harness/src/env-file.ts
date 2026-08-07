@@ -29,11 +29,11 @@ export function loadRepoDotEnv(): Record<string, string> {
 
   const parsed: Record<string, string> = {};
   for (const line of text.split("\n")) {
-    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (!match || line.trimStart().startsWith("#")) {
+    const [, key, rawValue] =
+      /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line) ?? [];
+    if (key === undefined || rawValue === undefined || line.trimStart().startsWith("#")) {
       continue;
     }
-    const [, key, rawValue] = match;
     const value = rawValue.replace(/^(["'])(.*)\1$/, "$2");
     if (value !== "") {
       parsed[key] = value;

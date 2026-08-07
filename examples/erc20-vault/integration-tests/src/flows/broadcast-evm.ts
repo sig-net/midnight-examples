@@ -18,20 +18,35 @@ export interface BroadcastEvmOptions {
   readonly tolerateRevert?: boolean;
 }
 
+// A thrown value's `code`, when it actually carries one as a string. Narrows
+// from `unknown` rather than asserting a shape nothing checked.
+function errorCode(err: unknown): string | undefined {
+  if (typeof err === "object" && err !== null && "code" in err && typeof err.code === "string") {
+    return err.code;
+  }
+  return undefined;
+}
+
 /**
  * The "this exact tx was already submitted" family of node errors. Re-POSTing a
  * signed tx the node has already seen is a no-op on-chain (same nonce+signature
  * ⇒ same hash ⇒ one transaction), so these are safe to swallow and fall through
  * to waiting on the hash. Distinct from a *reverted* tx, which mines and gets a
  * receipt with `status: 0`.
+ *
+ * @param err - The value the broadcast attempt threw.
+ * @returns Whether the node is reporting this exact transaction as already seen.
  */
 function isAlreadySubmitted(err: unknown): boolean {
   // ethers surfaces "nonce too low" as NONCE_EXPIRED; "already known" /
   // "already imported" / "txpool is full"-style dupes come through as the raw
   // node message, so match on text too.
-  const code = (err as { code?: string })?.code;
-  if (code === "NONCE_EXPIRED") return true;
-  const message = ((err as { message?: string })?.message ?? "").toLowerCase();
+  if (errorCode(err) === "NONCE_EXPIRED") return true;
+  const rawMessage =
+    typeof err === "object" && err !== null && "message" in err && typeof err.message === "string"
+      ? err.message
+      : "";
+  const message = rawMessage.toLowerCase();
   return (
     message.includes("already known") ||
     message.includes("already imported") ||
@@ -60,7 +75,7 @@ function isAlreadySubmitted(err: unknown): boolean {
  * @param options - The transaction to broadcast.
  * @returns The mined transaction's receipt (its `hash` is the tx hash the
  *   fakenet traces the execution output from).
- * @throws Error when the transaction reverted on-chain, or its nonce was
+ * @throws {Error} When the transaction reverted on-chain, or its nonce was
  *   consumed by a different transaction (so it can never mine).
  */
 export async function broadcastEvm(
@@ -78,13 +93,13 @@ export async function broadcastEvm(
   }
 
   console.log(`evm rpc:   ${context.evmRpcUrl}`);
-  console.log(`tx hash:   ${hash} (nonce ${nonce})`);
+  console.log(`tx hash:   ${hash} (nonce ${String(nonce)})`);
 
   // 1. Already mined? A receipt exists whether the tx succeeded OR reverted —
   //    both consume the nonce, so there is nothing left to broadcast either way.
   const mined = await provider.getTransactionReceipt(hash);
   if (mined !== null) {
-    console.log(`already mined at block ${mined.blockNumber}`);
+    console.log(`already mined at block ${String(mined.blockNumber)}`);
     return assertMinedOk(mined, hash, tolerateRevert);
   }
 
@@ -110,7 +125,7 @@ export async function broadcastEvm(
       // does NOT resolve to null) — a confirmation slower than the window is
       // normal on a live chain, so treat it as "not yet" and fall through to
       // the burned-nonce check below, then keep waiting. Any other error is real.
-      if ((err as { code?: string })?.code !== "TIMEOUT") throw err;
+      if (errorCode(err) !== "TIMEOUT") throw err;
       receipt = null;
     }
     if (receipt !== null) {
@@ -128,11 +143,11 @@ export async function broadcastEvm(
         return assertMinedOk(latestReceipt, hash, tolerateRevert);
       }
       throw new Error(
-        `nonce ${nonce} for ${from} was consumed by a different transaction; ` +
+        `nonce ${String(nonce)} for ${from} was consumed by a different transaction; ` +
           `this signed tx (${hash}) can never mine`,
       );
     }
-    console.log(`still pending (account nonce ${latestNonce}) — waiting…`);
+    console.log(`still pending (account nonce ${String(latestNonce)}) — waiting…`);
   }
 }
 
@@ -141,10 +156,18 @@ export async function broadcastEvm(
  * reverted (nonce consumed, gas burned, state rolled back). Treat that as a
  * failure rather than silently returning the receipt of a reverted tx — unless
  * `tolerateRevert` (a swap, whose revert the refund path settles).
+ *
+ * @param receipt - The mined receipt to check.
+ * @param hash - The transaction hash, for the error message.
+ * @param tolerateRevert - When true, a reverted receipt is returned instead of throwing.
+ * @returns The same receipt, when the transaction succeeded (or `tolerateRevert`).
+ * @throws {Error} If the receipt reports `status: 0` and `tolerateRevert` is false.
  */
 function assertMinedOk(receipt: TransactionReceipt, hash: string, tolerateRevert: boolean): TransactionReceipt {
   if (receipt.status === 0 && !tolerateRevert) {
-    throw new Error(`transaction ${hash} reverted on-chain (mined in block ${receipt.blockNumber}, status 0)`);
+    throw new Error(
+      `transaction ${hash} reverted on-chain (mined in block ${String(receipt.blockNumber)}, status 0)`,
+    );
   }
   return receipt;
 }

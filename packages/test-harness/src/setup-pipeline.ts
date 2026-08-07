@@ -8,8 +8,10 @@
 // injected env). No `vitest` imports here — worker-only test APIs are
 // unavailable in the main process; the worker-side half is flow-hooks.ts.
 
-import type { TestProject } from "vitest/node";
 import "./provided-context.ts";
+
+import type { TestProject } from "vitest/node";
+
 import { buildBaseEnv } from "./e2e-env.ts";
 import { testHeader } from "./output.ts";
 import { waitForGo } from "./waitForGo.ts";
@@ -19,7 +21,10 @@ import { waitForGo } from "./waitForGo.ts";
  * STEP_THROUGH prompts show; the function mutates the shared env accumulator
  * (presence of a step's canonical env var doubles as its skip signal).
  */
-export type SetupStep = readonly [name: string, run: (env: NodeJS.ProcessEnv) => void | Promise<void>];
+export type SetupStep = readonly [
+  name: string,
+  run: (env: NodeJS.ProcessEnv) => void | Promise<void>,
+];
 
 /**
  * Run an example's setup pipeline: build the base env (repo-root `.env`
@@ -33,9 +38,12 @@ export type SetupStep = readonly [name: string, run: (env: NodeJS.ProcessEnv) =>
  *
  * @param project - The vitest project handed to globalSetup.
  * @param steps - The ordered setup steps to run.
- * @throws Whatever the first failing step throws (aborting the whole run).
+ * @throws {Error} Whatever the first failing step throws (aborting the whole run).
  */
-export async function runSetupPipeline(project: TestProject, steps: readonly SetupStep[]): Promise<void> {
+export async function runSetupPipeline(
+  project: TestProject,
+  steps: readonly SetupStep[],
+): Promise<void> {
   if (!process.env.RUN_INTEGRATION_TESTS) return;
 
   const env = buildBaseEnv();
@@ -56,7 +64,9 @@ export async function runSetupPipeline(project: TestProject, steps: readonly Set
   project.provide(
     "e2eEnv",
     Object.fromEntries(
-      Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      Object.entries(env).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
     ),
   );
 }

@@ -13,6 +13,9 @@ on:
       - "docker-compose.yaml"
       - "package.json"
       - "tsconfig.base.json"
+      - "eslint.config.js"
+      - ".prettierrc.json"
+      - ".prettierignore"
       - ".github/workflows/example-test.yaml"
       - ".github/workflows/erc20-vault.yaml"
   pull_request:
@@ -22,6 +25,9 @@ on:
       - "docker-compose.yaml"
       - "package.json"
       - "tsconfig.base.json"
+      - "eslint.config.js"
+      - ".prettierrc.json"
+      - ".prettierignore"
       - ".github/workflows/example-test.yaml"
       - ".github/workflows/erc20-vault.yaml"
   workflow_dispatch:

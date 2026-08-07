@@ -10,8 +10,6 @@
 // deploy: the key derives from the vault's own contract address, and the
 // initialize flow pins it on-chain.
 
-import type { TestProject } from "vitest/node";
-
 import {
   assertEnvironment,
   compileContractZk,
@@ -29,10 +27,11 @@ import {
   retryWhileDustGenerates,
   runCommand,
   runSetupPipeline,
-  startFakenetResponder,
   type SetupStep,
+  startFakenetResponder,
 } from "@midnight-examples/test-harness";
 import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
+import type { TestProject } from "vitest/node";
 
 import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
@@ -64,12 +63,15 @@ const PIPELINE_KEYS = [
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` and node config from it).
- * @throws If the deploy subprocess fails (after the dust-generation retries)
+ * @throws {Error} If the deploy subprocess fails (after the dust-generation retries)
  *   or its output carries no contract address.
  */
 async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.MIDNIGHT_VAULT_CONTRACT_ADDRESS) {
-    logSkip("deploy vault contract", `MIDNIGHT_VAULT_CONTRACT_ADDRESS is set (${env.MIDNIGHT_VAULT_CONTRACT_ADDRESS})`);
+    logSkip(
+      "deploy vault contract",
+      `MIDNIGHT_VAULT_CONTRACT_ADDRESS is set (${env.MIDNIGHT_VAULT_CONTRACT_ADDRESS})`,
+    );
     return;
   }
   // The deploy seals the DEPLOYER identity commitment into the contract and
@@ -80,7 +82,9 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   // secret unless the operator pinned it explicitly.
   if (!env.VAULT_DEPLOYER_SECRET_KEY) {
     env.VAULT_DEPLOYER_SECRET_KEY = bytesToHex(resolveUserIdentity(env).secretKey);
-    console.log("defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialize is deployer-gated)");
+    console.log(
+      "defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialize is deployer-gated)",
+    );
   }
   const contractAddress = await retryWhileDustGenerates("deploy vault contract", async () => {
     const stdout = await runCommand(
@@ -89,16 +93,20 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
       env,
       10 * MINUTE,
     );
-    const match = stdout.match(/deployed erc20-vault at (\S+)/);
-    if (!match) {
-      throw new Error("vault deploy succeeded but printed no `deployed erc20-vault at <address>` line");
+    const address = /deployed erc20-vault at (\S+)/.exec(stdout)?.[1];
+    if (address === undefined) {
+      throw new Error(
+        "vault deploy succeeded but printed no `deployed erc20-vault at <address>` line",
+      );
     }
-    return match[1];
+    return address;
   });
   env.MIDNIGHT_VAULT_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_VAULT_CONTRACT_ADDRESS=${contractAddress}`);
   console.log(` ➜ the vault contract on Midnight — holds deposits and authorizes withdrawals`);
-  console.log(` ➜ 💡 Set as MIDNIGHT_VAULT_CONTRACT_ADDRESS in the environment to skip compile + deploy on the next run`);
+  console.log(
+    ` ➜ 💡 Set as MIDNIGHT_VAULT_CONTRACT_ADDRESS in the environment to skip compile + deploy on the next run`,
+  );
 }
 
 /**
@@ -107,7 +115,7 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
  * deriving it when absent.
  *
  * @param env - The suite's env accumulator.
- * @throws If a preset `EVM_VAULT_ADDRESS` mismatches the derivation.
+ * @throws {Error} If a preset `EVM_VAULT_ADDRESS` mismatches the derivation.
  */
 function ensureVaultEvmAddress(env: NodeJS.ProcessEnv): void {
   const expectedAddress = deriveEvmAddress(
@@ -128,8 +136,12 @@ function ensureVaultEvmAddress(env: NodeJS.ProcessEnv): void {
   env.EVM_VAULT_ADDRESS = expectedAddress;
   console.log(`derived a fresh EVM_VAULT_ADDRESS=${expectedAddress}`);
   console.log(` ➜ the vault's own EVM account (path "vault")`);
-  console.log(` ➜ fund it with ETH for gas before running withdrawals (automatic on the local dev chain)`);
-  console.log(` ➜ 💡 Set as EVM_VAULT_ADDRESS in the environment to skip this step on the next run`);
+  console.log(
+    ` ➜ fund it with ETH for gas before running withdrawals (automatic on the local dev chain)`,
+  );
+  console.log(
+    ` ➜ 💡 Set as EVM_VAULT_ADDRESS in the environment to skip this step on the next run`,
+  );
 }
 
 /**
@@ -138,7 +150,7 @@ function ensureVaultEvmAddress(env: NodeJS.ProcessEnv): void {
  * commitment read as the MPC's path string), deriving it when absent.
  *
  * @param env - The suite's env accumulator.
- * @throws If a preset `EVM_USER_ADDRESS` mismatches the derivation.
+ * @throws {Error} If a preset `EVM_USER_ADDRESS` mismatches the derivation.
  */
 function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   const identity = resolveUserIdentity(env);
@@ -197,7 +209,7 @@ function ensureErc20Address(env: NodeJS.ProcessEnv): void {
   console.log(`defaulted ERC20_ADDRESS=${SEPOLIA_USDC} (real Sepolia USDC — the suites fork Sepolia)`);
 }
 
-/** Step names match what the operator greps for and what STEP_THROUGH prompts show. */
+// Step names match what the operator greps for and what STEP_THROUGH prompts show.
 const STEPS: readonly SetupStep[] = [
   [
     "environment: midnight stack reachable, compact on PATH, EVM_RPC_URL resolved",
@@ -227,12 +239,19 @@ const STEPS: readonly SetupStep[] = [
   ["setup: deploy vault contract", deployVaultContractStep],
   [
     "setup: check/derive MPC_RESPONSE_KEY for the vault contract",
-    (env) => ensureMpcResponseKey(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
+    (env) => {
+      ensureMpcResponseKey(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
+    },
   ],
   ["setup: check/derive vault EVM address", ensureVaultEvmAddress],
   ["setup: check/derive user EVM address", ensureUserEvmAddress],
   ["setup: deal derived EVM accounts on the Sepolia fork (ETH + real USDC)", dealForkEvmAccounts],
-  ["setup: print MPC server configuration", (env) => printMpcServerConfig(env, PIPELINE_KEYS)],
+  [
+    "setup: print MPC server configuration",
+    (env) => {
+      printMpcServerConfig(env, PIPELINE_KEYS);
+    },
+  ],
 ];
 
 /**
@@ -240,7 +259,7 @@ const STEPS: readonly SetupStep[] = [
  * provide the populated env accumulator to the flow-test workers.
  *
  * @param project - The vitest project handed to globalSetup.
- * @throws Whatever the first failing step throws (aborting the whole run).
+ * @throws {Error} Whatever the first failing step throws (aborting the whole run).
  */
 export async function setup(project: TestProject): Promise<void> {
   await runSetupPipeline(project, STEPS);
