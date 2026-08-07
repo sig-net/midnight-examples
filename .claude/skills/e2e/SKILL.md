@@ -48,16 +48,20 @@ launcher's channel refuses the rc version, use the installer + direct-download
 recipe in `.github/workflows/example-test.yaml` (the `Install / update the
 compact toolchain` step).
 
-No pre-existing `.env` is required: the setup pipeline creates it and appends
-the generated wallet seeds (root + the deployer/user/mpc responder/bearer
-roles, funded from root) and the fakenet hand-off values (`MPC_ROOT_KEY`,
-`MIDNIGHT_SIGNET_CONTRACT_ADDRESS`) plus prints a ready-to-paste block with
-everything else it deployed/derived. Appends are append-only — existing lines
-are never modified, and a value that conflicts with the shell environment is
-a hard error, not an overwrite. On the local EVM (the compose anvil,
-chain id 31337) a fresh DEPLOY runs green in ONE pass: funding of the derived
-accounts is automatic, TestUSDC is auto-deployed, and the setup starts the
-fakenet responder itself mid-run. The FLOW files are another matter: on a
+One value MUST be in `.env` before the stack comes up: `SEPOLIA_FORK_RPC_URL`
+(any Sepolia RPC). The compose anvil forks Sepolia from it so the real Uniswap V3
+deployment and real USDC are present — without it anvil is a bare chain and the
+suites fail dealing tokens. (`SEPOLIA_FORK_BLOCK` is optional — pin a block for
+determinism, needs an archive RPC.) Everything else the setup pipeline creates:
+it appends the generated wallet seeds (root + the deployer/user/mpc
+responder/bearer roles, funded from root) and the fakenet hand-off values
+(`MPC_ROOT_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`) plus prints a ready-to-paste
+block with everything else it deployed/derived. Appends are append-only —
+existing lines are never modified, and a value that conflicts with the shell
+environment is a hard error, not an overwrite. On the Sepolia-forked anvil
+(chain id 11155111) a fresh DEPLOY runs green in ONE pass: the derived accounts
+are dealt ETH + real USDC via anvil cheatcodes, and the setup starts the fakenet
+responder itself mid-run. The FLOW files are another matter: on a
 16 GB Docker VM expect the proof-server OOM (see "Reading failures") to
 interrupt the suite at some proving leg partway through the six files:
 that is routine, not a defect; recover per the playbook and the suite
@@ -87,7 +91,7 @@ kept contracts.
 
 ## Ground rules (violating these wastes 10+ minutes per mistake)
 
-- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all six
+- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all eight
   specs) or `yarn test:erc20-vault:e2e tests/<spec-file>` for one spec (the
   setup pipeline still runs first; extra args pass through to vitest).
 - **Background any run that may zk-compile or deploy** (fresh clone,
@@ -99,8 +103,9 @@ kept contracts.
   order: it stops at the first failure.
 - Expected per-spec test counts, in run order: `happy-day-e2e` **15**,
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
-  **6**, `benchmark` **13**, `false-claimer` **6**, `bearer-transfer` **11**
-  — 60 total.
+  **6**, `benchmark` **13**, `false-claimer` **6**, `bearer-transfer` **11**,
+  `swap-e2e` **1**, `swap-refund-e2e` **1** — 62 total (the two swap specs
+  self-skip if Uniswap is absent, e.g. an un-forked anvil).
 - **Wallets are role wallets funded from ROOT at setup.** The setup's
   wallet steps resolve/generate `ROOT_SEED` plus the role seeds
   (`DEPLOYER_SEED`, `USER_SEED`, `MPC_RESPONDER_SEED`, `BEARER_SEED`),

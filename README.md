@@ -57,8 +57,15 @@ The quickest way to get going with these examples is to get an end to end integr
                                 # to stable.
    yarn compile
    ```
-3. Start the local stack (Midnight node, indexer, proof server, anvil EVM) with `docker compose up -d`. The fakenet MPC responder is not part of this: its compose service sits behind the `fakenet` profile, and the test setup starts it itself mid-run once the hand-off values are in `.env`.
-4. Run the happy day test and watch it go. The first run can take **~20–25 minutes** (it generates zk proving keys, deploys every contract and funds the derived accounts, all automatically, no `.env` inserts needed):
+3. Fork Sepolia on the local EVM. The e2e suites use the **real** Sepolia Uniswap V3 deployment and real USDC (dealt to the derived accounts with anvil cheatcodes), so the anvil service must fork Sepolia. Copy the env template and set a Sepolia RPC:
+   ```sh
+   cp .env.example .env
+   # in .env, set:
+   #   SEPOLIA_FORK_RPC_URL=https://sepolia.infura.io/v3/<your-key>   # required — the EVM forks Sepolia
+   #   SEPOLIA_FORK_BLOCK=<block>                                     # optional — pin a block for determinism (needs an ARCHIVE RPC)
+   ```
+4. Start the local stack (Midnight node, indexer, proof server, anvil EVM forking Sepolia) with `docker compose up -d`. The fakenet MPC responder is not part of this: its compose service sits behind the `fakenet` profile, and the test setup starts it itself mid-run once the hand-off values are in `.env`.
+5. Run the happy day test and watch it go. The first run can take **~20–25 minutes** (it generates zk proving keys, deploys every contract and funds the derived accounts, all automatically — beyond `SEPOLIA_FORK_RPC_URL` no `.env` inserts are needed):
    ```sh
    yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
 
@@ -140,7 +147,7 @@ Prettier.
 The e2e suites need the running docker stack and the fakenet MPC responder: the [Quickstart](#quickstart) walks the first run end to end, and the [erc20-vault README](examples/erc20-vault/README.md) documents every spec in the suite. From the root:
 
 ```sh
-yarn test:erc20-vault:e2e                              # the full six-spec suite, requires 'yarn compile'
+yarn test:erc20-vault:e2e                              # the full eight-spec suite, requires 'yarn compile'
 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any tests/*.test.ts name works), requires 'yarn compile'
 ```
 
