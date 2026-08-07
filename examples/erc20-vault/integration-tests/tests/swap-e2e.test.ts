@@ -22,9 +22,10 @@ const EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
 const FEE = 500n;
 // exactOutput: receive EXACTLY AMOUNT_OUT of EURC, spending up to AMOUNT_IN_MAX of USDC. The
 // deposited coin IS the surrendered coin (the circuit burns amountInMaximum), so deposit the
-// cap. 3 EURC (~3.25 USD) costs well under 5 USDC, so the swap always leaves change to mint.
-const AMOUNT_IN_MAX = 5_000_000n; // 5 USDC deposited + slippage cap
-const AMOUNT_OUT = 3_000_000n; // 3 EURC exact receive
+// cap. The fork's USDC/EURC pool is thin and imbalanced (~4-5 USDC per EURC, not ~1:1), so keep
+// the output small and the cap generous — 1 EURC costs a few USDC, well under 20, leaving change.
+const AMOUNT_IN_MAX = 20_000_000n; // 20 USDC deposited + spend cap
+const AMOUNT_OUT = 1_000_000n; // 1 EURC exact receive
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () => {
   installFlowHooks();
