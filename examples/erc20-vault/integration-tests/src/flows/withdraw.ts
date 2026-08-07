@@ -6,12 +6,10 @@
 // circuit and asserted against the ledger map key before it is returned.
 
 import {
-  asciiPadded,
   calculateRequestId,
   evmAddressAbiWord,
   hexToBytes,
   numericAbiWord,
-  PATH_BYTES,
   type RequestIdHex,
   requestIdHex,
   type SignBidirectionalEvent,
@@ -28,7 +26,7 @@ import {
   ERC20_TRANSFER_SELECTOR,
   evmAddressBytes,
 } from "../evm-transfer.ts";
-import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
+import { VAULT_MPC_ROUTING, VAULT_PATH_BYTES } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
@@ -42,10 +40,6 @@ export interface WithdrawOptions {
   /** Nonce of the VAULT's derived EVM account (the withdraw tx sender). */
   readonly evmNonce: bigint;
 }
-
-// The MPC derivation path of the vault's own EVM account: mirrors the
-// contract-fixed in-circuit literal `pad(32, "vault")` in withdraw.
-const VAULT_PATH = asciiPadded("vault", PATH_BYTES);
 
 /**
  * Call the vault's `withdraw` circuit on the deployed contract and return
@@ -122,7 +116,7 @@ export async function withdraw(
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce,
     keyVersion,
-    path: VAULT_PATH,
+    path: VAULT_PATH_BYTES,
     ...VAULT_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
     caip2Id: before.caip2Id,

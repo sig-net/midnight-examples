@@ -35,6 +35,7 @@ import {
 import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
 import type { TestProject } from "vitest/node";
 
+import { VAULT_PATH_HEX } from "./mpc-routing.ts";
 import { deployTestUsdc } from "./test-usdc.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 
@@ -116,8 +117,8 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
 
 /**
  * Ensure `EVM_VAULT_ADDRESS` matches the vault's derived EVM account
- * (`MPC_SECP256K1_PUBKEY` + vault contract address, path `"vault"`),
- * deriving it when absent.
+ * (`MPC_SECP256K1_PUBKEY` + vault contract address, path = the hex rendering
+ * of the contract-fixed `pad(32, "vault")` bytes), deriving it when absent.
  *
  * @param env - The suite's env accumulator.
  * @throws {Error} If a preset `EVM_VAULT_ADDRESS` mismatches the derivation.
@@ -126,7 +127,7 @@ function ensureVaultEvmAddress(env: NodeJS.ProcessEnv): void {
   const expectedAddress = deriveEvmAddress(
     requireEnv(env, "MPC_SECP256K1_PUBKEY"),
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
-    "vault",
+    VAULT_PATH_HEX,
   );
   if (env.EVM_VAULT_ADDRESS) {
     console.log(`Found EVM_VAULT_ADDRESS in the environment as ${env.EVM_VAULT_ADDRESS}`);
@@ -151,8 +152,8 @@ function ensureVaultEvmAddress(env: NodeJS.ProcessEnv): void {
 
 /**
  * Ensure `EVM_USER_ADDRESS` matches the user's derived EVM account
- * (`MPC_SECP256K1_PUBKEY` + vault contract address, path = the user identity
- * commitment read as the MPC's path string), deriving it when absent.
+ * (`MPC_SECP256K1_PUBKEY` + vault contract address, path = the hex rendering
+ * of the user's identity commitment), deriving it when absent.
  *
  * @param env - The suite's env accumulator.
  * @throws {Error} If a preset `EVM_USER_ADDRESS` mismatches the derivation.
@@ -162,7 +163,7 @@ function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   const expectedAddress = deriveEvmAddress(
     requireEnv(env, "MPC_SECP256K1_PUBKEY"),
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
-    identity.pathString,
+    identity.commitmentHex,
   );
   if (env.EVM_USER_ADDRESS) {
     console.log(`Found EVM_USER_ADDRESS in the environment as ${env.EVM_USER_ADDRESS}`);
