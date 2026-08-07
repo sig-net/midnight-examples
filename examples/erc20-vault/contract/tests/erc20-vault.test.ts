@@ -1344,10 +1344,12 @@ describe("claim settle", () => {
 
 // ============================ Swap (Uniswap V3) =============================
 
-const EXACT_INPUT_SINGLE_SELECTOR = new Uint8Array([0x04, 0xe4, 0x5a, 0xaf]);
+const EXACT_OUTPUT_SINGLE_SELECTOR = new Uint8Array([0x50, 0x23, 0xb4, 0xdf]);
 const APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
 const MAX_APPROVE = 340282366920938463463374607431768211455n; // 2^128-1
-const SWAP_SCHEMA = asciiPadded('[{"name":"amountOut","type":"uint256"}]', 39);
+// exactOutputSingle returns amountIn: the MPC decodes it as uint256, re-packs it as uint64.
+const SWAP_OUTPUT_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint256"}]', 38);
+const SWAP_RESPOND_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint64"}]', 37);
 
 // A second ERC20 (tokenOut) with its own vault-token color.
 const ERC20_OUT = bytes(20, 0xbb);
@@ -1355,7 +1357,9 @@ const VAULT_TOKEN_COLOR_OUT = hexToBytes(
   rawTokenType(pureCircuits.vaultTokenDomainSeparator(ERC20_OUT), VAULT_ADDRESS),
 );
 const FEE = 500n;
-const AMOUNT_OUT_MIN = 990_000n;
+const SWAP_AMOUNT_OUT = 995_000n; // exact tokenOut received
+const SWAP_AMOUNT_IN_MAX = AMOUNT; // spend cap = the surrendered coin
+const SWAP_AMOUNT_IN_SPENT = 990_000n; // attested input actually spent (<= the cap)
 
 interface SwapCallArgs {
   evmNonce: bigint;
@@ -1364,8 +1368,8 @@ interface SwapCallArgs {
     tokenIn: Uint8Array;
     tokenOut: Uint8Array;
     fee: bigint;
-    amountIn: bigint;
-    amountOutMin: bigint;
+    amountOut: bigint;
+    amountInMaximum: bigint;
   };
   coin: ReturnType<typeof vaultCoin>;
 }
@@ -1373,8 +1377,14 @@ interface SwapCallArgs {
 const VALID_SWAP: SwapCallArgs = {
   evmNonce: 0n,
   keyVersion: 1n,
-  swap: { tokenIn: ERC20, tokenOut: ERC20_OUT, fee: FEE, amountIn: AMOUNT, amountOutMin: AMOUNT_OUT_MIN },
-  coin: vaultCoin(AMOUNT),
+  swap: {
+    tokenIn: ERC20,
+    tokenOut: ERC20_OUT,
+    fee: FEE,
+    amountOut: SWAP_AMOUNT_OUT,
+    amountInMaximum: SWAP_AMOUNT_IN_MAX,
+  },
+  coin: vaultCoin(SWAP_AMOUNT_IN_MAX),
 };
 
 const swap = (
@@ -1383,17 +1393,19 @@ const swap = (
   args: SwapCallArgs,
 ) => contract.circuits.swap(ctx, args.evmNonce, args.keyVersion, args.swap, args.coin);
 
-// A successful swap's attested output: the amountOut as the MPC serializes it —
-// Midnight-native little-endian (low byte first), the twin of serializeRespondOutput,
-// NOT the big-endian ABI word. completeSwap reads it little-endian.
-const swapOutput = (amountOut: bigint): Uint8Array => {
-  const b = new Uint8Array(32);
-  let v = amountOut;
-  for (let i = 0; i < 32 && v > 0n; i++) { b[i] = Number(v & 0xffn); v >>= 8n; }
+// A successful swap's attested output: the amountIn spent as the MPC serializes it — a
+// Midnight-native little-endian uint64 (8 bytes), the twin of serializeRespondOutput.
+// completeSwap native-deserializes it.
+const swapOutput = (amountIn: bigint): Uint8Array => {
+  const b = new Uint8Array(8);
+  let v = amountIn;
+  for (let i = 0; i < 8 && v > 0n; i++) {
+    b[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
   return b;
 };
-const AMOUNT_OUT = 995_000n;
-const OUTPUT_SWAP = swapOutput(AMOUNT_OUT);
+const OUTPUT_SWAP = swapOutput(SWAP_AMOUNT_IN_SPENT);
 
 describe("approveRouter", () => {
   it("records an approve(router, ~unlimited) on field 0 from the vault path, no coin", async () => {
@@ -1419,16 +1431,23 @@ describe("approveRouter", () => {
 
   it("is permissionless (a stranger may ready a token) and needs initialize", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).rejects.toThrow(/Not initialized/);
+    await expect(contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).rejects.toThrow(
+      /Not initialized/,
+    );
     const ready = await deployInitialized();
     await expect(
-      ready.contract.circuits.approveRouter(await strangerContext("approveRouter", ready.ctx), ERC20, 0n, 1n),
+      ready.contract.circuits.approveRouter(
+        await strangerContext("approveRouter", ready.ctx),
+        ERC20,
+        0n,
+        1n,
+      ),
     ).resolves.toBeDefined();
   });
 });
 
 describe("swap round-trip", () => {
-  it("burns tokenIn and stores a vault-path exactInputSingle event on field 11", async () => {
+  it("burns tokenIn and stores a vault-path exactOutputSingle event on field 11", async () => {
     const { contract, ctx } = await deployInitialized();
     const { context: next } = await swap(contract, ctx, VALID_SWAP);
     const state = ledger(next.callContext.currentQueryContext.state);
@@ -1455,33 +1474,33 @@ describe("swap round-trip", () => {
       accessListEntryCount: 0n,
       accessList: [],
     });
-    expect(record.outputDeserializationSchema).toEqual(SWAP_SCHEMA);
-    expect(record.respondSerializationSchema).toEqual(SWAP_SCHEMA);
+    expect(record.outputDeserializationSchema).toEqual(SWAP_OUTPUT_SCHEMA);
+    expect(record.respondSerializationSchema).toEqual(SWAP_RESPOND_SCHEMA);
 
-    // exactInputSingle((tokenIn, tokenOut, fee, recipient=vault, amountIn, amountOutMin, 0)).
+    // exactOutputSingle((tokenIn, tokenOut, fee, recipient=vault, amountOut, amountInMaximum, 0)).
     expect(calldata.is_some).toBe(true);
-    expect(calldata.value.selector).toEqual(EXACT_INPUT_SINGLE_SELECTOR);
+    expect(calldata.value.selector).toEqual(EXACT_OUTPUT_SINGLE_SELECTOR);
     expect(calldata.value.noWords).toBe(7n);
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(ERC20));
     expect(calldata.value.words[1]).toEqual(evmAddressAbiWord(ERC20_OUT));
     expect(calldata.value.words[2]).toEqual(numericAbiWord(FEE));
     expect(calldata.value.words[3]).toEqual(evmAddressAbiWord(VAULT_EVM));
-    expect(calldata.value.words[4]).toEqual(numericAbiWord(AMOUNT));
-    expect(calldata.value.words[5]).toEqual(numericAbiWord(AMOUNT_OUT_MIN));
+    expect(calldata.value.words[4]).toEqual(numericAbiWord(SWAP_AMOUNT_OUT));
+    expect(calldata.value.words[5]).toEqual(numericAbiWord(SWAP_AMOUNT_IN_MAX));
     expect(calldata.value.words[6]).toEqual(numericAbiWord(0n));
 
     // Pending-swap marker pinned.
     expect(state.swapRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
   });
 
-  it("rejects a coin that is not the tokenIn vault color or not amountIn", async () => {
+  it("rejects a coin that is not the tokenIn vault color or not amountInMaximum", async () => {
     const { contract, ctx } = await deployInitialized();
     await expect(
       swap(contract, ctx, { ...VALID_SWAP, coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR_OUT) }),
     ).rejects.toThrow(/Coin is not the vault token for tokenIn/);
     await expect(
-      swap(contract, ctx, { ...VALID_SWAP, coin: vaultCoin(AMOUNT + 1n) }),
-    ).rejects.toThrow(/Coin value must equal amountIn/);
+      swap(contract, ctx, { ...VALID_SWAP, coin: vaultCoin(SWAP_AMOUNT_IN_MAX + 1n) }),
+    ).rejects.toThrow(/Coin value must equal amountInMaximum/);
   });
 });
 
@@ -1498,7 +1517,7 @@ const swapRequested = async () => {
 };
 
 describe("completeSwap settle", () => {
-  it("verifies the amountOut attestation, mints tokenOut, and cleans up (swapper-gated)", async () => {
+  it("verifies the amountIn attestation, mints tokenOut + change, and cleans up (swapper-gated)", async () => {
     const { contract, ctx, requestId } = await swapRequested();
     const next = (
       await contract.circuits.completeSwap(
@@ -1530,10 +1549,22 @@ describe("completeSwap settle", () => {
   it("rejects an attestation signed by the wrong key, and presented bytes that differ", async () => {
     const { contract, ctx, requestId } = await swapRequested();
     await expect(
-      contract.circuits.completeSwap(ctx, requestId, respond(IMPOSTER_SECRET, requestId, OUTPUT_SWAP), OUTPUT_SWAP, MINT_NONCE),
+      contract.circuits.completeSwap(
+        ctx,
+        requestId,
+        respond(IMPOSTER_SECRET, requestId, OUTPUT_SWAP),
+        OUTPUT_SWAP,
+        MINT_NONCE,
+      ),
     ).rejects.toThrow(/Invalid attestation signature/);
     await expect(
-      contract.circuits.completeSwap(ctx, requestId, respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP), swapOutput(1n), MINT_NONCE),
+      contract.circuits.completeSwap(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        swapOutput(1n),
+        MINT_NONCE,
+      ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
 });
