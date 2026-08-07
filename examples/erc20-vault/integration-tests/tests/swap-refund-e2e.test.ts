@@ -7,7 +7,7 @@ import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
 import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { uniswapAvailable } from "../src/evm-swap.ts";
+import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit.ts";
 import { initialize } from "../src/flows/initialize.ts";
 import { runSwapRoundTrip } from "../src/flows/swap.ts";
@@ -20,11 +20,10 @@ const session = createVaultSession(env);
 
 const EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
 const FEE = 500n;
-// exactOutput refund: request 3 EURC (~3.25 USDC to buy) but cap the spend at only 1 USDC. The
-// deposited coin IS the surrendered cap, so deposit 1 USDC. On-chain the real cost exceeds the
-// cap, so exactOutputSingle reverts ("Too much requested") and the swap must refund.
-const AMOUNT_IN_MAX = 1_000_000n; // 1 USDC deposited + surrendered cap
-const AMOUNT_OUT = 3_000_000n; // 3 EURC (costs far more than the 1 USDC cap)
+// exactOutput refund: request AMOUNT_OUT but cap the spend BELOW its real cost, so the router
+// reverts ("Too much requested") and the swap must refund. The cost is arbitrary on the fork's
+// thin pool, so derive the cap from a LIVE quote (half the quoted input) rather than hardcode.
+const AMOUNT_OUT = 3_000_000n; // 3 EURC exact receive
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e", () => {
   installFlowHooks();
@@ -53,9 +52,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
         });
       }
 
-      // Deposit funds the vault with tokenIn + gives the caller a shielded tokenIn coin of
-      // exactly AMOUNT_IN_MAX (the coin the swap surrenders).
-      await runDepositRoundTrip(session, { amount: AMOUNT_IN_MAX });
+      // Cap the spend at HALF the live quote — guaranteed under the real cost, so the swap
+      // reverts. The deposited coin IS the surrendered cap, so deposit exactly it.
+      const { amountIn: quotedIn } = await quoteExactOutputSingle(
+        context.evmRpcUrl,
+        context.erc20Address,
+        EURC,
+        FEE,
+        AMOUNT_OUT,
+      );
+      const cap = quotedIn / 2n;
+      await runDepositRoundTrip(session, { amount: cap });
 
       // The caller's own shielded tokenIn balance (the owner can read it, though it is not
       // publicly observable): the swap burns the surrendered coin, and a successful refund
@@ -64,14 +71,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
       const readBalance = async () =>
         (await (await session.wallet()).facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
       const balanceBefore = await readBalance();
-      expect(balanceBefore).toBeGreaterThanOrEqual(AMOUNT_IN_MAX);
+      expect(balanceBefore).toBeGreaterThanOrEqual(cap);
 
-      // amountInMaximum below the real cost -> exactOutputSingle reverts -> the settle re-mints tokenIn.
+      // amountInMaximum (the cap) below the real cost -> exactOutputSingle reverts -> the settle re-mints tokenIn.
       const result = await runSwapRoundTrip(session, {
         tokenOut: EURC,
         fee: FEE,
         amountOut: AMOUNT_OUT,
-        amountInMaximum: AMOUNT_IN_MAX,
+        amountInMaximum: cap,
       });
       if (!result)
         throw new Error("swap unexpectedly skipped (router availability already checked)");
