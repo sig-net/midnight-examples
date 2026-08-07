@@ -99,12 +99,13 @@ export ledger refundCommitment: Map<RequestId, Bytes<32>>;
 // malicious client can never point the pooled funds at a fake router. Field index 10.
 export ledger uniswapRouter: Bytes<20>;
 
-// Swap requests. exactInputSingle is 7 calldata words with a uint256 (amountOut) result,
-// so this is a SEPARATE map from signBidirectionalEventMap (field 0, sized for a 2-word
-// transfer): the calldata width is part of the ledger type. This is ledger FIELD 11 (see
-// the field-0 note on how positions are counted; sealed fields count). Swap's notification
-// names this position, so like field 0 it must never move after the first deploy.
-export ledger swapEventMap: SignBidirectionalEventMap<EvmType2TxParams<7, 0, 0>, 39, 39>;
+// Swap requests. exactOutputSingle is 7 calldata words with a uint256 (amountIn) result the
+// MPC repacks to uint64, so this is a SEPARATE map from signBidirectionalEventMap (field 0,
+// sized for a 2-word transfer): the calldata width and schema widths are part of the ledger
+// type. This is ledger FIELD 11 (see the field-0 note on how positions are counted; sealed
+// fields count). Swap's notification names this position, so like field 0 it must never move
+// after the first deploy.
+export ledger swapEventMap: SignBidirectionalEventMap<EvmType2TxParams<7, 0, 0>, 38, 37>;
 
 // Pending-swap marker + swapper refund gate, mirroring refundCommitment for withdrawals
 // (kept separate so a swap requestId can never be settled through a withdraw circuit).
@@ -133,11 +134,23 @@ struct VaultResponse {
   success: Boolean;
 }
 
-// The result schema of Uniswap's exactInputSingle: a single uint256 amountOut. Exact
-// width: 39 bytes. The MPC decodes the swap's return against it and serialises the packed
-// amountOut (32 bytes) into the attestation completeSwap verifies.
-pure circuit swapResponseSchema(): Bytes<39> {
-  return "[{\"name\":\"amountOut\",\"type\":\"uint256\"}]" as Bytes<39>;
+// exactOutputSingle returns amountIn (the input actually spent, <= amountInMaximum). Two
+// schemas, unlike the symmetric transfer case: the MPC DECODES the swap's uint256 return
+// against outputSchema, then RESERIALISES it packed as a uint64 (respondSchema) into the
+// attestation completeSwap verifies. Bounding to uint64 off-chain lets completeSwap native-
+// deserialize an 8-byte output straight into the struct below. Exact widths: 38 and 37.
+pure circuit swapOutputSchema(): Bytes<38> {
+  return "[{\"name\":\"amountIn\",\"type\":\"uint256\"}]" as Bytes<38>;
+}
+pure circuit swapRespondSchema(): Bytes<37> {
+  return "[{\"name\":\"amountIn\",\"type\":\"uint64\"}]" as Bytes<37>;
+}
+
+// The decoded form of swapRespondSchema()'s output: the uint64 amountIn the swap spent,
+// packed by the MPC to this struct's exact serialized width (8 bytes). completeSwap unpacks
+// the attested bytes back into it with the stdlib deserialize, the inverse of that packing.
+struct ExactOutputSingleReturnValue {
+  amountIn: Uint<64>;
 }
 
 // ---- Token model --------------------------------------------------------------------
@@ -640,7 +653,7 @@ export circuit refund(
     refundSurrenderedValue(disclosedRequestId, signatureRequest, mintNonce);
     refundCommitment.remove(disclosedRequestId);
   } else {
-    // Swap refund: swapper-only, re-minting the surrendered amountIn of tokenIn.
+    // Swap refund: swapper-only, re-minting the surrendered amountInMaximum of tokenIn.
     assert(swapRefundCommitment.member(disclosedRequestId), "Request not found");
     const signatureRequest = swapEventMap.lookup(disclosedRequestId);
     swapEventMap.remove(disclosedRequestId);
@@ -651,13 +664,14 @@ export circuit refund(
     );
     swapRefundCommitment.remove(disclosedRequestId);
 
-    // Re-mint amountIn (calldata word 4) of tokenIn (word 0, low 20 bytes) to the swapper.
+    // Re-mint the full surrendered amountInMaximum (calldata word 5) of tokenIn (word 0, low
+    // 20 bytes) to the swapper — the swap never executed, so nothing was spent.
     assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
-    const amountIn = abiWordToUint128(signatureRequest.txParams.calldata.value.words[4]);
+    const amountInMaximum = abiWordToUint128(signatureRequest.txParams.calldata.value.words[5]);
     const tokenIn = slice<20>(signatureRequest.txParams.calldata.value.words[0], 12);
     const domainSep = vaultTokenDomainSeparator(tokenIn);
     const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-    mintShieldedToken(domainSep, amountIn as Uint<64>, disclose(mintNonce), recipient);
+    mintShieldedToken(domainSep, amountInMaximum as Uint<64>, disclose(mintNonce), recipient);
   }
 }
 
@@ -743,20 +757,25 @@ export circuit approveRouter(
 // The vault-specific arguments of a swap. The surrendered coin (tokenIn value) is a
 // separate coin-typed parameter, as in withdraw.
 struct SwapRequest {
-  tokenIn: Bytes<20>;       // ERC20 sold (its vault coin is surrendered)
-  tokenOut: Bytes<20>;      // ERC20 bought (its vault coin is minted on success)
-  fee: Uint<24>;            // Uniswap V3 pool fee tier (e.g. 500, 3000)
-  amountIn: Uint<128>;      // exact input amount
-  amountOutMin: Uint<128>;  // on-chain slippage floor (router reverts below it)
+  tokenIn: Bytes<20>;          // ERC20 sold (its vault coin is surrendered)
+  tokenOut: Bytes<20>;         // ERC20 bought (its vault coin is minted on success)
+  fee: Uint<24>;               // Uniswap V3 pool fee tier (e.g. 500, 3000)
+  amountOut: Uint<128>;        // exact output amount to receive
+  amountInMaximum: Uint<128>;  // max input to spend (slippage cap; router reverts above it)
 }
 
-// Starts a swap, optimistically (like withdraw): the caller surrenders `amountIn` of the
-// tokenIn vault coin, and the vault records exactInputSingle on the pinned router, to be
-// signed with the VAULT's account and broadcast off-chain. The router pulls tokenIn from
-// the vault (via the approveRouter allowance) and sends tokenOut BACK to the vault
-// (recipient is contract-pinned), keeping pool balance == shielded supply per token. On
-// success completeSwap mints the attested amountOut of tokenOut; on EVM failure refund
-// re-mints the surrendered tokenIn. The coin spend IS the authorisation.
+// Starts a swap, optimistically (like withdraw): the caller surrenders `amountInMaximum` of
+// the tokenIn vault coin, and the vault records exactOutputSingle on the pinned router, to be
+// signed with the VAULT's account and broadcast off-chain. The router pulls only the tokens
+// it actually spends from the vault (via the approveRouter allowance) and sends exactly
+// `amountOut` of tokenOut BACK to the vault (recipient is contract-pinned), keeping pool
+// balance == shielded supply per token. On success completeSwap mints `amountOut` of tokenOut
+// plus the unspent tokenIn as change; on EVM failure refund re-mints the surrendered
+// amountInMaximum. The coin spend IS the authorisation.
+//
+// exactOutput (not exactInput) so the MINT amount is known up front: amountOut is an input,
+// asserted to fit the Uint<64> mint API BEFORE anything is burned. Under exactInput the mint
+// amount is the swap's result, and an oversized result would strand the already-burned coin.
 export circuit swap(
   evmNonce: Uint<64>,
   keyVersion: Uint<8>,
@@ -766,31 +785,36 @@ export circuit swap(
   assert(initialized >= 1, "Not initialized");
   assert(swapRequest.tokenIn as Field != 0 as Field, "tokenIn cannot be zero");
   assert(swapRequest.tokenOut as Field != 0 as Field, "tokenOut cannot be zero");
-  assert(swapRequest.amountIn > 0 as Uint<128>, "amountIn must be positive");
-  // A refund re-mints via the Uint<64> mint API; reject unrefundable inputs.
-  assert(swapRequest.amountIn <= 18446744073709551615 as Uint<128>, "amountIn exceeds Uint<64> max");
+  assert(swapRequest.amountOut > 0 as Uint<128>, "amountOut must be positive");
+  assert(swapRequest.amountInMaximum > 0 as Uint<128>, "amountInMaximum must be positive");
+  // Both are minted via the Uint<64> mint API (amountOut of tokenOut on success; amountInMaximum
+  // of tokenIn on refund; the unspent remainder of amountInMaximum as change), so bound both to
+  // Uint<64> here, BEFORE the burn. The unspent change is <= amountInMaximum, so it fits too.
+  assert(swapRequest.amountOut <= 18446744073709551615 as Uint<128>, "amountOut exceeds Uint<64> max");
+  assert(swapRequest.amountInMaximum <= 18446744073709551615 as Uint<128>, "amountInMaximum exceeds Uint<64> max");
 
-  // The surrendered coin must be the vault token for tokenIn, of exactly amountIn.
+  // The surrendered coin must be the vault token for tokenIn, of exactly amountInMaximum (the
+  // worst-case spend; completeSwap returns the unspent remainder as change).
   const color = tokenType(
     vaultTokenDomainSeparator(disclose(swapRequest.tokenIn)),
     kernel.self()
   );
   assert(coin.color == color, "Coin is not the vault token for tokenIn");
-  assert(coin.value == swapRequest.amountIn, "Coin value must equal amountIn");
+  assert(coin.value == swapRequest.amountInMaximum, "Coin value must equal amountInMaximum");
 
-  // exactInputSingle((tokenIn, tokenOut, fee, recipient=vault, amountIn, amountOutMin, 0)).
-  // recipient is the vault EVM address so bought tokens return to the pool; sqrtPriceLimit
-  // is 0 (no price bound); slippage is enforced on-chain by amountOutMin (revert->refund).
+  // exactOutputSingle((tokenIn, tokenOut, fee, recipient=vault, amountOut, amountInMaximum, 0)).
+  // recipient is the vault EVM address so bought tokens return to the pool; sqrtPriceLimit is
+  // 0 (no price bound); slippage is enforced on-chain by amountInMaximum (revert->refund).
   const calldata = EvmCalldata<7> {
-    selector: Bytes [0x04, 0xe4, 0x5a, 0xaf], // exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))
+    selector: Bytes [0x50, 0x23, 0xb4, 0xdf], // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))
     noWords: 7 as Uint<16>,
     words: [
       evmAddressAbiWord(disclose(swapRequest.tokenIn)),
       evmAddressAbiWord(disclose(swapRequest.tokenOut)),
       numericAbiWord(swapRequest.fee as Uint<128>),
       evmAddressAbiWord(vaultEvmAddress),
-      numericAbiWord(swapRequest.amountIn),
-      numericAbiWord(swapRequest.amountOutMin),
+      numericAbiWord(swapRequest.amountOut),
+      numericAbiWord(swapRequest.amountInMaximum),
       numericAbiWord(0 as Uint<128>),
     ]
   };
@@ -810,9 +834,8 @@ export circuit swap(
   };
 
   const path = pad(32, "vault");
-  const schema = swapResponseSchema();
   const requestNonce = signetRequestNonce as Uint<64>;
-  const request = constructSignBidirectionalEvent<EvmType2TxParams<7, 0, 0>, 39, 39>(
+  const request = constructSignBidirectionalEvent<EvmType2TxParams<7, 0, 0>, 38, 37>(
     kernel.self(),
     requestNonce,
     keyVersion,
@@ -823,10 +846,10 @@ export circuit swap(
     TxParamType.evmType2,
     txParams,
     caip2Id,
-    schema,
-    schema
+    swapOutputSchema(),
+    swapRespondSchema()
   );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<7, 0, 0>, 39, 39>(request));
+  const requestId = disclose(calculateRequestId<EvmType2TxParams<7, 0, 0>, 38, 37>(request));
   assert(!swapEventMap.member(requestId), "Request already exists");
 
   // Burn the surrendered tokenIn value (see withdraw): received, never recorded.
@@ -848,16 +871,16 @@ export circuit swap(
 }
 
 // ---- Swap: completeSwap -------------------------------------------------------------
-// Settles a SUCCESSFUL swap: exactInputSingle either returns amountOut (>= amountOutMin,
-// the router enforces the floor) or reverts, so a Bytes<32> attested output means success
-// and carries the packed uint256 amountOut. Mints that amountOut of the tokenOut vault
-// coin to the swapper. Swapper-gated (it mints a private coin), one settle per request.
-// A swap whose transaction never executed settles through refund: the MPC's fixed
-// 5-byte failure output cannot type-fit this circuit's Bytes<32>.
+// Settles a SUCCESSFUL swap: exactOutputSingle either returns amountIn (the input spent, the
+// router enforces amountIn <= amountInMaximum) or reverts, so an 8-byte attested output means
+// success and carries the uint64 amountIn. Mints the exact amountOut of tokenOut (a request
+// input, not the result) to the swapper, plus the unspent tokenIn as change. Swapper-gated
+// (it mints private coins), one settle per request. A swap whose transaction never executed
+// settles through refund: the MPC's fixed 5-byte failure output cannot type-fit Bytes<8>.
 export circuit completeSwap(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
-  serializedOutput: Bytes<32>,
+  serializedOutput: Bytes<8>,
   mintNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
@@ -867,7 +890,7 @@ export circuit completeSwap(
   // Same authentication gate as claim/completeWithdraw: recomputed output hashes to the
   // attested digest, and the in-circuit ECDSA verifies against the pinned response key.
   assert(
-    verifyRespondBidirectionalEvent<32>(
+    verifyRespondBidirectionalEvent<8>(
       disclosedRequestId,
       serializedOutput,
       disclose(respondBidirectionalEvent),
@@ -882,7 +905,7 @@ export circuit completeSwap(
   const signatureRequest = swapEventMap.lookup(disclosedRequestId);
   swapEventMap.remove(disclosedRequestId);
 
-  // Swapper gate: minting tokenOut to the swapper, so prove the swap-time commitment.
+  // Swapper gate: minting to the swapper, so prove the swap-time commitment.
   assert(
     withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
       == swapRefundCommitment.lookup(disclosedRequestId),
@@ -890,20 +913,24 @@ export circuit completeSwap(
   );
   swapRefundCommitment.remove(disclosedRequestId);
 
-  // Mint the attested amountOut of the tokenOut vault coin. amountOut is the packed uint256
-  // output (an ABI word); tokenOut is calldata word 1, its low 20 bytes the address. The
-  // output is a circuit argument (witness), and a mint amount is public ledger state, so
-  // disclose it — safe, as the swap's amountOut is already public (attested EVM result).
-  // The attested amountOut is MIDNIGHT-NATIVE serialized: little-endian (low byte first),
-  // unlike the big-endian ABI CALLDATA words abiWordToUint128 reads. Read the low 16 bytes
-  // LE (Bytes as Field is little-endian) and require the high 16 bytes zero — the same
-  // Uint<128> overflow guard abiWordToUint128 makes, mirrored for the little-endian output.
-  assert(slice<16>(serializedOutput, 16) as Field == 0 as Field, "amountOut exceeds Uint<128>");
-  const amountOut = disclose(slice<16>(serializedOutput, 0) as Field as Uint<128>);
-  assert(amountOut <= 18446744073709551615 as Uint<128>, "amountOut exceeds Uint<64> max");
   assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
-  const tokenOut = slice<20>(signatureRequest.txParams.calldata.value.words[1], 12);
-  const domainSep = vaultTokenDomainSeparator(tokenOut);
   const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-  mintShieldedToken(domainSep, amountOut as Uint<64>, disclose(mintNonce), recipient);
+
+  // Mint the EXACT amountOut of tokenOut the swap requested — calldata word 4 (amountOut) of
+  // tokenOut (word 1, low 20 bytes). amountOut was bounded to Uint<64> in swap, before the
+  // burn, so this never strands the surrendered coin.
+  const amountOut = abiWordToUint128(signatureRequest.txParams.calldata.value.words[4]);
+  const tokenOut = slice<20>(signatureRequest.txParams.calldata.value.words[1], 12);
+  mintShieldedToken(vaultTokenDomainSeparator(tokenOut), amountOut as Uint<64>, disclose(mintNonce), recipient);
+
+  // Return the unspent tokenIn as change: amountInMaximum (word 5) - amountIn spent (the
+  // attested result, native-deserialized). tokenIn is word 0. amountInMaximum was bounded to
+  // Uint<64>, so change (<= amountInMaximum) fits the mint API. Change is 0 on an exact spend;
+  // that mints a 0-value coin, harmless. A distinct nonce keeps the two coins unlinkable.
+  const amountIn = disclose(deserialize<ExactOutputSingleReturnValue, 8>(serializedOutput).amountIn);
+  const amountInMaximum = abiWordToUint128(signatureRequest.txParams.calldata.value.words[5]);
+  const change = amountInMaximum - (amountIn as Uint<128>);
+  const tokenIn = slice<20>(signatureRequest.txParams.calldata.value.words[0], 12);
+  const changeNonce = persistentHash<Vector<2, Bytes<32>>>([disclose(mintNonce), pad(32, "change")]);
+  mintShieldedToken(vaultTokenDomainSeparator(tokenIn), change as Uint<64>, changeNonce, recipient);
 }
