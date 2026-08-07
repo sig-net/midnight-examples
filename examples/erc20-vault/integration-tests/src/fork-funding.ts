@@ -2,10 +2,10 @@
 // mint (fundLocalEvmAccounts + TestUSDC) now that every suite runs against a Sepolia fork,
 // where the ERC20 is the real, unmintable USDC. USDC is sourced by impersonating a pool that
 // holds a large balance (anvil cheatcodes) — the same trick swap-e2e used inline.
+import { type ContractWriteMethod, requireEnv } from "@midnight-examples/test-harness";
 import { ethers } from "ethers";
-import { requireEnv } from "@midnight-examples/test-harness";
 
-// Real Sepolia USDC + a pool holding a large USDC balance (also the swap suite's tokenIn source).
+/** Real Sepolia USDC (the swap suite's tokenIn) — also present on a Sepolia fork. */
 export const SEPOLIA_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const USDC_WHALE = "0x68adf381b8f9e9e100bb6e13d50b14094e3b6a9d"; // USDC/EURC pool, holds USDC on the fork
 const ONE_ETH = "0xDE0B6B3A7640000";
@@ -18,14 +18,28 @@ const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
 ];
 
-/** Deal ETH (+ optional USDC) to `to` on the fork: anvil setBalance + an impersonated whale transfer. */
-export async function dealFork(provider: ethers.JsonRpcProvider, to: string, usdc: bigint): Promise<void> {
+/**
+ * Deal ETH (+ optional USDC) to `to` on the fork: anvil setBalance + an impersonated whale transfer.
+ *
+ * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
+ * @param to - The recipient address.
+ * @param usdc - USDC base units to deal (0 deals only ETH).
+ */
+export async function dealFork(
+  provider: ethers.JsonRpcProvider,
+  to: string,
+  usdc: bigint,
+): Promise<void> {
   await provider.send("anvil_setBalance", [to, ONE_ETH]);
   if (usdc > 0n) {
     await provider.send("anvil_setBalance", [USDC_WHALE, ONE_ETH]);
     await provider.send("anvil_impersonateAccount", [USDC_WHALE]);
-    const token = new ethers.Contract(SEPOLIA_USDC, ERC20_ABI, await provider.getSigner(USDC_WHALE));
-    await (await token.transfer(to, usdc)).wait();
+    const token = new ethers.Contract(
+      SEPOLIA_USDC,
+      ERC20_ABI,
+      await provider.getSigner(USDC_WHALE),
+    );
+    await (await token.getFunction<ContractWriteMethod>("transfer")(to, usdc)).wait();
     await provider.send("anvil_stopImpersonatingAccount", [USDC_WHALE]);
   }
 }
@@ -35,7 +49,8 @@ export async function dealFork(provider: ethers.JsonRpcProvider, to: string, usd
  * USDC (the deposit source); the vault gets ETH (withdraw/approve/swap gas — deposits fund its
  * USDC). Requires EVM_RPC_URL to point at a Sepolia fork exposing anvil_* cheatcodes.
  *
- * @throws If the anvil cheatcalls fail (the EVM is not a cheatcode-capable fork).
+ * @param env - The suite's env accumulator (reads EVM_RPC_URL, EVM_USER_ADDRESS, EVM_VAULT_ADDRESS).
+ * @throws {Error} If the anvil cheatcalls fail (the EVM is not a cheatcode-capable fork).
  */
 export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void> {
   const rpcUrl = requireEnv(env, "EVM_RPC_URL");

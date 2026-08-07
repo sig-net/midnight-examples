@@ -5,33 +5,32 @@
 // amountInMaximum. Mirrors the withdraw flow, with a swap-schema (uint64 amountIn spent)
 // attestation. Runs only where Uniswap is deployed (Sepolia / the pinned Sepolia fork);
 // logSkip elsewhere.
+import { VAULT_SWAP_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
+import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
 import {
+  asciiPadded,
+  calculateRequestId,
+  deserializeEvmOutput,
   evmAddressAbiWord,
   hexToBytes,
-  numericAbiWord,
-  requestIdBytes,
-  requestIdHex,
-  stripHexPrefix,
-  asciiPadded,
-  PATH_BYTES,
-  SIGNET_DEFAULT_KEY_VERSION,
-  TxParamType,
-  calculateRequestId,
-  verifyRespondBidirectionalSignature,
-  deserializeEvmOutput,
-  serializeRespondOutput,
-  toSignBidirectionalEventIndex,
   MPC_FAILURE_OUTPUT,
-  type SignBidirectionalEvent,
+  numericAbiWord,
+  PATH_BYTES,
+  requestIdBytes,
   type RequestIdHex,
+  requestIdHex,
+  serializeRespondOutput,
+  type SignBidirectionalEvent,
+  SIGNET_DEFAULT_KEY_VERSION,
+  stripHexPrefix,
+  toSignBidirectionalEventIndex,
+  TxParamType,
+  verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
 
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
-import { VAULT_SWAP_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-
-import { evmAddressBytes } from "../evm-transfer.ts";
 import {
   EXACT_OUTPUT_SINGLE_SELECTOR,
+  quoteExactOutputSingle,
   SWAP_GAS_LIMIT,
   SWAP_MAX_FEE_PER_GAS,
   SWAP_MAX_PRIORITY_FEE_PER_GAS,
@@ -39,17 +38,17 @@ import {
   SWAP_OUTPUT_SCHEMA,
   SWAP_RESPOND_SCHEMA,
   UNISWAP_SWAP_ROUTER_02,
-  quoteExactOutputSingle,
   uniswapAvailable,
 } from "../evm-swap.ts";
-import { createResponseReader, type VaultContext } from "../vault-context.ts";
+import { evmAddressBytes } from "../evm-transfer.ts";
 import { fetchFakenetResponse } from "../fakenet-responses.ts";
+import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
-import { vaultTokenType } from "../vault-token.ts";
 import type { VaultSession } from "../vault-session.ts";
+import { vaultTokenType } from "../vault-token.ts";
+import { ensureRouterApproved } from "./approve.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
-import { ensureRouterApproved } from "./approve.ts";
 
 const MINUTE = 60_000;
 const VAULT_PATH = asciiPadded("vault", PATH_BYTES);
@@ -63,12 +62,22 @@ export interface SwapOptions {
   readonly evmNonce: bigint;
 }
 
-/** Record the swap request (exactOutputSingle) and return its id. tokenIn = context.erc20Address. */
+/**
+ * Record the swap request (exactOutputSingle) and return its id. tokenIn = context.erc20Address.
+ *
+ * @param context - The flow context.
+ * @param options - The swap parameters (tokenOut, fee, amountOut, amountInMaximum, evmNonce).
+ * @returns The recorded swap request id.
+ */
 export async function swap(context: VaultContext, options: SwapOptions): Promise<RequestIdHex> {
   const tokenIn = evmAddressBytes(context.erc20Address);
   const tokenOut = evmAddressBytes(options.tokenOut);
-  const before = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-  if (!before.initialized) throw new Error("vault is not initialized, run the initialize flow first");
+  const before = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+  if (!before.initialized)
+    throw new Error("vault is not initialized, run the initialize flow first");
 
   // Surrender the tokenIn vault coin of exactly amountInMaximum (burned; completeSwap returns
   // the unspent remainder as change).
@@ -121,12 +130,21 @@ export async function swap(context: VaultContext, options: SwapOptions): Promise
   const result = await context.vault.callTx.swap(
     options.evmNonce,
     SIGNET_DEFAULT_KEY_VERSION,
-    { tokenIn, tokenOut, fee: options.fee, amountOut: options.amountOut, amountInMaximum: options.amountInMaximum },
+    {
+      tokenIn,
+      tokenOut,
+      fee: options.fee,
+      amountOut: options.amountOut,
+      amountInMaximum: options.amountInMaximum,
+    },
     coin,
   );
   console.log(`swap finalized in tx ${result.public.txId}`);
 
-  const after = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+  const after = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
   if (!toSignBidirectionalEventIndex(after.swapEventMap).has(expectedIdHex)) {
     throw new Error(`recomputed swap request id ${expectedIdHex} not found on the swap ledger map`);
   }
@@ -151,22 +169,33 @@ type SignetReader = ReturnType<typeof createResponseReader>;
  * protocol's fixed 5-byte output. The signature-only event carries no digest, so a candidate
  * is selected only when a posted event's ECDSA signature verifies over it against the
  * vault-pinned response key. Returns undefined until a matching attestation posts.
+ *
+ * @param context - The flow context.
+ * @param requestId - The swap request id to resolve.
+ * @returns The resolved outcome (attested amountIn spent, or the failure output), or undefined.
  */
-async function fetchSwapOutcome(context: VaultContext, requestId: RequestIdHex): Promise<SwapOutcome | undefined> {
+async function fetchSwapOutcome(
+  context: VaultContext,
+  requestId: RequestIdHex,
+): Promise<SwapOutcome | undefined> {
   const reader = createResponseReader(context, VAULT_SWAP_REQUESTS_PATH);
   const events = await reader.getRespondBidirectionalEvents(requestId);
   if (events.length === 0) return undefined;
 
-  const { mpcResponseKey } = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+  const { mpcResponseKey } = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
 
   const cached = await fetchFakenetResponse(requestId, 3_000).catch(() => undefined);
-  const candidates: { serializedOutput: Uint8Array; amountIn: bigint; isFailureOutput: boolean }[] = [];
+  const candidates: { serializedOutput: Uint8Array; amountIn: bigint; isFailureOutput: boolean }[] =
+    [];
   if (cached?.success && cached.output != null) {
     try {
       const decoded = deserializeEvmOutput(SWAP_OUTPUT_SCHEMA, cached.output);
       candidates.push({
         serializedOutput: serializeRespondOutput(SWAP_RESPOND_SCHEMA, decoded),
-        amountIn: BigInt((decoded as { amountIn: bigint }).amountIn),
+        amountIn: (decoded as { amountIn: bigint }).amountIn,
         isFailureOutput: false,
       });
     } catch {
@@ -177,17 +206,36 @@ async function fetchSwapOutcome(context: VaultContext, requestId: RequestIdHex):
 
   for (const c of candidates) {
     const event = events.find((posted) =>
-      verifyRespondBidirectionalSignature(requestIdBytes(requestId), c.serializedOutput, posted, mpcResponseKey),
+      verifyRespondBidirectionalSignature(
+        requestIdBytes(requestId),
+        c.serializedOutput,
+        posted,
+        mpcResponseKey,
+      ),
     );
     if (event) {
-      return { event, serializedOutput: c.serializedOutput, amountIn: c.amountIn, matchedFailureOutput: c.isFailureOutput };
+      return {
+        event,
+        serializedOutput: c.serializedOutput,
+        amountIn: c.amountIn,
+        matchedFailureOutput: c.isFailureOutput,
+      };
     }
   }
   return undefined;
 }
 
-/** Poll until the swap outcome resolves, then settle via completeSwap / refund. */
-export async function completeSwap(context: VaultContext, requestId: RequestIdHex): Promise<{ amountIn: bigint; refunded: boolean }> {
+/**
+ * Poll until the swap outcome resolves, then settle via completeSwap / refund.
+ *
+ * @param context - The flow context.
+ * @param requestId - The swap request id to settle.
+ * @returns The attested amountIn spent (0 on refund) and whether the swap was refunded.
+ */
+export async function completeSwap(
+  context: VaultContext,
+  requestId: RequestIdHex,
+): Promise<{ amountIn: bigint; refunded: boolean }> {
   const end = Date.now() + 6 * MINUTE;
   let outcome: SwapOutcome | undefined;
   while (Date.now() < end && (outcome = await fetchSwapOutcome(context, requestId)) === undefined) {
@@ -198,12 +246,24 @@ export async function completeSwap(context: VaultContext, requestId: RequestIdHe
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
   if (outcome.matchedFailureOutput) {
     console.log("swap tx never executed: refunding tokenIn to this wallet");
-    const r = await context.vault.callTx.refund(requestIdBytes(requestId), outcome.event, outcome.serializedOutput, mintNonce);
+    const r = await context.vault.callTx.refund(
+      requestIdBytes(requestId),
+      outcome.event,
+      outcome.serializedOutput,
+      mintNonce,
+    );
     console.log(`refund settled in tx ${r.public.txId}`);
     return { amountIn: 0n, refunded: true };
   }
-  const r = await context.vault.callTx.completeSwap(requestIdBytes(requestId), outcome.event, outcome.serializedOutput, mintNonce);
-  console.log(`completeSwap settled in tx ${r.public.txId} (spent ${outcome.amountIn} tokenIn)`);
+  const r = await context.vault.callTx.completeSwap(
+    requestIdBytes(requestId),
+    outcome.event,
+    outcome.serializedOutput,
+    mintNonce,
+  );
+  console.log(
+    `completeSwap settled in tx ${r.public.txId} (spent ${String(outcome.amountIn)} tokenIn)`,
+  );
   return { amountIn: outcome.amountIn, refunded: false };
 }
 
@@ -225,32 +285,60 @@ export interface SwapRoundTripOptions {
  * the unspent tokenIn as change). Gated on Uniswap being deployed on the EVM chain; logSkip
  * otherwise. Requires the caller to already HOLD amountInMaximum of the tokenIn vault coin
  * (run a deposit first). Returns amountOut (minted) and amountIn (the attested spend).
+ *
+ * @param session - The vault session.
+ * @param opts - Swap parameters (tokenOut, fee, exact amountOut, optional slippage/cap override).
+ * @returns The request id, amountOut minted, amountIn spent, and refund flag — or undefined when skipped.
  */
 export async function runSwapRoundTrip(
   session: VaultSession,
   opts: SwapRoundTripOptions,
-): Promise<{ requestId: RequestIdHex; amountOut: bigint; amountIn: bigint; refunded: boolean } | undefined> {
+): Promise<
+  { requestId: RequestIdHex; amountOut: bigint; amountIn: bigint; refunded: boolean } | undefined
+> {
   const context = await session.vaultContext();
   if (!(await uniswapAvailable(context.evmRpcUrl))) {
-    logSkip("swap", "Uniswap router not deployed on this EVM chain (needs Sepolia or a Sepolia fork)");
+    logSkip(
+      "swap",
+      "Uniswap router not deployed on this EVM chain (needs Sepolia or a Sepolia fork)",
+    );
     return undefined;
   }
 
   await ensureRouterApproved(session);
 
   const { amountIn: quoted, amountInMaximum: quotedMax } = await quoteExactOutputSingle(
-    context.evmRpcUrl, context.erc20Address, opts.tokenOut, opts.fee, opts.amountOut, opts.slippageBps ?? 100n,
+    context.evmRpcUrl,
+    context.erc20Address,
+    opts.tokenOut,
+    opts.fee,
+    opts.amountOut,
+    opts.slippageBps ?? 100n,
   );
   const amountInMaximum = opts.amountInMaximum ?? quotedMax;
-  console.log(`quote: ~${quoted} ${context.erc20Address} -> ${opts.amountOut} ${opts.tokenOut} (max ${amountInMaximum})`);
+  console.log(
+    `quote: ~${String(quoted)} ${context.erc20Address} -> ${String(opts.amountOut)} ${opts.tokenOut} (max ${String(amountInMaximum)})`,
+  );
 
   const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await swap(context, { tokenOut: opts.tokenOut, fee: opts.fee, amountOut: opts.amountOut, amountInMaximum, evmNonce });
+  const requestId = await swap(context, {
+    tokenOut: opts.tokenOut,
+    fee: opts.fee,
+    amountOut: opts.amountOut,
+    amountInMaximum,
+    evmNonce,
+  });
 
   // The swap tx is signed by the VAULT's account (it holds the pooled funds). tolerateRevert:
   // an on-chain revert (slippage / liquidity / an impossible amountInMaximum) is a valid outcome
   // the MPC attests as a failure and completeSwap settles via refund — not a broadcast error.
-  const signed = await pollSignatureResponse(context, { requestId, intervalMs: 1000, timeoutMs: 3 * MINUTE, expectedSigner: context.evmVaultAddress, requestsPath: VAULT_SWAP_REQUESTS_PATH });
+  const signed = await pollSignatureResponse(context, {
+    requestId,
+    intervalMs: 1000,
+    timeoutMs: 3 * MINUTE,
+    expectedSigner: context.evmVaultAddress,
+    requestsPath: VAULT_SWAP_REQUESTS_PATH,
+  });
   await broadcastEvm(context, { transaction: signed, tolerateRevert: true });
   const { amountIn, refunded } = await completeSwap(context, requestId);
   return { requestId, amountOut: opts.amountOut, amountIn, refunded };

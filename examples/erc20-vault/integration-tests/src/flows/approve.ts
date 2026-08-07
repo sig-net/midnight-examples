@@ -4,35 +4,38 @@
 // circuit, so the round trip ends at the broadcast. One-time per token; the allowance is
 // global (one pooled account), so the first caller readies a token for everyone.
 import {
+  type ContractReadMethod,
+  getTransactionNonce,
+  logSkip,
+} from "@midnight-examples/test-harness";
+import {
+  asciiPadded,
+  calculateRequestId,
   evmAddressAbiWord,
   hexToBytes,
   numericAbiWord,
-  requestIdHex,
-  stripHexPrefix,
-  asciiPadded,
   PATH_BYTES,
-  SIGNET_DEFAULT_KEY_VERSION,
-  TxParamType,
-  calculateRequestId,
-  toSignBidirectionalEventIndex,
-  type SignBidirectionalEvent,
   type RequestIdHex,
+  requestIdHex,
+  type SignBidirectionalEvent,
+  SIGNET_DEFAULT_KEY_VERSION,
+  stripHexPrefix,
+  toSignBidirectionalEventIndex,
+  TxParamType,
 } from "@sig-net/midnight";
 
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
-
-import {
-  ERC20_TRANSFER_GAS_LIMIT,
-  ERC20_TRANSFER_MAX_FEE_PER_GAS,
-  ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
-  evmAddressBytes,
-} from "../evm-transfer.ts";
 import {
   APPROVE_SELECTOR,
   MAX_APPROVE,
   UNISWAP_SWAP_ROUTER_02,
   uniswapAvailable,
 } from "../evm-swap.ts";
+import {
+  ERC20_TRANSFER_GAS_LIMIT,
+  ERC20_TRANSFER_MAX_FEE_PER_GAS,
+  ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
+  evmAddressBytes,
+} from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
@@ -42,11 +45,24 @@ import { pollSignatureResponse } from "./poll-signature-response.ts";
 
 const MINUTE = 60_000;
 
-/** Record the approveRouter request and return its id. */
-export async function approveRouter(context: VaultContext, evmNonce: bigint): Promise<RequestIdHex> {
+/**
+ * Record the approveRouter request and return its id.
+ *
+ * @param context - The flow context.
+ * @param evmNonce - The vault EVM account nonce for the approve transaction.
+ * @returns The recorded request id.
+ */
+export async function approveRouter(
+  context: VaultContext,
+  evmNonce: bigint,
+): Promise<RequestIdHex> {
   const erc20 = evmAddressBytes(context.erc20Address);
-  const before = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-  if (!before.initialized) throw new Error("vault is not initialized, run the initialize flow first");
+  const before = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+  if (!before.initialized)
+    throw new Error("vault is not initialized, run the initialize flow first");
 
   // approve(router, MAX) on the ERC20, signed with the vault account (path "vault"), same
   // 2-word map + bool schema as a transfer.
@@ -73,16 +89,26 @@ export async function approveRouter(context: VaultContext, evmNonce: bigint): Pr
         value: {
           selector: APPROVE_SELECTOR,
           noWords: 2n,
-          words: [evmAddressAbiWord(evmAddressBytes(UNISWAP_SWAP_ROUTER_02)), numericAbiWord(MAX_APPROVE)],
+          words: [
+            evmAddressAbiWord(evmAddressBytes(UNISWAP_SWAP_ROUTER_02)),
+            numericAbiWord(MAX_APPROVE),
+          ],
         },
       },
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
-  const result = await context.vault.callTx.approveRouter(erc20, evmNonce, SIGNET_DEFAULT_KEY_VERSION);
+  const result = await context.vault.callTx.approveRouter(
+    erc20,
+    evmNonce,
+    SIGNET_DEFAULT_KEY_VERSION,
+  );
   console.log(`approveRouter finalized in tx ${result.public.txId}`);
 
-  const after = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+  const after = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
   if (!toSignBidirectionalEventIndex(after.signBidirectionalEventMap).has(expectedIdHex)) {
     throw new Error(`recomputed approve request id ${expectedIdHex} not found on the ledger`);
   }
@@ -93,6 +119,8 @@ export async function approveRouter(context: VaultContext, evmNonce: bigint): Pr
  * Ensure the vault account has approved the router for `context.erc20Address`: read the
  * live allowance, and if it is zero run the approve leg (request -> sign -> broadcast; no
  * settle). Idempotent and global — a nonzero allowance short-circuits.
+ *
+ * @param session - The vault session.
  */
 export async function ensureRouterApproved(session: VaultSession): Promise<void> {
   const context = await session.vaultContext();
@@ -106,9 +134,15 @@ export async function ensureRouterApproved(session: VaultSession): Promise<void>
     ["function allowance(address,address) view returns (uint256)"],
     new ethers.JsonRpcProvider(context.evmRpcUrl),
   );
-  const allowance: bigint = await token.allowance(context.evmVaultAddress, UNISWAP_SWAP_ROUTER_02);
+  const allowance: bigint = await token.getFunction<ContractReadMethod<bigint>>("allowance")(
+    context.evmVaultAddress,
+    UNISWAP_SWAP_ROUTER_02,
+  );
   if (allowance > 0n) {
-    logSkip("approveRouter", `router already approved for ${context.erc20Address} (allowance ${allowance})`);
+    logSkip(
+      "approveRouter",
+      `router already approved for ${context.erc20Address} (allowance ${String(allowance)})`,
+    );
     return;
   }
 
@@ -124,4 +158,3 @@ export async function ensureRouterApproved(session: VaultSession): Promise<void>
   await broadcastEvm(context, { transaction: signed });
   console.log(`router approved for ${context.erc20Address}`);
 }
-

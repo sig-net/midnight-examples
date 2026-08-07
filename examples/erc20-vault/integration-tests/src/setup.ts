@@ -206,7 +206,9 @@ function ensureErc20Address(env: NodeJS.ProcessEnv): void {
     return;
   }
   env.ERC20_ADDRESS = SEPOLIA_USDC;
-  console.log(`defaulted ERC20_ADDRESS=${SEPOLIA_USDC} (real Sepolia USDC — the suites fork Sepolia)`);
+  console.log(
+    `defaulted ERC20_ADDRESS=${SEPOLIA_USDC} (real Sepolia USDC — the suites fork Sepolia)`,
+  );
 }
 
 // Step names match what the operator greps for and what STEP_THROUGH prompts show.

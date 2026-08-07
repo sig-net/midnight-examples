@@ -163,7 +163,11 @@ export async function broadcastEvm(
  * @returns The same receipt, when the transaction succeeded (or `tolerateRevert`).
  * @throws {Error} If the receipt reports `status: 0` and `tolerateRevert` is false.
  */
-function assertMinedOk(receipt: TransactionReceipt, hash: string, tolerateRevert: boolean): TransactionReceipt {
+function assertMinedOk(
+  receipt: TransactionReceipt,
+  hash: string,
+  tolerateRevert: boolean,
+): TransactionReceipt {
   if (receipt.status === 0 && !tolerateRevert) {
     throw new Error(
       `transaction ${hash} reverted on-chain (mined in block ${String(receipt.blockNumber)}, status 0)`,
