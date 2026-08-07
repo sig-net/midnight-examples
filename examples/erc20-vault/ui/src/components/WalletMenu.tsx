@@ -1,5 +1,5 @@
 import { CheckIcon, KeyRoundIcon, LoaderCircleIcon } from "lucide-react";
-import { useState, type JSX } from "react";
+import { type JSX, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +33,8 @@ export interface WalletMenuProps {
  * injected extensions.
  *
  * @param props - The chain's connection.
+ * @param props.connection - The chain this control speaks for, already
+ *   normalised to one shape.
  * @returns The trigger and its menu.
  */
 export const WalletMenu = ({ connection }: WalletMenuProps): JSX.Element => {

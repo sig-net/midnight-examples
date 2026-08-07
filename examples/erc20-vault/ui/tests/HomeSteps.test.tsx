@@ -270,7 +270,7 @@ describe("the deposit address step", () => {
     // stored one: the loss the tick box warns about, made visible.
     injectMidnightWallet({
       name: "Test Lace",
-      signDataSignature: (data, callIndex) => `sig:${callIndex}:${data}`,
+      signDataSignature: (data, callIndex) => `sig:${String(callIndex)}:${data}`,
     });
     const firstMount = render(<App />);
 

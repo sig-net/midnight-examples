@@ -1,27 +1,28 @@
+import type { MidnightNodeConfig, NetworkId } from "@midnight-examples/chain-config";
+import * as ERC20Vault from "@midnight-examples/erc20-vault-contract";
+import { createCrossContractProofServerProvider } from "@midnight-examples/lib/midnight-providers";
+import { CompiledContract } from "@midnight-ntwrk/compact-js";
+import { findDeployedContract, type FoundContract } from "@midnight-ntwrk/midnight-js/contracts";
+import type { MidnightProviders } from "@midnight-ntwrk/midnight-js/types";
+import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
+import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
+import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
+  type JSX,
+  type ReactNode,
   useCallback,
   useContext,
   useMemo,
   useState,
-  type JSX,
-  type ReactNode,
 } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CompiledContract } from "@midnight-ntwrk/compact-js";
-import { findDeployedContract, type FoundContract } from "@midnight-ntwrk/midnight-js/contracts";
-import type { MidnightProviders } from "@midnight-ntwrk/midnight-js/types";
-import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
-import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
-import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
-import { createCrossContractProofServerProvider } from "@midnight-examples/lib/midnight-providers";
-import { deriveEvmAddress, bytesToHex } from "@sig-net/midnight";
-import { useMidnightChainConfig } from "./MidnightChainConfigContext";
-import * as ERC20Vault from "@midnight-examples/erc20-vault-contract";
-import { type MidnightNodeConfig, type NetworkId } from "@midnight-examples/chain-config";
-import { useMidnightWallet } from "./MidnightWalletContext";
-import type { Wallet } from "../../lib/midnight/wallet/Wallet";
+
 import { describeError } from "../../lib/errorMessage";
+import type { Wallet } from "../../lib/midnight/wallet/Wallet";
+import { useMidnightChainConfig } from "./MidnightChainConfigContext";
+import { useMidnightWallet } from "./MidnightWalletContext";
 
 // Base path under which the compiled ZK assets (the contract's `keys/` and
 // `zkir/` from @midnight-examples/erc20-vault-contract's managed/ output) are
@@ -38,8 +39,7 @@ const ZK_ASSETS_PATH = `${import.meta.env.BASE_URL}managed/erc20-vault`;
 // callee's keys as well as the vault's.
 const SIGNET_ZK_ASSETS_PATH = `${import.meta.env.BASE_URL}managed/SignetSigner`;
 
-type ERC20VaultCircuit = keyof InstanceType<typeof ERC20Vault.Contract>["provableCircuits"] &
-  string;
+type ERC20VaultCircuit = keyof InstanceType<typeof ERC20Vault.Contract>["provableCircuits"];
 
 type ERC20VaultContract = ERC20Vault.Contract<ERC20Vault.VaultPrivateState>;
 
@@ -208,9 +208,9 @@ export const IDENTITY_SIGNING_MESSAGE = "signet-wallet-erc20-vault-demo";
  *
  * @param input - The key as supplied, hex with the 0x prefix optional.
  * @returns The key as 0x-prefixed hex.
- * @throws If the input is not a 33-byte compressed or 65-byte uncompressed
- *   secp256k1 point in hex, so a typo fails loudly rather than deriving
- *   addresses from garbage.
+ * @throws {Error} If the input is not a 33-byte compressed or 65-byte
+ *   uncompressed secp256k1 point in hex, so a typo fails loudly rather than
+ *   deriving addresses from garbage.
  */
 function parseMpcRootPublicKey(input: string): string {
   const hex = input.startsWith("0x") ? input.slice(2) : input;
@@ -228,7 +228,7 @@ function parseMpcRootPublicKey(input: string): string {
  *
  * @param env - The build-time environment, normally `import.meta.env`.
  * @returns The key normalised via {@link parseMpcRootPublicKey}, or null.
- * @throws If the variable is set but does not validate.
+ * @throws {Error} If the variable is set but does not validate.
  */
 function readMpcRootPublicKey(env: ImportMetaEnv): string | null {
   const configured = env.VITE_MPC_ROOT_PUBLIC_KEY?.trim();
@@ -288,8 +288,8 @@ export enum CallerIdentityStatus {
  *
  * @param wallet - The connected Midnight wallet.
  * @returns The 32-byte secret.
- * @throws The connector's own `APIError` (`code: 'Rejected'`) when the user
- *   declines the signing prompt.
+ * @throws {Error} The connector's own `APIError` (`code: 'Rejected'`) when
+ *   the user declines the signing prompt.
  */
 async function secretKeyOfWalletSignature(wallet: Wallet): Promise<Uint8Array> {
   const signature = await wallet.signData(IDENTITY_SIGNING_MESSAGE, {
@@ -366,7 +366,7 @@ export interface ERC20VaultContextValue {
    * Deposit addresses re-derive from the new key.
    *
    * @param pubkeyHex - The key in hex, 0x prefix optional, or empty.
-   * @throws If the input is neither empty nor a valid compressed or
+   * @throws {Error} If the input is neither empty nor a valid compressed or
    *   uncompressed secp256k1 point in hex.
    */
   readonly setMpcPubkey: (pubkeyHex: string) => void;
@@ -388,7 +388,7 @@ export interface ERC20VaultContextValue {
    * Derive a fresh identity from the wallet's signature and persist it.
    *
    * @returns The generated identity.
-   * @throws If an identity already exists (overwriting a stored secret is
+   * @throws {Error} If an identity already exists (overwriting a stored secret is
    *   destructive and only {@link regenerateIdentity}, behind its explicit
    *   confirmation, may do it), if no wallet or deployment is in hand, or
    *   when the user declines the signing prompt.
@@ -404,7 +404,7 @@ export interface ERC20VaultContextValue {
    * it. Callers must collect an explicit confirmation before invoking.
    *
    * @returns The regenerated identity.
-   * @throws If no wallet or deployment is in hand, or when the user
+   * @throws {Error} If no wallet or deployment is in hand, or when the user
    *   declines the signing prompt.
    */
   readonly regenerateIdentity: () => Promise<CallerIdentity>;
@@ -426,6 +426,7 @@ interface ERC20VaultContextProviderProps {
  * through {@link useERC20Vault}.
  *
  * @param props - The subtree that can read the vault.
+ * @param props.children - The subtree the provider wraps.
  * @returns The provider wrapping that subtree.
  */
 export function ERC20VaultContextProvider({
@@ -443,19 +444,19 @@ export function ERC20VaultContextProvider({
   const [contractAddressIdx, setContractAddressIdx] = useState<Record<NetworkId, string>>(() =>
     INITIAL_VAULT_ADDRESS_OVERRIDE === null
       ? networkAddressIdx
-      : { ...networkAddressIdx, [config.networkId as NetworkId]: INITIAL_VAULT_ADDRESS_OVERRIDE },
+      : { ...networkAddressIdx, [config.networkId]: INITIAL_VAULT_ADDRESS_OVERRIDE },
   );
   const [mpcPubkey, setMpcPubkeyState] = useState<string | null>(INITIAL_MPC_ROOT_PUBLIC_KEY);
 
   // Config.networkId is the SDK's bare string type, but its values always
   // come from the app's Network union.
-  const contractAddress = contractAddressIdx[config.networkId as NetworkId] || null;
+  const contractAddress = contractAddressIdx[config.networkId] || null;
 
   const setContractAddress = useCallback(
     (address: string): void => {
       setContractAddressIdx((current) => ({
         ...current,
-        [config.networkId as NetworkId]: address.trim(),
+        [config.networkId]: address.trim(),
       }));
     },
     [config.networkId],
@@ -672,8 +673,8 @@ export function ERC20VaultContextProvider({
  * Read the vault: the found contract and the caller's identity.
  *
  * @returns The context value.
- * @throws If called outside an {@link ERC20VaultContextProvider}, since there
- *   is no sensible vault to fall back to.
+ * @throws {Error} If called outside an {@link ERC20VaultContextProvider},
+ *   since there is no sensible vault to fall back to.
  */
 export function useERC20Vault(): ERC20VaultContextValue {
   const context = useContext(ERC20VaultContext);

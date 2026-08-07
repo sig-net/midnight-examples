@@ -1,13 +1,13 @@
 "use client";
 
-import { Toaster as Sonner, type ToasterProps } from "sonner";
 import {
   CircleCheckIcon,
   InfoIcon,
-  TriangleAlertIcon,
-  OctagonXIcon,
   Loader2Icon,
+  OctagonXIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
+import { Toaster as Sonner, type ToasterProps } from "sonner";
 
 // Edited away from the registry's version in one place, deliberately: it reads
 // the theme from next-themes, and this app has its own ThemeContext. Two theme
@@ -16,6 +16,12 @@ import {
 // file and reinstates the next-themes import, so re-apply this edit if it does.
 import { useTheme } from "../contexts/ThemeContext.tsx";
 
+/**
+ * The app's toast outlet, themed from the app's own ThemeContext.
+ *
+ * @param props - Sonner's Toaster props, passed through over the app's defaults.
+ * @returns The configured toaster element.
+ */
 const Toaster = ({ ...props }: ToasterProps) => {
   const { resolved } = useTheme();
 

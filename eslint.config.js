@@ -13,6 +13,9 @@ import vitest from "@vitest/eslint-plugin";
 import prettier from "eslint-config-prettier/flat";
 import importX from "eslint-plugin-import-x";
 import jsdoc from "eslint-plugin-jsdoc";
+import jsxA11y from "eslint-plugin-jsx-a11y";
+import react from "eslint-plugin-react";
+import reactHooks from "eslint-plugin-react-hooks";
 import simpleImportSort from "eslint-plugin-simple-import-sort";
 import { defineConfig, globalIgnores } from "eslint/config";
 import tseslint from "typescript-eslint";
@@ -50,7 +53,7 @@ export default defineConfig([
 
   {
     name: "workspace/typescript",
-    files: ["**/*.ts"],
+    files: ["**/*.ts", "**/*.tsx"],
     extends: [
       js.configs.recommended,
       tseslint.configs.strictTypeChecked,
@@ -100,7 +103,7 @@ export default defineConfig([
 
   {
     name: "workspace/jsdoc",
-    files: ["**/src/**/*.ts", "**/deploy.ts"],
+    files: ["**/src/**/*.ts", "**/src/**/*.tsx", "**/deploy.ts"],
     extends: [jsdoc.configs["flat/recommended-typescript-error"]],
     rules: {
       // Every export carries a block. Internal helpers are the author's call.
@@ -135,9 +138,49 @@ export default defineConfig([
     },
   },
 
+  // The react rule set, scoped to where react code lives: a ui member's own
+  // tree (components, hooks and their tests — hooks-in-.ts included, so the
+  // rules of hooks reach useX() helpers that render nothing). Three plugins:
+  // react's recommended set on the modern JSX runtime, the rules of hooks,
+  // and jsx-a11y (the tests already query by role and accessible name, so
+  // the markup is held to the same standard).
+  //
+  // eslint-plugin-react-refresh is deliberately NOT part of the set. Its
+  // only-export-components rule is incompatible with two conventions this
+  // repo keeps on purpose: a context file co-locating its provider, hook and
+  // errors, and shadcn/ui registry output exporting cva variants beside the
+  // component. Adopting it would mean restructuring both away from their
+  // documented shapes; the price of leaving it out is only that vite HMR
+  // falls back to a full reload when those files change.
+  {
+    name: "workspace/react",
+    files: ["examples/*/ui/src/**/*.{ts,tsx}", "examples/*/ui/tests/**/*.{ts,tsx}"],
+    extends: [
+      react.configs.flat.recommended,
+      react.configs.flat["jsx-runtime"],
+      reactHooks.configs.flat["recommended-latest"],
+      jsxA11y.flatConfigs.recommended,
+    ],
+    settings: {
+      // Not "detect": detection resolves react from the config's own
+      // directory, and react is a ui member's dependency, not the root's.
+      // Keep in lockstep with the react version in examples/*/ui/package.json.
+      react: { version: "19.2" },
+    },
+    rules: {
+      // shadcn/ui's Input and Checkbox render a real <input> / <button
+      // role="checkbox">, both labelable; the rule cannot see through a
+      // custom component, so it is told which ones are controls. A widening
+      // of what the rule recognises, not an exemption from it.
+      "jsx-a11y/label-has-associated-control": [
+        "error",
+        { controlComponents: ["Input", "Checkbox"] },
+      ],
+    },
+  },
   {
     name: "workspace/tests",
-    files: ["**/tests/**/*.ts", "**/*.test.ts"],
+    files: ["**/tests/**/*.ts", "**/tests/**/*.tsx", "**/*.test.ts", "**/*.test.tsx"],
     extends: [vitest.configs.recommended],
     rules: {
       // An it.only reaching main silently disables the rest of its suite.
@@ -149,7 +192,7 @@ export default defineConfig([
   },
 
   // This file itself. No disableTypeChecked needed: the type-aware configs are
-  // scoped to `files: ["**/*.ts"]`, so they never reach a .js file.
+  // scoped to .ts/.tsx files, so they never reach a .js file.
   {
     name: "workspace/config-files",
     files: ["**/*.js", "**/*.mjs"],

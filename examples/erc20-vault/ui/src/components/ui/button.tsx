@@ -1,6 +1,6 @@
-import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Slot } from "radix-ui";
+import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -41,6 +41,16 @@ const buttonVariants = cva(
   },
 );
 
+/**
+ * A button styled by {@link buttonVariants}.
+ *
+ * @param props - The underlying button element's props plus the variant options.
+ * @param props.className - Extra classes merged after the variant's own.
+ * @param props.variant - The visual style to render with.
+ * @param props.size - The size preset, including the icon-only squares.
+ * @param props.asChild - Puts the button's classes on the child element instead of a button.
+ * @returns The styled button element.
+ */
 function Button({
   className,
   variant = "default",

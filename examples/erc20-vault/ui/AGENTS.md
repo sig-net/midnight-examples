@@ -272,9 +272,13 @@ than reconstructed from the components each time.
 
 ## Verifying a change
 
-`yarn build && yarn test` in this package, per the root's finish-a-change rule.
-Both must be green, and neither is optional: `vite dev` executes without
-typechecking, so "it renders" is not verification.
+`yarn format:check && yarn lint` from the repo root plus `yarn build && yarn test`
+in this package, per the root's finish-a-change rule. All must be green, and
+none is optional: `vite dev` executes without typechecking, so "it renders" is
+not verification. The root ESLint config covers this member's `.tsx` too, with
+a react block (react recommended on the JSX runtime, the rules of hooks,
+jsx-a11y) scoped to `examples/*/ui/` — there is deliberately NO per-package
+lint or prettier config, per the root's config-lives-once rule.
 
 When a change is visual or navigational, also drive the running app rather than
 trusting the DOM assertions alone: `yarn dev`, then load `http://localhost:5173`,

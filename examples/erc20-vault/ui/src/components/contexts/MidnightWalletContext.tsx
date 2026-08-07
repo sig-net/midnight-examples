@@ -1,21 +1,21 @@
 import type { MidnightNodeConfig } from "@midnight-examples/chain-config";
 import {
   createContext,
+  type JSX,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type JSX,
-  type ReactNode,
 } from "react";
 import { toast } from "sonner";
 
 import { describeError } from "../../lib/errorMessage.ts";
 import { BrowserWallet, type BrowserWalletInfo } from "../../lib/midnight/wallet/BrowserWallet.ts";
 import { SeedWallet } from "../../lib/midnight/wallet/SeedWallet.ts";
-import { WalletError, WalletKind, type Wallet } from "../../lib/midnight/wallet/Wallet.ts";
+import { type Wallet, WalletError, WalletKind } from "../../lib/midnight/wallet/Wallet.ts";
 import { useMidnightChainConfig } from "./MidnightChainConfigContext.tsx";
 
 /**
@@ -27,6 +27,10 @@ import { useMidnightChainConfig } from "./MidnightChainConfigContext.tsx";
  * whole is connecting is this context's question to answer.
  */
 export class MidnightWalletConnectBusyError extends WalletError {
+  /**
+   * @param inFlightTarget - The wallet the outstanding connect is building.
+   * @param requestedTarget - The wallet the colliding call asked for.
+   */
   constructor(
     readonly inFlightTarget: string,
     readonly requestedTarget: string,
@@ -136,6 +140,7 @@ interface MidnightWalletProviderProps {
  * call, since it means a wallet prompt (or re-entering a seed).
  *
  * @param props - The subtree that can read the wallet.
+ * @param props.children - The subtree the provider wraps.
  * @returns The provider wrapping that subtree.
  */
 export function MidnightWalletProvider({ children }: MidnightWalletProviderProps): JSX.Element {
@@ -170,7 +175,7 @@ export function MidnightWalletProvider({ children }: MidnightWalletProviderProps
             if (previous !== null && previous !== built) {
               // Fire-and-forget: the replaced wallet's teardown failing leaves
               // nothing the user could act on.
-              void previous.disconnect().catch(() => {});
+              void previous.disconnect().catch(() => undefined);
             }
             return built;
           });
@@ -225,12 +230,7 @@ export function MidnightWalletProvider({ children }: MidnightWalletProviderProps
   // extension owns its endpoints, and the app cannot reconfigure it.
   useEffect(() => {
     const installed = installedSeedRef.current;
-    if (
-      wallet === null ||
-      wallet.kind !== WalletKind.Seed ||
-      installed === null ||
-      installed.config === config
-    ) {
+    if (wallet?.kind !== WalletKind.Seed || installed === null || installed.config === config) {
       return;
     }
     installSeedWallet(installed.seed).catch((error: unknown) => {
@@ -244,7 +244,7 @@ export function MidnightWalletProvider({ children }: MidnightWalletProviderProps
     setWallet((previous) => {
       if (previous !== null) {
         // Fire-and-forget, as above: a teardown failure is not actionable.
-        void previous.disconnect().catch(() => {});
+        void previous.disconnect().catch(() => undefined);
       }
       return null;
     });
@@ -254,7 +254,7 @@ export function MidnightWalletProvider({ children }: MidnightWalletProviderProps
     () => ({
       wallet,
       connecting,
-      availableBrowserWallets: BrowserWallet.available,
+      availableBrowserWallets: () => BrowserWallet.available(),
       connectBrowserWallet,
       installSeedWallet,
       disconnect,
@@ -269,8 +269,8 @@ export function MidnightWalletProvider({ children }: MidnightWalletProviderProps
  * Read the app's Midnight wallet.
  *
  * @returns The wallet and the operations that change it.
- * @throws If called outside a {@link MidnightWalletProvider}, since there is no
- *   sensible wallet to fall back to.
+ * @throws {Error} If called outside a {@link MidnightWalletProvider}, since
+ *   there is no sensible wallet to fall back to.
  */
 export function useMidnightWallet(): MidnightWalletContextValue {
   const context = useContext(MidnightWalletContext);

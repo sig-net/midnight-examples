@@ -1,26 +1,57 @@
-import * as React from "react";
-import { Dialog as DialogPrimitive } from "radix-ui";
-
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { XIcon } from "lucide-react";
+import { Dialog as DialogPrimitive } from "radix-ui";
+import type * as React from "react";
 
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+/**
+ * The dialog's stateful root, which the other Dialog parts nest inside.
+ *
+ * @param props - The Radix dialog root's own props, passed through.
+ * @returns The dialog root element.
+ */
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
 }
 
+/**
+ * The control that opens the dialog.
+ *
+ * @param props - The Radix dialog trigger's own props, passed through.
+ * @returns The dialog trigger element.
+ */
 function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
   return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
 }
 
+/**
+ * Renders its dialog children into the document body.
+ *
+ * @param props - The Radix dialog portal's own props, passed through.
+ * @returns The dialog portal element.
+ */
 function DialogPortal({ ...props }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
   return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />;
 }
 
+/**
+ * A control that closes the dialog it sits in.
+ *
+ * @param props - The Radix dialog close button's own props, passed through.
+ * @returns The dialog close element.
+ */
 function DialogClose({ ...props }: React.ComponentProps<typeof DialogPrimitive.Close>) {
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
 }
 
+/**
+ * The dimmed backdrop behind an open dialog.
+ *
+ * @param props - The Radix dialog overlay's own props, passed through.
+ * @param props.className - Extra classes merged after the overlay's own.
+ * @returns The styled overlay element.
+ */
 function DialogOverlay({
   className,
   ...props
@@ -37,6 +68,15 @@ function DialogOverlay({
   );
 }
 
+/**
+ * The dialog panel itself, portalled and centred over its own overlay.
+ *
+ * @param props - The Radix dialog content's own props, passed through.
+ * @param props.className - Extra classes merged after the panel's own.
+ * @param props.children - The dialog's body content.
+ * @param props.showCloseButton - Shows the corner close button, on by default.
+ * @returns The portalled dialog panel with its overlay.
+ */
 function DialogContent({
   className,
   children,
@@ -70,12 +110,28 @@ function DialogContent({
   );
 }
 
+/**
+ * The stacked title and description block at the top of a dialog.
+ *
+ * @param props - The underlying div element's props, passed through.
+ * @param props.className - Extra classes merged after the header's own.
+ * @returns The styled dialog header element.
+ */
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div data-slot="dialog-header" className={cn("flex flex-col gap-2", className)} {...props} />
   );
 }
 
+/**
+ * The dialog's action strip, end-aligned on wide viewports.
+ *
+ * @param props - The underlying div element's props, passed through.
+ * @param props.className - Extra classes merged after the footer's own.
+ * @param props.showCloseButton - Appends a Close button after the children, off by default.
+ * @param props.children - The footer's action controls.
+ * @returns The styled dialog footer element.
+ */
 function DialogFooter({
   className,
   showCloseButton = false,
@@ -103,6 +159,13 @@ function DialogFooter({
   );
 }
 
+/**
+ * The dialog's heading, which also names the dialog for assistive technology.
+ *
+ * @param props - The Radix dialog title's own props, passed through.
+ * @param props.className - Extra classes merged after the title's own.
+ * @returns The styled dialog title element.
+ */
 function DialogTitle({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Title>) {
   return (
     <DialogPrimitive.Title
@@ -113,6 +176,13 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
   );
 }
 
+/**
+ * The muted supporting text under a dialog's title, announced with the dialog.
+ *
+ * @param props - The Radix dialog description's own props, passed through.
+ * @param props.className - Extra classes merged after the description's own.
+ * @returns The styled dialog description element.
+ */
 function DialogDescription({
   className,
   ...props

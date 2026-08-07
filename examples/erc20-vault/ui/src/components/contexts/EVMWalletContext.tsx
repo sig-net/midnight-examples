@@ -1,21 +1,21 @@
 import type { EvmChainConfig } from "@midnight-examples/chain-config";
 import {
   createContext,
+  type JSX,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type JSX,
-  type ReactNode,
 } from "react";
 import { toast } from "sonner";
 
 import { describeError } from "../../lib/errorMessage.ts";
 import { BrowserWallet, type BrowserWalletInfo } from "../../lib/evm/wallet/BrowserWallet.ts";
 import { SeedWallet } from "../../lib/evm/wallet/SeedWallet.ts";
-import { WalletError, WalletKind, type Wallet } from "../../lib/evm/wallet/Wallet.ts";
+import { type Wallet, WalletError, WalletKind } from "../../lib/evm/wallet/Wallet.ts";
 import { useEVMChainConfig } from "./EVMChainConfigContext.tsx";
 
 /**
@@ -27,6 +27,10 @@ import { useEVMChainConfig } from "./EVMChainConfigContext.tsx";
  * whole is connecting is this context's question to answer.
  */
 export class EVMWalletConnectBusyError extends WalletError {
+  /**
+   * @param inFlightTarget - The wallet the outstanding connect is building.
+   * @param requestedTarget - The wallet the colliding call asked for.
+   */
   constructor(
     readonly inFlightTarget: string,
     readonly requestedTarget: string,
@@ -139,6 +143,7 @@ interface EVMWalletProviderProps {
  * wrong-chain wallet, which is what keeps the two consistent.
  *
  * @param props - The subtree that can read the wallet.
+ * @param props.children - The subtree the provider wraps.
  * @returns The provider wrapping that subtree.
  */
 export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Element {
@@ -173,7 +178,7 @@ export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Ele
             if (previous !== null && previous !== built) {
               // Fire-and-forget: the replaced wallet's teardown failing leaves
               // nothing the user could act on.
-              void previous.disconnect().catch(() => {});
+              void previous.disconnect().catch(() => undefined);
             }
             return built;
           });
@@ -208,7 +213,7 @@ export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Ele
           // from clearing its successor.
           setWallet((previous) => {
             if (previous !== built) return previous;
-            void built.disconnect().catch(() => {});
+            void built.disconnect().catch(() => undefined);
             return null;
           });
         });
@@ -241,12 +246,7 @@ export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Ele
   // chain.
   useEffect(() => {
     const installed = installedSeedRef.current;
-    if (
-      wallet === null ||
-      wallet.kind !== WalletKind.Seed ||
-      installed === null ||
-      installed.config === config
-    ) {
+    if (wallet?.kind !== WalletKind.Seed || installed === null || installed.config === config) {
       return;
     }
     installSeedWallet(installed.seed).catch((error: unknown) => {
@@ -260,7 +260,7 @@ export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Ele
     setWallet((previous) => {
       if (previous !== null) {
         // Fire-and-forget, as above: a teardown failure is not actionable.
-        void previous.disconnect().catch(() => {});
+        void previous.disconnect().catch(() => undefined);
       }
       return null;
     });
@@ -270,7 +270,7 @@ export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Ele
     () => ({
       wallet,
       connecting,
-      availableBrowserWallets: BrowserWallet.available,
+      availableBrowserWallets: () => BrowserWallet.available(),
       connectBrowserWallet,
       installSeedWallet,
       disconnect,
@@ -285,8 +285,8 @@ export function EVMWalletProvider({ children }: EVMWalletProviderProps): JSX.Ele
  * Read the app's EVM wallet.
  *
  * @returns The wallet and the operations that change it.
- * @throws If called outside an {@link EVMWalletProvider}, since there is no
- *   sensible wallet to fall back to.
+ * @throws {Error} If called outside an {@link EVMWalletProvider}, since there
+ *   is no sensible wallet to fall back to.
  */
 export function useEVMWallet(): EVMWalletContextValue {
   const context = useContext(EVMWalletContext);

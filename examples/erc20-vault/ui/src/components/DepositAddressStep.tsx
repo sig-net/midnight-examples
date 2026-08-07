@@ -1,12 +1,12 @@
 import { CheckCircle2Icon, CircleDashedIcon, CopyIcon, LoaderCircleIcon } from "lucide-react";
-import { useState, type JSX } from "react";
+import { type JSX, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
-import { CallerIdentityStatus, IDENTITY_SIGNING_MESSAGE, type CallerIdentity } from "./contexts";
 import type { DepositAddress } from "../hooks/useDepositAddress";
 import { shortenAddress } from "../lib/shortenAddress";
+import { type CallerIdentity, CallerIdentityStatus, IDENTITY_SIGNING_MESSAGE } from "./contexts";
 
 /** Props of {@link DepositAddressSummary}. */
 export interface DepositAddressSummaryProps {
@@ -22,6 +22,9 @@ export interface DepositAddressSummaryProps {
  * {@link DepositAddressView}.
  *
  * @param props - The identity's progress.
+ * @param props.status - Where the identity stands, picking the line to show.
+ * @param props.identity - The identity whose derived address the line shows,
+ *   once the status reports it present.
  * @returns The one-line summary.
  */
 export const DepositAddressSummary = ({
@@ -74,6 +77,8 @@ interface RegenerateControlProps {
  * has said they understand exactly that.
  *
  * @param props - The in-flight flag and the action.
+ * @param props.regenerating - True while the wallet is being asked to re-sign.
+ * @param props.onRegenerate - Re-derive the key, overwriting the stored one.
  * @returns The control.
  */
 const RegenerateControl = ({ regenerating, onRegenerate }: RegenerateControlProps): JSX.Element => {
@@ -131,6 +136,14 @@ interface DepositAddressRowsProps {
  * confirmed-destructive regenerate control.
  *
  * @param props - The identity and the step's actions.
+ * @param props.identity - The identity in hand, with its derived address or
+ *   null when the address cannot be derived.
+ * @param props.fresh - True for a key generated this session, false for one
+ *   found in storage.
+ * @param props.regenerating - True while a re-signing is in flight.
+ * @param props.onRegenerate - Re-derive the key, overwriting the stored one.
+ * @param props.onCopyAddress - Copy the derived address to the clipboard.
+ * @param props.onProceed - Take the user on to the vault-interactions step.
  * @returns The rows.
  */
 const DepositAddressRows = ({
@@ -145,7 +158,7 @@ const DepositAddressRows = ({
     {identity.depositEvmAddress === null ? (
       <p className="text-destructive">
         The secret key is in hand, but VITE_MPC_ROOT_PUBLIC_KEY is not set, so the deposit address
-        cannot be derived. Set it to the MPC network's root public key and reload.
+        cannot be derived. Set it to the MPC network&apos;s root public key and reload.
       </p>
     ) : (
       <div className="flex flex-col gap-1">
@@ -168,7 +181,7 @@ const DepositAddressRows = ({
     {fresh ? (
       <span className="flex items-center gap-2">
         <CheckCircle2Icon className="size-4 shrink-0 text-emerald-500" aria-hidden="true" />
-        Generated from your wallet's signature this session.
+        Generated from your wallet&apos;s signature this session.
       </span>
     ) : (
       <span className="flex items-center gap-2 text-muted-foreground">
@@ -205,6 +218,18 @@ export interface DepositAddressViewProps extends DepositAddress {
  * destructive action, never a requirement.
  *
  * @param props - The step, as {@link useDepositAddress} builds it.
+ * @param props.status - Where the identity stands, choosing which body to show.
+ * @param props.identity - The identity, once the status reports it present.
+ * @param props.fresh - True for a key generated this session rather than found
+ *   in storage.
+ * @param props.error - What went wrong reading the stored identity, shown when
+ *   the status is Error.
+ * @param props.generating - True while the first signing is in flight.
+ * @param props.regenerating - True while a re-signing is in flight.
+ * @param props.generate - Ask the wallet to sign and derive the key.
+ * @param props.regenerate - Re-sign and overwrite the stored key.
+ * @param props.copyAddress - Copy the derived deposit address to the clipboard.
+ * @param props.onProceed - Take the user on to the vault-interactions step.
  * @returns The view's body.
  */
 export const DepositAddressView = ({
@@ -222,7 +247,7 @@ export const DepositAddressView = ({
   <div className="flex flex-col gap-3 text-sm">
     <p className="text-muted-foreground">
       Each deposit is an ERC20 transfer signed by the MPC network from your own derived EVM account:
-      its address comes from the MPC root key, the vault contract's address, and your identity
+      its address comes from the MPC root key, the vault contract&apos;s address, and your identity
       commitment.
     </p>
 

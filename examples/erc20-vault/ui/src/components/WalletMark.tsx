@@ -21,6 +21,9 @@ export interface WalletMarkProps {
  * accessible name, and a second announcement of it would only be noise.
  *
  * @param props - The icon to show, and whether to wash it out.
+ * @param props.iconUrl - The wallet's own icon URL, or undefined for the
+ *   generic fallback.
+ * @param props.muted - Wash it out, for a wallet offered rather than connected.
  * @returns The mark, sized to sit inside a button or a row.
  */
 export const WalletMark = ({ iconUrl, muted = false }: WalletMarkProps): JSX.Element => {

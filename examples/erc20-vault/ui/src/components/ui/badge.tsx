@@ -1,6 +1,6 @@
-import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Slot } from "radix-ui";
+import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -24,6 +24,15 @@ const badgeVariants = cva(
   },
 );
 
+/**
+ * A small status pill styled by {@link badgeVariants}.
+ *
+ * @param props - The underlying span element's props plus the variant options.
+ * @param props.className - Extra classes merged after the variant's own.
+ * @param props.variant - The visual style to render with.
+ * @param props.asChild - Puts the badge's classes on the child element instead of a span.
+ * @returns The styled badge element.
+ */
 function Badge({
   className,
   variant = "default",

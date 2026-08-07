@@ -11,8 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import { useTheme } from "./contexts";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
+import { useTheme } from "./contexts";
 
 /** How each preference is offered in the menu. */
 const PREFERENCE_LABELS: Record<ThemePreference, string> = {
@@ -30,6 +30,7 @@ interface PreferenceIconProps {
  * The glyph for one preference.
  *
  * @param props - The preference to draw.
+ * @param props.preference - The preference the glyph stands for.
  * @returns Its icon.
  */
 const PreferenceIcon = ({ preference }: PreferenceIconProps): JSX.Element => {

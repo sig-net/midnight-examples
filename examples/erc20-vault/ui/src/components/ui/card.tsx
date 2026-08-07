@@ -1,7 +1,15 @@
-import * as React from "react";
+import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * The card surface the other Card parts render inside.
+ *
+ * @param props - The underlying div element's props, passed through.
+ * @param props.className - Extra classes merged after the card's own.
+ * @param props.size - The spacing preset, tighter when "sm".
+ * @returns The styled card container element.
+ */
 function Card({
   className,
   size = "default",
@@ -20,6 +28,13 @@ function Card({
   );
 }
 
+/**
+ * The card's top row, a grid that seats the title, description and action.
+ *
+ * @param props - The underlying div element's props, passed through.
+ * @param props.className - Extra classes merged after the header's own.
+ * @returns The styled card header element.
+ */
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -33,6 +48,13 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/**
+ * The card's heading text, sized down inside a small card.
+ *
+ * @param props - The underlying div element's props, passed through.
+ * @param props.className - Extra classes merged after the title's own.
+ * @returns The styled card title element.
+ */
 function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -46,6 +68,13 @@ function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/**
+ * The muted supporting text under a card's title.
+ *
+ * @param props - The underlying div element's props, passed through.
+ * @param props.className - Extra classes merged after the description's own.
+ * @returns The styled card description element.
+ */
 function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -56,6 +85,13 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/**
+ * The header's trailing slot, pinned to the card's top-right corner.
+ *
+ * @param props - The underlying div element's props, passed through.
+ * @param props.className - Extra classes merged after the action slot's own.
+ * @returns The styled card action element.
+ */
 function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -66,12 +102,26 @@ function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/**
+ * The card's body, indented to the card's shared horizontal padding.
+ *
+ * @param props - The underlying div element's props, passed through.
+ * @param props.className - Extra classes merged after the content's own.
+ * @returns The styled card content element.
+ */
 function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div data-slot="card-content" className={cn("px-(--card-spacing)", className)} {...props} />
   );
 }
 
+/**
+ * The card's bottom strip, set off by a top border and a muted background.
+ *
+ * @param props - The underlying div element's props, passed through.
+ * @param props.className - Extra classes merged after the footer's own.
+ * @returns The styled card footer element.
+ */
 function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -85,4 +135,4 @@ function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-export { Card, CardHeader, CardFooter, CardTitle, CardAction, CardDescription, CardContent };
+export { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle };

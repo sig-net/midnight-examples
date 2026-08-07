@@ -1,7 +1,15 @@
-import * as React from "react";
+import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * A single-line text field in the app's form styling.
+ *
+ * @param props - The underlying input element's props, passed through.
+ * @param props.className - Extra classes merged after the input's own.
+ * @param props.type - The input type, forwarded to the element.
+ * @returns The styled input element.
+ */
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (
     <input

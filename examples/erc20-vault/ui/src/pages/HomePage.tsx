@@ -1,5 +1,5 @@
 import { WalletIcon } from "lucide-react";
-import { useState, type JSX } from "react";
+import { type JSX, useState } from "react";
 
 import { ConnectWalletsStep } from "../components/ConnectWalletsStep";
 import { DepositAddressSummary, DepositAddressView } from "../components/DepositAddressStep";
@@ -35,6 +35,8 @@ interface ConnectWalletsViewProps {
  * repeating them.
  *
  * @param props - The connection progress.
+ * @param props.allConnected - True once both wallets are connected, switching
+ *   the message from the ask to the way forward.
  * @returns The view's body.
  */
 const ConnectWalletsView = ({ allConnected }: ConnectWalletsViewProps): JSX.Element => (
@@ -74,7 +76,7 @@ export const HomePage = (): JSX.Element => {
       <h1 className="text-xl font-semibold tracking-tight">
         {allConnected
           ? "Wallet connections set"
-          : `To start you'll need ${requiredCount} connected wallets`}
+          : `To start you'll need ${String(requiredCount)} connected wallets`}
       </h1>
 
       <ol className="grid list-none gap-4 sm:grid-cols-3">
@@ -83,7 +85,7 @@ export const HomePage = (): JSX.Element => {
             stepNumber={VaultStep.ConnectWallets}
             title={STEP_TITLES[VaultStep.ConnectWallets]}
             status={connectStatus}
-            badge={allConnected ? undefined : `${connectedCount}/${requiredCount}`}
+            badge={allConnected ? undefined : `${String(connectedCount)}/${String(requiredCount)}`}
             selected={activeStep === VaultStep.ConnectWallets}
             onSelect={() => {
               setChosenStep(VaultStep.ConnectWallets);

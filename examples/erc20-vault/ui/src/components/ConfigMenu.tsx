@@ -1,5 +1,5 @@
 import { InfoIcon, SettingsIcon, TriangleAlertIcon } from "lucide-react";
-import { useState, type JSX } from "react";
+import { type JSX, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,14 +14,20 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-import { ConfigFieldKind, useAppConfig, type ConfigField } from "../hooks/useAppConfig";
+import { type ConfigField, ConfigFieldKind, useAppConfig } from "../hooks/useAppConfig";
 
 /** Props of {@link FieldInfo}. */
 interface FieldInfoProps {
   readonly field: ConfigField;
 }
 
-/** The info icon beside a field, showing what the value means on hover. */
+/**
+ * The info icon beside a field, showing what the value means on hover.
+ *
+ * @param props - The field to explain.
+ * @param props.field - The field whose info text fills the tooltip.
+ * @returns The icon button and its tooltip.
+ */
 const FieldInfo = ({ field }: FieldInfoProps): JSX.Element => (
   <Tooltip>
     <TooltipTrigger asChild>
@@ -48,7 +54,14 @@ interface FieldWalletWarningProps {
   readonly walletValue: string;
 }
 
-/** The warning beside a field whose value the connected wallet disagrees with. */
+/**
+ * The warning beside a field whose value the connected wallet disagrees with.
+ *
+ * @param props - The field and the wallet's differing value.
+ * @param props.field - The field the wallet disagrees on, naming the warning.
+ * @param props.walletValue - The wallet's own value, shown in the tooltip.
+ * @returns The warning button and its tooltip.
+ */
 const FieldWalletWarning = ({ field, walletValue }: FieldWalletWarningProps): JSX.Element => (
   <Tooltip>
     <TooltipTrigger asChild>
@@ -81,6 +94,11 @@ interface ConfigFieldRowProps {
  * half-typed URL is never applied keystroke by keystroke. A rejected commit
  * (reported on a toast by the field itself) keeps the draft in place for
  * correcting, and a committed one drops it and shows the stored value again.
+ *
+ * @param props - The field to render.
+ * @param props.field - The field: its kind picks the control, and a reported
+ *   wallet value turns the info icon into a warning.
+ * @returns The row: label, control and icon.
  */
 const ConfigFieldRow = ({ field }: ConfigFieldRowProps): JSX.Element => {
   const [draft, setDraft] = useState<string | null>(null);

@@ -1,15 +1,28 @@
 "use client";
 
-import * as React from "react";
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
+import type * as React from "react";
 
 import { cn } from "@/lib/utils";
-import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react";
 
+/**
+ * The select's stateful root, which the other Select parts nest inside.
+ *
+ * @param props - The Radix select root's own props, passed through.
+ * @returns The select root element.
+ */
 function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root data-slot="select" {...props} />;
 }
 
+/**
+ * Groups related options under one label for assistive technology.
+ *
+ * @param props - The Radix select group's own props, passed through.
+ * @param props.className - Extra classes merged after the group's own.
+ * @returns The styled select group element.
+ */
 function SelectGroup({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Group>) {
   return (
     <SelectPrimitive.Group
@@ -20,10 +33,25 @@ function SelectGroup({ className, ...props }: React.ComponentProps<typeof Select
   );
 }
 
+/**
+ * Shows the selected option, or the placeholder, inside the trigger.
+ *
+ * @param props - The Radix select value's own props, passed through.
+ * @returns The select value element.
+ */
 function SelectValue({ ...props }: React.ComponentProps<typeof SelectPrimitive.Value>) {
   return <SelectPrimitive.Value data-slot="select-value" {...props} />;
 }
 
+/**
+ * The button that opens the option list, with a chevron at its trailing edge.
+ *
+ * @param props - The Radix select trigger's own props, passed through.
+ * @param props.className - Extra classes merged after the trigger's own.
+ * @param props.size - The height preset, shorter when "sm".
+ * @param props.children - The trigger's content, usually a SelectValue.
+ * @returns The styled select trigger element.
+ */
 function SelectTrigger({
   className,
   size = "default",
@@ -50,6 +78,16 @@ function SelectTrigger({
   );
 }
 
+/**
+ * The option list itself, portalled, with scroll buttons at both ends.
+ *
+ * @param props - The Radix select content's own props, passed through.
+ * @param props.className - Extra classes merged after the panel's own.
+ * @param props.children - The options, items and groups to list.
+ * @param props.position - The placement strategy, aligned over the trigger by default.
+ * @param props.align - The edge of the trigger to line up with in popper position.
+ * @returns The portalled option list element.
+ */
 function SelectContent({
   className,
   children,
@@ -88,6 +126,13 @@ function SelectContent({
   );
 }
 
+/**
+ * A non-interactive heading over a group of options.
+ *
+ * @param props - The Radix select label's own props, passed through.
+ * @param props.className - Extra classes merged after the label's own.
+ * @returns The styled select label element.
+ */
 function SelectLabel({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Label>) {
   return (
     <SelectPrimitive.Label
@@ -98,6 +143,14 @@ function SelectLabel({ className, ...props }: React.ComponentProps<typeof Select
   );
 }
 
+/**
+ * One selectable option, with a tick shown while selected.
+ *
+ * @param props - The Radix select item's own props, passed through.
+ * @param props.className - Extra classes merged after the item's own.
+ * @param props.children - The option's label content.
+ * @returns The styled select item element.
+ */
 function SelectItem({
   className,
   children,
@@ -122,6 +175,13 @@ function SelectItem({
   );
 }
 
+/**
+ * A horizontal rule between runs of options.
+ *
+ * @param props - The Radix select separator's own props, passed through.
+ * @param props.className - Extra classes merged after the separator's own.
+ * @returns The styled separator element.
+ */
 function SelectSeparator({
   className,
   ...props
@@ -135,6 +195,13 @@ function SelectSeparator({
   );
 }
 
+/**
+ * The control that scrolls a too-tall option list upwards.
+ *
+ * @param props - The Radix scroll-up button's own props, passed through.
+ * @param props.className - Extra classes merged after the button's own.
+ * @returns The styled scroll-up button element.
+ */
 function SelectScrollUpButton({
   className,
   ...props
@@ -153,6 +220,13 @@ function SelectScrollUpButton({
   );
 }
 
+/**
+ * The control that scrolls a too-tall option list downwards.
+ *
+ * @param props - The Radix scroll-down button's own props, passed through.
+ * @param props.className - Extra classes merged after the button's own.
+ * @returns The styled scroll-down button element.
+ */
 function SelectScrollDownButton({
   className,
   ...props

@@ -1,4 +1,4 @@
-import { useState, type JSX, type SubmitEvent } from "react";
+import { type JSX, type SubmitEvent, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,10 @@ export interface SeedWalletDialogProps {
  * DOM of a closed dialog.
  *
  * @param props - The open state and the install to run on submit.
+ * @param props.open - Whether the dialog is shown, owned by the opener.
+ * @param props.onOpenChange - Called with the new open state when the dialog
+ *   closes itself.
+ * @param props.onInstall - Install the trimmed seed, called on submit.
  * @returns The dialog.
  */
 export const SeedWalletDialog = ({

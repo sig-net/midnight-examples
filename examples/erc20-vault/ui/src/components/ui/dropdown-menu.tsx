@@ -1,25 +1,52 @@
-import * as React from "react";
+import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
+import type * as React from "react";
 
 import { cn } from "@/lib/utils";
-import { CheckIcon, ChevronRightIcon } from "lucide-react";
 
+/**
+ * The menu's stateful root, which the other DropdownMenu parts nest inside.
+ *
+ * @param props - The Radix dropdown menu root's own props, passed through.
+ * @returns The dropdown menu root element.
+ */
 function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
 }
 
+/**
+ * Renders its menu children into the document body.
+ *
+ * @param props - The Radix dropdown menu portal's own props, passed through.
+ * @returns The dropdown menu portal element.
+ */
 function DropdownMenuPortal({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Portal>) {
   return <DropdownMenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />;
 }
 
+/**
+ * The control that opens the menu.
+ *
+ * @param props - The Radix dropdown menu trigger's own props, passed through.
+ * @returns The dropdown menu trigger element.
+ */
 function DropdownMenuTrigger({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
   return <DropdownMenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />;
 }
 
+/**
+ * The menu panel itself, portalled and sized to its trigger.
+ *
+ * @param props - The Radix dropdown menu content's own props, passed through.
+ * @param props.className - Extra classes merged after the panel's own.
+ * @param props.align - The edge of the trigger to line up with, start by default.
+ * @param props.sideOffset - The gap in pixels between trigger and panel.
+ * @returns The portalled menu panel element.
+ */
 function DropdownMenuContent({
   className,
   align = "start",
@@ -42,10 +69,25 @@ function DropdownMenuContent({
   );
 }
 
+/**
+ * Groups related menu items for assistive technology.
+ *
+ * @param props - The Radix dropdown menu group's own props, passed through.
+ * @returns The dropdown menu group element.
+ */
 function DropdownMenuGroup({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Group>) {
   return <DropdownMenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />;
 }
 
+/**
+ * One selectable row of the menu.
+ *
+ * @param props - The Radix dropdown menu item's own props, passed through.
+ * @param props.className - Extra classes merged after the item's own.
+ * @param props.inset - Indents the row to line up with items that carry an indicator.
+ * @param props.variant - Renders the destructive style when "destructive".
+ * @returns The styled menu item element.
+ */
 function DropdownMenuItem({
   className,
   inset,
@@ -69,6 +111,16 @@ function DropdownMenuItem({
   );
 }
 
+/**
+ * A menu row that toggles a boolean, with a tick shown while checked.
+ *
+ * @param props - The Radix checkbox item's own props, passed through.
+ * @param props.className - Extra classes merged after the item's own.
+ * @param props.children - The row's label content.
+ * @param props.checked - The controlled checked state the tick reflects.
+ * @param props.inset - Indents the row to line up with items that carry an indicator.
+ * @returns The styled checkbox item element.
+ */
 function DropdownMenuCheckboxItem({
   className,
   children,
@@ -102,12 +154,27 @@ function DropdownMenuCheckboxItem({
   );
 }
 
+/**
+ * Holds radio items that share one selected value.
+ *
+ * @param props - The Radix radio group's own props, passed through.
+ * @returns The dropdown menu radio group element.
+ */
 function DropdownMenuRadioGroup({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioGroup>) {
   return <DropdownMenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />;
 }
 
+/**
+ * One choice inside a radio group, with a tick shown while selected.
+ *
+ * @param props - The Radix radio item's own props, passed through.
+ * @param props.className - Extra classes merged after the item's own.
+ * @param props.children - The row's label content.
+ * @param props.inset - Indents the row to line up with items that carry an indicator.
+ * @returns The styled radio item element.
+ */
 function DropdownMenuRadioItem({
   className,
   children,
@@ -139,6 +206,14 @@ function DropdownMenuRadioItem({
   );
 }
 
+/**
+ * A non-interactive heading over a run of menu items.
+ *
+ * @param props - The Radix dropdown menu label's own props, passed through.
+ * @param props.className - Extra classes merged after the label's own.
+ * @param props.inset - Indents the label to line up with items that carry an indicator.
+ * @returns The styled menu label element.
+ */
 function DropdownMenuLabel({
   className,
   inset,
@@ -159,6 +234,13 @@ function DropdownMenuLabel({
   );
 }
 
+/**
+ * A horizontal rule between runs of menu items.
+ *
+ * @param props - The Radix dropdown menu separator's own props, passed through.
+ * @param props.className - Extra classes merged after the separator's own.
+ * @returns The styled separator element.
+ */
 function DropdownMenuSeparator({
   className,
   ...props
@@ -172,6 +254,13 @@ function DropdownMenuSeparator({
   );
 }
 
+/**
+ * The keyboard hint at the trailing edge of a menu item.
+ *
+ * @param props - The underlying span element's props, passed through.
+ * @param props.className - Extra classes merged after the shortcut's own.
+ * @returns The styled shortcut element.
+ */
 function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
@@ -185,10 +274,25 @@ function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<"spa
   );
 }
 
+/**
+ * The stateful root of a nested submenu.
+ *
+ * @param props - The Radix submenu root's own props, passed through.
+ * @returns The submenu root element.
+ */
 function DropdownMenuSub({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>) {
   return <DropdownMenuPrimitive.Sub data-slot="dropdown-menu-sub" {...props} />;
 }
 
+/**
+ * The menu row that opens a submenu, with a chevron at its trailing edge.
+ *
+ * @param props - The Radix submenu trigger's own props, passed through.
+ * @param props.className - Extra classes merged after the trigger's own.
+ * @param props.inset - Indents the row to line up with items that carry an indicator.
+ * @param props.children - The row's label content.
+ * @returns The styled submenu trigger element.
+ */
 function DropdownMenuSubTrigger({
   className,
   inset,
@@ -213,6 +317,13 @@ function DropdownMenuSubTrigger({
   );
 }
 
+/**
+ * The panel a submenu opens beside its trigger.
+ *
+ * @param props - The Radix submenu content's own props, passed through.
+ * @param props.className - Extra classes merged after the panel's own.
+ * @returns The styled submenu panel element.
+ */
 function DropdownMenuSubContent({
   className,
   ...props
@@ -231,18 +342,18 @@ function DropdownMenuSubContent({
 
 export {
   DropdownMenu,
-  DropdownMenuPortal,
-  DropdownMenuTrigger,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuLabel,
   DropdownMenuItem,
-  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuPortal,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuSub,
-  DropdownMenuSubTrigger,
   DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
 };

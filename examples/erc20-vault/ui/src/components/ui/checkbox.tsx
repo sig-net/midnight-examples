@@ -1,9 +1,16 @@
-import * as React from "react";
+import { CheckIcon } from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
+import type * as React from "react";
 
 import { cn } from "@/lib/utils";
-import { CheckIcon } from "lucide-react";
 
+/**
+ * A tick box over Radix's checkbox primitive, with the tick indicator built in.
+ *
+ * @param props - The Radix checkbox root's own props, passed through.
+ * @param props.className - Extra classes merged after the checkbox's own.
+ * @returns The styled checkbox element.
+ */
 function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxPrimitive.Root>) {
   return (
     <CheckboxPrimitive.Root

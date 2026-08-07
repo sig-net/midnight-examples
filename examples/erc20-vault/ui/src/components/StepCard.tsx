@@ -42,6 +42,17 @@ export interface StepCardProps {
  * a glance, the run of green is how far you have got.
  *
  * @param props - The step's position, title, state and content.
+ * @param props.stepNumber - The step's place in the sequence, drawn as the
+ *   marker until the step completes.
+ * @param props.title - What the step is, shown beside the marker.
+ * @param props.status - How far along it is: complete swaps the number for a
+ *   green tick and takes the green ring.
+ * @param props.badge - A short flag beside the title, when there is one.
+ * @param props.selected - True while this step's details fill the view area,
+ *   taking the ring in the theme's ring colour.
+ * @param props.onSelect - Put this step's details in the view area, making the
+ *   card selectable.
+ * @param props.children - The step's own card body.
  * @returns The card.
  */
 export const StepCard = ({
@@ -78,7 +89,7 @@ export const StepCard = ({
       // A labelled group, so the step is one findable thing to a screen reader
       // and to a test, rather than a div that happens to contain a heading.
       role="group"
-      aria-label={`Step ${stepNumber}: ${title} (${status})`}
+      aria-label={`Step ${String(stepNumber)}: ${title} (${status})`}
       // Card-level click is a convenience enlargement of the title button's
       // target for mouse users; keyboard and assistive access go through the
       // button itself. Clicks on inner controls bubble here too, which is
@@ -135,6 +146,7 @@ export interface ComingSoonProps {
  * so the card signposts the flow rather than sitting empty.
  *
  * @param props - The description of the step to come.
+ * @param props.children - What the step will do once it exists.
  * @returns The muted body.
  */
 export const ComingSoon = ({ children }: ComingSoonProps): JSX.Element => (

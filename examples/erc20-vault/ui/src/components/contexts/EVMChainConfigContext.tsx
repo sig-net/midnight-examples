@@ -1,17 +1,17 @@
 import {
   evmCaip2ChainId,
   evmChainById,
-  LOCAL_EVM_CHAIN,
   type EvmChainConfig,
+  LOCAL_EVM_CHAIN,
 } from "@midnight-examples/chain-config";
 import {
   createContext,
+  type JSX,
+  type ReactNode,
   useCallback,
   useContext,
   useMemo,
   useState,
-  type JSX,
-  type ReactNode,
 } from "react";
 
 /**
@@ -24,8 +24,9 @@ import {
  *
  * @param env - The build-time environment, normally `import.meta.env`.
  * @returns The expected chain id.
- * @throws If the variable is set to something that is not an integer, so a
- *   typo fails at startup rather than silently becoming a different chain.
+ * @throws {Error} If the variable is set to something that is not an integer,
+ *   so a typo fails at startup rather than silently becoming a different
+ *   chain.
  */
 function readInitialChainId(env: ImportMetaEnv): bigint {
   const configured = env.VITE_EVM_CHAIN_ID?.trim();
@@ -45,8 +46,8 @@ function readInitialChainId(env: ImportMetaEnv): bigint {
  *
  * @param env - The build-time environment, normally `import.meta.env`.
  * @returns The config the app starts with.
- * @throws If an override is not a parsable absolute URL, or the chain id is
- *   not an integer.
+ * @throws {TypeError} If an override is not a parsable absolute URL.
+ * @throws {Error} If the chain id is not an integer.
  */
 function readInitialConfig(env: ImportMetaEnv): EvmChainConfig {
   const rpcUrl = env.VITE_EVM_RPC_URL?.trim();
@@ -94,6 +95,7 @@ interface EVMChainConfigProviderProps {
  * rather than reaching for this context themselves.
  *
  * @param props - The subtree that can read the config.
+ * @param props.children - The subtree the provider wraps.
  * @returns The provider wrapping that subtree.
  */
 export function EVMChainConfigProvider({ children }: EVMChainConfigProviderProps): JSX.Element {
@@ -124,7 +126,7 @@ export function EVMChainConfigProvider({ children }: EVMChainConfigProviderProps
   const setExplorerUrl = useCallback((explorerUrl: string): void => {
     const normalised = explorerUrl.trim() === "" ? undefined : new URL(explorerUrl).toString();
     setConfig((current) => {
-      const { explorerUrl: dropped, ...rest } = current;
+      const { explorerUrl: _dropped, ...rest } = current;
       return normalised === undefined ? rest : { ...rest, explorerUrl: normalised };
     });
   }, []);
@@ -147,8 +149,8 @@ export function EVMChainConfigProvider({ children }: EVMChainConfigProviderProps
  * Read the EVM chain config.
  *
  * @returns The config and the operations that change it.
- * @throws If called outside an {@link EVMChainConfigProvider}, since there is
- *   no sensible default chain to fall back to.
+ * @throws {Error} If called outside an {@link EVMChainConfigProvider}, since
+ *   there is no sensible default chain to fall back to.
  */
 export function useEVMChainConfig(): EVMChainConfigContextValue {
   const context = useContext(EVMChainConfigContext);

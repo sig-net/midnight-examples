@@ -1,22 +1,23 @@
 import {
   createContext,
+  type JSX,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
-  type JSX,
-  type ReactNode,
+  useSyncExternalStore,
 } from "react";
 
 import {
   applyResolvedTheme,
   readStoredThemePreference,
+  type ResolvedTheme,
   resolveTheme,
   storeThemePreference,
-  watchSystemTheme,
-  type ResolvedTheme,
   type ThemePreference,
+  watchSystemTheme,
 } from "../../lib/theme.ts";
 
 /** The theme the app is rendering, and the way to change it. */
@@ -46,31 +47,24 @@ interface ThemeProviderProps {
  * same store the script read, and agrees with it.
  *
  * @param props - The subtree that can read and change the theme.
+ * @param props.children - The subtree the provider wraps.
  * @returns The provider wrapping that subtree.
  */
 export function ThemeProvider({ children }: ThemeProviderProps): JSX.Element {
   const [preference, setPreferenceState] = useState<ThemePreference>(readStoredThemePreference);
-  const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(preference));
 
-  // Apply on every change of the choice. Not a fetch: this is the DOM being
-  // synchronised with state that lives outside React, which is what an effect
-  // is actually for.
-  useEffect(() => {
-    const theme = resolveTheme(preference);
-    setResolved(theme);
-    applyResolvedTheme(theme);
-  }, [preference]);
+  // The OS half of the resolution, read as an external store: the media
+  // query is the source of truth, so subscribing through
+  // useSyncExternalStore keeps `resolved` derived during render rather than
+  // synchronised into state after it.
+  const systemTheme = useSyncExternalStore(watchSystemTheme, () => resolveTheme("system"));
+  const resolved: ResolvedTheme = preference === "system" ? systemTheme : preference;
 
-  // Only `system` defers to the OS, so only `system` subscribes to it.
+  // Put the resolution into the DOM. Not a fetch: this is state that lives
+  // outside React being kept in step, which is what an effect is for.
   useEffect(() => {
-    if (preference !== "system") {
-      return;
-    }
-    return watchSystemTheme((theme) => {
-      setResolved(theme);
-      applyResolvedTheme(theme);
-    });
-  }, [preference]);
+    applyResolvedTheme(resolved);
+  }, [resolved]);
 
   const setPreference = useCallback((next: ThemePreference): void => {
     setPreferenceState(next);
@@ -89,8 +83,9 @@ export function ThemeProvider({ children }: ThemeProviderProps): JSX.Element {
  * Read the app's theme.
  *
  * @returns The current preference, what it resolves to, and the setter.
- * @throws If called outside a {@link ThemeProvider}, since a component guessing
- *   its own theme is exactly the drift this context exists to prevent.
+ * @throws {Error} If called outside a {@link ThemeProvider}, since a component
+ *   guessing its own theme is exactly the drift this context exists to
+ *   prevent.
  */
 export function useTheme(): ThemeContextValue {
   const context = useContext(ThemeContext);

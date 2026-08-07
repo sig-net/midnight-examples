@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useEVMWallet, useMidnightWallet } from "../components/contexts";
@@ -81,8 +81,16 @@ export function useMidnightWalletConnection(): WalletConnection {
 
   // Injected wallets are read on demand rather than subscribed to: extensions
   // inject on page load and the connector publishes no announcement to listen
-  // for. Snapshot once on mount, and again whenever a consumer asks.
-  const [injected, setInjected] = useState<readonly WalletChoice[]>([]);
+  // for. The lazy initialiser takes the first snapshot at first render, and
+  // refreshChoices takes another whenever a consumer asks (the menus, on
+  // open).
+  const [injected, setInjected] = useState<readonly WalletChoice[]>(() =>
+    availableBrowserWallets().map((injectedWallet) => ({
+      id: injectedWallet.walletKey,
+      name: injectedWallet.name,
+      iconUrl: injectedWallet.icon,
+    })),
+  );
 
   const refreshChoices = useCallback((): void => {
     setInjected(
@@ -93,12 +101,6 @@ export function useMidnightWalletConnection(): WalletConnection {
       })),
     );
   }, [availableBrowserWallets]);
-
-  // Reading the injected wallets is a synchronous look at `window`, not a
-  // fetch: there is nothing to cache, retry or race.
-  useEffect(() => {
-    refreshChoices();
-  }, [refreshChoices]);
 
   const connect = useCallback(
     (walletKey: string): void => {
@@ -160,9 +162,16 @@ export function useEVMWalletConnection(): WalletConnection {
   } = useEVMWallet();
 
   // Announced wallets are read on demand rather than subscribed to: the
-  // context snapshots the EIP-6963 announcements per call. Snapshot once on
-  // mount, and again whenever a consumer asks.
-  const [announced, setAnnounced] = useState<readonly WalletChoice[]>([]);
+  // context snapshots the EIP-6963 announcements per call. The lazy
+  // initialiser takes the first snapshot at first render, and refreshChoices
+  // takes another whenever a consumer asks (the menus, on open).
+  const [announced, setAnnounced] = useState<readonly WalletChoice[]>(() =>
+    availableBrowserWallets().map((announcedWallet) => ({
+      id: announcedWallet.rdns,
+      name: announcedWallet.name,
+      iconUrl: announcedWallet.icon,
+    })),
+  );
 
   const refreshChoices = useCallback((): void => {
     setAnnounced(
@@ -173,12 +182,6 @@ export function useEVMWalletConnection(): WalletConnection {
       })),
     );
   }, [availableBrowserWallets]);
-
-  // Reading the announced wallets is a synchronous exchange of window events,
-  // not a fetch: there is nothing to cache, retry or race.
-  useEffect(() => {
-    refreshChoices();
-  }, [refreshChoices]);
 
   const connect = useCallback(
     (rdns: string): void => {

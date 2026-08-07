@@ -1,21 +1,21 @@
 import {
   DEFAULT_ENDPOINTS,
+  type Endpoints,
   indexerWsUrlFromIndexerUrl,
   isNetworkId,
-  NETWORK_IDS,
-  type Endpoints,
   type MidnightNodeConfig,
+  NETWORK_IDS,
   type NetworkId,
 } from "@midnight-examples/chain-config";
 import { setNetworkId as setSdkNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import {
   createContext,
+  type JSX,
+  type ReactNode,
   useCallback,
   useContext,
   useMemo,
   useState,
-  type JSX,
-  type ReactNode,
 } from "react";
 
 /** The network the app falls back to: the local standalone Docker stack. */
@@ -35,8 +35,9 @@ function selectNetwork(networkId: NetworkId): Endpoints {
  *
  * @param env - The build-time environment, normally `import.meta.env`.
  * @returns The network the app starts on.
- * @throws If the variable is set to a network id chain-config does not know,
- *   so a typo fails at startup rather than rendering against nothing.
+ * @throws {Error} If the variable is set to a network id chain-config does
+ *   not know, so a typo fails at startup rather than rendering against
+ *   nothing.
  */
 function readInitialNetworkId(env: ImportMetaEnv): NetworkId {
   const configured = env.VITE_MIDNIGHT_NETWORK_ID?.trim();
@@ -64,7 +65,7 @@ function readInitialNetworkId(env: ImportMetaEnv): NetworkId {
  * @param env - The build-time environment, normally `import.meta.env`.
  * @param defaults - The selected network's default endpoints.
  * @returns The endpoints the app starts with.
- * @throws If an override is not a parsable absolute URL.
+ * @throws {TypeError} If an override is not a parsable absolute URL.
  */
 function readInitialEndpoints(env: ImportMetaEnv, defaults: Endpoints): Endpoints {
   const indexerUrl = env.VITE_MIDNIGHT_INDEXER_URL?.trim();
@@ -128,6 +129,7 @@ interface MidnightChainConfigProviderProps {
  * by argument rather than reaching for this context themselves.
  *
  * @param props - The subtree that can read the config.
+ * @param props.children - The subtree the provider wraps.
  * @returns The provider wrapping that subtree.
  */
 export function MidnightChainConfigProvider({
@@ -200,8 +202,8 @@ export function MidnightChainConfigProvider({
  * Read the chain connection config.
  *
  * @returns The config and the operations that change it.
- * @throws If called outside a {@link MidnightChainConfigProvider}, since there
- *   is no sensible default config to fall back to.
+ * @throws {Error} If called outside a {@link MidnightChainConfigProvider},
+ *   since there is no sensible default config to fall back to.
  */
 export function useMidnightChainConfig(): MidnightChainConfigContextValue {
   const context = useContext(MidnightChainConfigContext);

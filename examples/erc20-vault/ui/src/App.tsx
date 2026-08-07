@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState, type JSX } from "react";
+import { type JSX, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router";
 
 import { AppLayout } from "./components/AppLayout";

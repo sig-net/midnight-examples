@@ -1,5 +1,5 @@
 import { CheckCircle2Icon, CircleIcon, KeyRoundIcon, LoaderCircleIcon } from "lucide-react";
-import { useState, type JSX } from "react";
+import { type JSX, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +28,7 @@ interface ConnectWalletRowProps {
  * where it does not compete with the step's forward motion.
  *
  * @param props - The chain's connection.
+ * @param props.connection - The chain to connect, already normalised to one shape.
  * @returns The row.
  */
 const ConnectWalletRow = ({ connection }: ConnectWalletRowProps): JSX.Element => {
@@ -107,8 +108,8 @@ const ConnectWalletRow = ({ connection }: ConnectWalletRowProps): JSX.Element =>
   // than a menu of one. The seed entry deliberately does not force a menu
   // here: the step is forward motion and the extension is the primary path,
   // while the header's wallet menu always carries the seed entry too.
-  if (choices.length === 1) {
-    const only = choices[0]!;
+  const only = choices.length === 1 ? choices[0] : undefined;
+  if (only !== undefined) {
     return (
       <Button
         variant="ghost"
@@ -191,6 +192,7 @@ export interface ConnectWalletsStepProps {
  * would keep resetting what the user thinks is being asked of them.
  *
  * @param props - The connections to list.
+ * @param props.connections - Every wallet the app needs, one row each.
  * @returns The rows.
  */
 export const ConnectWalletsStep = ({ connections }: ConnectWalletsStepProps): JSX.Element => (

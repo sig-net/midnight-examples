@@ -1,8 +1,15 @@
-import * as React from "react";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
+import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * Shares tooltip timing across every Tooltip mounted beneath it.
+ *
+ * @param props - The Radix tooltip provider's own props, passed through.
+ * @param props.delayDuration - Milliseconds before a tooltip opens, immediate by default.
+ * @returns The tooltip provider element.
+ */
 function TooltipProvider({
   delayDuration = 0,
   ...props
@@ -16,14 +23,35 @@ function TooltipProvider({
   );
 }
 
+/**
+ * The tooltip's stateful root, which the other Tooltip parts nest inside.
+ *
+ * @param props - The Radix tooltip root's own props, passed through.
+ * @returns The tooltip root element.
+ */
 function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
   return <TooltipPrimitive.Root data-slot="tooltip" {...props} />;
 }
 
+/**
+ * The element whose hover or focus opens the tooltip.
+ *
+ * @param props - The Radix tooltip trigger's own props, passed through.
+ * @returns The tooltip trigger element.
+ */
 function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
+/**
+ * The tooltip bubble itself, portalled, with its arrow built in.
+ *
+ * @param props - The Radix tooltip content's own props, passed through.
+ * @param props.className - Extra classes merged after the bubble's own.
+ * @param props.sideOffset - The gap in pixels between trigger and bubble.
+ * @param props.children - The tooltip's content.
+ * @returns The portalled tooltip bubble element.
+ */
 function TooltipContent({
   className,
   sideOffset = 0,

@@ -1,20 +1,20 @@
 import { RefreshCwIcon, XIcon } from "lucide-react";
-import { useMemo, useState, type JSX } from "react";
-import { isAddress, type Address } from "viem";
+import { type JSX, useMemo, useState } from "react";
+import { type Address, isAddress } from "viem";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-import { useERC20Vault, useEVMWallet, useMidnightWallet } from "./contexts";
 import {
-  useEvmAccountBalances,
-  useMidnightAccountBalances,
   type AccountBalances,
   type AssetBalance,
+  useEvmAccountBalances,
+  useMidnightAccountBalances,
 } from "../hooks/useAccountBalances";
-import { useTrackedTokens, type TrackedToken, type TrackedTokens } from "../hooks/useTrackedTokens";
+import { type TrackedToken, type TrackedTokens, useTrackedTokens } from "../hooks/useTrackedTokens";
 import { useVaultEvmAddress } from "../hooks/useVaultEvmAddress";
 import { shortenAddress } from "../lib/shortenAddress";
+import { useERC20Vault, useEVMWallet, useMidnightWallet } from "./contexts";
 
 /** What a token that answers no `name()` or `symbol()` is called instead. */
 const UNKNOWN_METADATA = "Unknown";
@@ -29,6 +29,8 @@ interface TrackedTokenRowProps {
  * One tracked ERC20: what it is, and the control that drops it.
  *
  * @param props - The token and the drop action.
+ * @param props.token - The tracked ERC20, with whatever metadata it answered.
+ * @param props.onUntrack - Drop the token, called with its address.
  * @returns The row.
  */
 const TrackedTokenRow = ({ token, onUntrack }: TrackedTokenRowProps): JSX.Element => (
@@ -72,6 +74,8 @@ interface TrackedTokensSectionProps {
  * field only clears when the token was actually taken.
  *
  * @param props - The tracked-token list and its operations.
+ * @param props.tracked - The tokens being followed, with their track and
+ *   untrack operations.
  * @returns The section.
  */
 const TrackedTokensSection = ({ tracked }: TrackedTokensSectionProps): JSX.Element => {
@@ -133,6 +137,7 @@ interface AssetBalanceRowProps {
  * One asset a balance panel lists: how much, and of what.
  *
  * @param props - The balance to render.
+ * @param props.balance - The amount, its label, and any detail beside them.
  * @returns The row.
  */
 const AssetBalanceRow = ({ balance }: AssetBalanceRowProps): JSX.Element => (
@@ -166,6 +171,13 @@ interface BalancesPanelProps {
  * shape and nothing else.
  *
  * @param props - The account, its balances, and any reason there are none.
+ * @param props.title - Whose balances these are, naming the panel and its
+ *   refresh control.
+ * @param props.address - The account's address form, when there is one to show.
+ * @param props.unavailable - Why there is nothing to read, or null when the
+ *   balances are readable.
+ * @param props.balances - The balances, with their loading, error and refresh
+ *   state.
  * @returns The panel.
  */
 const BalancesPanel = ({
