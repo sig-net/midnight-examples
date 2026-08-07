@@ -1,8 +1,6 @@
 // Simulator-level unit tests: the contract runs entirely in-process via
 // @midnight-ntwrk/compact-runtime. No ledger, no network, no proving.
 
-import { describe, expect, it } from "vitest";
-
 import {
   createCircuitContext,
   createConstructorContext,
@@ -12,13 +10,7 @@ import {
 // This tree's wasm ContractState class: see signetStateProvider for why the
 // portal-linked signet module's state must round-trip through it.
 import { ContractState } from "@midnightntwrk/onchain-runtime-v4";
-
 import {
-  MPC_FAILURE_OUTPUT,
-  MPCDestination,
-  MPCSignatureAlgorithm,
-  SignetEventName,
-  TxParamType,
   asciiPadded,
   bytesToHex,
   calculateRequestId,
@@ -28,24 +20,37 @@ import {
   decodeSignetLogEvents,
   ecdsaSignatureToMpcSignature,
   evmAddressAbiWord,
-  numericAbiWord,
   hexToBytes,
+  MPC_FAILURE_OUTPUT,
+  MPCDestination,
+  MPCSignatureAlgorithm,
+  numericAbiWord,
   pureCircuits as signetCircuits,
   readSignetRequestsLedgerFromState,
   requestIdBytes,
   requestIdHex,
+  type RespondBidirectionalEvent,
   secp256k1PublicKeyOf,
   serializeRespondOutput,
   signAttestationDigest,
+  type SignBidirectionalEventLedgerMap,
+  SignetEventName,
   signetFieldNodeByPath,
   toSignBidirectionalEventIndex,
-  type RespondBidirectionalEvent,
-  type SignBidirectionalEventLedgerMap,
+  TxParamType,
 } from "@sig-net/midnight";
+import { describe, expect, it } from "vitest";
 
 // The ERC20 transfer(address,uint256) selector: the TS mirror of the literal
 // `Bytes [0xa9, 0x05, 0x9c, 0xbb]` hardcoded in erc20-vault.compact.
 const ERC20_TRANSFER_SELECTOR = new Uint8Array([0xa9, 0x05, 0x9c, 0xbb]);
+
+// The signet contract (callee) module, the same one the vault's generated code
+// cross-contract-calls (via the compile-time src/managed/SignetSigner link
+// into this npm package's managed output). The request circuits end in a call
+// to its signBidirectional, so the simulator needs its state
+// (see signetStateProvider) to execute that path.
+import * as SignetSigner from "@sig-net/midnight-contract/managed/contract/index.js";
 
 import {
   Contract,
@@ -54,23 +59,25 @@ import {
   pureCircuits,
   VAULT_NONCE_PATH,
   VAULT_REQUESTS_PATH,
-  witnesses,
   type VaultPrivateState,
+  witnesses,
 } from "../src/index.ts";
-// The signet contract (callee) module, the same one the vault's generated code
-// cross-contract-calls (via the compile-time src/managed/SignetSigner link
-// into this npm package's managed output). The request circuits end in a call
-// to its signBidirectional, so the simulator needs its state
-// (see signetStateProvider) to execute that path.
-import * as SignetSigner from "@sig-net/midnight-contract/managed/contract/index.js";
 
 // ---- Fixtures ----
 
 // Dummy coin public key (32-byte hex). Required by the API, unused here.
 const CPK = "0".repeat(64);
 
-const bytes = (length: number, fill: number) =>
-  new Uint8Array(length).fill(fill);
+const bytes = (length: number, fill: number) => new Uint8Array(length).fill(fill);
+
+// A `toHaveLength` assertion does not narrow the index read that follows it,
+// so take the first element by iterating and fail naming what was missing.
+const first = <T>(items: Iterable<T>, what: string): T => {
+  for (const item of items) {
+    return item;
+  }
+  throw new Error(`expected at least one ${what}`);
+};
 
 // Identity secrets for the simulated deployer/caller (same key: the deployer
 // deposits in these tests) and for a stranger.
@@ -116,7 +123,7 @@ const signetStateProvider = async () => {
     createConstructorContext(undefined, CPK),
   );
   const state = ContractState.deserialize(currentContractState.serialize());
-  return { getContractState: async () => state };
+  return { getContractState: () => Promise.resolve(state) };
 };
 
 const VAULT_EVM = bytes(20, 0xee);
@@ -180,19 +187,13 @@ const VALID_DEPOSIT: DepositCallArgs = {
 
 // ---- Harness ----
 
-const deployContract = async (
-  deployerCommitment: Uint8Array = DEPLOYER_COMMITMENT,
-) => {
+const deployContract = async (deployerCommitment: Uint8Array = DEPLOYER_COMMITMENT) => {
   const contract = new Contract<VaultPrivateState>(witnesses);
-  const { currentContractState, currentPrivateState } =
-    await contract.initialState(
-      createConstructorContext<VaultPrivateState>(
-        createVaultPrivateState(SECRET_KEY),
-        CPK,
-      ),
-      deployerCommitment,
-      SIGNET_CONTRACT_REF,
-    );
+  const { currentContractState, currentPrivateState } = await contract.initialState(
+    createConstructorContext<VaultPrivateState>(createVaultPrivateState(SECRET_KEY), CPK),
+    deployerCommitment,
+    SIGNET_CONTRACT_REF,
+  );
   const ctx = createCircuitContext(
     "deposit",
     VAULT_ADDRESS,
@@ -316,7 +317,9 @@ describe("withdrawRefundCommitment", () => {
     // Bound to the request id: two withdrawals by the same secret differ.
     expect(commitment).not.toEqual(pureCircuits.withdrawRefundCommitment(SECRET_KEY, requestIdB));
     // And bound to the secret: another identity's commitment differs.
-    expect(commitment).not.toEqual(pureCircuits.withdrawRefundCommitment(OTHER_SECRET_KEY, requestIdA));
+    expect(commitment).not.toEqual(
+      pureCircuits.withdrawRefundCommitment(OTHER_SECRET_KEY, requestIdA),
+    );
   });
 });
 
@@ -325,9 +328,7 @@ describe("ABI words (shared library circuits)", () => {
     // Words are ABI-ready (big-endian, broadcast form); the library's TS
     // mirrors and its compiled circuits must emit identical bytes. The vault
     // stores exactly these words (see the deposit/withdraw record tests).
-    expect(evmAddressAbiWord(VAULT_EVM)).toEqual(
-      signetCircuits.evmAddressAbiWord(VAULT_EVM),
-    );
+    expect(evmAddressAbiWord(VAULT_EVM)).toEqual(signetCircuits.evmAddressAbiWord(VAULT_EVM));
     expect(numericAbiWord(AMOUNT)).toEqual(signetCircuits.numericAbiWord(AMOUNT));
     expect(signetCircuits.abiWordToUint128(numericAbiWord(AMOUNT))).toBe(AMOUNT);
   });
@@ -375,9 +376,7 @@ describe("deposit round-trip", () => {
     const state = next.callContext.currentQueryContext.state;
 
     // Read 1: generated ledger().
-    const typedIndex = toSignBidirectionalEventIndex(
-      ledger(state).signBidirectionalEventMap,
-    );
+    const typedIndex = toSignBidirectionalEventIndex(ledger(state).signBidirectionalEventMap);
     // Read 2: MPC-style raw read, no compiled contract involved.
     const rawLedger = readSignetRequestsLedgerFromState(
       state,
@@ -390,7 +389,7 @@ describe("deposit round-trip", () => {
     // The raw counter read matches the generated one.
     expect(rawLedger.nonce).toBe(ledger(state).signetRequestNonce);
 
-    const [idHex, record] = [...typedIndex.entries()][0];
+    const [idHex, record] = first(typedIndex.entries(), "indexed signBidirectional request");
 
     // The cross-contract call's observable effect: the signet contract
     // emitted the notification event, its payload declaring the stored
@@ -399,9 +398,10 @@ describe("deposit round-trip", () => {
     // discovery feed performs).
     const notificationEvents = decodeSignetLogEvents(next.events, SIGNET_ADDRESS);
     expect(notificationEvents).toHaveLength(1);
-    expect(notificationEvents[0].name).toBe(SignetEventName.SignBidirectionalEvent);
+    const notificationEvent = first(notificationEvents, "signet notification event");
+    expect(notificationEvent.name).toBe(SignetEventName.SignBidirectionalEvent);
     const notificationPost = decodeSignBidirectionalEventNotificationPayload(
-      notificationEvents[0].payload,
+      notificationEvent.payload,
     );
     // The declared id IS the stored map key: the MPC looks it up directly.
     expect(requestIdHex(notificationPost.requestId)).toBe(idHex);
@@ -442,9 +442,7 @@ describe("deposit round-trip", () => {
     expect(record.outputDeserializationSchema).toEqual(
       EXPECTED_ROUTING.outputDeserializationSchema,
     );
-    expect(record.respondSerializationSchema).toEqual(
-      EXPECTED_ROUTING.respondSerializationSchema,
-    );
+    expect(record.respondSerializationSchema).toEqual(EXPECTED_ROUTING.respondSerializationSchema);
     expect(record.requestNonce).toBe(0n);
 
     // Contract-built calldata: transfer(vaultEvmAddress, amount) as ABI-ready
@@ -506,19 +504,14 @@ const DEPOSIT_REJECTION_CASES: DepositRejectionCase[] = [
 ];
 
 describe("deposit validation", () => {
-  it.each(DEPOSIT_REJECTION_CASES)(
-    "rejects $name",
-    async ({ args, throws }) => {
-      const { contract, ctx } = await deployInitialized();
-      await expect(deposit(contract, ctx, args)).rejects.toThrow(throws);
-    },
-  );
+  it.each(DEPOSIT_REJECTION_CASES)("rejects $name", async ({ args, throws }) => {
+    const { contract, ctx } = await deployInitialized();
+    await expect(deposit(contract, ctx, args)).rejects.toThrow(throws);
+  });
 
   it("rejects before initialize", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(
-      deposit(contract, ctx, VALID_DEPOSIT),
-    ).rejects.toThrow(/Not initialized/);
+    await expect(deposit(contract, ctx, VALID_DEPOSIT)).rejects.toThrow(/Not initialized/);
   });
 
   it("identical deposits get DISTINCT ids: requestNonce differentiates them", async () => {
@@ -531,8 +524,7 @@ describe("deposit validation", () => {
     const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
 
     const index = toSignBidirectionalEventIndex(
-      ledger(afterSecond.callContext.currentQueryContext.state)
-        .signBidirectionalEventMap,
+      ledger(afterSecond.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
     expect(index.size).toBe(2);
     const nonces = [...index.values()].map((r) => r.requestNonce).sort();
@@ -549,8 +541,7 @@ describe("deposit validation", () => {
     const afterSecond = (await deposit(contract, stranger, VALID_DEPOSIT)).context;
 
     const index = toSignBidirectionalEventIndex(
-      ledger(afterSecond.callContext.currentQueryContext.state)
-        .signBidirectionalEventMap,
+      ledger(afterSecond.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
     expect(index.size).toBe(2);
     const paths = [...index.values()].map((r) => r.path);
@@ -607,14 +598,7 @@ const withdraw = (
   contract: Contract<VaultPrivateState>,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["withdraw"]>[0],
   args: WithdrawCallArgs,
-) =>
-  contract.circuits.withdraw(
-    ctx,
-    args.evmNonce,
-    args.keyVersion,
-    args.withdraw,
-    args.coin,
-  );
+) => contract.circuits.withdraw(ctx, args.evmNonce, args.keyVersion, args.withdraw, args.coin);
 
 // ---- Withdraw tests ----
 
@@ -625,16 +609,17 @@ describe("withdraw round-trip", () => {
     const { context: next } = await withdraw(contract, ctx, VALID_WITHDRAW);
     const state = next.callContext.currentQueryContext.state;
 
-    const index = toSignBidirectionalEventIndex(
-      ledger(state).signBidirectionalEventMap,
-    );
+    const index = toSignBidirectionalEventIndex(ledger(state).signBidirectionalEventMap);
     expect(index.size).toBe(1);
-    const [idHex, record] = [...index.entries()][0];
+    const [idHex, record] = first(index.entries(), "indexed signBidirectional request");
 
     // The cross-contract call's observable effect: the signet contract
     // emitted the notification event declaring the stored event's id and
     // naming this vault's field-0 request map.
-    const [notificationEvent] = decodeSignetLogEvents(next.events, SIGNET_ADDRESS);
+    const notificationEvent = first(
+      decodeSignetLogEvents(next.events, SIGNET_ADDRESS),
+      "signet notification event",
+    );
     expect(notificationEvent.name).toBe(SignetEventName.SignBidirectionalEvent);
     const notificationPost = decodeSignBidirectionalEventNotificationPayload(
       notificationEvent.payload,
@@ -681,9 +666,7 @@ describe("withdraw round-trip", () => {
     expect(record.outputDeserializationSchema).toEqual(
       EXPECTED_ROUTING.outputDeserializationSchema,
     );
-    expect(record.respondSerializationSchema).toEqual(
-      EXPECTED_ROUTING.respondSerializationSchema,
-    );
+    expect(record.respondSerializationSchema).toEqual(EXPECTED_ROUTING.respondSerializationSchema);
     expect(record.requestNonce).toBe(0n);
 
     // Contract-built calldata: transfer(destEvmAddress, amount) as ABI-ready
@@ -789,19 +772,14 @@ const WITHDRAW_REJECTION_CASES: WithdrawRejectionCase[] = [
 ];
 
 describe("withdraw validation", () => {
-  it.each(WITHDRAW_REJECTION_CASES)(
-    "rejects $name",
-    async ({ args, throws }) => {
-      const { contract, ctx } = await deployInitialized();
-      await expect(withdraw(contract, ctx, args)).rejects.toThrow(throws);
-    },
-  );
+  it.each(WITHDRAW_REJECTION_CASES)("rejects $name", async ({ args, throws }) => {
+    const { contract, ctx } = await deployInitialized();
+    await expect(withdraw(contract, ctx, args)).rejects.toThrow(throws);
+  });
 
   it("rejects before initialize", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(
-      withdraw(contract, ctx, VALID_WITHDRAW),
-    ).rejects.toThrow(/Not initialized/);
+    await expect(withdraw(contract, ctx, VALID_WITHDRAW)).rejects.toThrow(/Not initialized/);
   });
 });
 
@@ -848,10 +826,7 @@ const respond = (
   serializedOutput: Uint8Array,
 ): RespondBidirectionalEvent => ({
   signature: ecdsaSignatureToMpcSignature(
-    signAttestationDigest(
-      calculateSignetAttestationDigest(requestId, serializedOutput),
-      secretKey,
-    ),
+    signAttestationDigest(calculateSignetAttestationDigest(requestId, serializedOutput), secretKey),
   ),
 });
 
@@ -868,7 +843,7 @@ const withdrawRequested = async () => {
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
   );
-  const [idHex] = [...index.keys()];
+  const idHex = first(index.keys(), "signBidirectional request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
 
@@ -1039,7 +1014,7 @@ describe("completeWithdraw settle", () => {
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
-    const [depositIdHex] = [...index.keys()];
+    const depositIdHex = first(index.keys(), "signBidirectional request id");
     const depositId = requestIdBytes(depositIdHex);
 
     await expect(
@@ -1142,7 +1117,7 @@ describe("refundWithdraw settle", () => {
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
-    const [depositIdHex] = [...index.keys()];
+    const depositIdHex = first(index.keys(), "signBidirectional request id");
     const depositId = requestIdBytes(depositIdHex);
 
     await expect(
@@ -1221,7 +1196,7 @@ const depositRequested = async () => {
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
   );
-  const [idHex] = [...index.keys()];
+  const idHex = first(index.keys(), "signBidirectional request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
 
@@ -1232,8 +1207,14 @@ describe("claim settle", () => {
   // the publicly-observable effect asserted here is the request's consumption.
   it.each([
     { name: "no recipient: mints to the caller", recipient: CALLER_RECIPIENT },
-    { name: "an explicit wallet recipient: mints to the given coin public key", recipient: OTHER_WALLET_RECIPIENT },
-    { name: "an explicit contract recipient: mints to the given contract address", recipient: CONTRACT_RECIPIENT },
+    {
+      name: "an explicit wallet recipient: mints to the given coin public key",
+      recipient: OTHER_WALLET_RECIPIENT,
+    },
+    {
+      name: "an explicit contract recipient: mints to the given contract address",
+      recipient: CONTRACT_RECIPIENT,
+    },
   ])("$name and consumes the request", async ({ recipient }) => {
     const { contract, ctx, requestId } = await depositRequested();
 

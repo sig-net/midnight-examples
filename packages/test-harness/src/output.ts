@@ -36,5 +36,5 @@ export function banner(lines: string[]): void {
  */
 export function testHeader(index: number, total: number, name: string): void {
   const border = "━".repeat(72);
-  console.log(`\n${border}\n▶  TEST ${index}/${total}  ${name}\n${border}`);
+  console.log(`\n${border}\n▶  TEST ${String(index)}/${String(total)}  ${name}\n${border}`);
 }

@@ -6,7 +6,9 @@
 // worker-only APIs are unavailable in the main process).
 
 import "./provided-context.ts";
+
 import { beforeEach, inject } from "vitest";
+
 import { testHeader } from "./output.ts";
 import { waitForGo } from "./waitForGo.ts";
 

@@ -17,9 +17,9 @@ export interface VaultPrivateState {
  * @param secretKey - The caller's 32-byte identity secret.
  * @returns A fresh private state holding `secretKey`.
  */
-export const createVaultPrivateState = (
-  secretKey: Uint8Array,
-): VaultPrivateState => ({ secretKey });
+export const createVaultPrivateState = (secretKey: Uint8Array): VaultPrivateState => ({
+  secretKey,
+});
 
 /**
  * Witness implementations, typed against the generated `Witnesses` shape.

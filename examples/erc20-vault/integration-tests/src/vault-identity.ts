@@ -3,10 +3,10 @@
 // secret itself is parsed by lib's `parseIdentitySecretKey`
 // (`VAULT_USER_SECRET_KEY`, defaulting to the `USER_SEED` bytes).
 
-import { bytesToHex } from "@sig-net/midnight";
 import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
 import { parseIdentitySecretKey } from "@midnight-examples/lib";
 import { resolveUserSeed } from "@midnight-examples/test-harness";
+import { bytesToHex } from "@sig-net/midnight";
 
 /** The caller identity every vault interaction is bound to. */
 export interface UserIdentity {
@@ -51,7 +51,7 @@ export function pathStringOfBytes(path: Uint8Array): string {
  *
  * @param env - The environment holding the identity secret (or seed).
  * @returns The derived identity.
- * @throws If the identity secret/seed is malformed.
+ * @throws {ParseError} If the identity secret/seed is malformed.
  */
 export function resolveUserIdentity(env: NodeJS.ProcessEnv): UserIdentity {
   const secretKey = parseIdentitySecretKey("VAULT_USER_SECRET_KEY", env, resolveUserSeed(env));

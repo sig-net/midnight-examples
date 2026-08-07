@@ -43,7 +43,7 @@ export const fakenetResponsesUrl = (): string =>
  * @param requestId - The request id, hex with or without 0x prefix.
  * @param timeoutMs - How long to keep retrying 404s before failing.
  * @returns The cached response.
- * @throws Error when the API stays unreachable or 404s past the deadline.
+ * @throws {Error} When the API stays unreachable or 404s past the deadline.
  */
 export async function fetchFakenetResponse(
   requestId: string,
@@ -63,9 +63,11 @@ export async function fetchFakenetResponse(
       if (response.ok) {
         return (await response.json()) as FakenetResponse;
       }
-      lastFailure = `HTTP ${response.status}: ${await response.text()}`;
+      lastFailure = `HTTP ${String(response.status)}: ${await response.text()}`;
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   } while (Date.now() < deadline);
-  throw new Error(`no fakenet response for ${requestId} within ${timeoutMs}ms (${lastFailure}) at ${url}`);
+  throw new Error(
+    `no fakenet response for ${requestId} within ${String(timeoutMs)}ms (${lastFailure}) at ${url}`,
+  );
 }

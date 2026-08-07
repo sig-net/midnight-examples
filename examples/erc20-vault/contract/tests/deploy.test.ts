@@ -8,16 +8,15 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
-
 import { buildDeployTransaction, makeCompiledContract } from "@midnight-examples/lib";
+import { describe, expect, it } from "vitest";
 
 import {
   Contract,
   createVaultPrivateState,
   pureCircuits,
-  witnesses,
   type VaultPrivateState,
+  witnesses,
 } from "../src/index.ts";
 
 const MANAGED_DIR = fileURLToPath(new URL("../src/managed/erc20-vault", import.meta.url));

@@ -42,11 +42,14 @@ export interface CompleteWithdrawOptions {
  *
  * @param context - The flow context.
  * @param options - The settle arguments.
- * @throws If no matching attestation has been posted for `options.requestId`
+ * @throws {Error} If no matching attestation has been posted for `options.requestId`
  *   yet, or the withdrawal was already settled (no pending marker on the
  *   ledger).
  */
-export async function completeWithdraw(context: VaultContext, options: CompleteWithdrawOptions): Promise<void> {
+export async function completeWithdraw(
+  context: VaultContext,
+  options: CompleteWithdrawOptions,
+): Promise<void> {
   console.log(`vault contract:  ${context.vaultContractAddress}`);
   console.log(`signet contract: ${context.signetContractAddress}`);
   console.log(`request id:      ${options.requestId}`);

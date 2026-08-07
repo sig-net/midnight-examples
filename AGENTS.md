@@ -96,11 +96,55 @@ exception for that specific case.
   No `dist/`, no `tsc --outDir`, no ts-node loaders, no copy steps. Tests run under
   vitest; entrypoints run under `tsx`. If you think you need a build step, stop and
   ask — a build step is a defect in this workspace, not a missing feature.
-- **ALWAYS finish a change with `yarn build && yarn test`** in the member you
-  touched (or from the root). `tsx` and vitest execute without typechecking — "it
-  runs" is NOT verification. If you add a new top-level TS directory to a member,
-  add it to that member's tsconfig `include` in the same change; a file outside
-  `include` passes silently and then breaks in the IDE.
+- **ALWAYS finish a change with `yarn format:check && yarn lint && yarn build && yarn test`**
+  in the member you touched (or from the root). `tsx` and vitest execute without
+  typechecking — "it runs" is NOT verification. If you add a new top-level TS
+  directory to a member, add it to that member's tsconfig `include` in the same
+  change; a file outside `include` passes silently and then breaks in the IDE —
+  and it is also invisible to the type-aware lint rules, which go quiet rather
+  than erroring when a file belongs to no tsconfig.
+- **Lint and format config lives ONCE at the repo root, and lint runs AFTER
+  compile.** `eslint.config.js`, `.prettierrc.json` and `.prettierignore` are
+  root-only: `eslint .` from the root already covers every member, and
+  per-package copies drift. The type-aware rules read the generated
+  `src/managed/` types the source imports, so `yarn lint` needs `yarn compile`
+  first exactly as `yarn build` does. NEVER add a per-package `eslint.config.*`
+  or `.prettierrc*`.
+- **The ESLint config turns NO rule off, and the tree carries NO
+  `eslint-disable` directive.** When a rule fires, FIX THE CODE. A config full
+  of suppressions is a config fitted to whatever code happens to exist, and it
+  licenses the same defect forever; a config with none is a standard the code is
+  held to. `reportUnusedDisableDirectives` is set to `error`, so a stale
+  suppression fails the build too. The only options the config passes to a rule
+  are ones that WIDEN coverage (e.g. `jsdoc/require-jsdoc` reaching types and
+  exported consts), teach a rule about an API it predates (e.g.
+  `vitest/expect-expect` learning `expectTypeOf`), or pin a purely cosmetic
+  house style to what the repo's existing blocks already do (`jsdoc/tag-lines`).
+  If you believe a rule genuinely cannot hold, STOP and ask rather than adding
+  an `"off"`.
+- **Two TypeScripts, on purpose: members build on 7, ESLint reads types through
+  a root-only 6.0.3.** Every member pins `typescript@^7.0.2`, the native Go
+  compiler `yarn build` runs. TypeScript 7 ships no public compiler API (it is
+  scheduled for 7.1), so typescript-eslint declares
+  `peerDependencies.typescript: ">=4.8.4 <6.1.0"` and cannot parse `.ts` at all
+  under 7 — not merely lose its type-aware rules. The root therefore carries
+  `typescript@6.0.3` as a devDependency used ONLY by the lint toolchain, which
+  is Microsoft's own documented transition pattern (they publish
+  `@typescript/typescript6` for the same purpose). yarn resolves the root to
+  6.0.3 and nests 7.0.2 under each member, so `yarn build` keeps the native
+  compiler. DELETE the root pin once typescript-eslint supports the 7.1 API;
+  until then, do NOT "tidy" the two versions into one, and remember lint's
+  checker is a major behind the one that gates the build.
+- **`noUncheckedIndexedAccess` is on.** An index read (`arr[i]`, `record[key]`,
+  a regex capture group, a `.split()` result) is typed `T | undefined`, so it
+  must be narrowed before use. In preference order: iterate instead of indexing
+  (`for (const b of bytes.subarray(a, b))` yields `number` and is usually
+  shorter); use `.at(i)` with an explicit `throw`; hoist the lookup and fold its
+  undefined check into a throw the code already performs. NEVER reach for `!` —
+  `no-non-null-assertion` is on, so a bang only moves the problem. In a test,
+  `expect(xs).toHaveLength(1)` does NOT narrow the `xs[0]` that follows it: add
+  a small local helper that throws when the element is missing, and keep the
+  `toHaveLength` assertion visible in the test itself.
 - **NEVER commit generated compiler output.** Each contract package's
   `src/managed/` is produced by `yarn compile` and is gitignored. Default
   compile is `--skip-zk` (fast; enough for typecheck + simulator tests); run

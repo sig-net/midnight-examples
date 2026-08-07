@@ -3,9 +3,9 @@
 // than a full VaultContext so the read-state script can drive it without a
 // wallet.
 
+import { ledger } from "@midnight-examples/erc20-vault-contract";
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js-types";
 import { bytesToHex, toSignBidirectionalEventIndex } from "@sig-net/midnight";
-import { ledger } from "@midnight-examples/erc20-vault-contract";
 
 /** The decoded vault public ledger state, as the generated `ledger()` returns it. */
 export type VaultLedgerState = ReturnType<typeof ledger>;
@@ -16,7 +16,7 @@ export type VaultLedgerState = ReturnType<typeof ledger>;
  * @param publicDataProvider - The provider to query raw contract state through.
  * @param vaultContractAddress - The deployed vault contract address.
  * @returns The decoded ledger state.
- * @throws If no contract state exists at `vaultContractAddress`.
+ * @throws {Error} If no contract state exists at `vaultContractAddress`.
  */
 export async function readVaultLedger(
   publicDataProvider: PublicDataProvider,
@@ -36,7 +36,7 @@ export async function readVaultLedger(
  *
  * @param publicDataProvider - The provider to query raw contract state through.
  * @param vaultContractAddress - The deployed vault contract address.
- * @throws If no contract state exists at `vaultContractAddress`.
+ * @throws {Error} If no contract state exists at `vaultContractAddress`.
  */
 export async function printVaultState(
   publicDataProvider: PublicDataProvider,
@@ -44,14 +44,16 @@ export async function printVaultState(
 ): Promise<void> {
   const state = await readVaultLedger(publicDataProvider, vaultContractAddress);
   console.log(`vault contract:    ${vaultContractAddress}`);
-  console.log(`initialized:       ${state.initialized}`);
+  console.log(`initialized:       ${String(state.initialized)}`);
   console.log(`vault EVM address: 0x${bytesToHex(state.vaultEvmAddress)}`);
   // caip2Id is zero-padded ASCII; NUL-trim for display.
-  console.log(`EVM chain:         ${state.evmChainId} (${new TextDecoder().decode(state.caip2Id).replace(/\0+$/u, "")})`);
+  console.log(
+    `EVM chain:         ${String(state.evmChainId)} (${new TextDecoder().decode(state.caip2Id).replace(/\0+$/u, "")})`,
+  );
 
   const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
-  console.log(`pending signature requests: ${index.size}`);
+  console.log(`pending signature requests: ${String(index.size)}`);
   for (const [requestIdHex, request] of index) {
-    console.log(`- ${requestIdHex} (requestNonce ${request.requestNonce})`);
+    console.log(`- ${requestIdHex} (requestNonce ${String(request.requestNonce)})`);
   }
 }

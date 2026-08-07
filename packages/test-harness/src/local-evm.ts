@@ -4,8 +4,18 @@
 // signs with the universally-known dev funder account, which only exists
 // pre-funded on a throwaway local chain.
 
-import { Contract, ContractFactory, JsonRpcProvider, NonceManager, Wallet, parseEther, parseUnits } from "ethers";
 import type { InterfaceAbi } from "ethers";
+import {
+  Contract,
+  ContractFactory,
+  JsonRpcProvider,
+  NonceManager,
+  parseEther,
+  parseUnits,
+  Wallet,
+} from "ethers";
+
+import type { ContractReadMethod, ContractWriteMethod } from "./evm.ts";
 
 /** EVM chain ids the setup pipeline keys behavior on. */
 export enum WellKnownEvmChainId {
@@ -31,7 +41,8 @@ export function isLocalEvmChain(chainId: bigint): boolean {
 // Dev account #0 of the universal hardhat/anvil test mnemonic ("test test …
 // junk"): pre-funded with 10 000 ETH on every fresh local node, never funded
 // on any real network. Deployer of test tokens and source of all top-ups.
-const LOCAL_FUNDER_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const LOCAL_FUNDER_PRIVATE_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 /** ETH top-up target per derived account on the local chain, in wei. */
 export const LOCAL_ETH_TARGET = parseEther("10");
@@ -59,9 +70,12 @@ export interface EvmContractArtifact {
  * @param rpcUrl - JSON-RPC endpoint of the LOCAL dev chain (`EVM_RPC_URL`).
  * @param artifact - The compiled contract to deploy.
  * @returns The deployed contract's address.
- * @throws If the deployment fails.
+ * @throws {Error} If the deployment fails.
  */
-export async function deployEvmContract(rpcUrl: string, artifact: EvmContractArtifact): Promise<string> {
+export async function deployEvmContract(
+  rpcUrl: string,
+  artifact: EvmContractArtifact,
+): Promise<string> {
   const provider = new JsonRpcProvider(rpcUrl);
   try {
     const funder = new Wallet(LOCAL_FUNDER_PRIVATE_KEY, provider);
@@ -104,13 +118,17 @@ export async function topUpLocalAccount(
     const funder = new NonceManager(new Wallet(LOCAL_FUNDER_PRIVATE_KEY, provider));
     const ethBalance = await provider.getBalance(address);
     if (ethBalance < LOCAL_ETH_TARGET) {
-      const sendTx = await funder.sendTransaction({ to: address, value: LOCAL_ETH_TARGET - ethBalance });
+      const sendTx = await funder.sendTransaction({
+        to: address,
+        value: LOCAL_ETH_TARGET - ethBalance,
+      });
       await sendTx.wait();
     }
     const token = new Contract(erc20Address, MINTABLE_ERC20_ABI, funder);
-    const tokenBalance = (await token.balanceOf(address)) as bigint;
+    const tokenBalance = await token.getFunction<ContractReadMethod<bigint>>("balanceOf")(address);
     if (tokenBalance < LOCAL_TOKEN_TARGET) {
-      const mintTx = await token.mint(address, LOCAL_TOKEN_TARGET - tokenBalance);
+      const mint = token.getFunction<ContractWriteMethod>("mint");
+      const mintTx = await mint(address, LOCAL_TOKEN_TARGET - tokenBalance);
       await mintTx.wait();
     }
     // Computed, not re-read: an immediate re-read through this provider can

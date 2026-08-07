@@ -5,10 +5,10 @@
 // tests assert the same values against the real compiled contract.
 
 import {
+  asciiPadded,
   MPC_PARAMS_BYTES,
   MPCDestination,
   MPCSignatureAlgorithm,
-  asciiPadded,
 } from "@sig-net/midnight";
 
 /**

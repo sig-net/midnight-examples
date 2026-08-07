@@ -4,18 +4,37 @@
 // the decoded notification stays in the test bodies.
 
 import { getMidnightNodeConfig } from "@midnight-examples/lib";
+import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import {
   decodeSignBidirectionalEventNotificationPayload,
   decodeSignBidirectionalNotification,
-  requestIdHex,
-  signetEventSourceFromPublicDataProvider,
-  stripHexPrefix,
-  SignetEventName,
   type RequestIdHex,
+  requestIdHex,
   type SignBidirectionalNotification,
+  SignetEventName,
+  signetEventSourceFromPublicDataProvider,
+  type SignetMiscEvent,
+  stripHexPrefix,
 } from "@sig-net/midnight";
-import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+
 import { requireEnv } from "./e2e-env.ts";
+
+/**
+ * Whether a decoded signet event carries `name`.
+ *
+ * {@link SignetMiscEvent.name} is a bare `string` decoded off the wire, so a
+ * direct `===` against the {@link SignetEventName} enum compares two values
+ * that share no enum type. The widening belongs here, once, rather than at
+ * each call site.
+ *
+ * @param event - The decoded signet event.
+ * @param name - The event name to match.
+ * @returns Whether the event carries that name.
+ */
+export function isSignetEventNamed(event: SignetMiscEvent, name: SignetEventName): boolean {
+  const expected: string = name;
+  return event.name === expected;
+}
 
 /** What to poll the signet contract's notification events for. */
 export interface SignetNotificationPoll {
@@ -47,7 +66,7 @@ export interface SignetNotificationPoll {
  * @param options - The env, expected request id and caller pointer, and
  *   patience.
  * @returns The decoded V1 notification.
- * @throws Error when no matching decodable event is indexed in time.
+ * @throws {Error} When no matching decodable event is indexed in time.
  */
 export async function pollSignetNotification(
   options: SignetNotificationPoll,
@@ -68,13 +87,11 @@ export async function pollSignetNotification(
   while (Date.now() < deadline) {
     const events = await eventSource.querySignetEvents(signetAddress);
     for (const event of events) {
-      if (event.name !== SignetEventName.SignBidirectionalEvent) continue;
+      if (!isSignetEventNamed(event, SignetEventName.SignBidirectionalEvent)) continue;
       let declaredId: RequestIdHex;
       let decoded: SignBidirectionalNotification;
       try {
-        const post = decodeSignBidirectionalEventNotificationPayload(
-          event.payload,
-        );
+        const post = decodeSignBidirectionalEventNotificationPayload(event.payload);
         declaredId = requestIdHex(post.requestId);
         decoded = decodeSignBidirectionalNotification(post.event);
       } catch {
@@ -93,6 +110,6 @@ export async function pollSignetNotification(
   }
 
   throw new Error(
-    `no notification event ${options.description} emitted on ${signetAddress} within ${timeoutMs / 1000}s`,
+    `no notification event ${options.description} emitted on ${signetAddress} within ${String(timeoutMs / 1000)}s`,
   );
 }

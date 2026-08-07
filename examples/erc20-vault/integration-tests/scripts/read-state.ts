@@ -4,11 +4,10 @@
 // — no wallet, no proving keys. Run:
 //   yarn workspace @midnight-examples/erc20-vault-integration-tests read-state
 
-import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
-import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
-
 import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { buildBaseEnv, requireEnv } from "@midnight-examples/test-harness";
+import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
+import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 
 import { printVaultState } from "../src/vault-ledger.ts";
 
