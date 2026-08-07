@@ -79,7 +79,11 @@ async function main(): Promise<void> {
     const contractAddress = deployTransaction.contractAddress;
     console.log(`contract address (pre-submit): ${contractAddress}`);
 
-    const deployTxId = await submitUnprovenTransaction(facade, accountKeys, deployTransaction.serializedTransaction);
+    const deployTxId = await submitUnprovenTransaction(
+      facade,
+      accountKeys,
+      deployTransaction.serializedTransaction,
+    );
     console.log(`submitted deploy tx ${deployTxId}`);
 
     // Join the freshly-deployed contract and run the deployer-gated initialize.
@@ -92,11 +96,19 @@ async function main(): Promise<void> {
     } as never);
 
     const vaultEvmAddress = deriveEvmAddress(mpcSecpPub, contractAddress, "vault");
-    const mpcResponseKey = formatSecp256k1PublicKey(deriveMidnightResponseKey(mpcSecpPub, contractAddress));
+    const mpcResponseKey = formatSecp256k1PublicKey(
+      deriveMidnightResponseKey(mpcSecpPub, contractAddress),
+    );
     const caip2Id = `eip155:${evmChainId}`;
-    console.log(`initialize: vaultEvm=${vaultEvmAddress} router=${router} chain=${evmChainId} responseKey=${mpcResponseKey}`);
+    console.log(
+      `initialize: vaultEvm=${vaultEvmAddress} router=${router} chain=${evmChainId} responseKey=${mpcResponseKey}`,
+    );
 
-    const initRes = await (vault as never as { callTx: { initialize: (...a: unknown[]) => Promise<{ public: { txId: string } }> } }).callTx.initialize(
+    const initRes = await (
+      vault as never as {
+        callTx: { initialize: (...a: unknown[]) => Promise<{ public: { txId: string } }> };
+      }
+    ).callTx.initialize(
       evmAddressBytes(vaultEvmAddress),
       evmAddressBytes(router),
       evmChainId,
