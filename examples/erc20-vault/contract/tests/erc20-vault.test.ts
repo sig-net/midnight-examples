@@ -1512,7 +1512,7 @@ const swapRequested = async () => {
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).swapEventMap,
   );
-  const [idHex] = first(index.keys(), "indexed swap request");
+  const idHex = first(index.keys(), "indexed swap request");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
 
