@@ -1416,7 +1416,7 @@ describe("approveRouter", () => {
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
     expect(index.size).toBe(1);
-    const [, record] = [...index.entries()][0];
+    const [, record] = first(index.entries(), "indexed approveRouter request");
 
     // Vault path, approve ON the erc20, spender = pinned router, amount = MAX.
     expect(record.path).toEqual(asciiPadded("vault", 32));
@@ -1456,7 +1456,7 @@ describe("swap round-trip", () => {
     expect(index.size).toBe(1);
     // Field 0 stays empty: the swap went to the swap map, not the transfer map.
     expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
-    const [idHex, record] = [...index.entries()][0];
+    const [idHex, record] = first(index.entries(), "indexed swap request");
 
     expect(record.sender).toEqual({ bytes: VAULT_ADDRESS_BYTES });
     expect(record.path).toEqual(asciiPadded("vault", 32));
@@ -1512,7 +1512,7 @@ const swapRequested = async () => {
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).swapEventMap,
   );
-  const [idHex] = [...index.keys()];
+  const [idHex] = first(index.keys(), "indexed swap request");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
 

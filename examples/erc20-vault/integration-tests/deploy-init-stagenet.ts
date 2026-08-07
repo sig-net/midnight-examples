@@ -7,6 +7,7 @@
 // Env: NETWORK_ID, MIDNIGHT_NODE_URL, MIDNIGHT_NODE_INDEXER_URL, MIDNIGHT_NODE_INDEXER_WS_URL,
 //      MIDNIGHT_NODE_PROOF_SERVER_URL, DEPLOYER_SEED (funded), MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
 //      MPC_SECP256K1_PUBKEY, EVM_CHAIN_ID, ROUTER (optional).
+import { createVaultPrivateState, pureCircuits } from "@midnight-examples/erc20-vault-contract";
 import {
   assertDeployerFunded,
   buildDeployTransaction,
@@ -28,12 +29,11 @@ import {
   parseSecp256k1PublicKey,
   stripHexPrefix,
 } from "@sig-net/midnight";
-import { pureCircuits, createVaultPrivateState } from "@midnight-examples/erc20-vault-contract";
 
 import {
   buildVaultProviders,
-  vaultCompiledContract,
   VAULT_PRIVATE_STATE_ID,
+  vaultCompiledContract,
 } from "./src/vault-providers.ts";
 
 const UNISWAP_SWAP_ROUTER_02 = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E";
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   const signetAddr = req("MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
   const mpcSecpPub = req("MPC_SECP256K1_PUBKEY");
   const evmChainId = BigInt(req("EVM_CHAIN_ID"));
-  const router = env.ROUTER?.trim() || UNISWAP_SWAP_ROUTER_02;
+  const router = env.ROUTER?.trim() ?? UNISWAP_SWAP_ROUTER_02;
 
   const secretKey = parseIdentitySecretKey("VAULT_DEPLOYER_SECRET_KEY", env, deployerSeed);
   const deployerCommitment = pureCircuits.userCommitment(secretKey);
@@ -99,9 +99,9 @@ async function main(): Promise<void> {
     const mpcResponseKey = formatSecp256k1PublicKey(
       deriveMidnightResponseKey(mpcSecpPub, contractAddress),
     );
-    const caip2Id = `eip155:${evmChainId}`;
+    const caip2Id = `eip155:${String(evmChainId)}`;
     console.log(
-      `initialize: vaultEvm=${vaultEvmAddress} router=${router} chain=${evmChainId} responseKey=${mpcResponseKey}`,
+      `initialize: vaultEvm=${vaultEvmAddress} router=${router} chain=${String(evmChainId)} responseKey=${mpcResponseKey}`,
     );
 
     const initRes = await (
