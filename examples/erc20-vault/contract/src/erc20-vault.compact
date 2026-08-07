@@ -685,6 +685,13 @@ export circuit refund(
 // request entry is deliberately never consumed. The allowance is global per token (one
 // pooled account), so the first caller readies a token for everyone; the frontend reads
 // allowance() to know whether this leg is needed.
+//
+// State-bloat note: a never-settled entry grows the map unboundedly, and this applies to any
+// no-utxo circuit (here approveRouter and deposit) — with nothing surrendered, no settle runs
+// to prune the entry. Not a practical DoS (each request costs the caller a Midnight proof, far
+// exceeding the vault's cost), but a production caller-contract should add an operator-only
+// cleanup circuit to prune stale entries (the durable fix is querying storage efficiently so a
+// large map never makes the MPC drop requests).
 export circuit approveRouter(
   erc20Address: Bytes<20>,
   evmNonce: Uint<64>,
