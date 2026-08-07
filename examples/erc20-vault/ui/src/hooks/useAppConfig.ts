@@ -135,7 +135,7 @@ export function useAppConfig(): readonly ConfigSection[] {
         {
           key: "mpc-pubkey",
           label: "MPC public key",
-          info: "The MPC network's root secp256k1 public key: 33-byte compressed or 65-byte uncompressed, hex, 0x optional. Deposit addresses derive from it. Left empty, the app says the address cannot be derived. The local fakenet prints its key as MPC_SECP256K1_PUBKEY in the repo-root .env.",
+          info: "The MPC network's root secp256k1 public key: 33-byte compressed or 65-byte uncompressed, hex, 0x optional. Deposit addresses derive from it. Left empty, the app says the address cannot be derived. The local fakenet prints its key as MPC_ROOT_PUBLIC_KEY in the repo-root .env.",
           kind: ConfigFieldKind.Text,
           value: vault.mpcPubkey ?? "",
           placeholder: "Not set",

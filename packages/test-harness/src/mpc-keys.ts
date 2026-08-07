@@ -1,7 +1,7 @@
 // Fakenet MPC key material helpers: root key generation and public-key
 // derivation. Test-harness only (a real client never holds the MPC root key):
-// these mirror what the fakenet response server derives from its MPC_ROOT_KEY
-// so the e2e setup can precompute the same public keys it will present.
+// these mirror what the fakenet response server derives from its root private
+// key so the e2e setup can precompute the same public keys it will present.
 
 import { randomBytes } from "node:crypto";
 
@@ -13,7 +13,7 @@ import { SigningKey } from "ethers";
  * response keys) epsilon-derive from.
  */
 export interface MpcPublicKeys {
-  /** Compressed secp256k1 public key as 0x-hex (`MPC_SECP256K1_PUBKEY`). */
+  /** Compressed secp256k1 public key as 0x-hex (`MPC_ROOT_PUBLIC_KEY`). */
   secp256k1CompressedPubkey: string;
 }
 

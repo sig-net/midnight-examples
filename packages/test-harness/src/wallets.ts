@@ -1,8 +1,8 @@
-// The multi-wallet seed + funding phase: ONE root wallet funds the role
-// wallets (deployer, user, mpc responder, bearer). Each role's seed is read from
-// .env when present, otherwise generated, persisted (append-only), and its
-// addresses printed. Root does no test work; it only holds funds and pays the
-// roles out.
+// The multi-wallet seed + funding phase: ONE root wallet funds the other
+// Midnight wallets the run needs (deployer, user 1, mpc responder, user 2).
+// Each wallet's seed is read from .env when present, otherwise generated,
+// persisted (append-only), and its addresses printed. Root does no test work;
+// it only holds funds and pays the others out.
 //
 // - undeployed: root defaults to the pre-funded genesis mint wallet, so the
 //   roles are funded from genesis at runtime.
@@ -35,29 +35,30 @@ import { appendRepoDotEnv } from "./env-file.ts";
 import { banner, logSkip } from "./output.ts";
 import { retryWhileDustGenerates } from "./steps.ts";
 
-/** One wallet role: its display label and the env var holding its seed. */
+/** One funded wallet: its display label and the env var holding its seed. */
 interface RoleWallet {
   readonly label: string;
   readonly envVar: string;
 }
 
-/** The funding root. Does no test work; holds NIGHT and pays the roles out. */
-const ROOT: RoleWallet = { label: "root", envVar: "ROOT_SEED" };
+/** The funding root. Does no test work; holds NIGHT and pays the others out. */
+const ROOT: RoleWallet = { label: "root", envVar: "MIDNIGHT_ROOT_WALLET_SEED" };
 
 /**
- * The role wallets funded from root, in setup order: `deployer` deploys the
- * signet + example contracts, `user` drives the example's circuits (and seeds
- * the derived EVM account identity), `mpc responder` is the fakenet
- * responder's fee-paying wallet (docker-compose interpolates its seed), and
- * `bearer` is the second SPENDING wallet of the bearer-transfer flow (it
- * pays its own withdraw fees). Receive-only test wallets (the fixed
- * `…42`/`…43` seeds) never pay anything and need no role here.
+ * The wallets funded from root, in setup order: `deployer` deploys the
+ * signet + example contracts (its seed bytes are also the deployer identity
+ * sealed at deploy), `user 1` drives the example's circuits, `mpc responder`
+ * is the fakenet responder's fee-paying wallet (docker-compose interpolates
+ * its seed), and `user 2` is the second user of flows that need two parties
+ * (today the bearer-transfer suite's token receiver, paying its own withdraw
+ * fees). Receive-only test wallets (the fixed `…42`/`…43` seeds) never pay
+ * anything and need no entry here.
  */
 const CHILDREN: readonly RoleWallet[] = [
-  { label: "deployer", envVar: "DEPLOYER_SEED" },
-  { label: "user", envVar: "USER_SEED" },
-  { label: "mpc responder", envVar: "MPC_RESPONDER_SEED" },
-  { label: "bearer", envVar: "BEARER_SEED" },
+  { label: "deployer", envVar: "MIDNIGHT_DEPLOYER_WALLET_SEED" },
+  { label: "user 1", envVar: "MIDNIGHT_USER1_WALLET_SEED" },
+  { label: "mpc responder", envVar: "MIDNIGHT_MPC_RESPONDER_WALLET_SEED" },
+  { label: "user 2", envVar: "MIDNIGHT_USER2_WALLET_SEED" },
 ];
 
 /** Format a wallet's three addresses as banner lines. */
@@ -74,9 +75,10 @@ function walletAddressLines(label: string, addresses: WalletAddresses): string[]
  * Resolve every wallet seed: reuse the one in `.env` when present, otherwise
  * generate it (root on the local chain defaults to the genesis mint wallet),
  * populate the env accumulator, persist the newly-created seeds to `.env`
- * (append-only), and print each wallet's addresses. After this, ROOT_SEED,
- * DEPLOYER_SEED, USER_SEED, MPC_RESPONDER_SEED and BEARER_SEED are all set
- * in `env`.
+ * (append-only), and print each wallet's addresses. After this,
+ * MIDNIGHT_ROOT_WALLET_SEED, MIDNIGHT_DEPLOYER_WALLET_SEED,
+ * MIDNIGHT_USER1_WALLET_SEED, MIDNIGHT_MPC_RESPONDER_WALLET_SEED and
+ * MIDNIGHT_USER2_WALLET_SEED are all set in `env`.
  *
  * @param env - The suite's env accumulator (mutated with the resolved seeds).
  */
@@ -103,7 +105,7 @@ export function ensureWalletSeeds(env: NodeJS.ProcessEnv): void {
   }
 
   if (Object.keys(generated).length > 0) {
-    appendRepoDotEnv(generated, "test-harness setup: generated wallet seeds (root/deployer/user/mpc responder/bearer)");
+    appendRepoDotEnv(generated, "test-harness setup: generated Midnight wallet seeds (root/deployer/user 1/mpc responder/user 2)");
   }
 }
 
@@ -115,16 +117,18 @@ function logFundedPass(label: string, funding: AccountFunding): void {
 }
 
 /**
- * The per-child NIGHT transfer amount. `FUND_CHILD_NIGHT` (base units) pins it;
- * otherwise root's balance is split evenly across the children that need
- * funding, keeping one share in root (for its own transfer fees), so the split
- * adapts to however much the faucet delivered.
+ * The per-wallet NIGHT transfer amount. `FUND_WALLET_NIGHT_AMOUNT` (base
+ * units) pins it; otherwise root's balance is split evenly across the wallets
+ * that need funding, keeping one share in root (for its own transfer fees),
+ * so the split adapts to however much the faucet delivered.
  */
 function perChildAmount(env: NodeJS.ProcessEnv, rootNight: bigint, unfundedCount: number): bigint {
-  const override = env.FUND_CHILD_NIGHT?.trim();
+  const override = env.FUND_WALLET_NIGHT_AMOUNT?.trim();
   if (override) {
     if (!/^\d+$/.test(override)) {
-      throw new Error(`FUND_CHILD_NIGHT must be a non-negative integer in NIGHT base units; got "${env.FUND_CHILD_NIGHT}".`);
+      throw new Error(
+        `FUND_WALLET_NIGHT_AMOUNT must be a non-negative integer in NIGHT base units; got "${env.FUND_WALLET_NIGHT_AMOUNT}".`,
+      );
     }
     return BigInt(override);
   }
@@ -132,7 +136,7 @@ function perChildAmount(env: NodeJS.ProcessEnv, rootNight: bigint, unfundedCount
 }
 
 /**
- * Fund the role wallets from root. Preflight root first: on a deployed network
+ * Fund the other wallets from root. Preflight root first: on a deployed network
  * whose root is not yet faucet-funded this STOPS the run (re-throwing
  * {@link RootUnfundedError}) after printing the NIGHT address + faucet URL.
  * Then each child that is already fee-ready passes; each that is not is topped

@@ -14,7 +14,7 @@
 //
 // The claimed tokens strand on the recipient wallet (this flow does not
 // withdraw them), so the deposited ERC20 would strand on the vault's EVM
-// account run after run — the final step drains it back to EVM_USER_ADDRESS
+// account run after run — the final step drains it back to EVM_USER1_DEPOSIT_ADDRESS
 // with the fakenet-only vault key (see src/fakenet-vault-account.ts), the
 // same fund-cycling move the failure-refund flow uses. Run AFTER
 // tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives there. Recovery
@@ -73,7 +73,7 @@ const session = createVaultSession(env);
 const DEPOSIT_AMOUNT = parseUnits("0.1", 6);
 
 // The alternate recipient's wallet seed: a fixed constant, deliberately
-// different from USER_SEED (which defaults to the genesis seed `00…01`), so
+// different from MIDNIGHT_USER1_WALLET_SEED (which defaults to the genesis seed `00…01`), so
 // the mint provably lands on a wallet that is NOT the claimant's. The wallet
 // only receives — it never signs or pays fees — so the seed needs no funding
 // and no identity secret.
@@ -90,7 +90,7 @@ const recipientKeys = (): ShieldedTokenRecipient => {
 
 /**
  * Build a FRESH wallet for the alternate recipient, sync it from chain, and
- * read its shielded balance of the vault token for `ERC20_ADDRESS`. A fresh
+ * read its shielded balance of the vault token for `EVM_ERC20_CONTRACT_ADDRESS`. A fresh
  * facade per read (rather than a shared session) is the point: discovering
  * the coin from public chain data alone is what proves the mint reached the
  * recipient.
@@ -98,7 +98,7 @@ const recipientKeys = (): ShieldedTokenRecipient => {
 const readRecipientVaultTokenBalance = async (): Promise<bigint> => {
   const nodeConfig = getMidnightNodeConfig(env);
   const keys = deriveAccountKeys(RECIPIENT_SEED, nodeConfig.networkId);
-  const color = vaultTokenType(requireEnv("ERC20_ADDRESS"), requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS"));
+  const color = vaultTokenType(requireEnv("EVM_ERC20_CONTRACT_ADDRESS"), requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS"));
   return withSyncedWalletFacade(keys, nodeConfig, async (_facade, state) => state.shielded.balances[color] ?? 0n);
 };
 
@@ -113,9 +113,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → cla
     "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the drain gas",
     async () => {
       const rpcUrl = requireEnv("EVM_RPC_URL");
-      const userAddress = requireEnv("EVM_USER_ADDRESS");
-      const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-      const erc20Address = requireEnv("ERC20_ADDRESS");
+      const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+      const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+      const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
       // Same minimums as the happy-day deposit leg: the user's derived
       // account pays the sweep gas and supplies the deposited ERC20.
@@ -168,7 +168,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → cla
       recipientBalanceBefore = await readRecipientVaultTokenBalance();
 
       banner([
-        "Alternate recipient wallet (fixed test seed, distinct from USER_SEED):",
+        "Alternate recipient wallet (fixed test seed, distinct from MIDNIGHT_USER1_WALLET_SEED):",
         "",
         `  coin public key:       ${recipient.coinPublicKey}`,
         `  encryption public key: ${recipient.encryptionPublicKey}`,
@@ -252,14 +252,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deposit → cla
     "cycle funds: drain the vault's EVM ERC20 balance (fakenet-only) back to the user's derived account",
     async () => {
       const rpcUrl = requireEnv("EVM_RPC_URL");
-      const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-      const erc20Address = requireEnv("ERC20_ADDRESS");
+      const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+      const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
       // The claimed tokens strand on the recipient wallet, so send the
       // deposited ERC20 (plus any prior-run leftovers) back to the user's
       // derived account — the suite's EVM funds keep cycling. A zero balance
       // means a prior aborted run already drained it.
-      const drained = await drainVaultErc20(env, requireEnv("EVM_USER_ADDRESS"));
+      const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
       if (drained === 0n) {
         logSkip("drain", "the vault's derived account already holds no ERC20");
       }

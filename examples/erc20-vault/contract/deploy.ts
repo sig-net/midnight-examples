@@ -17,8 +17,8 @@ import {
   buildDeployTransaction,
   deriveAccountKeys,
   getDeployConfig,
+  identitySecretFromSeed,
   makeCompiledContract,
-  parseIdentitySecretKey,
   submitUnprovenTransaction,
   withSyncedWalletFacade,
   type TransactionIdentifier,
@@ -57,17 +57,16 @@ interface VaultDeployment {
  * identity, build/prove the deploy transaction and submit it through a synced
  * wallet. Progress is logged to the console.
  *
- * The deployer identity comes from `VAULT_DEPLOYER_SECRET_KEY` (falling back
- * to the `DEPLOYER_SEED` bytes): its commitment is sealed into the contract
- * as `deployer`, and the same secret must later answer the `callerSecretKey`
- * witness to pass `initialize`'s gate. That gate is what protects the
- * post-deploy configuration (vault EVM address, chain, MPC response key)
- * from front-running.
+ * The deployer identity is the deployer wallet seed's 32 bytes: their
+ * commitment is sealed into the contract as `deployer`, and the same secret
+ * must later answer the `callerSecretKey` witness to pass `initialize`'s
+ * gate. That gate is what protects the post-deploy configuration (vault EVM
+ * address, chain, MPC response key) from front-running. One seed is thus both
+ * the wallet that pays for the deploy and the identity that may initialize.
  *
- * @param env - Environment map providing `DEPLOYER_SEED`,
- *   `VAULT_DEPLOYER_SECRET_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the
- *   signet contract to seal as the cross-contract signer) and lib's Midnight
- *   node configuration.
+ * @param env - Environment map providing `MIDNIGHT_DEPLOYER_WALLET_SEED`,
+ *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the signet contract to seal as the
+ *   cross-contract signer) and lib's Midnight node configuration.
  * @returns The deployed contract address and deploy transaction id.
  * @throws If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed, the
  *   deployer wallet holds no funds, or submission fails.
@@ -76,7 +75,7 @@ async function deployVault(env: Record<string, string | undefined> = process.env
   const deployConfig = getDeployConfig(env);
   const { networkId } = deployConfig.midnightNodeConfig;
 
-  const secretKey = parseIdentitySecretKey("VAULT_DEPLOYER_SECRET_KEY", env, deployConfig.deployerSeed);
+  const secretKey = identitySecretFromSeed(deployConfig.deployerSeed);
   const deployerCommitment = pureCircuits.userCommitment(secretKey);
 
   // The signet contract the vault cross-contract-calls to register signature

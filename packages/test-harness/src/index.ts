@@ -3,6 +3,11 @@
 // import `vitest` test APIs and therefore live behind the separate
 // `@midnight-examples/test-harness/flow-hooks` entry point, never here.
 
+// Seed generation, re-exported so example setups generate additional wallet
+// seeds (e.g. an EVM-side user seed) the same way the harness generates the
+// Midnight ones.
+export { generateHexSeed } from "@sig-net/midnight-contract-deploy";
+
 export * from "./e2e-env.ts";
 export * from "./env-file.ts";
 export * from "./evm.ts";

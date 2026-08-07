@@ -248,7 +248,7 @@ export const InteractWithVaultView = (): JSX.Element => {
       ? null
       : identity === null
         ? "Derive your deposit address first, in the step before this one."
-        : "VITE_MPC_SECP256K1_PUBKEY is not set, so the deposit address cannot be derived.";
+        : "VITE_MPC_ROOT_PUBLIC_KEY is not set, so the deposit address cannot be derived.";
 
   const evmWalletBalances = useEvmAccountBalances(account, tracked.tokens);
   const depositBalances = useEvmAccountBalances(depositAddress, tracked.tokens);

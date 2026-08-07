@@ -209,7 +209,7 @@ export const IDENTITY_SIGNING_MESSAGE = "signet-wallet-erc20-vault-demo";
  *   secp256k1 point in hex, so a typo fails loudly rather than deriving
  *   addresses from garbage.
  */
-function parseMpcSecp256k1Pubkey(input: string): string {
+function parseMpcRootPublicKey(input: string): string {
     const hex = input.startsWith("0x") ? input.slice(2) : input;
     if (!/^(0[23][0-9a-fA-F]{64}|04[0-9a-fA-F]{128})$/.test(hex)) {
         throw new Error(
@@ -220,25 +220,25 @@ function parseMpcSecp256k1Pubkey(input: string): string {
 }
 
 /**
- * The MPC root public key from `VITE_MPC_SECP256K1_PUBKEY`, or null when
+ * The MPC root public key from `VITE_MPC_ROOT_PUBLIC_KEY`, or null when
  * unset (deposit addresses then cannot derive, and the UI says so).
  *
  * @param env - The build-time environment, normally `import.meta.env`.
- * @returns The key normalised via {@link parseMpcSecp256k1Pubkey}, or null.
+ * @returns The key normalised via {@link parseMpcRootPublicKey}, or null.
  * @throws If the variable is set but does not validate.
  */
-function readMpcSecp256k1Pubkey(env: ImportMetaEnv): string | null {
-    const configured = env.VITE_MPC_SECP256K1_PUBKEY?.trim();
+function readMpcRootPublicKey(env: ImportMetaEnv): string | null {
+    const configured = env.VITE_MPC_ROOT_PUBLIC_KEY?.trim();
     if (configured === undefined || configured === "") {
         return null;
     }
-    return parseMpcSecp256k1Pubkey(configured);
+    return parseMpcRootPublicKey(configured);
 }
 
 // Resolved once at module load, like the chain endpoints: a bad value should
 // fail at startup, not on the first derivation. Runtime edits land in the
 // provider's state, which starts from this.
-const INITIAL_MPC_SECP256K1_PUBKEY: string | null = readMpcSecp256k1Pubkey(import.meta.env);
+const INITIAL_MPC_ROOT_PUBLIC_KEY: string | null = readMpcRootPublicKey(import.meta.env);
 
 /**
  * The caller's vault identity, every form of it the UI needs: the secret
@@ -257,7 +257,7 @@ export interface CallerIdentity {
     readonly pathString: string;
     /**
      * The caller's derived EVM deposit account, or null when
-     * `VITE_MPC_SECP256K1_PUBKEY` is unset.
+     * `VITE_MPC_ROOT_PUBLIC_KEY` is unset.
      */
     readonly depositEvmAddress: string | null;
 }
@@ -440,7 +440,7 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
             ? networkAddressIdx
             : { ...networkAddressIdx, [config.networkId as NetworkId]: INITIAL_VAULT_ADDRESS_OVERRIDE },
     );
-    const [mpcPubkey, setMpcPubkeyState] = useState<string | null>(INITIAL_MPC_SECP256K1_PUBKEY);
+    const [mpcPubkey, setMpcPubkeyState] = useState<string | null>(INITIAL_MPC_ROOT_PUBLIC_KEY);
 
     // Config.networkId is the SDK's bare string type, but its values always
     // come from the app's Network union.
@@ -458,7 +458,7 @@ export function ERC20VaultContextProvider({ children }: ERC20VaultContextProvide
 
     const setMpcPubkey = useCallback((pubkeyHex: string): void => {
         const trimmed = pubkeyHex.trim();
-        setMpcPubkeyState(trimmed === "" ? null : parseMpcSecp256k1Pubkey(trimmed));
+        setMpcPubkeyState(trimmed === "" ? null : parseMpcRootPublicKey(trimmed));
     }, []);
 
     const providers = useMemo<ERC20VaultProviders | null>(

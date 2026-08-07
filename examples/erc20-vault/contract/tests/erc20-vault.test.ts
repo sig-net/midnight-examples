@@ -87,7 +87,7 @@ const OTHER_COMMITMENT = pureCircuits.userCommitment(OTHER_SECRET_KEY);
 // exactly as a real deployment pins the off-chain-derived key (the key
 // depends on the contract's own address, so it cannot be a constructor arg).
 const MPC_RESPONSE_SECRET = bytes(32, 0x42);
-const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
+const MPC_VAULT_RESPONSE_PUBLIC_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
 
 // The signet contract (callee) the vault seals + cross-contract-calls. A valid
 // sample contract address so the runtime's address checks pass.
@@ -231,13 +231,13 @@ const strangerContext = async (
   );
 
 /**
- * Deploy + initialize(VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY) as
+ * Deploy + initialize(VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_VAULT_RESPONSE_PUBLIC_KEY) as
  * the deployer: the ready-to-use vault, with the MPC response key stored.
  */
 const deployInitialized = async () => {
   const { contract, ctx } = await deployContract();
   const next = (
-    await contract.circuits.initialize(ctx, VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY)
+    await contract.circuits.initialize(ctx, VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_VAULT_RESPONSE_PUBLIC_KEY)
   ).context;
   return { contract, ctx: next };
 };
@@ -338,21 +338,21 @@ describe("initialize", () => {
     // Deployed with a stranger's commitment; our caller key can't initialize.
     const { contract, ctx } = await deployContract(OTHER_COMMITMENT);
     await expect(
-      contract.circuits.initialize(ctx, VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY),
+      contract.circuits.initialize(ctx, VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_VAULT_RESPONSE_PUBLIC_KEY),
     ).rejects.toThrow(/Not the deployer/);
   });
 
   it("is one-shot", async () => {
     const { contract, ctx } = await deployInitialized();
     await expect(
-      contract.circuits.initialize(ctx, VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY),
+      contract.circuits.initialize(ctx, VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_VAULT_RESPONSE_PUBLIC_KEY),
     ).rejects.toThrow(/Already initialized/);
   });
 
   it("rejects a zero chain id", async () => {
     const { contract, ctx } = await deployContract();
     await expect(
-      contract.circuits.initialize(ctx, VAULT_EVM, 0n, CAIP2_ID, MPC_RESPONSE_KEY),
+      contract.circuits.initialize(ctx, VAULT_EVM, 0n, CAIP2_ID, MPC_VAULT_RESPONSE_PUBLIC_KEY),
     ).rejects.toThrow(/Chain ID must be positive/);
   });
 
@@ -363,7 +363,7 @@ describe("initialize", () => {
     expect(state.vaultEvmAddress).toEqual(VAULT_EVM);
     expect(state.evmChainId).toBe(CHAIN_ID);
     expect(state.caip2Id).toEqual(CAIP2_ID);
-    expect(state.mpcResponseKey).toEqual(MPC_RESPONSE_KEY);
+    expect(state.mpcResponseKey).toEqual(MPC_VAULT_RESPONSE_PUBLIC_KEY);
   });
 });
 

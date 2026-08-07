@@ -85,16 +85,16 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
 }
 
 /**
- * Ensure `ERC20_ADDRESS` points at a live token: skip when the address has
+ * Ensure `EVM_ERC20_CONTRACT_ADDRESS` points at a live token: skip when the address has
  * code ON CHAIN (env presence alone is not enough — a kept address can
  * outlive a wiped local chain); otherwise deploy a fresh token through the
  * example-supplied `deployErc20` (only ever on the local dev chain — any
- * other chain demands an explicit, live `ERC20_ADDRESS`).
+ * other chain demands an explicit, live `EVM_ERC20_CONTRACT_ADDRESS`).
  *
  * @param env - The suite's env accumulator.
  * @param deployErc20 - The example's compile-and-deploy of its own test
  *   token; returns the deployed address. Only invoked on the local dev chain.
- * @throws If the chain is not the local dev chain and `ERC20_ADDRESS` is
+ * @throws If the chain is not the local dev chain and `EVM_ERC20_CONTRACT_ADDRESS` is
  *   unset or has no code.
  */
 export async function ensureErc20Deployed(
@@ -104,114 +104,114 @@ export async function ensureErc20Deployed(
   const rpcUrl = requireEnv(env, "EVM_RPC_URL");
   const chainId = BigInt(requireEnv(env, "EVM_CHAIN_ID"));
   const local = isLocalEvmChain(chainId);
-  if (env.ERC20_ADDRESS) {
-    const code = await getDeployedCode(rpcUrl, env.ERC20_ADDRESS);
+  if (env.EVM_ERC20_CONTRACT_ADDRESS) {
+    const code = await getDeployedCode(rpcUrl, env.EVM_ERC20_CONTRACT_ADDRESS);
     if (code !== "0x") {
-      logSkip("check/deploy ERC20 token", `ERC20_ADDRESS (${env.ERC20_ADDRESS}) has code on chain ${chainId}`);
+      logSkip("check/deploy ERC20 token", `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has code on chain ${chainId}`);
       return;
     }
     if (!local) {
       throw new Error(
-        `ERC20_ADDRESS (${env.ERC20_ADDRESS}) has no code on chain ${chainId} — wrong address, or wrong EVM_RPC_URL?`,
+        `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has no code on chain ${chainId} — wrong address, or wrong EVM_RPC_URL?`,
       );
     }
-    console.log(`ERC20_ADDRESS (${env.ERC20_ADDRESS}) has no code — the local chain was wiped; redeploying`);
+    console.log(`EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has no code — the local chain was wiped; redeploying`);
   } else if (!local) {
     throw new Error(
-      `ERC20_ADDRESS is not set and chain ${chainId} is not the local dev chain — set the token to use in the environment`,
+      `EVM_ERC20_CONTRACT_ADDRESS is not set and chain ${chainId} is not the local dev chain — set the token to use in the environment`,
     );
   }
-  env.ERC20_ADDRESS = await deployErc20(env);
-  console.log(`deployed a fresh test ERC20 as ERC20_ADDRESS=${env.ERC20_ADDRESS}`);
+  env.EVM_ERC20_CONTRACT_ADDRESS = await deployErc20(env);
+  console.log(`deployed a fresh test ERC20 as EVM_ERC20_CONTRACT_ADDRESS=${env.EVM_ERC20_CONTRACT_ADDRESS}`);
   console.log(` ➜ the token the example's flows move; open mint funds the derived accounts`);
-  console.log(` ➜ 💡 Set as ERC20_ADDRESS in the environment to pin it for the next run`);
+  console.log(` ➜ 💡 Set as EVM_ERC20_CONTRACT_ADDRESS in the environment to pin it for the next run`);
 }
 
 /**
- * Ensure `MPC_ROOT_KEY` is set, generating a fresh random key when absent.
+ * Ensure `MPC_ROOT_PRIVATE_KEY` is set, generating a fresh random key when absent.
  *
  * @param env - The suite's env accumulator.
  */
 export function ensureMpcRootKey(env: NodeJS.ProcessEnv): void {
-  if (env.MPC_ROOT_KEY) {
-    logSkip("check/derive MPC root key", `MPC_ROOT_KEY is set as ${env.MPC_ROOT_KEY}`);
+  if (env.MPC_ROOT_PRIVATE_KEY) {
+    logSkip("check/derive MPC root key", `MPC_ROOT_PRIVATE_KEY is set as ${env.MPC_ROOT_PRIVATE_KEY}`);
     return;
   }
-  env.MPC_ROOT_KEY = generateMpcRootKey();
-  console.log(`generated a fresh MPC_ROOT_KEY=${env.MPC_ROOT_KEY}`);
+  env.MPC_ROOT_PRIVATE_KEY = generateMpcRootKey();
+  console.log(`generated a fresh MPC_ROOT_PRIVATE_KEY=${env.MPC_ROOT_PRIVATE_KEY}`);
   console.log(` ➜ seeds MPC key generation`);
-  console.log(` ➜ 💡 Set as MPC_ROOT_KEY in the environment to skip this step on the next run`);
+  console.log(` ➜ 💡 Set as MPC_ROOT_PRIVATE_KEY in the environment to skip this step on the next run`);
   console.log("(printed again in the MPC server configuration step)");
 }
 
 // Derive MPC keys for setting or checking public keys. Must be called INSIDE
 // the steps below — after ensureMpcRootKey has a chance to generate
-// MPC_ROOT_KEY.
-const mpcKeys = (env: NodeJS.ProcessEnv) => deriveMpcKeys(requireEnv(env, "MPC_ROOT_KEY"));
+// MPC_ROOT_PRIVATE_KEY.
+const mpcKeys = (env: NodeJS.ProcessEnv) => deriveMpcKeys(requireEnv(env, "MPC_ROOT_PRIVATE_KEY"));
 
 /**
- * Derive (or check) `MPC_RESPONSE_KEY` for a deployed client contract:
- * `MPC_RESPONSE_KEY = f(MPC root key, client contract address, "midnight
+ * Derive (or check) `MPC_VAULT_RESPONSE_PUBLIC_KEY` for a deployed client contract:
+ * `MPC_VAULT_RESPONSE_PUBLIC_KEY = f(MPC root key, client contract address, "midnight
  * response key")`, the sender-scoped derivation the real MPC uses for
  * respond-bidirectional signing. The key depends on the client contract's
  * address, so this step MUST run after the client contract deploy; the
  * example's initialize flow then pins the key on-chain via the contract's
  * one-shot initialize circuit. The fakenet responder derives the same key
- * per request from its MPC_ROOT_KEY + the request's sender, so nothing
+ * per request from its MPC_ROOT_PRIVATE_KEY + the request's sender, so nothing
  * extra is handed off.
  *
  * @param env - The suite's env accumulator.
  * @param contractAddressEnvVar - The env-var name holding the client
  *   contract's deployed address (e.g. the example's vault contract).
- * @throws If a pre-set MPC_RESPONSE_KEY disagrees with the derivation.
+ * @throws If a pre-set MPC_VAULT_RESPONSE_PUBLIC_KEY disagrees with the derivation.
  */
 export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvVar: string): void {
   const expected = formatSecp256k1PublicKey(
     deriveMidnightResponseKey(
-      requireEnv(env, "MPC_SECP256K1_PUBKEY"),
+      requireEnv(env, "MPC_ROOT_PUBLIC_KEY"),
       requireEnv(env, contractAddressEnvVar),
     ),
   );
-  if (env.MPC_RESPONSE_KEY) {
-    console.log(`Found MPC_RESPONSE_KEY in the environment as ${env.MPC_RESPONSE_KEY}`);
-    if (env.MPC_RESPONSE_KEY !== expected) {
+  if (env.MPC_VAULT_RESPONSE_PUBLIC_KEY) {
+    console.log(`Found MPC_VAULT_RESPONSE_PUBLIC_KEY in the environment as ${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`);
+    if (env.MPC_VAULT_RESPONSE_PUBLIC_KEY !== expected) {
       throw new Error(
-        `MPC_RESPONSE_KEY should be derived from MPC_ROOT_KEY + ${contractAddressEnvVar}: ` +
-          `expected ${expected}, found ${env.MPC_RESPONSE_KEY}`,
+        `MPC_VAULT_RESPONSE_PUBLIC_KEY should be derived from MPC_ROOT_PRIVATE_KEY + ${contractAddressEnvVar}: ` +
+          `expected ${expected}, found ${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`,
       );
     }
-    logSkip("check/derive MPC_RESPONSE_KEY public key", `MPC_RESPONSE_KEY is set correctly`);
+    logSkip("check/derive MPC_VAULT_RESPONSE_PUBLIC_KEY", `MPC_VAULT_RESPONSE_PUBLIC_KEY is set correctly`);
     return;
   }
-  env.MPC_RESPONSE_KEY = expected;
-  console.log(`derived a fresh MPC_RESPONSE_KEY=${env.MPC_RESPONSE_KEY}`);
+  env.MPC_VAULT_RESPONSE_PUBLIC_KEY = expected;
+  console.log(`derived a fresh MPC_VAULT_RESPONSE_PUBLIC_KEY=${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`);
   console.log(` ➜ the MPC's respond-bidirectional key for the client contract; the initialize flow pins it on-chain`);
-  console.log(` ➜ 💡 Set as MPC_RESPONSE_KEY in the environment to skip this step on the next run`);
+  console.log(` ➜ 💡 Set as MPC_VAULT_RESPONSE_PUBLIC_KEY in the environment to skip this step on the next run`);
 }
 
 /**
- * Ensure `MPC_SECP256K1_PUBKEY` matches the key derived from `MPC_ROOT_KEY`,
+ * Ensure `MPC_ROOT_PUBLIC_KEY` matches the key derived from `MPC_ROOT_PRIVATE_KEY`,
  * deriving it when absent.
  *
  * @param env - The suite's env accumulator.
- * @throws If a preset `MPC_SECP256K1_PUBKEY` mismatches the derived key.
+ * @throws If a preset `MPC_ROOT_PUBLIC_KEY` mismatches the derived key.
  */
 export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
   const expectedSECP256k1CompressedPubkey = mpcKeys(env).secp256k1CompressedPubkey;
-  if (env.MPC_SECP256K1_PUBKEY) {
-    console.log(`Found MPC_SECP256K1_PUBKEY in the environment as ${env.MPC_SECP256K1_PUBKEY}`);
-    if (env.MPC_SECP256K1_PUBKEY !== expectedSECP256k1CompressedPubkey) {
+  if (env.MPC_ROOT_PUBLIC_KEY) {
+    console.log(`Found MPC_ROOT_PUBLIC_KEY in the environment as ${env.MPC_ROOT_PUBLIC_KEY}`);
+    if (env.MPC_ROOT_PUBLIC_KEY !== expectedSECP256k1CompressedPubkey) {
       throw new Error(
-        `MPC_SECP256K1_PUBKEY should be derived from MPC_ROOT_KEY: expected ${expectedSECP256k1CompressedPubkey}, found ${env.MPC_SECP256K1_PUBKEY}`,
+        `MPC_ROOT_PUBLIC_KEY should be derived from MPC_ROOT_PRIVATE_KEY: expected ${expectedSECP256k1CompressedPubkey}, found ${env.MPC_ROOT_PUBLIC_KEY}`,
       );
     }
-    logSkip("check/derive MPC_SECP256K1_PUBKEY public key", `MPC_SECP256K1_PUBKEY is set correctly`);
+    logSkip("check/derive MPC_ROOT_PUBLIC_KEY", `MPC_ROOT_PUBLIC_KEY is set correctly`);
     return;
   }
-  env.MPC_SECP256K1_PUBKEY = expectedSECP256k1CompressedPubkey;
-  console.log(`generated a fresh MPC_SECP256K1_PUBKEY=${env.MPC_SECP256K1_PUBKEY}`);
+  env.MPC_ROOT_PUBLIC_KEY = expectedSECP256k1CompressedPubkey;
+  console.log(`generated a fresh MPC_ROOT_PUBLIC_KEY=${env.MPC_ROOT_PUBLIC_KEY}`);
   console.log(` ➜ used by contracts to validate signatures`);
-  console.log(` ➜ 💡 Set as MPC_SECP256K1_PUBKEY in the environment to skip this step on the next run`);
+  console.log(` ➜ 💡 Set as MPC_ROOT_PUBLIC_KEY in the environment to skip this step on the next run`);
 }
 
 /**
@@ -335,7 +335,7 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
 
 // The fakenet responder hand-off, automated. docker compose interpolates the
 // fakenet service's environment from the repo-root .env, so the responder can
-// only start once MPC_ROOT_KEY and MIDNIGHT_SIGNET_CONTRACT_ADDRESS are IN
+// only start once MPC_ROOT_PRIVATE_KEY and MIDNIGHT_SIGNET_CONTRACT_ADDRESS are IN
 // THAT FILE — the two steps below persist them (append-only) and start the
 // container, right after the signet deploy so the responder boots and syncs
 // while the (long) example zk compile runs. Set FAKENET_MANAGED=0 to run the
@@ -391,7 +391,7 @@ export function persistEnvKeysToDotEnv(
 }
 
 /** The env keys docker compose interpolates into the fakenet service — the hand-off payload. */
-const FAKENET_HANDOFF_KEYS = ["MPC_ROOT_KEY", "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"] as const;
+const FAKENET_HANDOFF_KEYS = ["MPC_ROOT_PRIVATE_KEY", "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"] as const;
 
 /**
  * Whether {@link persistFakenetHandoffToDotEnv} appended hand-off values to
@@ -479,7 +479,7 @@ export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<voi
  *
  * @param env - The suite's env accumulator.
  * @param addressEnvVars - The env-var names holding the EVM addresses to top
- *   up (e.g. the example's user, vault and seed-wallet accounts).
+ *   up (e.g. the example's deposit, vault and user wallet accounts).
  */
 export async function fundLocalEvmAccounts(
   env: NodeJS.ProcessEnv,
@@ -494,7 +494,7 @@ export async function fundLocalEvmAccounts(
     );
     return;
   }
-  const erc20Address = requireEnv(env, "ERC20_ADDRESS");
+  const erc20Address = requireEnv(env, "EVM_ERC20_CONTRACT_ADDRESS");
   for (const name of addressEnvVars) {
     const address = requireEnv(env, name);
     const { ethBalance, tokenBalance } = await topUpLocalAccount(rpcUrl, erc20Address, address);
@@ -514,12 +514,12 @@ export async function fundLocalEvmAccounts(
  *   order — printed as the ready-to-paste `.env` block.
  */
 export function printMpcServerConfig(env: NodeJS.ProcessEnv, pipelineKeys: readonly string[]): void {
-  const rootKey = env.MPC_ROOT_KEY ?? "(not derived here — already held by the server operator)";
+  const rootKey = env.MPC_ROOT_PRIVATE_KEY ?? "(not derived here — already held by the server operator)";
   const managed = env.FAKENET_MANAGED !== "0";
   banner([
     "MPC (fakenet) responder configuration:",
     "",
-    `  MPC_ROOT_KEY=${rootKey}`,
+    `  MPC_ROOT_PRIVATE_KEY=${rootKey}`,
     `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS")}`,
     "  # 💡 The responder DISCOVERS requesters by polling this signet",
     "  #    contract's emitted notification events — no requester contract list needed.",

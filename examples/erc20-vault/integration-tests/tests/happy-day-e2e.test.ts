@@ -67,25 +67,35 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // stopped once in afterAll.
 const session = createVaultSession(env);
 
+// The deployer's session, for initialize only: the circuit is gated to the
+// deployer identity (the deployer wallet seed's bytes, whose commitment the
+// deploy sealed), so the user session cannot drive it. Lazily built like
+// every session — a rerun against an initialized vault never starts it.
+const deployerSession = createVaultSession({
+  ...env,
+  MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
+});
+
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e", () => {
   installFlowHooks();
 
   afterAll(async () => {
     await session.stop();
+    await deployerSession.stop();
   });
 
   it(
     "initialize [erc-vault contract method call]: seal vault EVM address + MPC response key and read back state",
     async () => {
-      const vaultEvmAddress = requireEnv("EVM_VAULT_ADDRESS");
-      const mpcResponseKey = requireEnv("MPC_RESPONSE_KEY");
+      const vaultEvmAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+      const mpcResponseKey = requireEnv("MPC_VAULT_RESPONSE_PUBLIC_KEY");
       const context = await session.vaultContext();
       const readLedger = () => readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
 
       if ((await readLedger()).initialized) {
         logSkip("initialize", "vault is already initialized (rerun against a kept contract address)");
       } else {
-        await initialize(context, { vaultEvmAddress, mpcResponseKey });
+        await initialize(await deployerSession.vaultContext(), { vaultEvmAddress, mpcResponseKey });
       }
 
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
@@ -109,8 +119,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     "deposit funding preflight: check user EVM account for minimum ETH and USDC balances.",
     async () => {
       const rpcUrl = requireEnv("EVM_RPC_URL");
-      const userAddress = requireEnv("EVM_USER_ADDRESS");
-      const erc20Address = requireEnv("ERC20_ADDRESS");
+      const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+      const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
       const ethBalance = await getEthBalance(rpcUrl, userAddress);
       console.log(`${userAddress} ETH balance: ${ethBalance} wei`);
@@ -146,7 +156,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
       // The sweep tx sender is the user's derived EVM account; its next nonce
       // comes from the chain, exactly as a wallet would fetch it.
-      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_USER_ADDRESS"));
+      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
       const amount = parseUnits("0.1", 6); // 0.1 USDC — the funding preflight's minimum
 
       depositTransactionSignatureRequestId = await deposit(context, { amount, evmNonce });
@@ -233,7 +243,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         requestId: depositTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: 1 * MINUTE,
-        expectedSigner: requireEnv("EVM_USER_ADDRESS"),
+        expectedSigner: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
       });
 
       banner([
@@ -397,8 +407,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     "withdraw funding preflight: check vault EVM account for minimum ETH (gas) and ERC20 balances.",
     async () => {
       const rpcUrl = requireEnv("EVM_RPC_URL");
-      const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-      const erc20Address = requireEnv("ERC20_ADDRESS");
+      const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+      const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
       // The withdraw tx is sent FROM the vault's derived account, which pays
       // its own gas: require the full fee-cap budget of one MPC-signed ERC20
@@ -441,8 +451,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // The withdraw tx sender is the VAULT's derived EVM account; its next
       // nonce comes from the chain, exactly as a wallet would fetch it. The
       // destination is the user's derived account, so the suite's funds cycle.
-      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_VAULT_ADDRESS"));
-      const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
+      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"));
+      const destEvmAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
 
       withdrawTransactionSignatureRequestId = await withdraw(context, {
         amount: WITHDRAW_AMOUNT,
@@ -523,7 +533,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         requestId: withdrawTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: 1 * MINUTE,
-        expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+        expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
       });
 
       banner([
@@ -540,8 +550,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     async () => {
       expect(signedWithdrawTransaction).toBeDefined();
       const rpcUrl = requireEnv("EVM_RPC_URL");
-      const erc20Address = requireEnv("ERC20_ADDRESS");
-      const destination = requireEnv("EVM_USER_ADDRESS");
+      const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
+      const destination = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
       const context = await session.vaultContext();
 
       // Rerun tolerance: if this signed tx already mined on a previous run,

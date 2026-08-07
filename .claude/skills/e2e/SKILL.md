@@ -49,8 +49,9 @@ recipe in `.github/workflows/example-test.yaml` (the `Install / update the
 compact toolchain` step).
 
 No pre-existing `.env` is required: the setup pipeline creates it and appends
-the generated wallet seeds (root + the deployer/user/mpc responder/bearer
-roles, funded from root) and the fakenet hand-off values (`MPC_ROOT_KEY`,
+the generated wallet seeds (the Midnight root + deployer/user 1/mpc
+responder/user 2 wallets, funded from root, plus the independent
+`EVM_USER1_WALLET_SEED`) and the fakenet hand-off values (`MPC_ROOT_PRIVATE_KEY`,
 `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`) plus prints a ready-to-paste block with
 everything else it deployed/derived. Appends are append-only — existing lines
 are never modified, and a value that conflicts with the shell environment is
@@ -74,14 +75,14 @@ kept contracts.
 - **`/e2e redeploy`** — a circuit changed (any `.compact` edit that alters a
   circuit, struct layout, or the request-id hash domain): comment out
   `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
-  `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS` (and `ERC20_ADDRESS` if the anvil
+  `EVM_VAULT_ACCOUNT_ADDRESS`, `EVM_USER1_DEPOSIT_ADDRESS` (and `EVM_ERC20_CONTRACT_ADDRESS` if the anvil
   container restarted — its chain is in-memory) in `.env`, then rerun. The
   whole redeploy completes in ONE run: setup re-compiles (zk keygen, ~10 min
   — background the run), redeploys, re-derives, re-funds, and
   `--force-recreate`s the responder automatically. Afterwards, update `.env`
   with the freshly printed values and delete the commented-out old lines.
-  (The derived EVM accounts move on a redeploy — `EVM_VAULT_ADDRESS` and
-  `EVM_USER_ADDRESS` are epsilon-derived from the vault contract address —
+  (The derived EVM accounts move on a redeploy — `EVM_VAULT_ACCOUNT_ADDRESS` and
+  `EVM_USER1_DEPOSIT_ADDRESS` are epsilon-derived from the vault contract address —
   but on the local chain the new accounts are simply funded by setup;
   nothing needs sweeping.)
 
@@ -105,10 +106,10 @@ kept contracts.
   (`yarn test:erc20-vault:e2e tests/deploy-only.test.ts`) runs the setup
   pipeline, initializes the vault and stops, which is the fastest way to
   stand the contracts up for the UI demo.
-- **Wallets are role wallets funded from ROOT at setup.** The setup's
-  wallet steps resolve/generate `ROOT_SEED` plus the role seeds
-  (`DEPLOYER_SEED`, `USER_SEED`, `MPC_RESPONDER_SEED`, `BEARER_SEED`),
-  persist generated ones to `.env` (append-only), and fund each role from
+- **The Midnight wallets are funded from ROOT at setup.** The setup's
+  wallet steps resolve/generate `MIDNIGHT_ROOT_WALLET_SEED` plus the other seeds
+  (`MIDNIGHT_DEPLOYER_WALLET_SEED`, `MIDNIGHT_USER1_WALLET_SEED`, `MIDNIGHT_MPC_RESPONDER_WALLET_SEED`, `MIDNIGHT_USER2_WALLET_SEED`),
+  persist generated ones to `.env` (append-only), and fund each from
   root with dust-registered NIGHT (on the local chain root is the genesis
   mint wallet, so this is fully automatic; on a deployed network the first
   run stops printing root's NIGHT address to faucet-fund). The older
@@ -139,7 +140,7 @@ The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
 `docker-compose.yaml`, built from
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
 stand-in: it polls the signet contract's emitted notification events via the
-indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and
+indexer, signs EVM transactions with keys derived from `MPC_ROOT_PRIVATE_KEY`, and
 posts responses through the proof server. It also serves the public
 `/responses/{requestId}` helper API on port 3040 (mapped to localhost by the
 compose file): the attestation poll and settle flows fetch each request's
@@ -148,7 +149,7 @@ raw traced EVM output from it, so a poll that times out with
 (or its API port mapping) is down, not the Midnight stack.
 
 - **Managed by setup (default):** the setup's hand-off steps append
-  `MPC_ROOT_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
+  `MPC_ROOT_PRIVATE_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
   `docker compose --profile fakenet up -d fakenet` — with `--force-recreate`
   exactly when values newly landed in `.env` (recreate re-reads `.env` AND
   resets the responder's container-local LevelDB state). A running responder
@@ -230,8 +231,8 @@ raw traced EVM output from it, so a poll that times out with
 - **Preflight `expected 0 to be greater than or equal to …`**: a derived EVM
   account is unfunded. On the local stack that means the anvil container
   restarted (its chain is in-memory) while `.env` still holds the old
-  addresses — comment out `ERC20_ADDRESS`, `EVM_VAULT_ADDRESS`,
-  `EVM_USER_ADDRESS` and rerun; setup redeploys TestUSDC and re-funds.
+  addresses — comment out `EVM_ERC20_CONTRACT_ADDRESS`, `EVM_VAULT_ACCOUNT_ADDRESS`,
+  `EVM_USER1_DEPOSIT_ADDRESS` and rerun; setup redeploys TestUSDC and re-funds.
 - **`vault is already initialized`** on a kept address is informational; the
   test still asserts state and passes.
 - **`Insufficient funds: … Dust`** from a deploy/call: the wallet's NIGHT

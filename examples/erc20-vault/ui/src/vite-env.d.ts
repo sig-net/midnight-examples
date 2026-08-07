@@ -24,11 +24,11 @@ interface ImportMetaEnv {
   /**
    * The MPC network's root secp256k1 public key as hex (compressed or
    * uncompressed, 0x optional): what deposit addresses epsilon-derive from.
-   * The local fakenet's key is generated per machine (`MPC_SECP256K1_PUBKEY`
+   * The local fakenet's key is generated per machine (`MPC_ROOT_PUBLIC_KEY`
    * in the repo-root .env), so there is no default to fall back to; unset, the
    * app renders everything except derived EVM addresses.
    */
-  readonly VITE_MPC_SECP256K1_PUBKEY?: string;
+  readonly VITE_MPC_ROOT_PUBLIC_KEY?: string;
   /**
    * The vault's Midnight contract address on the STARTING network,
    * overriding the per-network deployment table. A local deploy mints a

@@ -109,9 +109,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
     "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the withdraw gas budget",
     async () => {
       const rpcUrl = requireEnv("EVM_RPC_URL");
-      const userAddress = requireEnv("EVM_USER_ADDRESS");
-      const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-      const erc20Address = requireEnv("ERC20_ADDRESS");
+      const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+      const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+      const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
       // Same minimums as the happy-day deposit leg: the user's derived
       // account pays the sweep gas and supplies the deposited ERC20.
@@ -172,7 +172,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
       // The sweep tx sender is the user's derived EVM account; its next
       // nonce comes from the chain — fetched OUTSIDE the timed span, which
       // brackets only the flow call under measurement.
-      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_USER_ADDRESS"));
+      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
 
       const stop = startTimer();
       depositRequestId = await deposit(context, { amount: DEPOSIT_AMOUNT, evmNonce });
@@ -207,7 +207,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
         requestId: depositRequestId,
         intervalMs: 1000,
         timeoutMs: 2 * MINUTE,
-        expectedSigner: requireEnv("EVM_USER_ADDRESS"),
+        expectedSigner: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
       });
       timings.deposit.pollSignatureResponse = stop();
     },
@@ -301,8 +301,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
       // The withdraw tx sender is the VAULT's derived EVM account; the
       // destination is the user's derived account, so the funds cycle. The
       // nonce fetch stays outside the timed span.
-      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_VAULT_ADDRESS"));
-      const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
+      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"));
+      const destEvmAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
 
       const stop = startTimer();
       withdrawRequestId = await withdraw(context, {
@@ -341,7 +341,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: 
         requestId: withdrawRequestId,
         intervalMs: 1000,
         timeoutMs: 2 * MINUTE,
-        expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+        expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
       });
       timings.withdraw.pollSignatureResponse = stop();
     },

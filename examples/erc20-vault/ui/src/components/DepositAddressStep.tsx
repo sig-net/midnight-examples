@@ -153,7 +153,7 @@ const DepositAddressRows = ({
   <>
     {identity.depositEvmAddress === null ? (
       <p className="text-destructive">
-        The secret key is in hand, but VITE_MPC_SECP256K1_PUBKEY is not set, so the deposit
+        The secret key is in hand, but VITE_MPC_ROOT_PUBLIC_KEY is not set, so the deposit
         address cannot be derived. Set it to the MPC network's root public key and reload.
       </p>
     ) : (

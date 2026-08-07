@@ -68,7 +68,7 @@ The quickest way to get going with these examples is to get an end to end integr
    ```
    Green looks like `Tests  15 passed (15)`. Afterwards, paste the setup's printed `.env` block into `.env` so the next run reuses the deployed contracts (~3–4 minutes).
 
-   Prefer to see it in a browser instead? [From a fresh clone to the running demo](examples/erc20-vault/ui/README.md#from-a-fresh-clone-to-the-running-demo) in the UI's README walks the same stack up via a deploy-only run and drives the app against it.
+   Prefer to see it in a browser instead? The UI's [Quickstart](examples/erc20-vault/ui/README.md#quickstart) walks the same stack up via a deploy-only run and drives the app against it.
 
 **TIP:** If you are using Claude Code you can ask it to do all of this for you using this [skill](.claude/skills/e2e/SKILL.md), for example:
 ```
@@ -124,8 +124,8 @@ typechecks it and emits a gitignored `dist/`.
 
 The UI reaches the chain only through the example's own `contract` package,
 whose export surface is environment-agnostic for exactly this reason. See the
-[erc20-vault UI README](examples/erc20-vault/ui/README.md) for its layout and
-the environment variables it reads.
+[erc20-vault UI README](examples/erc20-vault/ui/README.md) for its quickstart
+and the environment variables it reads.
 
 ## Integration tests
 
@@ -162,15 +162,15 @@ FAKENET_EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
 
 # Required on any non-local chain: an existing ERC20
 # with code on Sepolia, e.g. a test USDC deployment.
-ERC20_ADDRESS=0x...
+EVM_ERC20_CONTRACT_ADDRESS=0x...
 ```
 
 Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialize.
 
 What does NOT happen automatically on a real chain, by design:
 
-- **No auto-funding.** The flows spend from two EVM accounts *derived from the vault contract's address*, so you only learn them mid-run, when setup prints `EVM_VAULT_ADDRESS` / `EVM_USER_ADDRESS` with funding hints (the user account needs ≥ 0.01 ETH for gas and ≥ 0.1 USDC, and the vault account needs ETH for withdrawal gas). Fund them when printed, either across two runs (first run derives + prints, second run tests), or in one attended run with `STEP_THROUGH` (below).
-- **No token deploy.** TestUSDC auto-deploys on the local chain only. On Sepolia you bring your own `ERC20_ADDRESS`.
+- **No auto-funding.** The flows spend from two EVM accounts *derived from the vault contract's address*, so you only learn them mid-run, when setup prints `EVM_VAULT_ACCOUNT_ADDRESS` / `EVM_USER1_DEPOSIT_ADDRESS` with funding hints (the user account needs ≥ 0.01 ETH for gas and ≥ 0.1 USDC, and the vault account needs ETH for withdrawal gas). Fund them when printed, either across two runs (first run derives + prints, second run tests), or in one attended run with `STEP_THROUGH` (below).
+- **No token deploy.** TestUSDC auto-deploys on the local chain only. On Sepolia you bring your own `EVM_ERC20_CONTRACT_ADDRESS`.
 - A redeploy of the vault contract derives **new** accounts: previously funded ones don't move with it.
 
 ## Watching a run step by step: `STEP_THROUGH=1`

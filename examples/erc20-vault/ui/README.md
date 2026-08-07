@@ -1,205 +1,92 @@
 # erc20-vault UI
 
-The browser front end for the erc20-vault example: a single-page app that will
-let a user connect a Midnight wallet, read the deployed vault's state, and drive
-its deposit and withdrawal circuits.
+The browser front end for the erc20-vault example: a single-page app over the
+deployed vault, walked through as three steps.
 
-The overview presents that as three steps, worked through left to right:
-connect the wallets, derive the deposit address, then interact with the vault.
-The third step reads today and will write later: it shows what every account in
-the flow holds, and its card says that depositing and withdrawing are still to
-come. The cards are compact, equal-height summaries over one view area below them:
-selecting a card (its title is the control) puts that step's full details in
-the view area, and the selection follows the user's progress until a card is
-chosen by hand.
+1. **Connect wallets.** One Midnight wallet and one EVM wallet, each either a
+   browser extension or an in-app seed wallet installed from a pasted hex seed.
+2. **Derive the deposit address.** One signature from the Midnight wallet
+   establishes your vault identity and the EVM deposit account only the MPC
+   network can sign for.
+3. **Interact with the vault.** Track the ERC20 tokens you care about and see
+   what every account in the flow holds. Depositing and withdrawing are still
+   to come.
 
-Step two establishes the caller's vault identity. The Midnight wallet is asked
-to sign a fixed message (`signet-wallet-erc20-vault-demo`), the secret key is
-the SHA-256 hash of that signature, and only its commitment (the compiled
-`userCommitment` circuit) ever reaches the ledger. From the commitment the app
-derives the caller's EVM deposit address: the account only the MPC network can
-sign for, whose derivation combines the MPC root public key, the vault
-contract's address, and the commitment as the derivation path. The secret is
-stored in the browser (encrypted, scoped per wallet account), and a key found
-there with a derived address is already enough to proceed to the vault
-interactions. A found key can also be regenerated (re-signed and overwritten),
-but only behind a tick box acknowledging the loss: unless the wallet signs
-deterministically, the new signature derives a different key, and unclaimed
-deposits or pending refunds tied to the old commitment go with it.
+## Quickstart
 
-Step three is where the value shows up. A deposit moves ERC20 value from your
-own derived account into the vault's and mints a shielded token against it, and
-a withdrawal runs the same path backwards, so four accounts across two chains
-decide whether any of it worked:
+From a fresh clone to the running demo against a local stack. The
+prerequisites (Node 20+, Yarn 4 via Corepack, the compact toolchain, a docker
+engine with 16 GB of RAM allocated) are in the repository root's
+[README](../../../README.md).
 
-| Account | Where it comes from |
-| --- | --- |
-| EVM browser wallet | The connected wallet: what funds a deposit's gas and its tokens |
-| Your deposit address | Derived in step two: the account the MPC signs a deposit's transfer from |
-| Vault address | The vault's own EVM account, read from its ledger (the contract pins it at initialize) |
-| Midnight browser wallet | The connected wallet's shielded and unshielded balances, plus its dust |
+1. Stand the stack up and deploy the contracts, from the repository root:
 
-The vault handles any ERC20 and its ledger names none of them, so there is no
-token list to offer: paste the addresses you care about and each EVM panel adds
-a row per token. A token that answers no `name()` or `symbol()` reads as
-Unknown, and one that answers no `decimals()` leaves its balance in atomic
-units rather than guessing a scale. Midnight amounts stay in atomic units
-throughout: a token type there is an opaque id with no metadata behind it.
+   ```sh
+   corepack enable
+   yarn install
+   compact update 0.33.0-rc.2
+   yarn compile
+   docker compose up -d
+   yarn test:erc20-vault:e2e tests/deploy-only.test.ts
+   ```
 
-Depositing and withdrawing are not built yet, which is what the third card's
-"Coming soon" says.
+   The last command generates and funds wallets, deploys the contracts,
+   initialises the vault, and appends everything the demo needs to the
+   repo-root `.env`. The first run takes roughly ten minutes (the vault's zk
+   proving keys compile), and reruns skip whatever `.env` already holds.
 
-## Running it
+   When it is green, open the repo-root `.env`: the demo uses five of its
+   values. The two user seeds sit in their generated-seed blocks
+   (`MIDNIGHT_USER1_WALLET_SEED` near the top, `EVM_USER1_WALLET_SEED` in its
+   own block), and the run's final append is the hand-off block with the
+   other three, which looks like this (every value differs per machine):
 
-From the repository root (never run `yarn install` from inside this directory):
+   ```
+   # appended by the erc20-vault setup (2026-08-07T09:40:58.408Z): UI hand-off values
+   MPC_ROOT_PUBLIC_KEY=0x03a8e3c3ffbe8f986da894bf785d7c60b8eb4047205e089f095f173ca2446341de
+   MIDNIGHT_VAULT_CONTRACT_ADDRESS=439fa174127586474ad01552af3372033ebf624e68558a72e030a7506b445ad0
+   EVM_ERC20_CONTRACT_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
+   ```
 
-```sh
-yarn install
-yarn dev:erc20-vault-ui  # http://localhost:5173, hot reload
-yarn build:erc20-vault   # typechecks every vault package, then bundles this one
-```
+2. Run `yarn dev:erc20-vault-ui` and open http://localhost:5173.
+
+3. Hand the app the `.env`'s `MPC_ROOT_PUBLIC_KEY` and
+   `MIDNIGHT_VAULT_CONTRACT_ADDRESS`. Two equivalent ways, pick either:
+
+   - **Through the running app** (easiest): open the gear in the header and
+     paste the two values into the "ERC20 vault" section's "MPC public key"
+     and "Contract address" fields. An edit lasts until the page reloads.
+   - **Through the environment** (survives reloads): create
+     `examples/erc20-vault/ui/.env.local` mirroring the two values, then
+     restart the dev server:
+
+     ```
+     VITE_MPC_ROOT_PUBLIC_KEY=<the .env's MPC_ROOT_PUBLIC_KEY>
+     VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS=<the .env's MIDNIGHT_VAULT_CONTRACT_ADDRESS>
+     ```
+
+4. Walk the steps:
+   - **Connect wallets**: choose "Use a seed wallet" on both rows. Paste the
+     `.env`'s `MIDNIGHT_USER1_WALLET_SEED` into the Midnight dialog and its
+     `EVM_USER1_WALLET_SEED` into the EVM dialog: two independent wallets,
+     one per chain, both funded by the setup. The Midnight side syncs against
+     the indexer, so its first balance read can take a moment.
+   - **Derive the deposit address**: with a seed wallet the signature happens
+     in-app, no prompt.
+   - **Interact with the vault**: paste the `.env`'s
+     `EVM_ERC20_CONTRACT_ADDRESS` into the tracked-tokens field to see the
+     TestUSDC balances.
 
 Within this package the scripts are `dev`, `build`, `preview` and `test`.
-`build` runs `tsc` before `vite build`, so a type error fails the bundle rather
-than shipping.
-
-## From a fresh clone to the running demo
-
-The app is only interesting against a chain with a deployed vault, and the
-repository carries everything needed to stand one up locally. The prerequisite
-details (Node 20+, Yarn 4 via Corepack, the exact compact toolchain version, a
-docker engine with 16 GB of RAM allocated) live in the repository root's
-[README](../../../README.md). The whole path from there is, from the
-repository root:
-
-```sh
-corepack enable
-yarn install
-compact update 0.33.0-rc.2   # the exact toolchain version the contracts compile with
-yarn compile                 # generates each contract's TypeScript bindings
-docker compose up -d         # Midnight node + indexer + proof server + local EVM chain
-yarn test:erc20-vault:e2e tests/deploy-only.test.ts
-```
-
-That last command runs the e2e suite's setup pipeline and no deposit or
-withdrawal flows: it generates and funds wallets, deploys the test ERC20
-(TestUSDC), the signet contract and the vault, initializes the vault, starts
-the local MPC responder, and appends what the demo needs to the repo-root
-`.env`. The first run takes a while (the vault's proving keys compile,
-roughly ten minutes), and reruns skip everything already in `.env`.
-
-Then wire this app to what it produced. Open the repo-root `.env` and create
-`examples/erc20-vault/ui/.env.local` mirroring two values:
-
-```
-VITE_MPC_SECP256K1_PUBKEY=<the .env's MPC_SECP256K1_PUBKEY>
-VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS=<the .env's MIDNIGHT_VAULT_CONTRACT_ADDRESS>
-```
-
-Start the app with `yarn dev:erc20-vault-ui`, open http://localhost:5173, and
-walk the steps:
-
-1. **Connect wallets.** Both rows offer "Use a seed wallet": paste the
-   `.env`'s `USER_SEED` into BOTH dialogs. The setup funded that seed on both
-   chains: its Midnight wallet holds Night and dust, and the EVM account it
-   derives holds 10 ETH and 1000 TestUSDC. The Midnight side syncs against
-   the indexer, so its first balance read can take a moment.
-2. **Derive the deposit address.** With a seed wallet the signature happens
-   in-app, no prompt.
-3. **Interact with the vault.** To see the ERC20 balances, track the test
-   token: paste the `.env`'s `ERC20_ADDRESS` into the tracked-tokens field.
-
-The MPC responder the setup started is only exercised when a deposit or
-withdrawal actually runs: browsing balances and deriving the deposit address
-need nothing beyond the compose stack.
-
-## The stack
-
-| Piece | Choice |
-| --- | --- |
-| Bundler | Vite 8 |
-| UI | React 19 |
-| Routing | React Router 8, declarative mode |
-| Styling | Tailwind 4, configured in CSS via `@theme` in `src/index.css` |
-| Components | shadcn/ui, on the Radix base in the `nova` style |
-| Tests | vitest 4 + Testing Library, in a `jsdom` environment |
-
-Components are not a dependency: `yarn dlx shadcn@latest add <component>` copies
-the source into `src/components/ui/`, and from there it is ordinary code in this
-repository, to read and to edit. `components.json` records the base and style so
-a component added later matches the ones already here.
-
-Colours come from shadcn's tokens: `bg-background`, `text-muted-foreground`,
-`border-border` and the rest, with the values in the `:root` and `.dark` blocks
-of `src/index.css`. Restyle the app by editing those values.
-
-## The header
-
-The header carries the whole control surface, since a connection outlives
-navigation:
-
-| Control | What it shows |
-| --- | --- |
-| Configuration | A gear opening every configurable value: the vault's MPC key and contract address, then each chain's network and endpoints |
-| Midnight wallet | Grey dot and a washed-out icon until connected, then the wallet's own icon and a green dot |
-| EVM wallet | The same, over EIP-6963 discovery |
-| Theme | Light, dark, or system |
-
-Opening a wallet control lists the wallet extensions the browser announced, and
-connecting is one click from there. With a wallet connected the same menu shows
-which one, its address on the EVM side, and a disconnect. A connection that
-fails raises a toast carrying the wallet's own words rather than failing
-silently, so a declined prompt reads as a declined prompt.
-
-The first step card offers the same connections, one row per chain, and is the
-place to start rather than the header. It counts how many of the two are in,
-ticks each row as it connects, and turns green once both are. The page heading
-tracks it: "To start you'll need 2 connected wallets" until both are connected,
-"Wallet connections set" afterwards. Disconnecting stays in the header, so it
-never competes with the step's forward motion.
-
-Theme choice is one of light, dark or system, persisted under
-`erc20-vault-ui.theme`. System is the default and follows the operating system
-live. A short script in `index.html` applies the choice before the first paint,
-which is what stops a reload flashing the wrong theme.
-
-This is the only package in the workspace that bundles: a browser has no way to
-load TypeScript. `yarn build` emits a gitignored `dist/`, which is a deploy
-artefact and not something other packages import.
-
-## Layout
-
-```
-index.html          # the HTML entry, and the pre-paint theme script
-vite.config.ts      # bundler plugins, the "@/" alias, the vitest (jsdom) block
-components.json     # shadcn/ui's config: base, style and the "@/" aliases
-public/             # served verbatim at the site root, including the SIG mark
-src/
-  main.tsx          # mounts <App/> into #root
-  App.tsx           # the provider stack wrapped around the route table
-  routes.ts         # RoutePath enum: the single source of truth for paths
-  index.css         # Tailwind import and shadcn/ui's design tokens
-  vite-env.d.ts     # every VITE_ variable the app reads, precisely typed
-  components/       # the shell, the header controls and the step cards
-    contexts/       # app-wide React contexts, including the theme
-    ui/             # shadcn/ui components, copied in by its CLI
-  hooks/            # the logic the components render
-  lib/              # non-React modules the components lean on
-  pages/            # one component per route
-tests/              # Testing Library specs run under vitest
-```
+`build` typechecks before it bundles, so a type error fails the build.
 
 ## Configuration
 
 The app starts on the local standalone stack (`undeployed`) with the endpoint
-defaults published by `@midnight-examples/chain-config`. Put any override in a
-`.env.local` file in this directory. Only `VITE_`-prefixed variables reach the
-browser. Every value here can also be edited at runtime through the header's
-configuration panel (an edit lasts until the page reloads). Each field in the
-panel explains itself on its info icon, a Midnight browser wallet whose own
-endpoints differ from the app's gets a warning there, and an installed seed
-wallet follows edits automatically: an extension's endpoints are its own, and
-the app cannot change them.
+defaults published by `@midnight-examples/chain-config`. Overrides go in a
+`.env.local` file in this directory (only `VITE_`-prefixed variables reach the
+browser), and every value can also be edited at runtime through the header's
+configuration panel (an edit lasts until the page reloads).
 
 | Variable | Effect |
 | --- | --- |
@@ -209,38 +96,12 @@ the app cannot change them.
 | `VITE_MIDNIGHT_NODE_URL` | Midnight node RPC. |
 | `VITE_MIDNIGHT_PROOF_SERVER_URL` | Proof server. Stays local by default: it sees private witness data. |
 | `VITE_EVM_RPC_URL` | JSON-RPC endpoint of the EVM chain. Defaults to the local anvil compose service. |
-| `VITE_EVM_CHAIN_ID` | The EVM chain id to expect. Defaults to anvil's 31337. |
+| `VITE_EVM_CHAIN_ID` | The EVM chain id to expect. Defaults to anvil's 31337, and must match what the RPC actually serves. |
 | `VITE_EVM_EXPLORER_URL` | Block explorer base URL, for linking transactions and addresses. |
-| `VITE_MPC_SECP256K1_PUBKEY` | The MPC network's root secp256k1 public key (hex, compressed or uncompressed, `0x` optional). Deposit addresses derive from it; unset, everything else works and the app says the address cannot be derived. The local fakenet's key is generated per machine and appended as `MPC_SECP256K1_PUBKEY` to the repo-root `.env` by the setup pipeline. |
-| `VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS` | The vault's Midnight contract address on the starting network, overriding the per-network deployment table. A local deploy mints a fresh address, appended as `MIDNIGHT_VAULT_CONTRACT_ADDRESS` to the repo-root `.env` by the setup pipeline. |
+| `VITE_MPC_ROOT_PUBLIC_KEY` | The MPC network's root public key (secp256k1 hex, compressed or uncompressed, `0x` optional). Deposit addresses derive from it. Unset, everything else works and the app says the address cannot be derived. The quickstart's setup appends the local value to the repo-root `.env` as `MPC_ROOT_PUBLIC_KEY`. |
+| `VITE_MIDNIGHT_VAULT_CONTRACT_ADDRESS` | The vault's Midnight contract address on the starting network, overriding the per-network deployment table. The quickstart's setup appends the local value to the repo-root `.env`. |
 
 These set the *starting* config. Switching Midnight network in the running app
 resets every endpoint to that network's published defaults, so stagenet (whose
 endpoints this repo deliberately does not publish) has to be selected through
 the environment.
-
-The EVM chain id is not cosmetic: the vault seals `eip155:<chainId>` into its
-contract at initialize, and that is the routing key the MPC signs against.
-Nothing here yet proves the RPC actually serves the chain id you configured, so
-a mismatch is currently undetected: the balance reads go out over whatever the
-RPC is, and a wrong chain id shows as balances that do not match the wallet's
-own. Detecting it needs a live `eth_chainId` call compared against the config,
-and that check has still to be written.
-
-## Where the chain wiring goes
-
-Every read is a TanStack Query query, and a component never fetches for itself:
-
-1. Both wallet connections are contexts, published to components through
-   `useWalletConnections` as one shape per chain.
-2. Contract state is a query keyed by the deployed address:
-   `useVaultEvmAddress` reads the vault's own EVM account out of its ledger.
-3. EVM chain reads go through a viem client for the configured chain
-   (`useTrackedTokens` for what a token says about itself,
-   `useAccountBalances` for what an account holds).
-4. Still to come: deposit and withdrawal mutations, each refreshing the
-   balances above on success.
-
-The Midnight side reaches the chain through
-`@midnight-examples/erc20-vault-contract`, whose export surface is
-environment-agnostic so a browser can import it directly.

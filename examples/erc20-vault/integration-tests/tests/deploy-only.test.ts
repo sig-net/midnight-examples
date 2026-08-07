@@ -26,21 +26,32 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // touches the network; stopped once in afterAll.
 const session = createVaultSession(env);
 
+// The deployer's session, for initialize only: the circuit is gated to the
+// deployer identity (the deployer wallet seed's bytes, whose commitment the
+// deploy sealed), so the user session cannot drive it. Lazily built like
+// every session — a rerun against an initialized vault never starts it.
+const deployerSession = createVaultSession({
+  ...env,
+  MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
+});
+
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deploy-only", () => {
   installFlowHooks();
 
   afterAll(async () => {
     await session.stop();
+    await deployerSession.stop();
   });
 
   it("the pipeline produced every value the UI demo needs", () => {
     for (const key of [
-      "USER_SEED",
-      "MPC_SECP256K1_PUBKEY",
+      "MIDNIGHT_USER1_WALLET_SEED",
+      "EVM_USER1_WALLET_SEED",
+      "MPC_ROOT_PUBLIC_KEY",
       "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
       "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
-      "ERC20_ADDRESS",
-      "EVM_SEED_WALLET_ADDRESS",
+      "EVM_ERC20_CONTRACT_ADDRESS",
+      "EVM_USER1_WALLET_ADDRESS",
     ]) {
       expect(env[key], key).toBeTruthy();
     }
@@ -48,13 +59,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deploy-only", (
 
   it("the copy-paste values are in the repo-root .env", () => {
     const fileEnv = loadRepoDotEnv();
-    // The seed the demo's wallets install from, the two values the ui's
-    // .env.local mirrors, and the token its tracked-tokens field takes: a
-    // user reads them out of .env, never out of this run's log.
-    expect(fileEnv.USER_SEED, "USER_SEED").toBeTruthy();
-    expect(fileEnv.MPC_SECP256K1_PUBKEY).toBe(env.MPC_SECP256K1_PUBKEY);
+    // The two seeds the demo's wallets install from (one per chain), the two
+    // values the ui's .env.local mirrors, and the token its tracked-tokens
+    // field takes: a user reads them out of .env, never out of this run's log.
+    expect(fileEnv.MIDNIGHT_USER1_WALLET_SEED, "MIDNIGHT_USER1_WALLET_SEED").toBeTruthy();
+    expect(fileEnv.EVM_USER1_WALLET_SEED).toBe(env.EVM_USER1_WALLET_SEED);
+    expect(fileEnv.MPC_ROOT_PUBLIC_KEY).toBe(env.MPC_ROOT_PUBLIC_KEY);
     expect(fileEnv.MIDNIGHT_VAULT_CONTRACT_ADDRESS).toBe(env.MIDNIGHT_VAULT_CONTRACT_ADDRESS);
-    expect(fileEnv.ERC20_ADDRESS).toBe(env.ERC20_ADDRESS);
+    expect(fileEnv.EVM_ERC20_CONTRACT_ADDRESS).toBe(env.EVM_ERC20_CONTRACT_ADDRESS);
   });
 
   it(
@@ -67,9 +79,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deploy-only", (
       if ((await readLedger()).initialized) {
         logSkip("initialize", "vault is already initialized (rerun against a kept contract address)");
       } else {
-        await initialize(context, {
-          vaultEvmAddress: requireEnv("EVM_VAULT_ADDRESS"),
-          mpcResponseKey: requireEnv("MPC_RESPONSE_KEY"),
+        await initialize(await deployerSession.vaultContext(), {
+          vaultEvmAddress: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
+          mpcResponseKey: requireEnv("MPC_VAULT_RESPONSE_PUBLIC_KEY"),
         });
       }
 

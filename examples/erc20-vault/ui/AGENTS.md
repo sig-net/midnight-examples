@@ -68,6 +68,56 @@ tests/
   InteractWithVault.test.tsx # step three's panels, tracking, and wallet balances
 ```
 
+## How the demo works
+
+What the app implements, so a change is judged against the protocol rather
+than reconstructed from the components each time.
+
+- **The overview is three step cards over one view area.** Selecting a card
+  (its title is the control) puts that step's full details in the view area,
+  and the selection follows the user's progress until a card is chosen by
+  hand. The rendering rules for this live under "Rules" below.
+- **Step two establishes the caller's vault identity.** The Midnight wallet
+  signs the fixed message `signet-wallet-erc20-vault-demo`, the secret key is
+  the SHA-256 hash of that signature, and only its commitment (the compiled
+  `userCommitment` circuit) ever reaches the ledger. From the commitment the
+  app derives the caller's EVM deposit address: the account only the MPC
+  network can sign for, whose derivation combines the MPC root public key, the
+  vault contract's address, and the commitment as the derivation path. The
+  secret is stored in the browser (encrypted, scoped per wallet account), and
+  a key found there with a derived address is already enough to proceed to
+  step three. A found key can be regenerated (re-signed and overwritten), but
+  only behind a tick box acknowledging the loss: unless the wallet signs
+  deterministically, the new signature derives a different key, and unclaimed
+  deposits or pending refunds tied to the old commitment go with it.
+- **Step three reads four accounts across two chains.** The connected EVM
+  wallet (what funds a deposit's gas and tokens), the derived deposit address
+  (the account the MPC signs a deposit's transfer from), the vault's own EVM
+  account (read from its ledger, pinned at initialize), and the connected
+  Midnight wallet (shielded and unshielded balances, plus dust). A deposit
+  moves ERC20 value from the derived account into the vault's and mints a
+  shielded token against it, and a withdrawal runs the same path backwards.
+  Neither is built yet, which is what the third card's `ComingSoon` says.
+- **There is no token list to offer.** The vault handles any ERC20 and its
+  ledger names none of them, so the user pastes the addresses they care about
+  and each EVM panel adds a row per token. A token that answers no `name()` or
+  `symbol()` reads as Unknown, and one that answers no `decimals()` leaves its
+  balance in atomic units rather than guessing a scale. Midnight amounts stay
+  in atomic units throughout: a token type there is an opaque id with no
+  metadata behind it.
+- **The EVM chain id is not cosmetic.** The vault seals `eip155:<chainId>`
+  into its contract at initialize, and that is the routing key the MPC signs
+  against. Nothing yet proves the RPC actually serves the configured chain id,
+  so a mismatch is undetected: the balance reads go out over whatever the RPC
+  is, and a wrong chain id shows as balances that do not match the wallet's
+  own. Detecting it needs a live `eth_chainId` call compared against the
+  config, and that check has still to be written.
+- **Runtime config edits reach seed wallets, never extensions.** Every
+  configurable value is editable through the header's gear panel (an edit
+  lasts until reload). An installed seed wallet follows edits automatically,
+  while a browser extension's endpoints are its own: the panel can only warn
+  when a Midnight extension's endpoints differ from the app's.
+
 ## Rules
 
 - **The stack is Vite + React + React Router, and stays there.** Vite bundles,

@@ -131,7 +131,7 @@ export default defineConfig({
       // A valid MPC root key for tests, so deposit addresses derive: the
       // secp256k1 generator point (the public key of secret 1), well known
       // and never holding value. Any valid point would do.
-      VITE_MPC_SECP256K1_PUBKEY:
+      VITE_MPC_ROOT_PUBLIC_KEY:
         "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
     },
     // The private-state store note: vitest resolves `level` with Node's
