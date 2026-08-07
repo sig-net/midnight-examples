@@ -4,7 +4,7 @@
 // recomputed serialized output for the request, and return the resolved
 // outcome. There is deliberately no push/websocket alternative.
 
-import { sleepUnlessAborted, type RequestIdHex } from "@sig-net/midnight";
+import { type RequestIdHex, sleepUnlessAborted } from "@sig-net/midnight";
 
 import type { VaultContext } from "../vault-context.ts";
 import { fetchAttestedRespondOutcome, type RespondOutcome } from "./respond-output.ts";
@@ -38,7 +38,7 @@ export interface PollRespondBidirectionalOptions {
  * @param context - The flow context.
  * @param options - What to poll for and how patiently.
  * @returns The resolved outcome (attested event + verified output bytes).
- * @throws Error when the contract has no state on-chain, or `timeoutMs`
+ * @throws {Error} When the contract has no state on-chain, or `timeoutMs`
  *   elapses with no verifying attestation posted (a fakenet /responses API
  *   that stays unreachable surfaces as this timeout: each tick's fetch
  *   failure is logged and retried, this loop owns the deadline).
@@ -49,12 +49,16 @@ export async function pollRespondBidirectional(
 ): Promise<RespondOutcome> {
   console.log(`signet contract:   ${context.signetContractAddress}`);
   console.log(`request id:        ${options.requestId}`);
-  console.log(`poll:              every ${options.intervalMs}ms, up to ${options.timeoutMs}ms`);
+  console.log(
+    `poll:              every ${String(options.intervalMs)}ms, up to ${String(options.timeoutMs)}ms`,
+  );
 
   // The reads are single-shot; this loop owns the cadence and the give-up
   // timeout.
   const giveUp = new AbortController();
-  const timer = setTimeout(() => giveUp.abort(), options.timeoutMs);
+  const timer = setTimeout(() => {
+    giveUp.abort();
+  }, options.timeoutMs);
   try {
     while (!giveUp.signal.aborted) {
       const outcome = await fetchAttestedRespondOutcome(context, options.requestId);
@@ -69,7 +73,7 @@ export async function pollRespondBidirectional(
       await sleepUnlessAborted(options.intervalMs, giveUp.signal);
     }
     throw new Error(
-      `timed out after ${options.timeoutMs}ms waiting for a verifying respond-bidirectional attestation to request ${options.requestId}`,
+      `timed out after ${String(options.timeoutMs)}ms waiting for a verifying respond-bidirectional attestation to request ${options.requestId}`,
     );
   } finally {
     clearTimeout(timer);

@@ -7,10 +7,9 @@
 // RANDOM mint nonce, so the minted coin cannot be linked back to the
 // request.
 
-import { encodeCoinPublicKey, type CoinPublicKey } from "@midnight-ntwrk/compact-runtime";
-import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
-
 import type { EncPublicKey } from "@midnight-examples/lib";
+import { type CoinPublicKey, encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
+import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 
 import type { VaultContext } from "../vault-context.ts";
@@ -59,7 +58,7 @@ export interface ClaimOptions {
  *
  * @param context - The flow context.
  * @param options - The claim arguments.
- * @throws If no matching attestation has been posted for `options.requestId`
+ * @throws {Error} If no matching attestation has been posted for `options.requestId`
  *   yet, or the attested outcome is not a success (a failed sweep cannot be
  *   claimed).
  */

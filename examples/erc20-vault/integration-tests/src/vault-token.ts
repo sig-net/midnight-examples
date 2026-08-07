@@ -5,9 +5,12 @@
 // Shared by the withdraw flow (the surrendered coin's color) and by tests
 // that read a wallet's shielded balance of the vault token.
 
-import { rawTokenType, type ContractAddress, type RawTokenType } from "@midnight-ntwrk/compact-runtime";
-
 import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
+import {
+  type ContractAddress,
+  type RawTokenType,
+  rawTokenType,
+} from "@midnight-ntwrk/compact-runtime";
 
 import { evmAddressBytes } from "./evm-transfer.ts";
 
@@ -19,8 +22,14 @@ import { evmAddressBytes } from "./evm-transfer.ts";
  * @param erc20Address - The ERC20 token contract on the target chain (20-byte 0x hex).
  * @param vaultContractAddress - The deployed vault contract address.
  * @returns The raw token type (hex) of the vault token for this ERC20.
- * @throws If `erc20Address` is not a 20-byte 0x hex string.
+ * @throws {Error} If `erc20Address` is not a 20-byte 0x hex string.
  */
-export function vaultTokenType(erc20Address: string, vaultContractAddress: ContractAddress): RawTokenType {
-  return rawTokenType(pureCircuits.vaultTokenDomainSeparator(evmAddressBytes(erc20Address)), vaultContractAddress);
+export function vaultTokenType(
+  erc20Address: string,
+  vaultContractAddress: ContractAddress,
+): RawTokenType {
+  return rawTokenType(
+    pureCircuits.vaultTokenDomainSeparator(evmAddressBytes(erc20Address)),
+    vaultContractAddress,
+  );
 }

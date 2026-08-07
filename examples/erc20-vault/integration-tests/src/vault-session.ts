@@ -6,8 +6,13 @@
 // the network.
 
 import { VAULT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { createE2eSession, type E2eSession, type SessionWallet } from "@midnight-examples/test-harness";
+import {
+  createE2eSession,
+  type E2eSession,
+  type SessionWallet,
+} from "@midnight-examples/test-harness";
 import type { SignetRequestResponseReader } from "@sig-net/midnight";
+
 import { createVaultContext, type VaultContext } from "./vault-context.ts";
 
 /** The shared per-flow-file lifecycle handed out by {@link createVaultSession}. */
@@ -49,9 +54,7 @@ export function createVaultSession(env: NodeJS.ProcessEnv): VaultSession {
       // wallet() re-awaits synced state on every call; the context itself is
       // built once (findDeployedContract needs the setup-deployed vault).
       const wallet = await session.wallet();
-      if (!sharedContext) {
-        sharedContext = await createVaultContext(env, wallet);
-      }
+      sharedContext ??= await createVaultContext(env, wallet);
       return sharedContext;
     },
 

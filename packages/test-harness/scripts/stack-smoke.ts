@@ -10,6 +10,7 @@
 // testing against.
 
 import { getMidnightNodeConfig } from "@midnight-examples/lib";
+
 import { buildBaseEnv } from "../src/e2e-env.ts";
 import { getEvmChainId } from "../src/evm.ts";
 import { runCommand } from "../src/exec.ts";
@@ -26,7 +27,11 @@ const MINUTE = 60_000;
  * @param timeoutMs - Give-up timeout.
  * @throws The probe's last error once the timeout passes.
  */
-async function waitUntilReachable(name: string, probe: () => Promise<void>, timeoutMs: number): Promise<void> {
+async function waitUntilReachable(
+  name: string,
+  probe: () => Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
@@ -46,7 +51,9 @@ const env = buildBaseEnv();
 const nodeConfig = getMidnightNodeConfig(env);
 const evmRpcUrl = env.EVM_RPC_URL ?? "http://127.0.0.1:8545";
 
-console.log("bringing the compose stack up (node, indexer, proof server, EVM — fakenet is profile-gated) …");
+console.log(
+  "bringing the compose stack up (node, indexer, proof server, EVM — fakenet is profile-gated) …",
+);
 await runCommand("docker", ["compose", "up", "-d"], env, 10 * MINUTE);
 
 try {
@@ -55,7 +62,11 @@ try {
     () => assertHttpReachable("midnight node", new URL("/health", nodeConfig.nodeUrl).href),
     2 * MINUTE,
   );
-  await waitUntilReachable("indexer", () => assertHttpReachable("indexer", nodeConfig.indexerUrl), 2 * MINUTE);
+  await waitUntilReachable(
+    "indexer",
+    () => assertHttpReachable("indexer", nodeConfig.indexerUrl),
+    2 * MINUTE,
+  );
   await waitUntilReachable(
     "proof server",
     () => assertHttpReachable("proof server", nodeConfig.proofServerUrl),
@@ -65,7 +76,7 @@ try {
     "EVM node",
     async () => {
       const chainId = await getEvmChainId(evmRpcUrl);
-      console.log(`EVM node reports chain id ${chainId}`);
+      console.log(`EVM node reports chain id ${String(chainId)}`);
     },
     2 * MINUTE,
   );

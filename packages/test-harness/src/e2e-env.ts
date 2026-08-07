@@ -26,12 +26,14 @@ export function buildBaseEnv(): NodeJS.ProcessEnv {
  * @param env - The suite's env accumulator.
  * @param name - The env-var name a prior step (or the operator's `.env`) must have set.
  * @returns The non-empty value.
- * @throws If the variable is unset or empty.
+ * @throws {Error} If the variable is unset or empty.
  */
 export function requireEnv(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (!value) {
-    throw new Error(`${name} is not set — did the step that derives it run (or is it missing from your .env)?`);
+    throw new Error(
+      `${name} is not set — did the step that derives it run (or is it missing from your .env)?`,
+    );
   }
   return value;
 }

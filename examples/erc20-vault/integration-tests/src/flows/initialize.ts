@@ -34,17 +34,21 @@ export interface InitializeOptions {
  *
  * @param context - The flow context.
  * @param options - The initialize arguments.
- * @throws If an argument is malformed or the circuit rejects the caller.
+ * @throws {Error} If an argument is malformed or the circuit rejects the caller.
  */
 export async function initialize(context: VaultContext, options: InitializeOptions): Promise<void> {
   if (!/^0x[0-9a-fA-F]{40}$/.test(options.vaultEvmAddress)) {
-    throw new Error(`vaultEvmAddress must be a 20-byte 0x hex address; got "${options.vaultEvmAddress}".`);
+    throw new Error(
+      `vaultEvmAddress must be a 20-byte 0x hex address; got "${options.vaultEvmAddress}".`,
+    );
   }
   console.log(`vault contract:    ${context.vaultContractAddress}`);
   console.log(`vault EVM address: ${options.vaultEvmAddress}`);
-  console.log(`EVM chain:         ${context.evmChainId} (${context.caip2Id})`);
+  console.log(`EVM chain:         ${String(context.evmChainId)} (${context.caip2Id})`);
   console.log(`MPC response key:  ${options.mpcResponseKey}`);
-  console.log(`caller commitment: ${context.identity.commitmentHex} (must equal the sealed deployer)`);
+  console.log(
+    `caller commitment: ${context.identity.commitmentHex} (must equal the sealed deployer)`,
+  );
 
   const result = await context.vault.callTx.initialize(
     evmAddressBytes(options.vaultEvmAddress),
