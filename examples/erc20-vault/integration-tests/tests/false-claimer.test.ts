@@ -28,9 +28,6 @@
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
 
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
-import { formatEther, parseEther, parseUnits } from "ethers";
-import { afterAll, describe, expect, it } from "vitest";
 import {
   banner,
   getErc20Balance,
@@ -39,6 +36,9 @@ import {
   requireEnv as requireEnvOf,
 } from "@midnight-examples/test-harness";
 import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
+import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { formatEther, parseEther, parseUnits } from "ethers";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
@@ -85,179 +85,202 @@ const falseClaimerSession = createVaultSession({
 // claimed by its rightful owner — 0.1 USDC, the funding preflight's minimum.
 const DEPOSIT_AMOUNT = parseUnits("0.1", 6);
 
-describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault false-claimer e2e: a deposit is only claimable by the identity that requested it", () => {
-  installFlowHooks();
+describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
+  "erc20-vault false-claimer e2e: a deposit is only claimable by the identity that requested it",
+  () => {
+    installFlowHooks();
 
-  afterAll(async () => {
-    await session.stop();
-    await falseClaimerSession.stop();
-  });
+    afterAll(async () => {
+      await session.stop();
+      await falseClaimerSession.stop();
+    });
 
-  it(
-    "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the drain gas",
-    async () => {
-      const rpcUrl = requireEnv("EVM_RPC_URL");
-      const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
-      const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
-      const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
+    it(
+      "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the drain gas",
+      async () => {
+        const rpcUrl = requireEnv("EVM_RPC_URL");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+        const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
-      // Same minimums as the happy-day deposit leg: the user's derived
-      // account pays the sweep gas and supplies the deposited ERC20.
-      const userEth = await getEthBalance(rpcUrl, userAddress);
-      console.log(`${userAddress} ETH balance: ${userEth} wei`);
-      expect(userEth, `fund ${userAddress} with >= 0.009 ETH on EVM`).toBeGreaterThanOrEqual(
-        parseEther("0.009"),
-      );
-      const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
-      console.log(`${userAddress} balance on ${erc20Address}: ${balance} (decimals ${decimals})`);
-      expect(balance, `fund ${userAddress} with >= 0.1 of ERC20 ${erc20Address} on EVM`).toBeGreaterThanOrEqual(
-        DEPOSIT_AMOUNT,
-      );
+        // Same minimums as the happy-day deposit leg: the user's derived
+        // account pays the sweep gas and supplies the deposited ERC20.
+        const userEth = await getEthBalance(rpcUrl, userAddress);
+        console.log(`${userAddress} ETH balance: ${String(userEth)} wei`);
+        expect(userEth, `fund ${userAddress} with >= 0.009 ETH on EVM`).toBeGreaterThanOrEqual(
+          parseEther("0.009"),
+        );
+        const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
+        console.log(
+          `${userAddress} balance on ${erc20Address}: ${String(balance)} (decimals ${String(decimals)})`,
+        );
+        expect(
+          balance,
+          `fund ${userAddress} with >= 0.1 of ERC20 ${erc20Address} on EVM`,
+        ).toBeGreaterThanOrEqual(DEPOSIT_AMOUNT);
 
-      // The vault's derived account sends the fund-cycling drain itself:
-      // require the fee-cap budget of one ERC20 transfer.
-      const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
-      const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
-      console.log(`${vaultAddress} ETH balance: ${vaultEth} wei (drain gas budget: ${gasBudget} wei)`);
-      expect(
-        vaultEth,
-        `fund the vault's derived account ${vaultAddress} with >= ${formatEther(gasBudget)} ETH on EVM`,
-      ).toBeGreaterThanOrEqual(gasBudget);
-    },
-    MINUTE,
-  );
+        // The vault's derived account sends the fund-cycling drain itself:
+        // require the fee-cap budget of one ERC20 transfer.
+        const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
+        const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
+        console.log(
+          `${vaultAddress} ETH balance: ${String(vaultEth)} wei (drain gas budget: ${String(gasBudget)} wei)`,
+        );
+        expect(
+          vaultEth,
+          `fund the vault's derived account ${vaultAddress} with >= ${formatEther(gasBudget)} ETH on EVM`,
+        ).toBeGreaterThanOrEqual(gasBudget);
+      },
+      MINUTE,
+    );
 
-  it(
-    "vault-initialized preflight: the vault contract is initialized (read-only)",
-    async () => {
-      const context = await session.vaultContext();
-      const state = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      expect(
-        state.initialized,
-        "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
-      ).toBe(1n);
-    },
-    5 * MINUTE,
-  );
+    it(
+      "vault-initialized preflight: the vault contract is initialized (read-only)",
+      async () => {
+        const context = await session.vaultContext();
+        const state = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        expect(
+          state.initialized,
+          "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
+        ).toBe(1n);
+      },
+      5 * MINUTE,
+    );
 
-  // Populated by the arrange step for the claim-attempt steps.
-  let depositRequestId: RequestIdHex;
-  // Whether the arranged request is still on the ledger — false when a prior
-  // run already claimed the resumed request, so the claim steps skip.
-  let requestOnLedger: boolean;
+    // Populated by the arrange step for the claim-attempt steps.
+    let depositRequestId: RequestIdHex;
+    // Whether the arranged request is still on the ledger — false when a prior
+    // run already claimed the resumed request, so the claim steps skip.
+    let requestOnLedger: boolean;
 
-  it(
-    "arrange: deposit round trip up to (but not including) the claim — the request stays on the ledger",
-    async () => {
-      const { requestId, claimed } = await runDepositRoundTrip(session, {
-        amount: DEPOSIT_AMOUNT,
-        reuseRequestId: env.FALSE_CLAIMER_DEPOSIT_REQUEST_ID as RequestIdHex | undefined,
-        skipClaim: true,
-      });
-      depositRequestId = requestId;
-      expect(claimed, "skipClaim must leave the claim to this file").toBe(false);
+    it(
+      "arrange: deposit round trip up to (but not including) the claim — the request stays on the ledger",
+      async () => {
+        const { requestId, claimed } = await runDepositRoundTrip(session, {
+          amount: DEPOSIT_AMOUNT,
+          reuseRequestId: env.FALSE_CLAIMER_DEPOSIT_REQUEST_ID as RequestIdHex | undefined,
+          skipClaim: true,
+        });
+        depositRequestId = requestId;
+        expect(claimed, "skipClaim must leave the claim to this file").toBe(false);
 
-      // Resume tolerance: a prior run may already have finished the rightful
-      // claim — then the request is gone and both claim steps below skip.
-      const context = await session.vaultContext();
-      const ledger = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      requestOnLedger = ledger.signBidirectionalEventMap.member(requestIdBytes(requestId));
+        // Resume tolerance: a prior run may already have finished the rightful
+        // claim — then the request is gone and both claim steps below skip.
+        const context = await session.vaultContext();
+        const ledger = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        requestOnLedger = ledger.signBidirectionalEventMap.member(requestIdBytes(requestId));
 
-      banner([
-        `Arrange deposit ${requestId} complete — attested, UNCLAIMED, on the ledger: ${requestOnLedger}.`,
-        "",
-        "If a later step dies (e.g. proof-server OOM), resume with",
-        `  FALSE_CLAIMER_DEPOSIT_REQUEST_ID=${requestId}`,
-      ]);
-    },
-    15 * MINUTE,
-  );
+        banner([
+          `Arrange deposit ${requestId} complete — attested, UNCLAIMED, on the ledger: ${String(requestOnLedger)}.`,
+          "",
+          "If a later step dies (e.g. proof-server OOM), resume with",
+          `  FALSE_CLAIMER_DEPOSIT_REQUEST_ID=${requestId}`,
+        ]);
+      },
+      15 * MINUTE,
+    );
 
-  it(
-    "act: claim under a second identity rejects in-circuit and leaves the request on the ledger",
-    async () => {
-      expect(depositRequestId).toBeDefined();
-      if (!requestOnLedger) {
-        logSkip("false claim attempt", `request ${depositRequestId} already claimed by a prior run`);
-        return;
-      }
+    it(
+      "act: claim under a second identity rejects in-circuit and leaves the request on the ledger",
+      async () => {
+        expect(depositRequestId).toBeDefined();
+        if (!requestOnLedger) {
+          logSkip(
+            "false claim attempt",
+            `request ${depositRequestId} already claimed by a prior run`,
+          );
+          return;
+        }
 
-      // Identity B presents the SAME request id and the SAME valid MPC
-      // response, i.e. everything a claim needs except the right secret key.
-      // The circuit recomputes B's commitment from the callerSecretKey
-      // witness, compares it to the request's recorded path (A's commitment),
-      // and rejects during local transaction building.
-      const falseClaimerContext = await falseClaimerSession.vaultContext();
-      await expect(
-        claim(falseClaimerContext, { requestId: depositRequestId }),
-      ).rejects.toThrow(/Not the depositor/);
+        // Identity B presents the SAME request id and the SAME valid MPC
+        // response, i.e. everything a claim needs except the right secret key.
+        // The circuit recomputes B's commitment from the callerSecretKey
+        // witness, compares it to the request's recorded path (A's commitment),
+        // and rejects during local transaction building.
+        const falseClaimerContext = await falseClaimerSession.vaultContext();
+        await expect(claim(falseClaimerContext, { requestId: depositRequestId })).rejects.toThrow(
+          /Not the depositor/,
+        );
 
-      // The rejection happened client-side, so nothing was consumed: the
-      // request must still sit on the ledger, claimable by identity A.
-      const context = await session.vaultContext();
-      const ledger = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      expect(
-        ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
-        "the rejected claim must not consume the request",
-      ).toBe(true);
+        // The rejection happened client-side, so nothing was consumed: the
+        // request must still sit on the ledger, claimable by identity A.
+        const context = await session.vaultContext();
+        const ledger = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        expect(
+          ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
+          "the rejected claim must not consume the request",
+        ).toBe(true);
 
-      banner([
-        `False claim of deposit ${depositRequestId} rejected by the caller-identity check.`,
-        "",
-        "The request is still on the vault ledger, claimable by the depositor.",
-      ]);
-    },
-    15 * MINUTE,
-  );
+        banner([
+          `False claim of deposit ${depositRequestId} rejected by the caller-identity check.`,
+          "",
+          "The request is still on the vault ledger, claimable by the depositor.",
+        ]);
+      },
+      15 * MINUTE,
+    );
 
-  it(
-    "cleanup: the rightful identity claims the deposit — no stranded request",
-    async () => {
-      expect(depositRequestId).toBeDefined();
-      if (!requestOnLedger) {
-        logSkip("rightful claim", `request ${depositRequestId} already claimed by a prior run`);
-        return;
-      }
+    it(
+      "cleanup: the rightful identity claims the deposit — no stranded request",
+      async () => {
+        expect(depositRequestId).toBeDefined();
+        if (!requestOnLedger) {
+          logSkip("rightful claim", `request ${depositRequestId} already claimed by a prior run`);
+          return;
+        }
 
-      const context = await session.vaultContext();
-      await claim(context, { requestId: depositRequestId });
+        const context = await session.vaultContext();
+        await claim(context, { requestId: depositRequestId });
 
-      const ledger = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      expect(
-        ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
-        "the rightful claim must consume the request from the ledger",
-      ).toBe(false);
+        const ledger = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        expect(
+          ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
+          "the rightful claim must consume the request from the ledger",
+        ).toBe(false);
 
-      banner([
-        `Deposit ${depositRequestId} claimed by its rightful identity.`,
-        "",
-        "Same request, same attestation, the RIGHT secret key: the claim the",
-        "vault rejected for identity B went through for identity A.",
-      ]);
-    },
-    15 * MINUTE,
-  );
+        banner([
+          `Deposit ${depositRequestId} claimed by its rightful identity.`,
+          "",
+          "Same request, same attestation, the RIGHT secret key: the claim the",
+          "vault rejected for identity B went through for identity A.",
+        ]);
+      },
+      15 * MINUTE,
+    );
 
-  it(
-    "cycle funds: drain the vault's EVM ERC20 balance (fakenet-only) back to the user's derived account",
-    async () => {
-      const rpcUrl = requireEnv("EVM_RPC_URL");
-      const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
-      const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
+    it(
+      "cycle funds: drain the vault's EVM ERC20 balance (fakenet-only) back to the user's derived account",
+      async () => {
+        const rpcUrl = requireEnv("EVM_RPC_URL");
+        const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+        const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
-      // The claimed value lives on as shielded tokens in the depositor's
-      // wallet (this flow does not withdraw them), so send the deposited
-      // ERC20 (plus any prior-run leftovers) back to the user's derived
-      // account — the suite's EVM funds keep cycling. A zero balance means a
-      // prior aborted run already drained it.
-      const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
-      if (drained === 0n) {
-        logSkip("drain", "the vault's derived account already holds no ERC20");
-      }
+        // The claimed value lives on as shielded tokens in the depositor's
+        // wallet (this flow does not withdraw them), so send the deposited
+        // ERC20 (plus any prior-run leftovers) back to the user's derived
+        // account — the suite's EVM funds keep cycling. A zero balance means a
+        // prior aborted run already drained it.
+        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
+        if (drained === 0n) {
+          logSkip("drain", "the vault's derived account already holds no ERC20");
+        }
 
-      const { balance } = await getErc20Balance(rpcUrl, erc20Address, vaultAddress);
-      expect(balance, `the vault ${vaultAddress} must hold no ERC20 after the drain`).toBe(0n);
-    },
-    3 * MINUTE,
-  );
-});
+        const { balance } = await getErc20Balance(rpcUrl, erc20Address, vaultAddress);
+        expect(balance, `the vault ${vaultAddress} must hold no ERC20 after the drain`).toBe(0n);
+      },
+      3 * MINUTE,
+    );
+  },
+);

@@ -84,7 +84,7 @@ export const FAUCET_URLS: Partial<Record<NetworkId, string>> = {};
  *
  * @param indexerUrl - The indexer's GraphQL-over-HTTP URL.
  * @returns The matching GraphQL-over-WebSocket URL.
- * @throws If `indexerUrl` is not a parsable absolute URL.
+ * @throws {Error} If `indexerUrl` is not a parsable absolute URL.
  */
 export function indexerWsUrlFromIndexerUrl(indexerUrl: string): string {
   const url = new URL(indexerUrl);

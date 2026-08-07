@@ -1,7 +1,30 @@
 // EVM read-only helpers for funding preflights and setup checks (per the repo
 // convention, ethers is the Ethereum library).
 
+import type { ContractMethod, ContractTransactionResponse } from "ethers";
 import { Contract, JsonRpcProvider } from "ethers";
+
+/**
+ * A read-only ABI method reached through ethers' `getFunction` accessor.
+ *
+ * A `Contract` exposes its ABI methods through a string index signature, which
+ * `noUncheckedIndexedAccess` types as possibly-undefined, so `erc20.balanceOf(…)`
+ * cannot be invoked directly. `getFunction` is ethers' own typed accessor for
+ * that call. Its generic pins argument tuples to a loose list, so the precision
+ * worth expressing here is the return type.
+ */
+export type ContractReadMethod<R> = ContractMethod<unknown[], R, R>;
+
+/**
+ * A state-changing ABI method reached through ethers' `getFunction` accessor,
+ * resolving to the sent transaction. See {@link ContractReadMethod} for why
+ * `getFunction` stands in for a direct method access.
+ */
+export type ContractWriteMethod = ContractMethod<
+  unknown[],
+  ContractTransactionResponse,
+  ContractTransactionResponse
+>;
 
 /**
  * Read the chain id the RPC endpoint reports.
@@ -106,8 +129,8 @@ export async function getErc20Balance(
   try {
     const erc20 = new Contract(token, ERC20_READ_ABI, provider);
     const [balance, decimals] = await Promise.all([
-      erc20.balanceOf(holder) as Promise<bigint>,
-      erc20.decimals() as Promise<bigint>,
+      erc20.getFunction<ContractReadMethod<bigint>>("balanceOf")(holder),
+      erc20.getFunction<ContractReadMethod<bigint>>("decimals")(),
     ]);
     return { balance, decimals: Number(decimals) };
   } finally {

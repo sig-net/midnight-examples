@@ -4,7 +4,18 @@
 import * as bip39 from "@scure/bip39";
 import { wordlist as english } from "@scure/bip39/wordlists/english.js";
 
-const toHex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+const toHex = (bytes: Uint8Array) =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
+// Decode hex digits that a caller has ALREADY validated as even-length and
+// hex-only; a bad digit would decode to NaN rather than throwing.
+const fromHex = (hex: string): Uint8Array => {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index++) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+};
 
 /** How the input seed was supplied. */
 export enum SeedFormat {
@@ -31,7 +42,7 @@ export class ParseError extends Error {}
  *
  * @param input - The seed as supplied by the user: hex or mnemonic.
  * @returns The seed bytes plus a {@link DerivationSource} record of how they were supplied.
- * @throws {@link ParseError} when the input is neither valid hex nor a valid mnemonic.
+ * @throws {ParseError} When the input is neither valid hex nor a valid mnemonic.
  */
 export function parseSeed(input: string): { seed: Uint8Array; source: DerivationSource } {
   const trimmed = input.trim();
@@ -43,10 +54,13 @@ export function parseSeed(input: string): { seed: Uint8Array; source: Derivation
   if (looksHex) {
     const bytes = compact.length / 2;
     if (bytes < 16 || bytes > 64) {
-      throw new ParseError(`Hex seed must be 16–64 bytes; got ${bytes}.`);
+      throw new ParseError(`Hex seed must be 16–64 bytes; got ${String(bytes)}.`);
     }
-    const seed = Uint8Array.from(compact.match(/.{2}/g)!.map((h) => parseInt(h, 16)));
-    return { seed, source: { format: SeedFormat.Hex, seedHex: compact.toLowerCase(), seedBytes: bytes } };
+    const seed = fromHex(compact);
+    return {
+      seed,
+      source: { format: SeedFormat.Hex, seedHex: compact.toLowerCase(), seedBytes: bytes },
+    };
   }
 
   const words = trimmed.split(/\s+/);
@@ -56,7 +70,12 @@ export function parseSeed(input: string): { seed: Uint8Array; source: Derivation
   const seed = bip39.mnemonicToSeedSync(words.join(" "));
   return {
     seed,
-    source: { format: SeedFormat.Mnemonic, words: words.length, seedHex: toHex(seed), seedBytes: seed.length },
+    source: {
+      format: SeedFormat.Mnemonic,
+      words: words.length,
+      seedHex: toHex(seed),
+      seedBytes: seed.length,
+    },
   };
 }
 
@@ -70,15 +89,15 @@ export function parseSeed(input: string): { seed: Uint8Array; source: Derivation
  * @param seed - The wallet seed, as hex (16-64 bytes, optional 0x prefix) or
  *   a BIP-39 mnemonic.
  * @returns The 32-byte identity secret.
- * @throws {@link ParseError} when the seed does not parse, or parses to
- *   anything other than exactly 32 bytes (a mnemonic always does: it expands
- *   to 64, so identity-bearing wallets need a 32-byte hex seed).
+ * @throws {ParseError} When the seed does not parse, or parses to anything
+ *   other than exactly 32 bytes (a mnemonic always does: it expands to 64,
+ *   so identity-bearing wallets need a 32-byte hex seed).
  */
 export function identitySecretFromSeed(seed: string): Uint8Array {
   const { seed: bytes } = parseSeed(seed);
   if (bytes.length !== 32) {
     throw new ParseError(
-      `The seed parses to ${bytes.length} bytes; an identity secret needs exactly 32. ` +
+      `The seed parses to ${String(bytes.length)} bytes; an identity secret needs exactly 32. ` +
         `Use a 32-byte hex seed for identity-bearing wallets.`,
     );
   }

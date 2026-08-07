@@ -103,7 +103,9 @@ describe("the connect step", () => {
     injectMidnightWallet({ name: "Test Lace" });
     render(<App />);
 
-    await user.click(await within(connectStep()).findByRole("button", { name: /Connect Test Lace/ }));
+    await user.click(
+      await within(connectStep()).findByRole("button", { name: /Connect Test Lace/ }),
+    );
 
     // The connected row stops being a control and states the wallet instead.
     expect(await within(connectStep()).findByText("Test Lace")).toBeInTheDocument();
@@ -125,7 +127,9 @@ describe("the connect step", () => {
     announceMatchingEvmWallet("Test MetaMask");
     render(<App />);
 
-    await user.click(await within(connectStep()).findByRole("button", { name: /Connect Test Lace/ }));
+    await user.click(
+      await within(connectStep()).findByRole("button", { name: /Connect Test Lace/ }),
+    );
     await user.click(
       await within(connectStep()).findByRole("button", { name: /Connect Test MetaMask/ }),
     );
@@ -139,9 +143,7 @@ describe("the connect step", () => {
     expect(within(connectStep()).queryByText("2/2")).not.toBeInTheDocument();
 
     // Both header controls agree with the step.
-    expect(
-      screen.getByRole("button", { name: "Midnight wallet: connected" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Midnight wallet: connected" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "EVM wallet: connected" })).toBeInTheDocument();
   });
 });
@@ -168,9 +170,7 @@ describe("the deposit address step", () => {
       within(depositStep()).getByText("Connect the Midnight wallet first."),
     ).toBeInTheDocument();
     // With nothing connected, the view area belongs to the connect step.
-    expect(
-      screen.getByRole("region", { name: "Connect wallets details" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Connect wallets details" })).toBeInTheDocument();
   });
 
   it("offers to generate a secret key once the wallet is in and its view is opened", async () => {

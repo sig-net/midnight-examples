@@ -24,8 +24,8 @@ const REACHABILITY_RETRY_DELAY_MS = 3_000;
  *
  * @param name - Human-readable service name for the error message.
  * @param url - The endpoint to probe.
- * @throws If the service stays unreachable for the whole patience window,
- *   with a hint to start the docker stack.
+ * @throws {Error} If the service stays unreachable for the whole patience
+ *   window, with a hint to start the docker stack.
  */
 export async function assertHttpReachable(name: string, url: string): Promise<void> {
   const deadline = Date.now() + REACHABILITY_PATIENCE_MS;
@@ -43,7 +43,9 @@ export async function assertHttpReachable(name: string, url: string): Promise<vo
       }
       if (!waiting) {
         waiting = true;
-        console.log(`waiting for ${name} at ${url} (a just-started stack takes a moment to boot)...`);
+        console.log(
+          `waiting for ${name} at ${url} (a just-started stack takes a moment to boot)...`,
+        );
       }
       await new Promise((resolve) => setTimeout(resolve, REACHABILITY_RETRY_DELAY_MS));
     }
@@ -55,12 +57,13 @@ export async function assertHttpReachable(name: string, url: string): Promise<vo
  *
  * @param command - The executable name (e.g. `compact`).
  * @param args - Arguments for a cheap invocation (e.g. `["--version"]`).
- * @throws If the command is missing or exits non-zero, with install hint.
+ * @throws {Error} If the command is missing or exits non-zero, with install hint.
  */
 export async function assertCommandAvailable(command: string, args: string[]): Promise<void> {
   try {
     const { stdout } = await execFileAsync(command, args, { timeout: 30_000 });
-    console.log(`${command} ${args.join(" ")}: ${stdout.trim().split("\n")[0]}`);
+    const [firstLine = ""] = stdout.trim().split("\n");
+    console.log(`${command} ${args.join(" ")}: ${firstLine}`);
   } catch (error) {
     throw new Error(
       `\`${command} ${args.join(" ")}\` failed — is the ${command} toolchain installed and on PATH? (${String(error)})`,

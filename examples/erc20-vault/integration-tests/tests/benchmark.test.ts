@@ -30,12 +30,6 @@
 // (src/flows/) — in-process, never a subprocess.
 
 import {
-  requestIdBytes,
-  type RequestIdHex,
-} from "@sig-net/midnight";
-import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
-import { afterAll, describe, expect, it } from "vitest";
-import {
   banner,
   getErc20Balance,
   getEthBalance,
@@ -44,6 +38,9 @@ import {
   requireEnv as requireEnvOf,
 } from "@midnight-examples/test-harness";
 import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
+import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
@@ -98,350 +95,379 @@ const timings: {
   readonly withdraw: Record<string, number>;
 } = { deposit: {}, withdraw: {} };
 
-describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault benchmark e2e: per-leg wall-clock of a deposit + withdraw round trip", () => {
-  installFlowHooks();
+describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
+  "erc20-vault benchmark e2e: per-leg wall-clock of a deposit + withdraw round trip",
+  () => {
+    installFlowHooks();
 
-  afterAll(async () => {
-    await session.stop();
-  });
+    afterAll(async () => {
+      await session.stop();
+    });
 
-  it(
-    "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the withdraw gas budget",
-    async () => {
-      const rpcUrl = requireEnv("EVM_RPC_URL");
-      const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
-      const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
-      const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
+    it(
+      "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the withdraw gas budget",
+      async () => {
+        const rpcUrl = requireEnv("EVM_RPC_URL");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+        const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
-      // Same minimums as the happy-day deposit leg: the user's derived
-      // account pays the sweep gas and supplies the deposited ERC20.
-      const userEth = await getEthBalance(rpcUrl, userAddress);
-      console.log(`${userAddress} ETH balance: ${userEth} wei`);
-      expect(userEth, `fund ${userAddress} with >= 0.009 ETH on EVM`).toBeGreaterThanOrEqual(
-        parseEther("0.009"),
-      );
-      const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
-      console.log(`${userAddress} balance on ${erc20Address}: ${balance} (decimals ${decimals})`);
-      expect(balance, `fund ${userAddress} with >= 0.1 of ERC20 ${erc20Address} on EVM`).toBeGreaterThanOrEqual(
-        DEPOSIT_AMOUNT,
-      );
-
-      // The withdraw tx is sent FROM the vault's derived account, which pays
-      // its own gas: require the fee-cap budget of one MPC-signed ERC20
-      // transfer, like the happy-day withdraw leg.
-      const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
-      const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
-      console.log(`${vaultAddress} ETH balance: ${vaultEth} wei (withdraw gas budget: ${gasBudget} wei)`);
-      expect(
-        vaultEth,
-        `fund the vault's derived account ${vaultAddress} with >= ${formatEther(gasBudget)} ETH on EVM`,
-      ).toBeGreaterThanOrEqual(gasBudget);
-    },
-    MINUTE,
-  );
-
-  it(
-    "vault-initialized preflight: the vault contract is initialized (read-only)",
-    async () => {
-      const context = await session.vaultContext();
-      const state = await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      expect(
-        state.initialized,
-        "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
-      ).toBe(1n);
-    },
-    5 * MINUTE,
-  );
-
-  // ── Deposit round trip, one timed leg per test ─────────────────────────
-
-  // Populated by the request leg (or BENCHMARK_DEPOSIT_REQUEST_ID) for the
-  // subsequent deposit stages.
-  let depositRequestId: RequestIdHex;
-
-  it(
-    "time deposit: record the deposit request on the vault ledger",
-    async () => {
-      if (env.BENCHMARK_DEPOSIT_REQUEST_ID) {
-        depositRequestId = env.BENCHMARK_DEPOSIT_REQUEST_ID as RequestIdHex;
-        logSkip("deposit", `BENCHMARK_DEPOSIT_REQUEST_ID present, resuming deposit '${depositRequestId}'`);
-        return;
-      }
-
-      const context = await session.vaultContext();
-      // The sweep tx sender is the user's derived EVM account; its next
-      // nonce comes from the chain — fetched OUTSIDE the timed span, which
-      // brackets only the flow call under measurement.
-      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
-
-      const stop = startTimer();
-      depositRequestId = await deposit(context, { amount: DEPOSIT_AMOUNT, evmNonce });
-      timings.deposit.deposit = stop();
-
-      expect(depositRequestId).toMatch(/^[0-9a-f]{64}$/);
-
-      banner([
-        `Benchmark deposit request recorded on the vault ledger:`,
-        "",
-        `  request id: ${depositRequestId}`,
-        "",
-        "If a later step dies (e.g. proof-server OOM), resume with",
-        `  BENCHMARK_DEPOSIT_REQUEST_ID=${depositRequestId}`,
-      ]);
-    },
-    5 * MINUTE,
-  );
-
-  // Populated by the poll leg below for the broadcast leg.
-  let signedDepositSweepTransaction: Transaction;
-
-  it(
-    "time pollSignatureResponse (deposit): the MPC signs the sweep",
-    async () => {
-      expect(depositRequestId).toBeDefined();
-      const context = await session.vaultContext();
-
-      // Deposit sweeps are signed by the USER's derived account.
-      const stop = startTimer();
-      signedDepositSweepTransaction = await pollSignatureResponse(context, {
-        requestId: depositRequestId,
-        intervalMs: 1000,
-        timeoutMs: 2 * MINUTE,
-        expectedSigner: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
-      });
-      timings.deposit.pollSignatureResponse = stop();
-    },
-    5 * MINUTE,
-  );
-
-  it(
-    "time broadcastEvm (deposit): the sweep mines on the EVM",
-    async () => {
-      expect(signedDepositSweepTransaction).toBeDefined();
-      const context = await session.vaultContext();
-
-      // broadcastEvm waits for one confirmation and throws if the tx
-      // reverted; on a resumed run an already-mined sweep short-circuits.
-      const stop = startTimer();
-      await broadcastEvm(context, { transaction: signedDepositSweepTransaction });
-      timings.deposit.broadcastEvm = stop();
-    },
-    3 * MINUTE,
-  );
-
-  it(
-    "time pollRespondBidirectional (deposit): the MPC attests the sweep as succeeded",
-    async () => {
-      expect(depositRequestId).toBeDefined();
-      const context = await session.vaultContext();
-
-      const stop = startTimer();
-      const attestation = await pollRespondBidirectional(context, {
-        requestId: depositRequestId,
-        intervalMs: 1000,
-        timeoutMs: 2 * MINUTE,
-      });
-      timings.deposit.pollRespondBidirectional = stop();
-
-      // The claim below can only mint from a success attestation.
-      expect(
-        attestation.succeeded,
-        "the MPC must attest the deposit sweep as succeeded",
-      ).toBe(true);
-    },
-    5 * MINUTE,
-  );
-
-  it(
-    "time claim: verify the attestation in-circuit and consume the request",
-    async () => {
-      expect(depositRequestId).toBeDefined();
-      const context = await session.vaultContext();
-      const requestKey = requestIdBytes(depositRequestId);
-      const readLedger = () => readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-
-      // Rerun against a kept contract address: if a prior run already
-      // claimed this request the entry is gone and claim would reject
-      // with "Request not found" — skip cleanly instead.
-      const before = await readLedger();
-      if (!before.signBidirectionalEventMap.member(requestKey)) {
-        logSkip("claim", `request ${depositRequestId} already claimed (not on the ledger)`);
-        return;
-      }
-
-      const stop = startTimer();
-      await claim(context, { requestId: depositRequestId });
-      timings.deposit.claim = stop();
-
-      const after = await readLedger();
-      expect(
-        after.signBidirectionalEventMap.member(requestKey),
-        "claim must consume the request from the ledger",
-      ).toBe(false);
-    },
-    15 * MINUTE,
-  );
-
-  // ── Withdraw round trip, one timed leg per test ────────────────────────
-
-  // Populated by the request leg (or BENCHMARK_WITHDRAW_REQUEST_ID) for the
-  // subsequent withdraw stages.
-  let withdrawRequestId: RequestIdHex;
-
-  it(
-    "time withdraw: escrow the claimed shielded vault tokens",
-    async () => {
-      if (env.BENCHMARK_WITHDRAW_REQUEST_ID) {
-        withdrawRequestId = env.BENCHMARK_WITHDRAW_REQUEST_ID as RequestIdHex;
-        logSkip("withdraw", `BENCHMARK_WITHDRAW_REQUEST_ID present, resuming withdraw '${withdrawRequestId}'`);
-        return;
-      }
-
-      const context = await session.vaultContext();
-      // The withdraw tx sender is the VAULT's derived EVM account; the
-      // destination is the user's derived account, so the funds cycle. The
-      // nonce fetch stays outside the timed span.
-      const evmNonce = await getTransactionNonce(requireEnv("EVM_RPC_URL"), requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"));
-      const destEvmAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
-
-      const stop = startTimer();
-      withdrawRequestId = await withdraw(context, {
-        amount: WITHDRAW_AMOUNT,
-        destEvmAddress,
-        evmNonce,
-      });
-      timings.withdraw.withdraw = stop();
-
-      expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
-
-      banner([
-        `Benchmark withdraw request recorded on the vault ledger:`,
-        "",
-        `  request id: ${withdrawRequestId}`,
-        "",
-        "If a later step dies (e.g. proof-server OOM), resume with",
-        `  BENCHMARK_WITHDRAW_REQUEST_ID=${withdrawRequestId}`,
-      ]);
-    },
-    5 * MINUTE,
-  );
-
-  // Populated by the poll leg below for the broadcast leg.
-  let signedWithdrawTransaction: Transaction;
-
-  it(
-    "time pollSignatureResponse (withdraw): the MPC signs the transfer",
-    async () => {
-      expect(withdrawRequestId).toBeDefined();
-      const context = await session.vaultContext();
-
-      // Withdraw transfers are signed by the VAULT's derived account.
-      const stop = startTimer();
-      signedWithdrawTransaction = await pollSignatureResponse(context, {
-        requestId: withdrawRequestId,
-        intervalMs: 1000,
-        timeoutMs: 2 * MINUTE,
-        expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
-      });
-      timings.withdraw.pollSignatureResponse = stop();
-    },
-    5 * MINUTE,
-  );
-
-  it(
-    "time broadcastEvm (withdraw): the transfer mines on the EVM",
-    async () => {
-      expect(signedWithdrawTransaction).toBeDefined();
-      const context = await session.vaultContext();
-
-      const stop = startTimer();
-      await broadcastEvm(context, { transaction: signedWithdrawTransaction });
-      timings.withdraw.broadcastEvm = stop();
-    },
-    3 * MINUTE,
-  );
-
-  it(
-    "time pollRespondBidirectional (withdraw): the MPC attests the transfer as succeeded",
-    async () => {
-      expect(withdrawRequestId).toBeDefined();
-      const context = await session.vaultContext();
-
-      const stop = startTimer();
-      const attestation = await pollRespondBidirectional(context, {
-        requestId: withdrawRequestId,
-        intervalMs: 1000,
-        timeoutMs: 3 * MINUTE,
-      });
-      timings.withdraw.pollRespondBidirectional = stop();
-
-      // Happy-path benchmark: the broadcast leg saw the transfer mine, so
-      // the MPC must attest success (the 1-byte 0x01 result).
-      expect(
-        attestation.succeeded,
-        "the MPC must attest the withdraw transfer as succeeded",
-      ).toBe(true);
-    },
-    5 * MINUTE,
-  );
-
-  it(
-    "time completeWithdraw: settle the withdrawal and consume the request + refund marker",
-    async () => {
-      expect(withdrawRequestId).toBeDefined();
-      const context = await session.vaultContext();
-      const requestKey = requestIdBytes(withdrawRequestId);
-      const readLedger = () => readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-
-      // Rerun against a kept contract address: if a prior run already
-      // settled this request the pending-withdrawal marker is gone and
-      // completeWithdraw would reject with "Withdrawal not found" — skip
-      // cleanly instead.
-      const before = await readLedger();
-      if (!before.refundCommitment.member(requestKey)) {
-        logSkip(
-          "completeWithdraw",
-          `withdrawal ${withdrawRequestId} already settled (no pending marker on the ledger)`,
+        // Same minimums as the happy-day deposit leg: the user's derived
+        // account pays the sweep gas and supplies the deposited ERC20.
+        const userEth = await getEthBalance(rpcUrl, userAddress);
+        console.log(`${userAddress} ETH balance: ${String(userEth)} wei`);
+        expect(userEth, `fund ${userAddress} with >= 0.009 ETH on EVM`).toBeGreaterThanOrEqual(
+          parseEther("0.009"),
         );
-        return;
-      }
-
-      const stop = startTimer();
-      await completeWithdraw(context, { requestId: withdrawRequestId });
-      timings.withdraw.completeWithdraw = stop();
-
-      const after = await readLedger();
-      expect(
-        after.signBidirectionalEventMap.member(requestKey),
-        "completeWithdraw must consume the request from the ledger",
-      ).toBe(false);
-    },
-    15 * MINUTE,
-  );
-
-  it(
-    "report: per-leg wall clock of both round trips",
-    () => {
-      // Legs a resumed/rerun pass skipped are simply absent — the report
-      // never fabricates a number for work this run did not do.
-      const section = (label: string, record: Record<string, number>): string[] => {
-        const rows = Object.entries(record).map(
-          ([leg, ms]) => `  ${`${label}.${leg}`.padEnd(44)}${String(ms).padStart(9)} ms`,
+        const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
+        console.log(
+          `${userAddress} balance on ${erc20Address}: ${String(balance)} (decimals ${String(decimals)})`,
         );
-        return rows.length > 0 ? rows : [`  ${label}: (every leg skipped — resumed or rerun pass)`];
-      };
+        expect(
+          balance,
+          `fund ${userAddress} with >= 0.1 of ERC20 ${erc20Address} on EVM`,
+        ).toBeGreaterThanOrEqual(DEPOSIT_AMOUNT);
 
-      banner([
-        "Benchmark report — per-leg wall clock:",
-        "",
-        ...section("deposit", timings.deposit),
-        ...section("withdraw", timings.withdraw),
-      ]);
+        // The withdraw tx is sent FROM the vault's derived account, which pays
+        // its own gas: require the fee-cap budget of one MPC-signed ERC20
+        // transfer, like the happy-day withdraw leg.
+        const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
+        const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
+        console.log(
+          `${vaultAddress} ETH balance: ${String(vaultEth)} wei (withdraw gas budget: ${String(gasBudget)} wei)`,
+        );
+        expect(
+          vaultEth,
+          `fund the vault's derived account ${vaultAddress} with >= ${formatEther(gasBudget)} ETH on EVM`,
+        ).toBeGreaterThanOrEqual(gasBudget);
+      },
+      MINUTE,
+    );
 
-      // The machine-readable twin of the banner, one line per run, for
-      // scraping baselines out of run logs.
-      console.log(`BENCHMARK_TIMINGS_JSON ${JSON.stringify(timings)}`);
-    },
-    MINUTE,
-  );
-});
+    it(
+      "vault-initialized preflight: the vault contract is initialized (read-only)",
+      async () => {
+        const context = await session.vaultContext();
+        const state = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        expect(
+          state.initialized,
+          "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
+        ).toBe(1n);
+      },
+      5 * MINUTE,
+    );
+
+    // ── Deposit round trip, one timed leg per test ─────────────────────────
+
+    // Populated by the request leg (or BENCHMARK_DEPOSIT_REQUEST_ID) for the
+    // subsequent deposit stages.
+    let depositRequestId: RequestIdHex;
+
+    it(
+      "time deposit: record the deposit request on the vault ledger",
+      async () => {
+        if (env.BENCHMARK_DEPOSIT_REQUEST_ID) {
+          depositRequestId = env.BENCHMARK_DEPOSIT_REQUEST_ID as RequestIdHex;
+          logSkip(
+            "deposit",
+            `BENCHMARK_DEPOSIT_REQUEST_ID present, resuming deposit '${depositRequestId}'`,
+          );
+          return;
+        }
+
+        const context = await session.vaultContext();
+        // The sweep tx sender is the user's derived EVM account; its next
+        // nonce comes from the chain — fetched OUTSIDE the timed span, which
+        // brackets only the flow call under measurement.
+        const evmNonce = await getTransactionNonce(
+          requireEnv("EVM_RPC_URL"),
+          requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+        );
+
+        const stop = startTimer();
+        depositRequestId = await deposit(context, { amount: DEPOSIT_AMOUNT, evmNonce });
+        timings.deposit.deposit = stop();
+
+        expect(depositRequestId).toMatch(/^[0-9a-f]{64}$/);
+
+        banner([
+          `Benchmark deposit request recorded on the vault ledger:`,
+          "",
+          `  request id: ${depositRequestId}`,
+          "",
+          "If a later step dies (e.g. proof-server OOM), resume with",
+          `  BENCHMARK_DEPOSIT_REQUEST_ID=${depositRequestId}`,
+        ]);
+      },
+      5 * MINUTE,
+    );
+
+    // Populated by the poll leg below for the broadcast leg.
+    let signedDepositSweepTransaction: Transaction;
+
+    it(
+      "time pollSignatureResponse (deposit): the MPC signs the sweep",
+      async () => {
+        expect(depositRequestId).toBeDefined();
+        const context = await session.vaultContext();
+
+        // Deposit sweeps are signed by the USER's derived account.
+        const stop = startTimer();
+        signedDepositSweepTransaction = await pollSignatureResponse(context, {
+          requestId: depositRequestId,
+          intervalMs: 1000,
+          timeoutMs: 2 * MINUTE,
+          expectedSigner: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+        });
+        timings.deposit.pollSignatureResponse = stop();
+      },
+      5 * MINUTE,
+    );
+
+    it(
+      "time broadcastEvm (deposit): the sweep mines on the EVM",
+      async () => {
+        expect(signedDepositSweepTransaction).toBeDefined();
+        const context = await session.vaultContext();
+
+        // broadcastEvm waits for one confirmation and throws if the tx
+        // reverted; on a resumed run an already-mined sweep short-circuits.
+        const stop = startTimer();
+        await broadcastEvm(context, { transaction: signedDepositSweepTransaction });
+        timings.deposit.broadcastEvm = stop();
+      },
+      3 * MINUTE,
+    );
+
+    it(
+      "time pollRespondBidirectional (deposit): the MPC attests the sweep as succeeded",
+      async () => {
+        expect(depositRequestId).toBeDefined();
+        const context = await session.vaultContext();
+
+        const stop = startTimer();
+        const attestation = await pollRespondBidirectional(context, {
+          requestId: depositRequestId,
+          intervalMs: 1000,
+          timeoutMs: 2 * MINUTE,
+        });
+        timings.deposit.pollRespondBidirectional = stop();
+
+        // The claim below can only mint from a success attestation.
+        expect(attestation.succeeded, "the MPC must attest the deposit sweep as succeeded").toBe(
+          true,
+        );
+      },
+      5 * MINUTE,
+    );
+
+    it(
+      "time claim: verify the attestation in-circuit and consume the request",
+      async () => {
+        expect(depositRequestId).toBeDefined();
+        const context = await session.vaultContext();
+        const requestKey = requestIdBytes(depositRequestId);
+        const readLedger = () =>
+          readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+
+        // Rerun against a kept contract address: if a prior run already
+        // claimed this request the entry is gone and claim would reject
+        // with "Request not found" — skip cleanly instead.
+        const before = await readLedger();
+        if (!before.signBidirectionalEventMap.member(requestKey)) {
+          logSkip("claim", `request ${depositRequestId} already claimed (not on the ledger)`);
+          return;
+        }
+
+        const stop = startTimer();
+        await claim(context, { requestId: depositRequestId });
+        timings.deposit.claim = stop();
+
+        const after = await readLedger();
+        expect(
+          after.signBidirectionalEventMap.member(requestKey),
+          "claim must consume the request from the ledger",
+        ).toBe(false);
+      },
+      15 * MINUTE,
+    );
+
+    // ── Withdraw round trip, one timed leg per test ────────────────────────
+
+    // Populated by the request leg (or BENCHMARK_WITHDRAW_REQUEST_ID) for the
+    // subsequent withdraw stages.
+    let withdrawRequestId: RequestIdHex;
+
+    it(
+      "time withdraw: escrow the claimed shielded vault tokens",
+      async () => {
+        if (env.BENCHMARK_WITHDRAW_REQUEST_ID) {
+          withdrawRequestId = env.BENCHMARK_WITHDRAW_REQUEST_ID as RequestIdHex;
+          logSkip(
+            "withdraw",
+            `BENCHMARK_WITHDRAW_REQUEST_ID present, resuming withdraw '${withdrawRequestId}'`,
+          );
+          return;
+        }
+
+        const context = await session.vaultContext();
+        // The withdraw tx sender is the VAULT's derived EVM account; the
+        // destination is the user's derived account, so the funds cycle. The
+        // nonce fetch stays outside the timed span.
+        const evmNonce = await getTransactionNonce(
+          requireEnv("EVM_RPC_URL"),
+          requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
+        );
+        const destEvmAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+
+        const stop = startTimer();
+        withdrawRequestId = await withdraw(context, {
+          amount: WITHDRAW_AMOUNT,
+          destEvmAddress,
+          evmNonce,
+        });
+        timings.withdraw.withdraw = stop();
+
+        expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
+
+        banner([
+          `Benchmark withdraw request recorded on the vault ledger:`,
+          "",
+          `  request id: ${withdrawRequestId}`,
+          "",
+          "If a later step dies (e.g. proof-server OOM), resume with",
+          `  BENCHMARK_WITHDRAW_REQUEST_ID=${withdrawRequestId}`,
+        ]);
+      },
+      5 * MINUTE,
+    );
+
+    // Populated by the poll leg below for the broadcast leg.
+    let signedWithdrawTransaction: Transaction;
+
+    it(
+      "time pollSignatureResponse (withdraw): the MPC signs the transfer",
+      async () => {
+        expect(withdrawRequestId).toBeDefined();
+        const context = await session.vaultContext();
+
+        // Withdraw transfers are signed by the VAULT's derived account.
+        const stop = startTimer();
+        signedWithdrawTransaction = await pollSignatureResponse(context, {
+          requestId: withdrawRequestId,
+          intervalMs: 1000,
+          timeoutMs: 2 * MINUTE,
+          expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
+        });
+        timings.withdraw.pollSignatureResponse = stop();
+      },
+      5 * MINUTE,
+    );
+
+    it(
+      "time broadcastEvm (withdraw): the transfer mines on the EVM",
+      async () => {
+        expect(signedWithdrawTransaction).toBeDefined();
+        const context = await session.vaultContext();
+
+        const stop = startTimer();
+        await broadcastEvm(context, { transaction: signedWithdrawTransaction });
+        timings.withdraw.broadcastEvm = stop();
+      },
+      3 * MINUTE,
+    );
+
+    it(
+      "time pollRespondBidirectional (withdraw): the MPC attests the transfer as succeeded",
+      async () => {
+        expect(withdrawRequestId).toBeDefined();
+        const context = await session.vaultContext();
+
+        const stop = startTimer();
+        const attestation = await pollRespondBidirectional(context, {
+          requestId: withdrawRequestId,
+          intervalMs: 1000,
+          timeoutMs: 3 * MINUTE,
+        });
+        timings.withdraw.pollRespondBidirectional = stop();
+
+        // Happy-path benchmark: the broadcast leg saw the transfer mine, so
+        // the MPC must attest success (the 1-byte 0x01 result).
+        expect(
+          attestation.succeeded,
+          "the MPC must attest the withdraw transfer as succeeded",
+        ).toBe(true);
+      },
+      5 * MINUTE,
+    );
+
+    it(
+      "time completeWithdraw: settle the withdrawal and consume the request + refund marker",
+      async () => {
+        expect(withdrawRequestId).toBeDefined();
+        const context = await session.vaultContext();
+        const requestKey = requestIdBytes(withdrawRequestId);
+        const readLedger = () =>
+          readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+
+        // Rerun against a kept contract address: if a prior run already
+        // settled this request the pending-withdrawal marker is gone and
+        // completeWithdraw would reject with "Withdrawal not found" — skip
+        // cleanly instead.
+        const before = await readLedger();
+        if (!before.refundCommitment.member(requestKey)) {
+          logSkip(
+            "completeWithdraw",
+            `withdrawal ${withdrawRequestId} already settled (no pending marker on the ledger)`,
+          );
+          return;
+        }
+
+        const stop = startTimer();
+        await completeWithdraw(context, { requestId: withdrawRequestId });
+        timings.withdraw.completeWithdraw = stop();
+
+        const after = await readLedger();
+        expect(
+          after.signBidirectionalEventMap.member(requestKey),
+          "completeWithdraw must consume the request from the ledger",
+        ).toBe(false);
+      },
+      15 * MINUTE,
+    );
+
+    it(
+      "report: per-leg wall clock of both round trips",
+      () => {
+        // Legs a resumed/rerun pass skipped are simply absent — the report
+        // never fabricates a number for work this run did not do.
+        const section = (label: string, record: Record<string, number>): string[] => {
+          const rows = Object.entries(record).map(
+            ([leg, ms]) => `  ${`${label}.${leg}`.padEnd(44)}${String(ms).padStart(9)} ms`,
+          );
+          return rows.length > 0
+            ? rows
+            : [`  ${label}: (every leg skipped — resumed or rerun pass)`];
+        };
+
+        banner([
+          "Benchmark report — per-leg wall clock:",
+          "",
+          ...section("deposit", timings.deposit),
+          ...section("withdraw", timings.withdraw),
+        ]);
+
+        // The machine-readable twin of the banner, one line per run, for
+        // scraping baselines out of run logs.
+        console.log(`BENCHMARK_TIMINGS_JSON ${JSON.stringify(timings)}`);
+
+        // The report covers both round trips, whichever legs this run executed.
+        expect(Object.keys(timings)).toEqual(["deposit", "withdraw"]);
+      },
+      MINUTE,
+    );
+  },
+);

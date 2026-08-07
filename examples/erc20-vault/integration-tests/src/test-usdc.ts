@@ -8,9 +8,9 @@ import { readFileSync } from "node:fs";
 
 import {
   deployEvmContract,
+  type EvmContractArtifact,
   requireEnv,
   runCommand,
-  type EvmContractArtifact,
 } from "@midnight-examples/test-harness";
 
 const MINUTE = 60_000;
@@ -27,7 +27,7 @@ const TEST_USDC_ARTIFACT_URL = new URL(
  *
  * @param env - The suite's env accumulator (`EVM_RPC_URL`).
  * @returns The deployed token's address.
- * @throws If the hardhat compile fails, the artifact is missing afterwards,
+ * @throws {Error} If the hardhat compile fails, the artifact is missing afterwards,
  *   or the deployment fails.
  */
 export async function deployTestUsdc(env: NodeJS.ProcessEnv): Promise<string> {

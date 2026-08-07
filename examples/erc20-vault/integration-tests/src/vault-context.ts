@@ -6,30 +6,29 @@
 // construction from the harness session, the vault-specific providers /
 // witnesses / compiled-contract binding from this example's own modules.
 
+import { evmCaip2ChainId, type MidnightNodeConfig } from "@midnight-examples/chain-config";
+import {
+  type Contract as VaultContract,
+  createVaultPrivateState,
+  VAULT_REQUESTS_PATH,
+  type VaultPrivateState,
+} from "@midnight-examples/erc20-vault-contract";
+import { getMidnightNodeConfig } from "@midnight-examples/lib";
+import { requireEnv, type SessionWallet } from "@midnight-examples/test-harness";
 import { findDeployedContract, type FoundContract } from "@midnight-ntwrk/midnight-js/contracts";
 // midnight-js reads a process-global network id (unlike compact-js, which
 // takes it explicitly). createVaultContext sets it once per construction.
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
-
-import { evmCaip2ChainId, type MidnightNodeConfig } from "@midnight-examples/chain-config";
-import { getMidnightNodeConfig } from "@midnight-examples/lib";
-import { requireEnv, type SessionWallet } from "@midnight-examples/test-harness";
 import {
-  SignetRequestResponseReader,
   signetEventSourceFromPublicDataProvider,
+  SignetRequestResponseReader,
 } from "@sig-net/midnight";
-import {
-  createVaultPrivateState,
-  VAULT_REQUESTS_PATH,
-  type Contract as VaultContract,
-  type VaultPrivateState,
-} from "@midnight-examples/erc20-vault-contract";
 
 import { resolveUserIdentity, type UserIdentity } from "./vault-identity.ts";
 import {
   buildVaultProviders,
-  vaultCompiledContract,
   VAULT_PRIVATE_STATE_ID,
+  vaultCompiledContract,
   type VaultProviders,
 } from "./vault-providers.ts";
 
@@ -83,10 +82,13 @@ export interface VaultContext {
  * @param env - The setup-populated env accumulator.
  * @param wallet - The started wallet (from the harness session's `wallet()`).
  * @returns The context to hand to the flow functions.
- * @throws If a required env value is missing/malformed or no contract answers
+ * @throws {Error} If a required env value is missing/malformed or no contract answers
  *   at `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
  */
-export async function createVaultContext(env: NodeJS.ProcessEnv, wallet: SessionWallet): Promise<VaultContext> {
+export async function createVaultContext(
+  env: NodeJS.ProcessEnv,
+  wallet: SessionWallet,
+): Promise<VaultContext> {
   const nodeConfig = getMidnightNodeConfig(env);
   setNetworkId(nodeConfig.networkId);
 
@@ -98,7 +100,9 @@ export async function createVaultContext(env: NodeJS.ProcessEnv, wallet: Session
 
   const erc20Address = requireEnv(env, "EVM_ERC20_CONTRACT_ADDRESS");
   if (!/^0x[0-9a-fA-F]{40}$/.test(erc20Address)) {
-    throw new Error(`EVM_ERC20_CONTRACT_ADDRESS must be a 20-byte 0x hex address; got "${erc20Address}".`);
+    throw new Error(
+      `EVM_ERC20_CONTRACT_ADDRESS must be a 20-byte 0x hex address; got "${erc20Address}".`,
+    );
   }
 
   const vaultContractAddress = requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");

@@ -67,9 +67,9 @@ export const SeedWalletDialog = ({
           <DialogHeader>
             <DialogTitle>Use a seed wallet</DialogTitle>
             <DialogDescription>
-              Runs a wallet in this page from a hex seed (16&ndash;64 bytes, 0x optional). The
-              keys stay in memory for this tab only and signing never prompts: meant for
-              development against a local stack.
+              Runs a wallet in this page from a hex seed (16&ndash;64 bytes, 0x optional). The keys
+              stay in memory for this tab only and signing never prompts: meant for development
+              against a local stack.
             </DialogDescription>
           </DialogHeader>
           <label className="flex flex-col gap-1.5 text-sm font-medium">

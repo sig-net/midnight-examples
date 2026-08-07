@@ -3,8 +3,8 @@
 # the root `compile:<example-dir>` / `test:<example-dir>` scripts —
 # see AGENTS.md's root-script naming rule).
 #
-#   install → compact toolchain → compile (skip-zk) → zk keys (cached) →
-#   build → unit tests → compose up → e2e suite
+#   install → format:check → compact toolchain → compile (skip-zk) → lint →
+#   zk keys (cached) → build → unit tests → compose up → e2e suite
 #
 # Caches (keyed on the pinned compiler version and the contract sources):
 #   compact-*  : the compact toolchain (~/.compact + the launcher binary),
@@ -37,7 +37,7 @@ on:
 
 jobs:
   example:
-    name: ${{ inputs.example-dir }} — unit + e2e
+    name: ${{ inputs.example-dir }} — format + lint + unit + e2e
     runs-on: ubuntu-latest
     # The claim/settle proofs are the pacing (and memory) item: a single one
     # peaks >12 GiB inside the proof server, so the default 4-core/16 GB
@@ -107,8 +107,15 @@ jobs:
           echo "version=$(printf '%s' "$version" | tr -cd '[:alnum:]._-')" >> "$GITHUB_OUTPUT"
       - name: Install dependencies (locked by the committed yarn.lock)
         run: yarn install --immutable
+      # Formatting needs nothing compiled, so it fails fast.
+      - name: Check formatting (prettier)
+        run: yarn format:check
       - name: Compile (skip-zk)
         run: yarn compile
+      # Type-aware lint rules read the generated src/managed/ types the source
+      # imports, so lint cannot run on a clean checkout before compile.
+      - name: Lint (eslint, type-aware)
+        run: yarn lint
       - name: Restore prebuilt zk proving keys
         id: zk
         uses: actions/cache/restore@v4

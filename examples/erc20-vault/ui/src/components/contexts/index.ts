@@ -1,32 +1,32 @@
 // The app-wide React contexts, mounted once in App.tsx.
 export {
+  type CallerIdentity,
   CallerIdentityStatus,
   ERC20VaultContextProvider,
+  type ERC20VaultContextValue,
   IDENTITY_SIGNING_MESSAGE,
   useERC20Vault,
-  type CallerIdentity,
-  type ERC20VaultContextValue,
 } from "./ERC20VaultContext.tsx";
 export {
+  type EVMChainConfigContextValue,
   EVMChainConfigProvider,
   useEVMChainConfig,
-  type EVMChainConfigContextValue,
 } from "./EVMChainConfigContext.tsx";
 export {
   EVMWalletConnectBusyError,
+  type EVMWalletContextValue,
   EVMWalletProvider,
   useEVMWallet,
-  type EVMWalletContextValue,
 } from "./EVMWalletContext.tsx";
 export {
+  type MidnightChainConfigContextValue,
   MidnightChainConfigProvider,
   useMidnightChainConfig,
-  type MidnightChainConfigContextValue,
 } from "./MidnightChainConfigContext.tsx";
 export {
   MidnightWalletConnectBusyError,
+  type MidnightWalletContextValue,
   MidnightWalletProvider,
   useMidnightWallet,
-  type MidnightWalletContextValue,
 } from "./MidnightWalletContext.tsx";
-export { ThemeProvider, useTheme, type ThemeContextValue } from "./ThemeContext.tsx";
+export { type ThemeContextValue, ThemeProvider, useTheme } from "./ThemeContext.tsx";

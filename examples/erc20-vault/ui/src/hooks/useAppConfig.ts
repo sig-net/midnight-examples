@@ -1,8 +1,4 @@
-import {
-  EVM_CHAINS,
-  NETWORK_IDS,
-  type NetworkId,
-} from "@midnight-examples/chain-config";
+import { EVM_CHAINS, NETWORK_IDS, type NetworkId } from "@midnight-examples/chain-config";
 import { useMemo } from "react";
 import { toast } from "sonner";
 
@@ -209,10 +205,9 @@ export function useAppConfig(): readonly ConfigSection[] {
           info: "Proof server for ZK proof generation. Keep it local: it sees private witness data.",
           kind: ConfigFieldKind.Text,
           value: midnight.config.proofServerUrl,
-          walletValue: differingWalletUri(
-            walletConfiguration?.proverServerUri,
-            midnight.config.proofServerUrl,
-          ),
+          // No wallet comparison here: the connector deprecates its prover
+          // URI field (wallets are moving to in-wallet proving), so there is
+          // nothing reliable to compare against.
           apply: applyOf("Proof server URL", midnight.setProofServerUrl),
         },
       ],

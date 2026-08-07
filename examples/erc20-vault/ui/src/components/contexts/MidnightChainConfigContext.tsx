@@ -1,6 +1,7 @@
 import {
   DEFAULT_ENDPOINTS,
   indexerWsUrlFromIndexerUrl,
+  isNetworkId,
   NETWORK_IDS,
   type Endpoints,
   type MidnightNodeConfig,
@@ -42,7 +43,7 @@ function readInitialNetworkId(env: ImportMetaEnv): NetworkId {
   if (configured === undefined || configured === "") {
     return FALLBACK_NETWORK_ID;
   }
-  if (!NETWORK_IDS.includes(configured)) {
+  if (!isNetworkId(configured)) {
     throw new Error(
       `Invalid VITE_MIDNIGHT_NETWORK_ID "${configured}": expected one of ${NETWORK_IDS.join(", ")}.`,
     );
@@ -79,9 +80,7 @@ function readInitialEndpoints(env: ImportMetaEnv, defaults: Endpoints): Endpoint
         ? indexerWsUrlFromIndexerUrl(indexerUrl)
         : defaults.indexerWsUrl,
     nodeUrl: nodeUrl ? new URL(nodeUrl).toString() : defaults.nodeUrl,
-    proofServerUrl: proofServerUrl
-      ? new URL(proofServerUrl).toString()
-      : defaults.proofServerUrl,
+    proofServerUrl: proofServerUrl ? new URL(proofServerUrl).toString() : defaults.proofServerUrl,
   };
 }
 
@@ -179,7 +178,15 @@ export function MidnightChainConfigProvider({
       setNodeUrl,
       setProofServerUrl,
     }),
-    [endpoints, networkId, setNetworkId, setIndexerUrl, setIndexerWsUrl, setNodeUrl, setProofServerUrl],
+    [
+      endpoints,
+      networkId,
+      setNetworkId,
+      setIndexerUrl,
+      setIndexerWsUrl,
+      setNodeUrl,
+      setProofServerUrl,
+    ],
   );
 
   return (

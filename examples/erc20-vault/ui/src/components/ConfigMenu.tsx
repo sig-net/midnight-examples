@@ -129,7 +129,9 @@ const ConfigFieldRow = ({ field }: ConfigFieldRowProps): JSX.Element => {
             placeholder={field.placeholder}
             aria-invalid={warning === undefined ? undefined : true}
             className={
-              warning === undefined ? undefined : "border-destructive focus-visible:ring-destructive"
+              warning === undefined
+                ? undefined
+                : "border-destructive focus-visible:ring-destructive"
             }
             onChange={(event) => {
               setDraft(event.target.value);

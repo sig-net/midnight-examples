@@ -1,11 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
 
-import {
-  CallerIdentityStatus,
-  useERC20Vault,
-  type CallerIdentity,
-} from "../components/contexts";
+import { type CallerIdentity, CallerIdentityStatus, useERC20Vault } from "../components/contexts";
 import type { StepStatus } from "../components/StepCard";
 import { describeError } from "../lib/errorMessage";
 
@@ -71,7 +67,8 @@ export function useDepositAddress(): DepositAddress {
     regenerateIdentity()
       .then(() => {
         toast.success("Secret key regenerated", {
-          description: "The previous key is gone. The deposit address now shown is the one to fund.",
+          description:
+            "The previous key is gone. The deposit address now shown is the one to fund.",
         });
       })
       .catch((error: unknown) => {

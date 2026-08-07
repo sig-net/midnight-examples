@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { bytesToHex, getAddress, type Address } from "viem";
+import { type Address, bytesToHex, getAddress } from "viem";
 
 import {
   CallerIdentityStatus,
@@ -43,11 +43,7 @@ export function useVaultEvmAddress(): VaultEvmAddress {
   const notDeployed = identityStatus === CallerIdentityStatus.NotDeployed;
 
   const query = useQuery<Address>({
-    queryKey: [
-      "vault-evm-address",
-      config.networkId,
-      wallet === null ? null : wallet.id,
-    ],
+    queryKey: ["vault-evm-address", config.networkId, wallet === null ? null : wallet.id],
     enabled: !noWallet && !notDeployed,
     // One indexer round trip: worth a second attempt, not worth the default's
     // four before the view admits anything is wrong.

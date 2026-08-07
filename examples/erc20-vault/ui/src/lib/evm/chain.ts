@@ -1,5 +1,5 @@
 import type { EvmChainConfig } from "@midnight-examples/chain-config";
-import { defineChain, type Chain } from "viem";
+import { type Chain, defineChain } from "viem";
 
 /**
  * The app's {@link EvmChainConfig} as the viem `Chain` its clients are built
@@ -14,13 +14,13 @@ import { defineChain, type Chain } from "viem";
  * @returns A viem chain over that config.
  */
 export function toViemChain(config: EvmChainConfig): Chain {
-    return defineChain({
-        id: Number(config.chainId),
-        name: `EVM chain ${config.chainId}`,
-        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-        rpcUrls: { default: { http: [config.rpcUrl] } },
-        ...(config.explorerUrl === undefined
-            ? {}
-            : { blockExplorers: { default: { name: "Explorer", url: config.explorerUrl } } }),
-    });
+  return defineChain({
+    id: Number(config.chainId),
+    name: `EVM chain ${String(config.chainId)}`,
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: { default: { http: [config.rpcUrl] } },
+    ...(config.explorerUrl === undefined
+      ? {}
+      : { blockExplorers: { default: { name: "Explorer", url: config.explorerUrl } } }),
+  });
 }

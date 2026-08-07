@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
-import { erc20Abi, formatUnits, type Address } from "viem";
+import { type Address, erc20Abi, formatUnits } from "viem";
 
 import { useMidnightWallet } from "../components/contexts";
 import { describeError } from "../lib/errorMessage";
 import { shortenAddress } from "../lib/shortenAddress";
-import { useEvmPublicClient, type EvmPublicClient } from "./useEvmPublicClient.ts";
+import { type EvmPublicClient, useEvmPublicClient } from "./useEvmPublicClient.ts";
 import type { TrackedToken } from "./useTrackedTokens";
 
 /**

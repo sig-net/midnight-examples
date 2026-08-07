@@ -8,17 +8,18 @@
 // example's: it wraps {@link E2eSession.wallet} to build its own context.
 
 import {
+  type AccountKeys,
   deriveAccountKeys,
   getMidnightNodeConfig,
   initialiseWalletFacade,
-  type AccountKeys,
   type WalletFacade,
 } from "@midnight-examples/lib";
-import {
-  SignetRequestResponseReader,
-  signetEventSourceFromPublicDataProvider,
-} from "@sig-net/midnight";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import {
+  signetEventSourceFromPublicDataProvider,
+  SignetRequestResponseReader,
+} from "@sig-net/midnight";
+
 import { requireEnv } from "./e2e-env.ts";
 
 /**
@@ -29,7 +30,7 @@ import { requireEnv } from "./e2e-env.ts";
  *
  * @param env - The environment to read `MIDNIGHT_USER1_WALLET_SEED` from.
  * @returns The seed (hex or mnemonic) the user-side flows spend from.
- * @throws If `MIDNIGHT_USER1_WALLET_SEED` is unset (the wallet steps did not run).
+ * @throws {Error} If `MIDNIGHT_USER1_WALLET_SEED` is unset (the wallet steps did not run).
  */
 export function resolveUserSeed(env: NodeJS.ProcessEnv): string {
   return requireEnv(env, "MIDNIGHT_USER1_WALLET_SEED");
@@ -130,7 +131,7 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
     },
 
     async stop(): Promise<void> {
-      await sharedWallet?.facade.stop().catch(() => {});
+      await sharedWallet?.facade.stop().catch(() => undefined);
     },
   };
 }

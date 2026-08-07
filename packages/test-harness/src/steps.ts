@@ -11,12 +11,14 @@
 // globalSetup via {@link file://./setup-pipeline.ts runSetupPipeline} in
 // vitest's main process, so no `vitest` imports here.
 
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+
 import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { deriveMidnightResponseKey, formatSecp256k1PublicKey } from "@sig-net/midnight";
 import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
 import { formatEther, formatUnits } from "ethers";
-import { readdirSync } from "node:fs";
-import { join } from "node:path";
+
 import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv, loadRepoDotEnv } from "./env-file.ts";
 import { getDeployedCode, getEvmChainId } from "./evm.ts";
@@ -35,7 +37,7 @@ const MINUTE = 60_000;
  * the wallet steps in wallets.ts, which run right after this.
  *
  * @param env - The suite's env accumulator.
- * @throws If a service is unreachable, compact is missing, or `EVM_RPC_URL` is unset.
+ * @throws {Error} If a service is unreachable, compact is missing, or `EVM_RPC_URL` is unset.
  */
 export async function assertEnvironment(env: NodeJS.ProcessEnv): Promise<void> {
   const nodeConfig = getMidnightNodeConfig(env);
@@ -53,7 +55,7 @@ export async function assertEnvironment(env: NodeJS.ProcessEnv): Promise<void> {
  * seal the chain id into their contracts at initialize).
  *
  * @param env - The suite's env accumulator.
- * @throws If the RPC is unreachable or a preset `EVM_CHAIN_ID` mismatches it.
+ * @throws {Error} If the RPC is unreachable or a preset `EVM_CHAIN_ID` mismatches it.
  */
 export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
   const rpcUrl = requireEnv(env, "EVM_RPC_URL");
@@ -72,14 +74,16 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
     if (BigInt(env.EVM_CHAIN_ID) !== chainId) {
       throw new Error(
         `EVM_CHAIN_ID must match the chain EVM_RPC_URL serves (it is sealed into the example's contract at` +
-          ` initialize): the RPC reports ${chainId}, found ${env.EVM_CHAIN_ID}`,
+          ` initialize): the RPC reports ${String(chainId)}, found ${env.EVM_CHAIN_ID}`,
       );
     }
     logSkip("resolve EVM chain id", `EVM_CHAIN_ID is set correctly`);
   } else {
     env.EVM_CHAIN_ID = chainId.toString();
     console.log(`resolved EVM_CHAIN_ID=${env.EVM_CHAIN_ID} from EVM_RPC_URL`);
-    console.log(` ➜ sealed into the example's contract at initialize as CAIP-2 eip155:${env.EVM_CHAIN_ID}`);
+    console.log(
+      ` ➜ sealed into the example's contract at initialize as CAIP-2 eip155:${env.EVM_CHAIN_ID}`,
+    );
     console.log(` ➜ 💡 Set as EVM_CHAIN_ID in the environment to pin it explicitly`);
   }
 }
@@ -94,7 +98,7 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
  * @param env - The suite's env accumulator.
  * @param deployErc20 - The example's compile-and-deploy of its own test
  *   token; returns the deployed address. Only invoked on the local dev chain.
- * @throws If the chain is not the local dev chain and `EVM_ERC20_CONTRACT_ADDRESS` is
+ * @throws {Error} If the chain is not the local dev chain and `EVM_ERC20_CONTRACT_ADDRESS` is
  *   unset or has no code.
  */
 export async function ensureErc20Deployed(
@@ -107,24 +111,33 @@ export async function ensureErc20Deployed(
   if (env.EVM_ERC20_CONTRACT_ADDRESS) {
     const code = await getDeployedCode(rpcUrl, env.EVM_ERC20_CONTRACT_ADDRESS);
     if (code !== "0x") {
-      logSkip("check/deploy ERC20 token", `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has code on chain ${chainId}`);
+      logSkip(
+        "check/deploy ERC20 token",
+        `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has code on chain ${String(chainId)}`,
+      );
       return;
     }
     if (!local) {
       throw new Error(
-        `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has no code on chain ${chainId} — wrong address, or wrong EVM_RPC_URL?`,
+        `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has no code on chain ${String(chainId)} — wrong address, or wrong EVM_RPC_URL?`,
       );
     }
-    console.log(`EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has no code — the local chain was wiped; redeploying`);
+    console.log(
+      `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has no code — the local chain was wiped; redeploying`,
+    );
   } else if (!local) {
     throw new Error(
-      `EVM_ERC20_CONTRACT_ADDRESS is not set and chain ${chainId} is not the local dev chain — set the token to use in the environment`,
+      `EVM_ERC20_CONTRACT_ADDRESS is not set and chain ${String(chainId)} is not the local dev chain — set the token to use in the environment`,
     );
   }
   env.EVM_ERC20_CONTRACT_ADDRESS = await deployErc20(env);
-  console.log(`deployed a fresh test ERC20 as EVM_ERC20_CONTRACT_ADDRESS=${env.EVM_ERC20_CONTRACT_ADDRESS}`);
+  console.log(
+    `deployed a fresh test ERC20 as EVM_ERC20_CONTRACT_ADDRESS=${env.EVM_ERC20_CONTRACT_ADDRESS}`,
+  );
   console.log(` ➜ the token the example's flows move; open mint funds the derived accounts`);
-  console.log(` ➜ 💡 Set as EVM_ERC20_CONTRACT_ADDRESS in the environment to pin it for the next run`);
+  console.log(
+    ` ➜ 💡 Set as EVM_ERC20_CONTRACT_ADDRESS in the environment to pin it for the next run`,
+  );
 }
 
 /**
@@ -134,13 +147,18 @@ export async function ensureErc20Deployed(
  */
 export function ensureMpcRootKey(env: NodeJS.ProcessEnv): void {
   if (env.MPC_ROOT_PRIVATE_KEY) {
-    logSkip("check/derive MPC root key", `MPC_ROOT_PRIVATE_KEY is set as ${env.MPC_ROOT_PRIVATE_KEY}`);
+    logSkip(
+      "check/derive MPC root key",
+      `MPC_ROOT_PRIVATE_KEY is set as ${env.MPC_ROOT_PRIVATE_KEY}`,
+    );
     return;
   }
   env.MPC_ROOT_PRIVATE_KEY = generateMpcRootKey();
   console.log(`generated a fresh MPC_ROOT_PRIVATE_KEY=${env.MPC_ROOT_PRIVATE_KEY}`);
   console.log(` ➜ seeds MPC key generation`);
-  console.log(` ➜ 💡 Set as MPC_ROOT_PRIVATE_KEY in the environment to skip this step on the next run`);
+  console.log(
+    ` ➜ 💡 Set as MPC_ROOT_PRIVATE_KEY in the environment to skip this step on the next run`,
+  );
   console.log("(printed again in the MPC server configuration step)");
 }
 
@@ -163,7 +181,7 @@ const mpcKeys = (env: NodeJS.ProcessEnv) => deriveMpcKeys(requireEnv(env, "MPC_R
  * @param env - The suite's env accumulator.
  * @param contractAddressEnvVar - The env-var name holding the client
  *   contract's deployed address (e.g. the example's vault contract).
- * @throws If a pre-set MPC_VAULT_RESPONSE_PUBLIC_KEY disagrees with the derivation.
+ * @throws {Error} If a pre-set MPC_VAULT_RESPONSE_PUBLIC_KEY disagrees with the derivation.
  */
 export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvVar: string): void {
   const expected = formatSecp256k1PublicKey(
@@ -173,20 +191,29 @@ export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvV
     ),
   );
   if (env.MPC_VAULT_RESPONSE_PUBLIC_KEY) {
-    console.log(`Found MPC_VAULT_RESPONSE_PUBLIC_KEY in the environment as ${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`);
+    console.log(
+      `Found MPC_VAULT_RESPONSE_PUBLIC_KEY in the environment as ${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`,
+    );
     if (env.MPC_VAULT_RESPONSE_PUBLIC_KEY !== expected) {
       throw new Error(
         `MPC_VAULT_RESPONSE_PUBLIC_KEY should be derived from MPC_ROOT_PRIVATE_KEY + ${contractAddressEnvVar}: ` +
           `expected ${expected}, found ${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`,
       );
     }
-    logSkip("check/derive MPC_VAULT_RESPONSE_PUBLIC_KEY", `MPC_VAULT_RESPONSE_PUBLIC_KEY is set correctly`);
+    logSkip(
+      "check/derive MPC_VAULT_RESPONSE_PUBLIC_KEY",
+      `MPC_VAULT_RESPONSE_PUBLIC_KEY is set correctly`,
+    );
     return;
   }
   env.MPC_VAULT_RESPONSE_PUBLIC_KEY = expected;
   console.log(`derived a fresh MPC_VAULT_RESPONSE_PUBLIC_KEY=${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`);
-  console.log(` ➜ the MPC's respond-bidirectional key for the client contract; the initialize flow pins it on-chain`);
-  console.log(` ➜ 💡 Set as MPC_VAULT_RESPONSE_PUBLIC_KEY in the environment to skip this step on the next run`);
+  console.log(
+    ` ➜ the MPC's respond-bidirectional key for the client contract; the initialize flow pins it on-chain`,
+  );
+  console.log(
+    ` ➜ 💡 Set as MPC_VAULT_RESPONSE_PUBLIC_KEY in the environment to skip this step on the next run`,
+  );
 }
 
 /**
@@ -194,7 +221,7 @@ export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvV
  * deriving it when absent.
  *
  * @param env - The suite's env accumulator.
- * @throws If a preset `MPC_ROOT_PUBLIC_KEY` mismatches the derived key.
+ * @throws {Error} If a preset `MPC_ROOT_PUBLIC_KEY` mismatches the derived key.
  */
 export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
   const expectedSECP256k1CompressedPubkey = mpcKeys(env).secp256k1CompressedPubkey;
@@ -211,7 +238,9 @@ export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
   env.MPC_ROOT_PUBLIC_KEY = expectedSECP256k1CompressedPubkey;
   console.log(`generated a fresh MPC_ROOT_PUBLIC_KEY=${env.MPC_ROOT_PUBLIC_KEY}`);
   console.log(` ➜ used by contracts to validate signatures`);
-  console.log(` ➜ 💡 Set as MPC_ROOT_PUBLIC_KEY in the environment to skip this step on the next run`);
+  console.log(
+    ` ➜ 💡 Set as MPC_ROOT_PUBLIC_KEY in the environment to skip this step on the next run`,
+  );
 }
 
 /**
@@ -255,11 +284,15 @@ export interface CompileContractZkOptions {
  *
  * @param env - The suite's env accumulator.
  * @param options - Which contract to compile and how to decide to skip.
- * @throws If the compile script fails or times out.
+ * @throws {Error} If the compile script fails or times out.
  */
-export async function compileContractZk(env: NodeJS.ProcessEnv, options: CompileContractZkOptions): Promise<void> {
-  if (env[options.addressEnvVar]) {
-    logSkip(options.rootScript, `${options.addressEnvVar} is set (${env[options.addressEnvVar]})`);
+export async function compileContractZk(
+  env: NodeJS.ProcessEnv,
+  options: CompileContractZkOptions,
+): Promise<void> {
+  const presetAddress = env[options.addressEnvVar];
+  if (presetAddress) {
+    logSkip(options.rootScript, `${options.addressEnvVar} is set (${presetAddress})`);
     return;
   }
   if (trustsPrebuiltZkKeys(env, options.keysDir)) {
@@ -285,10 +318,13 @@ export async function compileContractZk(env: NodeJS.ProcessEnv, options: Compile
  * @param what - Step label for the retry log lines.
  * @param action - The fee-paying call to (re)attempt.
  * @returns Whatever `action` resolves to.
- * @throws The last error when attempts are exhausted, or immediately for
+ * @throws {Error} The last error when attempts are exhausted, or immediately for
  *   any error that is not the transient insufficient-dust failure.
  */
-export async function retryWhileDustGenerates<T>(what: string, action: () => Promise<T>): Promise<T> {
+export async function retryWhileDustGenerates<T>(
+  what: string,
+  action: () => Promise<T>,
+): Promise<T> {
   const RETRY_DELAY_MS = 15_000;
   const MAX_ATTEMPTS = 24; // ~6 minutes: a young dev chain generates plenty by then
   for (let attempt = 1; ; attempt++) {
@@ -296,13 +332,14 @@ export async function retryWhileDustGenerates<T>(what: string, action: () => Pro
       return await action();
     } catch (error) {
       const message = String(error);
-      const transient = message.includes("InsufficientFunds") || message.includes("could not balance dust");
+      const transient =
+        message.includes("InsufficientFunds") || message.includes("could not balance dust");
       if (!transient || attempt >= MAX_ATTEMPTS) {
         throw error;
       }
       console.log(
         `${what}: the paying wallet cannot cover the fee yet (dust still generating on a young chain?),` +
-          ` retrying in ${RETRY_DELAY_MS / 1000}s (attempt ${attempt}/${MAX_ATTEMPTS})`,
+          ` retrying in ${String(RETRY_DELAY_MS / 1000)}s (attempt ${String(attempt)}/${String(MAX_ATTEMPTS)})`,
       );
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
     }
@@ -317,11 +354,14 @@ export async function retryWhileDustGenerates<T>(what: string, action: () => Pro
  * (requesters seal the signet address at deploy time).
  *
  * @param env - The suite's env accumulator.
- * @throws If the deploy fails (after the dust-generation retries).
+ * @throws {Error} If the deploy fails (after the dust-generation retries).
  */
 export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS) {
-    logSkip("deploy signet contract", `MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set (${env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS})`);
+    logSkip(
+      "deploy signet contract",
+      `MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set (${env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS})`,
+    );
     return;
   }
   const { contractAddress } = await retryWhileDustGenerates("deploy signet contract", () =>
@@ -329,8 +369,12 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
   );
   env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${contractAddress}`);
-  console.log(` ➜ the Signet singleton on Midnight: append-only logs of signature requests and MPC responses`);
-  console.log(` ➜ 💡 Set as MIDNIGHT_SIGNET_CONTRACT_ADDRESS in the environment to skip the deploy on the next run`);
+  console.log(
+    ` ➜ the Signet singleton on Midnight: append-only logs of signature requests and MPC responses`,
+  );
+  console.log(
+    ` ➜ 💡 Set as MIDNIGHT_SIGNET_CONTRACT_ADDRESS in the environment to skip the deploy on the next run`,
+  );
 }
 
 // The fakenet responder hand-off, automated. docker compose interpolates the
@@ -354,8 +398,8 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
  * @param keys - The env-var names to persist.
  * @param provenance - The comment line written above the appended block.
  * @returns The keys actually appended (empty when the file already agrees).
- * @throws If a key in `.env` conflicts with the run's value, or a key is
- *   absent from `env`.
+ * @throws {Error} If a key in `.env` conflicts with the run's value, or a
+ *   key is absent from `env`.
  */
 export function persistEnvKeysToDotEnv(
   env: NodeJS.ProcessEnv,
@@ -411,11 +455,14 @@ let fakenetHandoffAppended = false;
  * value while this run uses another.
  *
  * @param env - The suite's env accumulator (holds the run's values).
- * @throws If a hand-off key in `.env` conflicts with the run's value.
+ * @throws {Error} If a hand-off key in `.env` conflicts with the run's value.
  */
 export function persistFakenetHandoffToDotEnv(env: NodeJS.ProcessEnv): void {
   if (env.FAKENET_MANAGED === "0") {
-    logSkip("persist fakenet hand-off to .env", "FAKENET_MANAGED=0 — you manage the responder and its config yourself");
+    logSkip(
+      "persist fakenet hand-off to .env",
+      "FAKENET_MANAGED=0 — you manage the responder and its config yourself",
+    );
     return;
   }
   const appended = persistEnvKeysToDotEnv(
@@ -424,7 +471,10 @@ export function persistFakenetHandoffToDotEnv(env: NodeJS.ProcessEnv): void {
     `appended by the test-harness setup (${new Date().toISOString()}) — fakenet responder hand-off`,
   );
   if (appended.length === 0) {
-    logSkip("persist fakenet hand-off to .env", `${FAKENET_HANDOFF_KEYS.join(" and ")} are already in .env`);
+    logSkip(
+      "persist fakenet hand-off to .env",
+      `${FAKENET_HANDOFF_KEYS.join(" and ")} are already in .env`,
+    );
     return;
   }
   fakenetHandoffAppended = true;
@@ -443,7 +493,7 @@ export function persistFakenetHandoffToDotEnv(env: NodeJS.ProcessEnv): void {
  * @param env - The suite's env accumulator (passed to docker compose, whose
  *   interpolation lets process env win over `.env` — same values by the time
  *   this runs, so the two sources agree).
- * @throws If docker compose fails or the container is not `running` after `up`.
+ * @throws {Error} If docker compose fails or the container is not `running` after `up`.
  */
 export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.FAKENET_MANAGED === "0") {
@@ -460,12 +510,29 @@ export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<voi
       ? "hand-off values newly landed in .env — recreating the responder so it re-reads .env and resets its private state"
       : "hand-off values were already in .env — plain up: a running responder is left untouched",
   );
-  const args = ["compose", "--profile", "fakenet", "up", "-d", ...(fakenetHandoffAppended ? ["--force-recreate"] : []), "fakenet"];
+  const args = [
+    "compose",
+    "--profile",
+    "fakenet",
+    "up",
+    "-d",
+    ...(fakenetHandoffAppended ? ["--force-recreate"] : []),
+    "fakenet",
+  ];
   console.log(`$ docker ${args.join(" ")}   (cwd: repo root)`);
   await runCommand("docker", args, env, 10 * MINUTE);
-  const status = (await runCommand("docker", ["inspect", "-f", "{{.State.Status}}", "fakenet-responder"], env, MINUTE)).trim();
+  const status = (
+    await runCommand(
+      "docker",
+      ["inspect", "-f", "{{.State.Status}}", "fakenet-responder"],
+      env,
+      MINUTE,
+    )
+  ).trim();
   if (status !== "running") {
-    throw new Error(`fakenet-responder container is "${status}", expected "running" — check \`docker logs fakenet-responder\``);
+    throw new Error(
+      `fakenet-responder container is "${status}", expected "running" — check \`docker logs fakenet-responder\``,
+    );
   }
   console.log("fakenet-responder container is running");
   console.log(" ➜ watch it: `docker logs -f fakenet-responder` — healthy startup prints");
@@ -490,7 +557,7 @@ export async function fundLocalEvmAccounts(
   if (!isLocalEvmChain(chainId)) {
     logSkip(
       "fund derived EVM accounts",
-      `chain ${chainId} is not the local dev chain — fund the derived accounts manually (see the printed hints)`,
+      `chain ${String(chainId)} is not the local dev chain — fund the derived accounts manually (see the printed hints)`,
     );
     return;
   }
@@ -513,8 +580,12 @@ export async function fundLocalEvmAccounts(
  * @param pipelineKeys - The example's pipeline env-var names, in derivation
  *   order — printed as the ready-to-paste `.env` block.
  */
-export function printMpcServerConfig(env: NodeJS.ProcessEnv, pipelineKeys: readonly string[]): void {
-  const rootKey = env.MPC_ROOT_PRIVATE_KEY ?? "(not derived here — already held by the server operator)";
+export function printMpcServerConfig(
+  env: NodeJS.ProcessEnv,
+  pipelineKeys: readonly string[],
+): void {
+  const rootKey =
+    env.MPC_ROOT_PRIVATE_KEY ?? "(not derived here — already held by the server operator)";
   const managed = env.FAKENET_MANAGED !== "0";
   banner([
     "MPC (fakenet) responder configuration:",

@@ -27,16 +27,13 @@ const WALLET_CASES: readonly WalletCase[] = [
 ];
 
 describe("wallet controls", () => {
-  it.each(WALLET_CASES)(
-    "shows the $chainName wallet as not connected",
-    ({ chainName }) => {
-      render(<App />);
+  it.each(WALLET_CASES)("shows the $chainName wallet as not connected", ({ chainName }) => {
+    render(<App />);
 
-      expect(
-        screen.getByRole("button", { name: `${chainName} wallet: not connected` }),
-      ).toBeInTheDocument();
-    },
-  );
+    expect(
+      screen.getByRole("button", { name: `${chainName} wallet: not connected` }),
+    ).toBeInTheDocument();
+  });
 
   it.each(WALLET_CASES)(
     "offers no $chainName wallet to connect when no extension is installed",
@@ -265,7 +262,9 @@ describe("the configuration panel", () => {
     await user.type(rpcUrl, "http://127.0.0.1:9999{Enter}");
     await user.keyboard("{Escape}");
 
-    expect(await screen.findByRole("button", { name: "EVM wallet: connected" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "EVM wallet: connected" }),
+    ).toBeInTheDocument();
   });
 });
 

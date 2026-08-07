@@ -55,17 +55,20 @@ describe("chain-config stays isomorphic", () => {
     expect(sourceFileNames.filter((name) => name.includes("/")).length).toBeGreaterThan(0);
   });
 
-  it.each(FORBIDDEN_GLOBALS)("no source file uses $description, which breaks $breaks", ({ pattern }) => {
-    const offenders = sourceFileNames.filter((name) => pattern.test(sourceWithoutComments(name)));
-    expect(offenders).toEqual([]);
-  });
+  it.each(FORBIDDEN_GLOBALS)(
+    "no source file uses $description, which breaks $breaks",
+    ({ pattern }) => {
+      const offenders = sourceFileNames.filter((name) => pattern.test(sourceWithoutComments(name)));
+      expect(offenders).toEqual([]);
+    },
+  );
 
   // A runtime dependency is the likeliest way the guarantee dies, and unlike a
   // stray global it would not show up in the scan above.
   it("declares no runtime dependency", () => {
-    const manifest: { dependencies?: Record<string, string> } = JSON.parse(
-      readFileSync(new URL("../package.json", SRC_DIR), "utf8"),
-    );
+    const manifest = JSON.parse(readFileSync(new URL("../package.json", SRC_DIR), "utf8")) as {
+      dependencies?: Record<string, string>;
+    };
     expect(manifest.dependencies ?? {}).toEqual({});
   });
 });

@@ -18,5 +18,5 @@
 // One directory per chain. The exports stay flat, so a name that would be
 // ambiguous across chains says which chain it belongs to (see evm/index.ts for
 // why the Midnight names are the exception).
-export * from "./midnight/index.ts";
 export * from "./evm/index.ts";
+export * from "./midnight/index.ts";

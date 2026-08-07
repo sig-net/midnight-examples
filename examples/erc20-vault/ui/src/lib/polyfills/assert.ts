@@ -14,8 +14,8 @@
  *
  * @param value - The condition that must hold.
  * @param message - What to raise when it does not.
- * @throws If `value` is falsy: `message` itself when it is an Error, or an
- *   Error carrying it (or a generic text) otherwise.
+ * @throws {Error} If `value` is falsy: `message` itself when it is an
+ *   Error, or an Error carrying it (or a generic text) otherwise.
  */
 export default function assert(value: unknown, message?: string | Error): asserts value {
   if (!value) {

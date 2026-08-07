@@ -8,6 +8,7 @@
 //   orders by results cache (failed/slowest first), not by name.
 // - bail + --disable-console-intercept stay on the test:e2e script.
 import { basename } from "node:path";
+
 import { defineConfig } from "vitest/config";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 
@@ -31,9 +32,11 @@ const rank = (moduleId: string): number => {
 };
 
 class PipelineSequencer extends BaseSequencer {
-  override async sort(files: TestSpecification[]): Promise<TestSpecification[]> {
-    return [...files].sort(
-      (a, b) => rank(a.moduleId) - rank(b.moduleId) || a.moduleId.localeCompare(b.moduleId),
+  override sort(files: TestSpecification[]): Promise<TestSpecification[]> {
+    return Promise.resolve(
+      [...files].sort(
+        (a, b) => rank(a.moduleId) - rank(b.moduleId) || a.moduleId.localeCompare(b.moduleId),
+      ),
     );
   }
 }

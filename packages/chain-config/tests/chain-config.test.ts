@@ -3,10 +3,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  evmCaip2ChainId,
-  evmChainById,
   DEFAULT_ENDPOINTS,
   EVM_CHAINS,
+  evmCaip2ChainId,
+  evmChainById,
   FAUCET_URLS,
   indexerWsUrlFromIndexerUrl,
   isLocalStandaloneNetwork,
@@ -32,9 +32,12 @@ describe("network ids", () => {
     { networkId: "preprod", expected: false },
     { networkId: "mainnet", expected: false },
   ];
-  it.each(STANDALONE_CASES)("isLocalStandaloneNetwork($networkId) === $expected", ({ networkId, expected }) => {
-    expect(isLocalStandaloneNetwork(networkId)).toBe(expected);
-  });
+  it.each(STANDALONE_CASES)(
+    "isLocalStandaloneNetwork($networkId) === $expected",
+    ({ networkId, expected }) => {
+      expect(isLocalStandaloneNetwork(networkId)).toBe(expected);
+    },
+  );
 });
 
 describe("default endpoints", () => {
@@ -64,10 +67,19 @@ describe("indexerWsUrlFromIndexerUrl", () => {
     expected: string;
   }
   const WS_CASES: WsCase[] = [
-    { indexerUrl: "https://indexer.example/api/v4/graphql", expected: "wss://indexer.example/api/v4/graphql/ws" },
-    { indexerUrl: "http://127.0.0.1:8088/api/v3/graphql", expected: "ws://127.0.0.1:8088/api/v3/graphql/ws" },
+    {
+      indexerUrl: "https://indexer.example/api/v4/graphql",
+      expected: "wss://indexer.example/api/v4/graphql/ws",
+    },
+    {
+      indexerUrl: "http://127.0.0.1:8088/api/v3/graphql",
+      expected: "ws://127.0.0.1:8088/api/v3/graphql/ws",
+    },
     // A trailing slash must not produce a doubled separator.
-    { indexerUrl: "https://indexer.example/graphql/", expected: "wss://indexer.example/graphql/ws" },
+    {
+      indexerUrl: "https://indexer.example/graphql/",
+      expected: "wss://indexer.example/graphql/ws",
+    },
   ];
   it.each(WS_CASES)("$indexerUrl -> $expected", ({ indexerUrl, expected }) => {
     expect(indexerWsUrlFromIndexerUrl(indexerUrl)).toBe(expected);
@@ -130,7 +142,10 @@ describe("named EVM chains", () => {
     { chainId: 11155111n, expectedName: "Sepolia" },
     { chainId: 424242n, expectedName: undefined },
   ];
-  it.each(CHAIN_BY_ID_CASES)("evmChainById($chainId) -> $expectedName", ({ chainId, expectedName }) => {
-    expect(evmChainById(chainId)?.name).toBe(expectedName);
-  });
+  it.each(CHAIN_BY_ID_CASES)(
+    "evmChainById($chainId) -> $expectedName",
+    ({ chainId, expectedName }) => {
+      expect(evmChainById(chainId)?.name).toBe(expectedName);
+    },
+  );
 });

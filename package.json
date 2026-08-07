@@ -19,7 +19,11 @@
     "test:erc20-vault:e2e": "yarn workspace @midnight-examples/erc20-vault-integration-tests test:e2e",
     "build:erc20-vault": "yarn workspace @midnight-examples/erc20-vault-contract build && yarn workspace @midnight-examples/erc20-vault-integration-tests build && yarn workspace @midnight-examples/erc20-vault-ui build",
     "build": "yarn workspaces foreach --all --exclude midnight-examples --topological run build",
-    "test": "yarn workspaces foreach --all --exclude midnight-examples --topological run test"
+    "test": "yarn workspaces foreach --all --exclude midnight-examples --topological run test",
+    "lint": "eslint . --max-warnings=0 --concurrency=auto",
+    "lint:fix": "eslint . --fix --concurrency=auto",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "resolutions": {
     "@midnight-ntwrk/compact-js": "2.5.5-rc.7",
@@ -30,5 +34,17 @@
     "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3",
     "@midnightntwrk/wallet-sdk-address-format": "4.0.0-beta.2"
   },
-  "packageManager": "yarn@4.17.1+sha512.ccbfabf7d7b6b32075088be9386fb9a2e00bb6887ef07fa56effabc890a56d53da1ccc4128d62db245fcbd3961b236d75335bdf7d5320ed6eafb7588b7ad4697"
+  "packageManager": "yarn@4.17.1+sha512.ccbfabf7d7b6b32075088be9386fb9a2e00bb6887ef07fa56effabc890a56d53da1ccc4128d62db245fcbd3961b236d75335bdf7d5320ed6eafb7588b7ad4697",
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@vitest/eslint-plugin": "1.6.26",
+    "eslint": "10.8.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-import-x": "4.17.1",
+    "eslint-plugin-jsdoc": "63.3.3",
+    "eslint-plugin-simple-import-sort": "14.0.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.66.0"
+  }
 }

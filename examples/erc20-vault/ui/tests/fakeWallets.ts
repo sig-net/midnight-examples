@@ -102,9 +102,10 @@ export function injectMidnightWallet({
               signDataCalls += 1;
               return Promise.resolve({
                 data,
-                signature: (
-                  signDataSignature ?? ((signed: string) => `signed:${name}:${signed}`)
-                )(data, callIndex),
+                signature: (signDataSignature ?? ((signed: string) => `signed:${name}:${signed}`))(
+                  data,
+                  callIndex,
+                ),
                 verifyingKey: `verifying-key:${name}`,
               });
             },
@@ -170,8 +171,12 @@ export function announceEvmWallet({
           return Promise.resolve(null);
       }
     },
-    on: () => {},
-    removeListener: () => {},
+    on: () => {
+      // The fake never emits session events; the app only needs the calls to exist.
+    },
+    removeListener: () => {
+      // See `on`.
+    },
   };
 
   const detail = Object.freeze({

@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { erc20Abi, getAddress, isAddress, type Address } from "viem";
+import { type Address, erc20Abi, getAddress, isAddress } from "viem";
 
-import { useEvmPublicClient, type EvmPublicClient } from "./useEvmPublicClient.ts";
+import { type EvmPublicClient, useEvmPublicClient } from "./useEvmPublicClient.ts";
 
 /**
  * One ERC20 the user asked the app to follow, with whatever the token says
@@ -114,8 +114,7 @@ export function useTrackedTokens(): TrackedTokens {
   const metadataQuery = useQuery<readonly TrackedToken[]>({
     queryKey: ["erc20-metadata", client.chain.id, addresses],
     enabled: addresses.length > 0,
-    queryFn: async () =>
-      Promise.all(addresses.map((address) => readTrackedToken(client, address))),
+    queryFn: async () => Promise.all(addresses.map((address) => readTrackedToken(client, address))),
   });
 
   const tokens = useMemo<readonly TrackedToken[]>(() => {

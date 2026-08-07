@@ -15,10 +15,10 @@ import type { Account, Address, Chain, Transport, WalletClient } from "viem";
  * interface exists to hide.
  */
 export enum WalletKind {
-    /** A connected browser-extension wallet (EIP-6963 announced). */
-    Browser = "browser",
-    /** Derived from a seed and run in-app (a viem local account). */
-    Seed = "seed",
+  /** A connected browser-extension wallet (EIP-6963 announced). */
+  Browser = "browser",
+  /** Derived from a seed and run in-app (a viem local account). */
+  Seed = "seed",
 }
 
 /**
@@ -31,10 +31,13 @@ export enum WalletKind {
  * never by `instanceof`.
  */
 export class WalletError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = new.target.name;
-    }
+  /**
+   * @param message - The human-readable failure, fit to surface in a toast.
+   */
+  constructor(message: string) {
+    super(message);
+    this.name = new.target.name;
+  }
 }
 
 /**
@@ -51,30 +54,30 @@ export type EvmWalletClient = WalletClient<Transport, Chain, Account>;
  * reads balances for, and the viem client that signs and sends for it.
  */
 export interface Wallet {
-    /** Which kind of wallet this wraps. */
-    readonly kind: WalletKind;
-    /**
-     * Stable identifier of the wallet: scopes browser storage and query keys.
-     * A browser wallet's EIP-6963 rdns, a seed wallet's derived address:
-     * stable across reconnects of the same wallet, different between wallets.
-     */
-    readonly id: string;
-    /** User-facing label. Render as a text node: a browser wallet's is the extension's own string. */
-    readonly name: string;
-    /** The wallet's own icon as a URL or data URL, when it published one. */
-    readonly iconUrl: string | undefined;
-    /** The wallet's account address, checksummed. */
-    readonly account: Address;
-    /**
-     * A viem wallet client bound to {@link Wallet.account} and the app's
-     * chain. A browser wallet routes requests through the extension, so
-     * signing raises its prompt; a seed wallet signs in-app and submits over
-     * the app's RPC URL without prompting.
-     */
-    readonly client: EvmWalletClient;
-    /**
-     * Forget the wallet's connection and keys. The wallet is unusable
-     * afterwards; obtain a fresh one to reconnect.
-     */
-    disconnect(): Promise<void>;
+  /** Which kind of wallet this wraps. */
+  readonly kind: WalletKind;
+  /**
+   * Stable identifier of the wallet: scopes browser storage and query keys.
+   * A browser wallet's EIP-6963 rdns, a seed wallet's derived address:
+   * stable across reconnects of the same wallet, different between wallets.
+   */
+  readonly id: string;
+  /** User-facing label. Render as a text node: a browser wallet's is the extension's own string. */
+  readonly name: string;
+  /** The wallet's own icon as a URL or data URL, when it published one. */
+  readonly iconUrl: string | undefined;
+  /** The wallet's account address, checksummed. */
+  readonly account: Address;
+  /**
+   * A viem wallet client bound to {@link Wallet.account} and the app's
+   * chain. A browser wallet routes requests through the extension, so
+   * signing raises its prompt; a seed wallet signs in-app and submits over
+   * the app's RPC URL without prompting.
+   */
+  readonly client: EvmWalletClient;
+  /**
+   * Forget the wallet's connection and keys. The wallet is unusable
+   * afterwards; obtain a fresh one to reconnect.
+   */
+  disconnect(): Promise<void>;
 }

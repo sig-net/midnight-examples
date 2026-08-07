@@ -1,19 +1,10 @@
-import {
-  CheckCircle2Icon,
-  CircleDashedIcon,
-  CopyIcon,
-  LoaderCircleIcon,
-} from "lucide-react";
+import { CheckCircle2Icon, CircleDashedIcon, CopyIcon, LoaderCircleIcon } from "lucide-react";
 import { useState, type JSX } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
-import {
-  CallerIdentityStatus,
-  IDENTITY_SIGNING_MESSAGE,
-  type CallerIdentity,
-} from "./contexts";
+import { CallerIdentityStatus, IDENTITY_SIGNING_MESSAGE, type CallerIdentity } from "./contexts";
 import type { DepositAddress } from "../hooks/useDepositAddress";
 import { shortenAddress } from "../lib/shortenAddress";
 
@@ -153,8 +144,8 @@ const DepositAddressRows = ({
   <>
     {identity.depositEvmAddress === null ? (
       <p className="text-destructive">
-        The secret key is in hand, but VITE_MPC_ROOT_PUBLIC_KEY is not set, so the deposit
-        address cannot be derived. Set it to the MPC network's root public key and reload.
+        The secret key is in hand, but VITE_MPC_ROOT_PUBLIC_KEY is not set, so the deposit address
+        cannot be derived. Set it to the MPC network's root public key and reload.
       </p>
     ) : (
       <div className="flex flex-col gap-1">
@@ -230,9 +221,9 @@ export const DepositAddressView = ({
 }: DepositAddressViewProps): JSX.Element => (
   <div className="flex flex-col gap-3 text-sm">
     <p className="text-muted-foreground">
-      Each deposit is an ERC20 transfer signed by the MPC network from your own derived EVM
-      account: its address comes from the MPC root key, the vault contract's address, and
-      your identity commitment.
+      Each deposit is an ERC20 transfer signed by the MPC network from your own derived EVM account:
+      its address comes from the MPC root key, the vault contract's address, and your identity
+      commitment.
     </p>
 
     {status === CallerIdentityStatus.NoWallet && (

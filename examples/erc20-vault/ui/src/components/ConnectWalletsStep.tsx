@@ -46,10 +46,7 @@ const ConnectWalletRow = ({ connection }: ConnectWalletRowProps): JSX.Element =>
 
   const tick =
     connected === null ? (
-      <CircleIcon
-        className="ml-auto size-4 shrink-0 text-muted-foreground/40"
-        aria-hidden="true"
-      />
+      <CircleIcon className="ml-auto size-4 shrink-0 text-muted-foreground/40" aria-hidden="true" />
     ) : (
       <CheckCircle2Icon className="ml-auto size-4 shrink-0 text-emerald-500" aria-hidden="true" />
     );

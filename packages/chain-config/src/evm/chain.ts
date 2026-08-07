@@ -93,5 +93,5 @@ export function evmChainById(chainId: bigint): NamedEvmChain | undefined {
  * @returns The CAIP-2 id, as `eip155:<chainId>`.
  */
 export function evmCaip2ChainId(chainId: bigint): string {
-  return `eip155:${chainId}`;
+  return `eip155:${String(chainId)}`;
 }

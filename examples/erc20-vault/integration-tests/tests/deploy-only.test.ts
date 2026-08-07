@@ -7,9 +7,13 @@
 // Reruns are cheap: every pipeline step skips when its value is already in
 // the repo-root .env, and an already-initialized vault skips the initialize.
 
-import { afterAll, describe, expect, it } from "vitest";
-import { loadRepoDotEnv, logSkip, requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
+import {
+  loadRepoDotEnv,
+  logSkip,
+  requireEnv as requireEnvOf,
+} from "@midnight-examples/test-harness";
 import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { initialize } from "../src/flows/initialize.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
@@ -53,7 +57,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deploy-only", (
       "EVM_ERC20_CONTRACT_ADDRESS",
       "EVM_USER1_WALLET_ADDRESS",
     ]) {
-      expect(env[key], key).toBeTruthy();
+      expect(env[key], `the setup pipeline did not populate ${key}`).toBeTruthy();
     }
   });
 
@@ -77,7 +81,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault deploy-only", (
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
 
       if ((await readLedger()).initialized) {
-        logSkip("initialize", "vault is already initialized (rerun against a kept contract address)");
+        logSkip(
+          "initialize",
+          "vault is already initialized (rerun against a kept contract address)",
+        );
       } else {
         await initialize(await deployerSession.vaultContext(), {
           vaultEvmAddress: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),

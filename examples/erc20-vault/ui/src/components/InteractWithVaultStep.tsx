@@ -34,10 +34,14 @@ interface TrackedTokenRowProps {
 const TrackedTokenRow = ({ token, onUntrack }: TrackedTokenRowProps): JSX.Element => (
   <li className="flex items-center gap-3">
     <code className="shrink-0 font-mono text-xs">{shortenAddress(token.address)}</code>
-    <span className={`min-w-0 flex-1 truncate ${token.name === null ? "text-muted-foreground" : ""}`}>
+    <span
+      className={`min-w-0 flex-1 truncate ${token.name === null ? "text-muted-foreground" : ""}`}
+    >
       {token.name ?? UNKNOWN_METADATA}
     </span>
-    <span className={`min-w-0 flex-1 truncate ${token.symbol === null ? "text-muted-foreground" : ""}`}>
+    <span
+      className={`min-w-0 flex-1 truncate ${token.symbol === null ? "text-muted-foreground" : ""}`}
+    >
       {token.symbol ?? UNKNOWN_METADATA}
     </span>
     <Button
@@ -170,7 +174,10 @@ const BalancesPanel = ({
   unavailable,
   balances,
 }: BalancesPanelProps): JSX.Element => (
-  <section aria-label={`${title} balances`} className="flex flex-col gap-2 border-t border-border pt-3">
+  <section
+    aria-label={`${title} balances`}
+    className="flex flex-col gap-2 border-t border-border pt-3"
+  >
     <div className="flex items-center gap-2">
       <h2 className="min-w-0 truncate font-medium">{title}</h2>
       {address === null ? null : (
@@ -288,9 +295,7 @@ export const InteractWithVaultView = (): JSX.Element => {
       <BalancesPanel
         title="Midnight wallet"
         address={null}
-        unavailable={
-          wallet === null ? "Connect the Midnight wallet to read its balances." : null
-        }
+        unavailable={wallet === null ? "Connect the Midnight wallet to read its balances." : null}
         balances={midnightBalances}
       />
     </div>

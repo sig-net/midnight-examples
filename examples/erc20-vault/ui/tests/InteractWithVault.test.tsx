@@ -62,10 +62,10 @@ describe("the vault interaction step", () => {
     expect(
       within(view).getByText("Connect the EVM wallet to read its balances."),
     ).toBeInTheDocument();
+    expect(within(view).getByText(/Derive your deposit address first/)).toBeInTheDocument();
     expect(
-      within(view).getByText(/Derive your deposit address first/),
+      within(view).getByText("Connect the Midnight wallet to read the vault."),
     ).toBeInTheDocument();
-    expect(within(view).getByText("Connect the Midnight wallet to read the vault.")).toBeInTheDocument();
     expect(
       within(view).getByText("Connect the Midnight wallet to read its balances."),
     ).toBeInTheDocument();
@@ -122,9 +122,9 @@ describe("the vault interaction step", () => {
     expect(within(tracked).getByText(/No assets tracked yet/)).toBeInTheDocument();
     expect(await screen.findByText("Not an ERC20 address")).toBeInTheDocument();
     // The rejected text stays put, so it can be corrected rather than retyped.
-    expect(within(tracked).getByRole("textbox", { name: "Enter ERC20 tokens to track" })).toHaveValue(
-      "not-an-address",
-    );
+    expect(
+      within(tracked).getByRole("textbox", { name: "Enter ERC20 tokens to track" }),
+    ).toHaveValue("not-an-address");
   });
 
   it("reads the Midnight wallet's balances once it is connected", async () => {
@@ -132,9 +132,7 @@ describe("the vault interaction step", () => {
     injectMidnightWallet({ name: "Test Lace" });
     render(<App />);
 
-    await user.click(
-      await screen.findByRole("button", { name: /Connect Test Lace/ }),
-    );
+    await user.click(await screen.findByRole("button", { name: /Connect Test Lace/ }));
     const view = await openInteractView(user);
     const panel = within(view).getByRole("region", { name: "Midnight wallet balances" });
 

@@ -31,7 +31,9 @@ describe("getMidnightNodeConfig for stagenet", () => {
   });
 
   it("rejects an unknown MIDNIGHT_NETWORK_ID", () => {
-    expect(() => getMidnightNodeConfig({ MIDNIGHT_NETWORK_ID: "nosuchnet" })).toThrow(/Invalid MIDNIGHT_NETWORK_ID/);
+    expect(() => getMidnightNodeConfig({ MIDNIGHT_NETWORK_ID: "nosuchnet" })).toThrow(
+      /Invalid MIDNIGHT_NETWORK_ID/,
+    );
   });
 
   it("takes MIDNIGHT_FAUCET_URL as the faucet hint, publishing none itself", () => {

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { createPublicClient, http, type Chain, type HttpTransport, type PublicClient } from "viem";
+import { type Chain, createPublicClient, http, type HttpTransport, type PublicClient } from "viem";
 
 import { useEVMChainConfig } from "../components/contexts";
 import { toViemChain } from "../lib/evm/chain.ts";

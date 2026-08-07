@@ -12,7 +12,13 @@ const MNEMONIC_24_WORDS =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon " +
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
 
-const bytesOf = (hex: string) => Uint8Array.from(hex.match(/.{2}/g)!.map((byte) => parseInt(byte, 16)));
+const bytesOf = (hex: string): Uint8Array => {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index++) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+};
 
 interface Case {
   name: string;

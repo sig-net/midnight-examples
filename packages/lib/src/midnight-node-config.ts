@@ -7,15 +7,22 @@ import {
   DEFAULT_ENDPOINTS,
   FAUCET_URLS,
   indexerWsUrlFromIndexerUrl,
-  NETWORK_IDS,
+  isNetworkId,
   type MidnightNodeConfig,
-  type NetworkId,
+  NETWORK_IDS,
 } from "@midnight-examples/chain-config";
+
+import { envOrUndefined } from "./env.ts";
 
 /**
  * The faucet URL to show in underfunded-wallet hints: `MIDNIGHT_FAUCET_URL`
  * from the environment when set, else the network's {@link FAUCET_URLS}
  * entry. Purely informational — a missing URL only makes the hint generic.
+ *
+ * Takes a bare `string` rather than a {@link NetworkId} because callers reach
+ * it holding a network id from the deploy SDK, which types its own as a plain
+ * string. An unrecognised name simply has no {@link FAUCET_URLS} entry, which
+ * is the same generic-hint outcome as a network that publishes no faucet.
  *
  * @param env - The environment to read `MIDNIGHT_FAUCET_URL` from.
  * @param networkId - The network whose faucet the hint points at.
@@ -23,9 +30,10 @@ import {
  */
 export function getFaucetUrl(
   env: Record<string, string | undefined>,
-  networkId: NetworkId,
+  networkId: string,
 ): string | undefined {
-  return env.MIDNIGHT_FAUCET_URL?.trim() || FAUCET_URLS[networkId];
+  const known = isNetworkId(networkId) ? FAUCET_URLS[networkId] : undefined;
+  return envOrUndefined(env, "MIDNIGHT_FAUCET_URL") ?? known;
 }
 
 /**
@@ -46,31 +54,34 @@ export function getFaucetUrl(
  *
  * @param env - The environment to read from; defaults to `process.env`.
  * @returns The resolved node configuration.
- * @throws If `MIDNIGHT_NETWORK_ID` is set to an unknown network id, or an
- *   endpoint resolves empty (blank default and no environment override).
+ * @throws {Error} If `MIDNIGHT_NETWORK_ID` is set to an unknown network id, or
+ *   an endpoint resolves empty (blank default and no environment override).
  */
 export function getMidnightNodeConfig(
   env: Record<string, string | undefined> = process.env,
 ): MidnightNodeConfig {
-  const networkId: NetworkId = env.MIDNIGHT_NETWORK_ID?.trim() || "undeployed";
-  if (!NETWORK_IDS.includes(networkId)) {
+  const networkId = envOrUndefined(env, "MIDNIGHT_NETWORK_ID") ?? "undeployed";
+  if (!isNetworkId(networkId)) {
     throw new Error(
       `Invalid MIDNIGHT_NETWORK_ID "${networkId}" — expected one of: ${NETWORK_IDS.join(", ")}.`,
     );
   }
 
   const defaults = DEFAULT_ENDPOINTS[networkId];
-  const indexerUrl = env.MIDNIGHT_INDEXER_URL || defaults.indexerUrl;
+  const indexerUrlOverride = envOrUndefined(env, "MIDNIGHT_INDEXER_URL");
+  const indexerUrl = indexerUrlOverride ?? defaults.indexerUrl;
   const indexerWsUrl =
-    env.MIDNIGHT_INDEXER_WS_URL ||
-    (env.MIDNIGHT_INDEXER_URL ? indexerWsUrlFromIndexerUrl(indexerUrl) : defaults.indexerWsUrl);
+    envOrUndefined(env, "MIDNIGHT_INDEXER_WS_URL") ??
+    (indexerUrlOverride === undefined
+      ? defaults.indexerWsUrl
+      : indexerWsUrlFromIndexerUrl(indexerUrl));
 
   const config: MidnightNodeConfig = {
     networkId,
     indexerUrl,
     indexerWsUrl,
-    nodeUrl: env.MIDNIGHT_NODE_URL || defaults.nodeUrl,
-    proofServerUrl: env.MIDNIGHT_PROOF_SERVER_URL || defaults.proofServerUrl,
+    nodeUrl: envOrUndefined(env, "MIDNIGHT_NODE_URL") ?? defaults.nodeUrl,
+    proofServerUrl: envOrUndefined(env, "MIDNIGHT_PROOF_SERVER_URL") ?? defaults.proofServerUrl,
   };
 
   // A blank default means the network's endpoints are not published in this

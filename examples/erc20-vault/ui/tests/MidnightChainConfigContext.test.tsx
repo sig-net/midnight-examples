@@ -2,10 +2,7 @@ import { DEFAULT_ENDPOINTS, NETWORK_IDS, type NetworkId } from "@midnight-exampl
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import {
-  MidnightChainConfigProvider,
-  useMidnightChainConfig,
-} from "../src/components/contexts";
+import { MidnightChainConfigProvider, useMidnightChainConfig } from "../src/components/contexts";
 
 // No VITE_MIDNIGHT_* variables are set under vitest, so the app starts on the
 // local standalone stack and every endpoint comes from its published defaults.
@@ -26,17 +23,20 @@ describe("MidnightChainConfigProvider", () => {
   // Switching resets every endpoint to the target network's published
   // defaults. Stagenet's are blank on purpose: this repo does not publish
   // them, so selecting it at runtime yields empty endpoints by design.
-  it.each(NETWORK_IDS)("setNetworkId(%s) resets the endpoints to that network's defaults", (networkId) => {
-    const { result } = renderHook(() => useMidnightChainConfig(), {
-      wrapper: MidnightChainConfigProvider,
-    });
+  it.each(NETWORK_IDS)(
+    "setNetworkId(%s) resets the endpoints to that network's defaults",
+    (networkId) => {
+      const { result } = renderHook(() => useMidnightChainConfig(), {
+        wrapper: MidnightChainConfigProvider,
+      });
 
-    act(() => {
-      result.current.setNetworkId(networkId);
-    });
+      act(() => {
+        result.current.setNetworkId(networkId);
+      });
 
-    expect(result.current.config).toEqual({ networkId, ...DEFAULT_ENDPOINTS[networkId] });
-  });
+      expect(result.current.config).toEqual({ networkId, ...DEFAULT_ENDPOINTS[networkId] });
+    },
+  );
 
   type MidnightChainConfigSetters = ReturnType<typeof useMidnightChainConfig>;
 

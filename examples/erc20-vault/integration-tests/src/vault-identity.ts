@@ -3,10 +3,10 @@
 // secret is the session's wallet seed bytes (lib's `identitySecretFromSeed`),
 // so one seed is both the wallet that spends and the identity that gates.
 
-import { bytesToHex } from "@sig-net/midnight";
 import { pathStringOfBytes, pureCircuits } from "@midnight-examples/erc20-vault-contract";
 import { identitySecretFromSeed } from "@midnight-examples/lib";
 import { resolveUserSeed } from "@midnight-examples/test-harness";
+import { bytesToHex } from "@sig-net/midnight";
 
 /** The caller identity every vault interaction is bound to. */
 export interface UserIdentity {
@@ -39,7 +39,7 @@ export interface UserIdentity {
  *
  * @param env - The environment holding the session's wallet seed.
  * @returns The derived identity.
- * @throws If the seed is malformed or not exactly 32 bytes of hex.
+ * @throws {ParseError} If the seed is malformed or not exactly 32 bytes of hex.
  */
 export function resolveUserIdentity(env: NodeJS.ProcessEnv): UserIdentity {
   const secretKey = identitySecretFromSeed(resolveUserSeed(env));

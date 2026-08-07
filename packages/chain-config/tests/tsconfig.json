@@ -1,0 +1,8 @@
+{
+  // ESLint's TypeScript project service resolves each file against the
+  // NEAREST tsconfig.json, and the package root's includes src/ only (the
+  // isomorphic guarantee — see ../tsconfig.json). This file exists so the
+  // tests resolve against the tests config instead of falling out of every
+  // project; the build already compiles them via ../tsconfig.tests.json.
+  "extends": "../tsconfig.tests.json"
+}

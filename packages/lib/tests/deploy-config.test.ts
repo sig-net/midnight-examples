@@ -1,8 +1,7 @@
 // getDeployConfig: env → DeployConfig parsing. Pure — no network, no crypto.
 
-import { describe, expect, it } from "vitest";
-
 import type { NetworkId } from "@midnight-examples/chain-config";
+import { describe, expect, it } from "vitest";
 
 import { getDeployConfig } from "../src/index.ts";
 
@@ -54,7 +53,11 @@ const CASES: Case[] = [
   },
   {
     name: "a deployed network uses the provided MIDNIGHT_DEPLOYER_WALLET_SEED",
-    env: { MIDNIGHT_NETWORK_ID: "stagenet", MIDNIGHT_DEPLOYER_WALLET_SEED: CUSTOM_SEED, ...STAGENET_ENDPOINTS },
+    env: {
+      MIDNIGHT_NETWORK_ID: "stagenet",
+      MIDNIGHT_DEPLOYER_WALLET_SEED: CUSTOM_SEED,
+      ...STAGENET_ENDPOINTS,
+    },
     expectedSeed: CUSTOM_SEED,
     expectedNetworkId: "stagenet",
   },
@@ -89,12 +92,20 @@ const THROW_CASES: ThrowCase[] = [
   },
   {
     name: "deployed network rejects the (unfunded here) genesis mint seed",
-    env: { MIDNIGHT_NETWORK_ID: "stagenet", MIDNIGHT_DEPLOYER_WALLET_SEED: GENESIS_MINT_WALLET_SEED, ...STAGENET_ENDPOINTS },
+    env: {
+      MIDNIGHT_NETWORK_ID: "stagenet",
+      MIDNIGHT_DEPLOYER_WALLET_SEED: GENESIS_MINT_WALLET_SEED,
+      ...STAGENET_ENDPOINTS,
+    },
     expectedMessage: /genesis mint seed, which holds no funds on "stagenet"/,
   },
   {
     name: "an env-provided MIDNIGHT_FAUCET_URL appears in the funding hint",
-    env: { MIDNIGHT_NETWORK_ID: "stagenet", MIDNIGHT_FAUCET_URL: "https://faucet.example", ...STAGENET_ENDPOINTS },
+    env: {
+      MIDNIGHT_NETWORK_ID: "stagenet",
+      MIDNIGHT_FAUCET_URL: "https://faucet.example",
+      ...STAGENET_ENDPOINTS,
+    },
     expectedMessage: /faucet\.example/,
   },
 ];

@@ -262,9 +262,7 @@ export function MidnightWalletProvider({ children }: MidnightWalletProviderProps
     [wallet, connecting, connectBrowserWallet, installSeedWallet, disconnect],
   );
 
-  return (
-    <MidnightWalletContext.Provider value={value}>{children}</MidnightWalletContext.Provider>
-  );
+  return <MidnightWalletContext.Provider value={value}>{children}</MidnightWalletContext.Provider>;
 }
 
 /**

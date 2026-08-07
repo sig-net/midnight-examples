@@ -31,6 +31,9 @@ export enum WalletKind {
  * a class, so they can only be recognised by that tag, never by `instanceof`.
  */
 export class WalletError extends Error {
+  /**
+   * @param message - The human-readable failure, fit to surface in a toast.
+   */
   constructor(message: string) {
     super(message);
     this.name = new.target.name;
@@ -92,8 +95,8 @@ export interface Wallet extends MidnightProvider, WalletProvider {
    * @param data - The data to sign, encoded as `options.encoding` says.
    * @param options - The encoding of `data` and which key signs.
    * @returns The signature, with the signed data and verifying key.
-   * @throws The connector's own `APIError` (`code: 'Rejected'`) when a
-   *   browser wallet's user declines the signing prompt.
+   * @throws {Error} The connector's own `APIError` (`code: 'Rejected'`)
+   *   when a browser wallet's user declines the signing prompt.
    */
   signData(data: string, options: SignDataOptions): Promise<Signature>;
 

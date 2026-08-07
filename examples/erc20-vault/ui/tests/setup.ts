@@ -2,6 +2,7 @@
 // (and their type augmentation) and unmounts anything a test rendered, so a
 // stale tree never leaks into the next test's queries.
 import "@testing-library/jest-dom/vitest";
+
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,21 +43,34 @@ const nodeUint8Array = Object.getPrototypeOf(Buffer) as Uint8ArrayConstructor;
 const nodeArrayBuffer = Buffer.alloc(0).buffer.constructor as ArrayBufferConstructor;
 globalThis.Uint8Array = nodeUint8Array;
 globalThis.ArrayBuffer = nodeArrayBuffer;
-globalThis.TextEncoder = NodeTextEncoder as typeof globalThis.TextEncoder;
-globalThis.TextDecoder = NodeTextDecoder as typeof globalThis.TextDecoder;
+globalThis.TextEncoder = NodeTextEncoder;
+globalThis.TextDecoder = NodeTextDecoder;
 
 // jsdom implements neither the pointer-capture API, nor scrollIntoView, nor
 // ResizeObserver, and radix's Select and Tooltip call all of them on open.
-// No-ops at module scope, like the binary intrinsics above: every browser the
-// app actually runs in has them.
-Element.prototype.hasPointerCapture ??= () => false;
-Element.prototype.setPointerCapture ??= () => {};
-Element.prototype.releasePointerCapture ??= () => {};
-Element.prototype.scrollIntoView ??= () => {};
-globalThis.ResizeObserver ??= class {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
+// Assigned unconditionally: this file only runs under vitest's jsdom, where
+// all of them are missing; every browser the app actually runs in has them.
+// The bodies are empty on purpose: the tests read no effect from any of them.
+Element.prototype.hasPointerCapture = () => false;
+Element.prototype.setPointerCapture = () => {
+  // No effect under jsdom; see the block comment above.
+};
+Element.prototype.releasePointerCapture = () => {
+  // No effect under jsdom; see the block comment above.
+};
+Element.prototype.scrollIntoView = () => {
+  // No effect under jsdom; see the block comment above.
+};
+globalThis.ResizeObserver = class {
+  observe(): void {
+    // No effect under jsdom; see the block comment above.
+  }
+  unobserve(): void {
+    // No effect under jsdom; see the block comment above.
+  }
+  disconnect(): void {
+    // No effect under jsdom; see the block comment above.
+  }
 };
 
 // jsdom implements no CSS media queries at all, so `window.matchMedia` is

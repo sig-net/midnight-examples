@@ -20,13 +20,13 @@ import {
   identitySecretFromSeed,
   makeCompiledContract,
   submitUnprovenTransaction,
-  withSyncedWalletFacade,
   type TransactionIdentifier,
+  withSyncedWalletFacade,
 } from "@midnight-examples/lib";
 import { hexToBytes } from "@sig-net/midnight";
 
 import { Contract, pureCircuits } from "./src/managed/erc20-vault/contract/index.js";
-import { createVaultPrivateState, witnesses, type VaultPrivateState } from "./src/witnesses.ts";
+import { createVaultPrivateState, type VaultPrivateState, witnesses } from "./src/witnesses.ts";
 
 /**
  * Convert a contract address (hex, optional `0x`) into the reference shape a
@@ -34,7 +34,7 @@ import { createVaultPrivateState, witnesses, type VaultPrivateState } from "./sr
  *
  * @param contractAddress - The 32-byte contract address in hex.
  * @returns The `{ bytes }` reference.
- * @throws If the address is not 32 bytes of hex.
+ * @throws {Error} If the address is not 32 bytes of hex.
  */
 function contractAddressToReference(contractAddress: string): { bytes: Uint8Array } {
   const hex = contractAddress.startsWith("0x") ? contractAddress.slice(2) : contractAddress;
@@ -68,10 +68,12 @@ interface VaultDeployment {
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the signet contract to seal as the
  *   cross-contract signer) and lib's Midnight node configuration.
  * @returns The deployed contract address and deploy transaction id.
- * @throws If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed, the
+ * @throws {Error} If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed, the
  *   deployer wallet holds no funds, or submission fails.
  */
-async function deployVault(env: Record<string, string | undefined> = process.env): Promise<VaultDeployment> {
+async function deployVault(
+  env: Record<string, string | undefined> = process.env,
+): Promise<VaultDeployment> {
   const deployConfig = getDeployConfig(env);
   const { networkId } = deployConfig.midnightNodeConfig;
 
@@ -83,7 +85,9 @@ async function deployVault(env: Record<string, string | undefined> = process.env
   // reference, so it must be deployed first.
   const signetContractAddress = env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS?.trim();
   if (!signetContractAddress) {
-    throw new Error("MIDNIGHT_SIGNET_CONTRACT_ADDRESS is required (deploy the signet contract first)");
+    throw new Error(
+      "MIDNIGHT_SIGNET_CONTRACT_ADDRESS is required (deploy the signet contract first)",
+    );
   }
   const signetSigner = contractAddressToReference(signetContractAddress);
 

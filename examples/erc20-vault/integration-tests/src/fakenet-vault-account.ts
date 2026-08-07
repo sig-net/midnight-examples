@@ -3,9 +3,13 @@
 // MPC never exposes its root key, so this can never be a flow capability —
 // it stays in test-support code.
 
+import {
+  type ContractReadMethod,
+  type ContractWriteMethod,
+  requireEnv,
+} from "@midnight-examples/test-harness";
 import { deriveEpsilon, SECP256K1_ORDER } from "@sig-net/midnight";
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
-import { requireEnv } from "@midnight-examples/test-harness";
 
 const ERC20_TRANSFER_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -32,7 +36,7 @@ const ERC20_TRANSFER_ABI = [
  *   `EVM_USER1_DEPOSIT_ADDRESS` so the funds keep cycling).
  * @returns The drained amount in ERC20 base units — `0n` when the account
  *   held nothing and no transaction was sent.
- * @throws If the derived address does not match `EVM_VAULT_ACCOUNT_ADDRESS` (wrong
+ * @throws {Error} If the derived address does not match `EVM_VAULT_ACCOUNT_ADDRESS` (wrong
  *   root key or vault contract address), or the transfer fails to mine.
  */
 export async function drainVaultErc20(env: NodeJS.ProcessEnv, to: string): Promise<bigint> {
@@ -59,13 +63,18 @@ export async function drainVaultErc20(env: NodeJS.ProcessEnv, to: string): Promi
     }
 
     const erc20 = new Contract(erc20Address, ERC20_TRANSFER_ABI, wallet);
-    const balance = (await erc20.balanceOf(wallet.address)) as bigint;
+    const balance = await erc20.getFunction<ContractReadMethod<bigint>>("balanceOf")(
+      wallet.address,
+    );
     if (balance === 0n) {
       return 0n;
     }
 
-    console.log(`draining ${balance} base units of ${erc20Address} from ${wallet.address} to ${to}`);
-    const tx = await erc20.transfer(to, balance);
+    console.log(
+      `draining ${String(balance)} base units of ${erc20Address} from ${wallet.address} to ${to}`,
+    );
+    const transfer = erc20.getFunction<ContractWriteMethod>("transfer");
+    const tx = await transfer(to, balance);
     console.log(`drain tx:  ${tx.hash} — waiting for 1 confirmation…`);
     await tx.wait(1);
     console.log(`drained:   ${tx.hash}`);

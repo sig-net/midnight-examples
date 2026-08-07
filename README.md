@@ -104,6 +104,19 @@ yarn test
 # Requires 'yarn compile'.
 yarn build
 
+## --- Linting and formatting (whole workspace, from the root) ---
+
+# Check formatting. Needs nothing compiled.
+yarn format:check
+# Rewrite files to match the Prettier config.
+yarn format
+
+# Lint. Requires 'yarn compile': the type-aware rules read the generated
+# managed/ types the source imports, exactly as 'yarn build' does.
+yarn lint
+# Apply the autofixable subset. Read the diff before keeping it.
+yarn lint:fix
+
 ## --- Per example ---
 
 # The erc20-vault example (contract + integration-tests + ui packages):
@@ -113,6 +126,17 @@ yarn test:erc20-vault        # requires at least 'yarn compile:erc20-vault'
 yarn build:erc20-vault       # requires 'yarn compile:erc20-vault'
 yarn dev:erc20-vault-ui      # serves the vault SPA on http://localhost:5173
 ```
+
+CI runs `yarn format:check` and `yarn lint` on every push and pull request, so a
+formatting drift or a lint finding fails the build. ESLint and Prettier are
+configured once at the repo root (`eslint.config.js`, `.prettierrc.json`), which
+covers every workspace member; there are no per-package configs. The config turns
+no rule off, so when a rule fires the fix belongs in the code.
+
+Opening the repo in VS Code will offer to install the ESLint and Prettier
+extensions (`.vscode/extensions.json`); with those in place the workspace
+settings format on save and apply ESLint's autofixes using the repo's own pinned
+Prettier.
 
 ## The example UI
 

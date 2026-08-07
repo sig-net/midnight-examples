@@ -4,8 +4,8 @@
 // browser or a backend (deploy tooling lives in ../deploy.ts, outside it).
 
 export * from "./managed/erc20-vault/contract/index.js";
-export * from "./witnesses.ts";
 export * from "./mpc-path.ts";
+export * from "./witnesses.ts";
 
 // THIS contract's signet ledger layout (declaration order in
 // erc20-vault.compact): the SignBidirectionalEventMap at field 0, then the
