@@ -826,13 +826,14 @@ export circuit swap(
     ]
   };
 
-  // Contract-FIXED gas envelope (vault pays): a V3 single-hop swap is ~120-200k gas.
+  // Contract-FIXED gas envelope (vault pays): a V3 single-hop swap is ~120-200k gas, but an
+  // exact-output swap across a thin/fragmented pool can cross many ticks, so the cap has headroom.
   const txParams = EvmType2TxParams<7, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
     maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
     maxFeePerGas: 30000000000 as Uint<128>,        // 30 gwei
-    gasLimit: 300000 as Uint<64>,
+    gasLimit: 700000 as Uint<64>,
     to: uniswapRouter,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<7>>(calldata),

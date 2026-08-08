@@ -26,7 +26,7 @@ export const APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
 export const MAX_APPROVE = 340282366920938463463374607431768211455n;
 
 /** Gas ceiling of a V3 single-hop swap (~120-200k gas); the contract fixes this (vault pays). */
-export const SWAP_GAS_LIMIT = 300_000n;
+export const SWAP_GAS_LIMIT = 700_000n;
 
 /** Max total fee per gas of a swap, wei (30 gwei). */
 export const SWAP_MAX_FEE_PER_GAS = 30_000_000_000n;
