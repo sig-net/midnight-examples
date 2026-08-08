@@ -1467,7 +1467,7 @@ describe("swap round-trip", () => {
       to: ROUTER,
       chainId: CHAIN_ID,
       nonce: VALID_SWAP.evmNonce,
-      gasLimit: 300_000n,
+      gasLimit: 700_000n,
       maxFeePerGas: 30_000_000_000n,
       maxPriorityFeePerGas: 1_000_000_000n,
       value: 0n,
