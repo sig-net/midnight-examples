@@ -1,4 +1,4 @@
-// Curated export surface — this IS the "sdk" face of the package.
+// Curated export surface: the "sdk" face of the package.
 // Everything the compiler emitted, plus the handwritten witnesses. Nothing
 // here may touch environment-specific APIs: this surface runs unchanged in a
 // browser or a backend (deploy tooling lives in ../deploy.ts, outside it).
@@ -29,7 +29,7 @@ export const VAULT_NONCE_PATH: readonly number[] = [3];
 
 /**
  * Resolved ledger-tree path of `swapEventMap` (ledger field 11). Swaps register
- * their notification in this SEPARATE map (sized for a 7-word exactInputSingle),
+ * their notification in this SEPARATE map (sized for a 7-word exactOutputSingle),
  * so the swap flow reads MPC responses from this path, not [0]. Matches the
  * `requestsPath` [11, 0, 0, 0] the swap circuit packs into its notification.
  */

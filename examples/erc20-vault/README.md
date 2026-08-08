@@ -33,7 +33,7 @@ Every circuit is a variation on one shape: record a signature request, let the
 MPC sign and broadcast it, then settle in-circuit against the MPC's attestation.
 The walkthrough below documents that shape in full for **`deposit` → `claim`**;
 the rest of the circuits reuse it, so the table names each and what it adds
-rather than repeating the detail.
+without repeating the detail.
 
 | Circuit(s) | What it adds over `deposit` → `claim` |
 |---|---|
@@ -477,7 +477,7 @@ and serves it over its public `/responses/{requestId}` helper API (port
 3040). It caches before it posts the attestation, so once an event is
 visible the fetch succeeds. Check the response's `success` flag: a reverted
 or replaced transaction has no output to fetch at all, and the candidate to
-hash is instead the protocol's fixed 5-byte failure output `0xdeadbeef01`.
+hash is the protocol's fixed 5-byte failure output `0xdeadbeef01`.
 
 **Move 2: re-pack it into the bytes the MPC hashed.** The MPC did not hash
 the raw return data. It decoded the raw data per the request's
@@ -503,7 +503,7 @@ import { deserializeEvmOutput, serializeRespondOutput } from "@sig-net/midnight"
 const response = await fetch(`http://localhost:3040/responses/${requestId}`);
 const { success, output } = await response.json();
 // success === false: nothing was returned to fetch (reverted/replaced tx).
-// The candidate to check is then MPC_FAILURE_OUTPUT instead of `output`.
+// The candidate to check is then MPC_FAILURE_OUTPUT, not `output`.
 
 // Move 2: raw return data -> the serialized output the MPC hashed. Decode
 // per the output deserialization schema, re-pack per the respond
@@ -592,13 +592,13 @@ await vault.callTx.claim(requestIdBytes(requestId), attestation, serializedOutpu
 });
 ```
 
-The deposited amount is now in the caller's wallet as shielded vault tokens.
+The deposited amount is in the caller's wallet as shielded vault tokens.
 Flow function: [`claim.ts`](integration-tests/src/flows/claim.ts), including
-how to mint to a different wallet's coin public key instead.
+how to mint to a different wallet's coin public key.
 
 ## Runtime: the other circuits
 
-The remaining circuits reuse the `deposit` → `claim` shape; below is only what
+The remaining circuits reuse the `deposit` → `claim` shape. Below is only what
 each one changes. Full code lives in the flow files under
 [`integration-tests/src/flows/`](integration-tests/src/flows/).
 
@@ -621,19 +621,19 @@ Two patterns to take from it
 ([`withdraw.ts`](integration-tests/src/flows/withdraw.ts) /
 [`complete-withdraw.ts`](integration-tests/src/flows/complete-withdraw.ts)):
 
-- **Coin-spend as authorisation.** `withdraw()` is optimistic — the surrendered
+- **Coin-spend as authorisation.** `withdraw()` is optimistic: the surrendered
   coin is BURNED first (`receiveShielded`, paid to the contract and never
   recorded, so vault tokens are IOUs a refund re-mints), and the refund path
   exists for when the EVM leg later fails. The spend IS the auth, so anyone may
-  withdraw to any destination; because the vault's account pays the gas, the fee
+  withdraw to any destination. Because the vault's account pays the gas, the fee
   envelope is contract-FIXED (a caller-chosen cap would let anyone drain the
   vault's ETH). The request is keyed under the vault's own `"vault"` path so the
   MPC signs with the vault account, and a `refundCommitment` is pinned so only the
   withdrawer can claim a refund.
-- **The settle branches on the MPC-attested output, never the caller — and the
+- **The settle branches on the MPC-attested output, never the caller, and the
   output WIDTH routes the call.** An executed transfer's 1-byte packed bool settles
   through `completeWithdraw` (final on success, so anyone holding the attestation
-  may settle it; withdrawer-only re-mint on a `0x00` false return). A transfer that
+  may settle it, withdrawer-only re-mint on a `0x00` false return). A transfer that
   never executed is attested as the protocol's fixed 5-byte failure output
   (`0xdeadbeef01`, `MPC_FAILURE_OUTPUT`) and can only type-fit `refund`'s
   `Bytes<5>`. Refunds re-mint under a fresh nonce (unlinkable to the request), and
@@ -644,7 +644,7 @@ Two patterns to take from it
 ### Swap (`approveRouter`, `swap` / `completeSwap`)
 
 The swap leg has the vault trade its pooled ERC20s on Uniswap V3 as if it were an
-EVM user. `approveRouter` is a **sign-only** request — one allowance per token,
+EVM user. `approveRouter` is a **sign-only** request: one allowance per token,
 contract-fixed spender and amount, and no settle circuit at all (a stale allowance
 just makes the next swap revert and refund). `swap` reuses the optimistic
 burn-then-mint shape on a SEPARATE request map at its own ledger field (the
@@ -662,27 +662,32 @@ functions: [`approve.ts`](integration-tests/src/flows/approve.ts),
 | Package | What it is |
 |---|---|
 | [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, a curated environment-agnostic export surface, simulator unit tests, and a deploy entrypoint. Its dependency list (`@sig-net/midnight`, `@sig-net/midnight-contract` and the compact tooling) is the minimal integration surface. |
-| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, six e2e specs, and the example's TestUSDC ERC20. |
+| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and eight e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
 
 # Running it
 
 Everything runs from the repo root against the local docker stack (Midnight
-node, indexer, proof server, anvil EVM, fakenet MPC responder). The fakenet
-responder's compose service sits behind the `fakenet` profile, so a plain
-`docker compose up -d` does not start it: the test setup starts it itself
-mid-run once the hand-off values are in `.env`. No pre-existing `.env` is
-required. The setup pipeline creates one and records everything it deploys
-so that later runs reuse the same contracts.
+node, indexer, proof server, anvil forking Sepolia, fakenet MPC responder).
+The anvil service forks Sepolia so the real Uniswap V3 deployment and real
+USDC are present, so `SEPOLIA_FORK_RPC_URL` (any Sepolia RPC) MUST be in
+`.env` before the stack comes up. The fakenet responder's compose service
+sits behind the `fakenet` profile, so a plain `docker compose up -d` does not
+start it: the test setup starts it itself mid-run once the hand-off values are
+in `.env`. Beyond `SEPOLIA_FORK_RPC_URL` the setup pipeline fills `.env`
+itself, recording everything it deploys so that later runs reuse the same
+contracts.
 
 ```sh
 corepack enable
 yarn install
+cp .env.example .env                # then set SEPOLIA_FORK_RPC_URL to any Sepolia RPC
 compact update 0.33.0-rc.2          # Exact version required.
 yarn compile:erc20-vault:zk         # ~10 min zk key generation, background it
-docker compose up -d                # node, indexer, proof server, anvil (NOT the
-                                    # fakenet responder: it is behind the `fakenet`
-                                    # profile, and the test setup starts it mid-run)
-yarn test:erc20-vault:e2e           # the six e2e specs, serially, bail on first failure
+docker compose up -d                # node, indexer, proof server, anvil forking
+                                    # Sepolia (NOT the fakenet responder: it is
+                                    # behind the `fakenet` profile, the test setup
+                                    # starts it mid-run)
+yarn test:erc20-vault:e2e           # the eight e2e specs, serially, bail on first failure
 ```
 
 Offline checks that need no stack and no proving keys beyond `yarn compile`:
@@ -712,7 +717,7 @@ failure recovery) and will drive it for you.
 
 # The e2e suite
 
-Six specs run serially in a pinned order (see
+Eight specs run serially in a pinned order (see
 `integration-tests/vitest.config.ts`). `happy-day-e2e` runs first because it
 initialises the vault and cycles the funds that the later flows build on.
 Each spec is rerun-tolerant against kept contract addresses and prints resume
@@ -725,9 +730,12 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `deposit-claimant-not-caller` | 6 | `claim` can direct the mint to a different wallet's coin public key, discovered from chain data alone | `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID` |
 | `benchmark` | 13 | Per-leg wall-clock report of both round trips (`BENCHMARK_TIMINGS_JSON` greppable line) | `BENCHMARK_DEPOSIT_REQUEST_ID`, `BENCHMARK_WITHDRAW_REQUEST_ID` |
 | `false-claimer` | 6 | A deposit recorded for identity A is NOT claimable by identity B, even with the valid MPC attestation | `FALSE_CLAIMER_DEPOSIT_REQUEST_ID` |
-| `bearer-transfer` | 11 | Shielded vault tokens are bearer assets: a plain Midnight transfer hands the claim to wallet B, the emptied wallet A can no longer withdraw, and B completes a full withdraw on the transferred balance | `BEARER_TRANSFER_DEPOSIT_REQUEST_ID`, `BEARER_TRANSFER_WITHDRAW_REQUEST_ID` |
+| `bearer-transfer` | 11 | Shielded vault tokens are bearer assets: a plain Midnight transfer hands the claim to wallet B, the emptied wallet A cannot withdraw, and B completes a full withdraw on the transferred balance | `BEARER_TRANSFER_DEPOSIT_REQUEST_ID`, `BEARER_TRANSFER_WITHDRAW_REQUEST_ID` |
+| `swap-e2e` | 1 | A deposit-funded `exactOutputSingle` swap mints exactly the requested `amountOut` of tokenOut plus the unspent tokenIn as change | none |
+| `swap-refund-e2e` | 1 | A swap whose `amountInMaximum` is below the real cost reverts on-chain and the settle re-mints the surrendered tokenIn | none |
 
-60 tests total. A rerun against kept contract addresses (a populated `.env`)
+62 tests total (the two swap specs self-skip when the EVM chain has no Uniswap
+router, e.g. an un-forked anvil). A rerun against kept contract addresses (a populated `.env`)
 completes in roughly 25–35 minutes on a laptop. A fresh deployment adds the
 setup pipeline's deploys (a few minutes) on top, and a cold clone adds the
 ~10 minute zk key generation. The claim/settle proofs are the heavy legs: the
@@ -748,7 +756,7 @@ To recover:
 1. `docker restart midnight-proof-server`
 2. Rerun the same spec file, passing the request id it printed via the spec's
    resume env var (see the table above) so that it resumes the pending
-   request instead of spending a fresh deposit:
+   request, not a fresh deposit:
 
    ```sh
    DEPOSIT_REQUEST_ID=<id from the banner> \
