@@ -4,7 +4,7 @@
 // which finalizes on success (permissionless cleanup) or refunds the
 // WITHDRAWER on a false return, while a NEVER-EXECUTED transfer (reverted or
 // replaced, attested as the fixed 5-byte MPC failure output) refunds through
-// `refundWithdraw`. Both refund paths demand proof of the identity
+// `refund`. Both refund paths demand proof of the identity
 // commitment pinned at withdraw time.
 
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
@@ -33,7 +33,7 @@ export interface CompleteWithdrawOptions {
  *   caller may settle), a false return re-mints to this wallet, which must
  *   be the withdrawer's.
  * - the fixed 5-byte MPC failure output (reverted or replaced transaction)
- *   goes to `refundWithdraw`, which re-verifies in-circuit, checks the
+ *   goes to `refund`, which re-verifies in-circuit, checks the
  *   sentinel bytes, and re-mints to this wallet, again withdrawer-only.
  *
  * Refunds mint under a fresh RANDOM nonce, so the refunded coin cannot be
@@ -70,13 +70,13 @@ export async function completeWithdraw(
 
   if (outcome.matchedFailureOutput) {
     console.log("EVM transfer never executed: refunding to this wallet (the withdrawer)");
-    const result = await context.vault.callTx.refundWithdraw(
+    const result = await context.vault.callTx.refund(
       requestIdBytes(options.requestId),
       outcome.event,
       outcome.serializedOutput,
       mintNonce,
     );
-    console.log(`refundWithdraw settled in tx ${result.public.txId}`);
+    console.log(`refund settled in tx ${result.public.txId}`);
     return;
   }
 

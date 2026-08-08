@@ -9,6 +9,13 @@ import type { VaultContext } from "../vault-context.ts";
 export interface BroadcastEvmOptions {
   /** The signed EVM transaction to broadcast (e.g. from `pollSignatureResponse`). */
   readonly transaction: Transaction;
+  /**
+   * When true, a mined-but-reverted tx (`status 0`) is RETURNED instead of throwing. Swaps
+   * set this: an on-chain revert (slippage / liquidity) is a valid outcome the MPC attests
+   * as a failure and the refund path settles — not an error. Defaults to false (deposit /
+   * withdraw treat a revert as fatal, letting the caller decide).
+   */
+  readonly tolerateRevert?: boolean;
 }
 
 // A thrown value's `code`, when it actually carries one as a string. Narrows
@@ -76,6 +83,7 @@ export async function broadcastEvm(
   options: BroadcastEvmOptions,
 ): Promise<TransactionReceipt> {
   const provider = new JsonRpcProvider(context.evmRpcUrl);
+  const tolerateRevert = options.tolerateRevert ?? false;
 
   // The hash and sender are already borne by the signed transaction — no
   // parsing or network needed. They are only null if the tx is unsigned.
@@ -92,7 +100,7 @@ export async function broadcastEvm(
   const mined = await provider.getTransactionReceipt(hash);
   if (mined !== null) {
     console.log(`already mined at block ${String(mined.blockNumber)}`);
-    return assertMinedOk(mined, hash);
+    return assertMinedOk(mined, hash, tolerateRevert);
   }
 
   // 2. Broadcast. If the node has already seen this exact tx, that's a no-op —
@@ -122,7 +130,7 @@ export async function broadcastEvm(
     }
     if (receipt !== null) {
       console.log(`confirmed: ${hash}`);
-      return assertMinedOk(receipt, hash);
+      return assertMinedOk(receipt, hash, tolerateRevert);
     }
     const latestNonce = await provider.getTransactionCount(from, "latest");
     if (latestNonce > nonce) {
@@ -132,7 +140,7 @@ export async function broadcastEvm(
       const latestReceipt = await provider.getTransactionReceipt(hash);
       if (latestReceipt !== null) {
         console.log(`confirmed: ${hash}`);
-        return assertMinedOk(latestReceipt, hash);
+        return assertMinedOk(latestReceipt, hash, tolerateRevert);
       }
       throw new Error(
         `nonce ${String(nonce)} for ${from} was consumed by a different transaction; ` +
@@ -146,15 +154,21 @@ export async function broadcastEvm(
 /**
  * A mined receipt with `status: 0` means the tx was included but its execution
  * reverted (nonce consumed, gas burned, state rolled back). Treat that as a
- * failure rather than silently returning the receipt of a reverted tx.
+ * failure rather than silently returning the receipt of a reverted tx — unless
+ * `tolerateRevert` (a swap, whose revert the refund path settles).
  *
  * @param receipt - The mined receipt to check.
  * @param hash - The transaction hash, for the error message.
- * @returns The same receipt, when the transaction succeeded.
- * @throws {Error} If the receipt reports `status: 0` (mined but reverted).
+ * @param tolerateRevert - When true, a reverted receipt is returned instead of throwing.
+ * @returns The same receipt, when the transaction succeeded (or `tolerateRevert`).
+ * @throws {Error} If the receipt reports `status: 0` and `tolerateRevert` is false.
  */
-function assertMinedOk(receipt: TransactionReceipt, hash: string): TransactionReceipt {
-  if (receipt.status === 0) {
+function assertMinedOk(
+  receipt: TransactionReceipt,
+  hash: string,
+  tolerateRevert: boolean,
+): TransactionReceipt {
+  if (receipt.status === 0 && !tolerateRevert) {
     throw new Error(
       `transaction ${hash} reverted on-chain (mined in block ${String(receipt.blockNumber)}, status 0)`,
     );
