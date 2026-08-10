@@ -14,11 +14,9 @@ import {
   asciiPadded,
   bytesToHex,
   calculateRequestId,
-  calculateSignetAttestationDigest,
   decodeSignBidirectionalEventNotificationPayload,
   decodeSignBidirectionalNotification,
   decodeSignetLogEvents,
-  ecdsaSignatureToMpcSignature,
   evmAddressAbiWord,
   hexToBytes,
   MPC_FAILURE_OUTPUT,
@@ -30,15 +28,19 @@ import {
   requestIdBytes,
   requestIdHex,
   type RespondBidirectionalEvent,
-  secp256k1PublicKeyOf,
   serializeRespondOutput,
-  signAttestationDigest,
   type SignBidirectionalEventLedgerMap,
   SignetEventName,
   signetFieldNodeByPath,
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
+import {
+  calculateSignetAttestationDigest,
+  ecdsaSignatureToMpcSignature,
+  secp256k1PublicKeyOf,
+  signAttestationDigest,
+} from "@sig-net/midnight/testing";
 import { describe, expect, it } from "vitest";
 
 // The ERC20 transfer(address,uint256) selector: the TS mirror of the literal

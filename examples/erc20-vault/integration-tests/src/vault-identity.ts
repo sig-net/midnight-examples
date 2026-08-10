@@ -20,34 +20,20 @@ export interface UserIdentity {
    * in-circuit, so it is never a circuit argument).
    */
   readonly commitment: Uint8Array;
-  /** Canonical lowercase hex of the commitment (no 0x prefix). */
-  readonly commitmentHex: string;
   /**
-   * The commitment as the MPC's epsilon-derivation PATH STRING: the fakenet
-   * reads the 32 opaque path bytes as UTF-8 with NUL bytes stripped before
-   * composing the derivation string, so deriving the user's EVM account
-   * off-chain must apply the exact same (lossy but deterministic) reading.
+   * Canonical lowercase hex of the commitment (no 0x prefix). Doubles as
+   * the MPC's epsilon-derivation PATH STRING for the user's account: the
+   * MPC renders a record's 32 path bytes as their full-width lowercase hex,
+   * so the string that derives the user's EVM address off-chain is exactly
+   * this rendering.
    */
-  readonly pathString: string;
-}
-
-/**
- * Read 32 opaque path bytes the way the MPC's epsilon derivation does:
- * decode as UTF-8 (invalid sequences become U+FFFD, deterministically) and
- * strip NUL bytes. Mirror of the fakenet responder's `getPath`.
- *
- * @param path - The 32 path bytes as stored in the event record.
- * @returns The derivation path string.
- */
-export function pathStringOfBytes(path: Uint8Array): string {
-  return Buffer.from(path).toString("utf8").replace(/\0/g, "");
+  readonly commitmentHex: string;
 }
 
 /**
  * Derive the user's vault identity from the environment: the secret from
- * `VAULT_USER_SECRET_KEY` (falling back to the `USER_SEED` bytes), the
- * commitment via the vault's compiled `userCommitment` circuit, and the MPC
- * derivation path string via the fakenet's path reading.
+ * `VAULT_USER_SECRET_KEY` (falling back to the `USER_SEED` bytes) and the
+ * commitment via the vault's compiled `userCommitment` circuit.
  *
  * @param env - The environment holding the identity secret (or seed).
  * @returns The derived identity.
@@ -60,6 +46,5 @@ export function resolveUserIdentity(env: NodeJS.ProcessEnv): UserIdentity {
     secretKey,
     commitment,
     commitmentHex: bytesToHex(commitment),
-    pathString: pathStringOfBytes(commitment),
   };
 }

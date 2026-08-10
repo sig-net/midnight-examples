@@ -27,13 +27,13 @@ import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/
 import {
   abiWordToUint128,
   bytesToHex,
-  calculateSignetAttestationDigest,
   parseSecp256k1PublicKey,
   requestIdBytes,
   type RequestIdHex,
   stripHexPrefix,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
+import { calculateSignetAttestationDigest } from "@sig-net/midnight/testing";
 import { formatEther, JsonRpcProvider, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -49,6 +49,7 @@ import {
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { withdraw } from "../src/flows/withdraw.ts";
+import { VAULT_PATH_BYTES } from "../src/mpc-routing.ts";
 import { printVaultState, readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
@@ -511,7 +512,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(abiWordToUint128(calldataWordAt(record.txParams.calldata.value.words, 1))).toBe(
         WITHDRAW_AMOUNT,
       );
-      expect(new TextDecoder().decode(record.path).replace(/\0+$/u, "")).toBe("vault");
+      expect(record.path).toEqual(VAULT_PATH_BYTES);
 
       banner([
         `Withdraw request recorded on the vault ledger:`,

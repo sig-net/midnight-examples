@@ -3,13 +3,10 @@
 // MPC's ECDSA signature over a request's EVM transaction appears, verifying
 // every post on the way. There is deliberately no push/websocket alternative.
 
-import {
-  type RequestIdHex,
-  signBidirectionalEventToSignedEvmTransaction,
-  sleepUnlessAborted,
-} from "@sig-net/midnight";
+import { type RequestIdHex, signBidirectionalEventToSignedEvmTransaction } from "@sig-net/midnight";
 import type { Transaction } from "ethers";
 
+import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 
 /** Options for {@link pollSignatureResponse}. */

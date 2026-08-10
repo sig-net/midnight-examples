@@ -91,13 +91,14 @@ as INPUT, so they cannot exist at construction time: the deployer-gated
 one-shot `initialize` circuit pins them right after deploy, when the address
 (and therefore the derivations) exist.
 
-One subtlety for raw-hash paths: the MPC reads the 32 opaque path bytes as a
-UTF-8 string with NUL bytes stripped when it composes the derivation string.
-For the ASCII literals (`"vault"`) that reading is the obvious one, and for
-the user's commitment (a raw hash) it is lossy but deterministic, so client
-code deriving the user's EVM address must apply the exact same reading (see
-`pathStringOfBytes` in the integration tests' `vault-identity.ts`, and the
-reader setup snippet in the deposit walkthrough below).
+The MPC composes the derivation string by rendering the 32 opaque path bytes
+as their full-width lowercase hex (no `0x` prefix, padding included), a total
+and injective rendering that accepts any bytes the contract chooses. Client
+code deriving an account off-chain must feed `deriveEvmAddress` the same
+rendering: `bytesToHex` of the stored path bytes, so the vault's own account
+derives from the hex of `pad(32, "vault")` and the user's account from the
+hex of the identity commitment (see the reader setup snippet in the deposit
+walkthrough below).
 
 # Integration walkthrough
 
@@ -312,19 +313,16 @@ const reader = new SignetRequestResponseReader({
   eventSource: signetEventSourceFromPublicDataProvider(publicDataProvider),
 });
 
-// The MPC reads the 32 opaque path bytes as UTF-8 with NULs stripped (see
-// Derived keys and accounts above), so the commitment is read the same way:
-const pathStringOfBytes = (path: Uint8Array) =>
-  Buffer.from(path).toString("utf8").replace(/\0/g, "");
-
 // Deposit sweeps are signed by the USER's deposit account: the derivation
 // path is the caller's identity commitment, computed with the vault's
-// compiled circuit (never a TypeScript re-implementation).
+// compiled circuit (never a TypeScript re-implementation) and rendered as
+// its full-width lowercase hex, the MPC's rendering of every record's 32
+// opaque path bytes (see Derived keys and accounts above).
 const userCommitment = pureCircuits.userCommitment(callerSecretKey);
 const evmUserAddress = deriveEvmAddress(
   mpcRootPublicKey,
   vaultContractAddress,
-  pathStringOfBytes(userCommitment),
+  bytesToHex(userCommitment),
 );
 ```
 
