@@ -708,19 +708,34 @@ describe("withdraw round-trip", () => {
     );
     expect(ledger(state).signetRequestNonce).toBe(1n);
 
-    // The burn, observable in the zswap local state: the surrendered coin is
-    // consumed as the call's input, and the single output pays its full value
-    // to the shielded burn address.
+    // The burn, observable in the zswap local state: the coin is received (a
+    // contract-owned output) and spent as the call's input, and the burn
+    // output pays its full value to the shielded burn address. The receive
+    // output's coin info must equal the spent coin's exactly: that identity is
+    // what lets the transaction builder pair the two into a same-transaction
+    // transient instead of a contract coin-tree spend.
     const zswap = zswapState(next);
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
     expect(consumed.color).toEqual(VAULT_TOKEN_COLOR);
     expect(consumed.value).toBe(AMOUNT);
-    expect(zswap.outputs).toHaveLength(1);
-    const burnOutput = first(zswap.outputs, "burn output");
+    expect(zswap.outputs).toHaveLength(2);
+    const received = first(
+      zswap.outputs.filter((output) => !output.recipient.is_left),
+      "contract-owned receive output",
+    );
+    expect(received.recipient.right.bytes).toEqual(VAULT_ADDRESS_BYTES);
+    expect(received.coinInfo).toEqual({
+      nonce: consumed.nonce,
+      color: consumed.color,
+      value: consumed.value,
+    });
+    const burnOutput = first(
+      zswap.outputs.filter((output) => output.recipient.is_left),
+      "burn output",
+    );
     expect(burnOutput.coinInfo.color).toEqual(VAULT_TOKEN_COLOR);
     expect(burnOutput.coinInfo.value).toBe(AMOUNT);
-    expect(burnOutput.recipient.is_left).toBe(true);
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
   });
 
@@ -1522,14 +1537,17 @@ describe("swap round-trip", () => {
     // Pending-swap marker pinned.
     expect(state.swapRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
 
-    // Same burn as withdraw: amountInMaximum of the tokenIn vault coin is
-    // consumed and paid, whole, to the shielded burn address.
+    // Same burn as withdraw (which asserts the receive/spend pairing in
+    // detail): amountInMaximum of the tokenIn vault coin is received, spent,
+    // and paid whole to the shielded burn address.
     const zswap = zswapState(next);
-    expect(zswap.outputs).toHaveLength(1);
-    const burnOutput = first(zswap.outputs, "burn output");
+    expect(zswap.outputs).toHaveLength(2);
+    const burnOutput = first(
+      zswap.outputs.filter((output) => output.recipient.is_left),
+      "burn output",
+    );
     expect(burnOutput.coinInfo.color).toEqual(VAULT_TOKEN_COLOR);
     expect(burnOutput.coinInfo.value).toBe(SWAP_AMOUNT_IN_MAX);
-    expect(burnOutput.recipient.is_left).toBe(true);
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
   });
 
