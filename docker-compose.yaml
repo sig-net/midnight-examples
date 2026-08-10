@@ -60,9 +60,26 @@ services:
     # anvil dev chain (id 31337, pre-funded dev-mnemonic accounts). State is
     # in-memory: a restart wipes the chain (the test setup detects this and
     # redeploys the token).
+    #
+    # Set SEPOLIA_FORK_RPC_URL to fork Sepolia so the real Uniswap V3 deployment
+    # + real USDC are present. The erc20-vault e2e suites run against this fork
+    # and deal ETH/USDC to the derived accounts via anvil cheatcodes. Unset -> a
+    # bare dev chain (no real tokens), which those suites no longer target.
+    # Forks at LATEST by default (any RPC serves latest state); set
+    # SEPOLIA_FORK_BLOCK to pin a block for determinism (needs an ARCHIVE RPC —
+    # a non-archive node cannot serve state at an old pinned block, so anvil
+    # forks but every state read returns empty).
     container_name: 'local-evm'
     image: 'ghcr.io/foundry-rs/foundry:v1.5.1'
-    entrypoint: ['anvil', '--host', '0.0.0.0']
+    entrypoint: ['sh', '-c']
+    command:
+      # Forked: inherit Sepolia's chain id (11155111) so real-token semantics hold; the suites
+      # deal ETH/USDC via anvil cheatcodes (a forked real token has no open mint). Bare:
+      # anvil's default id 31337.
+      - >
+        anvil --host 0.0.0.0
+        ${SEPOLIA_FORK_RPC_URL:+--fork-url ${SEPOLIA_FORK_RPC_URL}}
+        ${SEPOLIA_FORK_BLOCK:+--fork-block-number ${SEPOLIA_FORK_BLOCK}}
     ports:
       - '127.0.0.1:8545:8545'
 

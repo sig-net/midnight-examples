@@ -44,6 +44,12 @@ jobs:
     # runner is marginal — happy-day-only as the PR gate keeps the wall clock
     # and OOM exposure down; the full suite is opt-in via `full-suite`.
     timeout-minutes: ${{ inputs.full-suite && 300 || 150 }}
+    # Job-level so EVERY step (and every docker compose invocation) sees the fork URL. The
+    # setup pipeline recreates the fakenet responder with `docker compose up`; if that step
+    # lacks SEPOLIA_FORK_RPC_URL, compose re-renders the evm service WITHOUT --fork-url, drifts
+    # from the running forked anvil, and recreates local-evm BARE — silently killing the fork.
+    env:
+      SEPOLIA_FORK_RPC_URL: ${{ secrets.SEPOLIA_FORK_RPC_URL }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -135,19 +141,32 @@ jobs:
         run: yarn build
       - name: Unit tests (simulator-only; e2e files self-skip without RUN_INTEGRATION_TESTS)
         run: yarn test
-      - name: Start the local stack (midnight node, indexer, proof server, anvil)
-        run: docker compose up -d
+      - name: Start the local stack (midnight node, indexer, proof server, anvil forking Sepolia)
+        # SEPOLIA_FORK_RPC_URL comes from the job-level env so this AND the setup's fakenet
+        # recreate render the evm service identically-forked. REQUIRED — without it anvil runs
+        # bare (no real tokens) and the fork suites fail. Set it as a repo Actions secret.
+        run: |
+          if [ -z "$SEPOLIA_FORK_RPC_URL" ]; then
+            echo "::error::SEPOLIA_FORK_RPC_URL is empty — set it as a repo Actions secret (caller passes secrets: inherit)."
+            exit 1
+          fi
+          # Fail fast if the fork args don't render, instead of an opaque bare-anvil failure later.
+          docker compose config | grep -q -- '--fork-url' \
+            || { echo "::error::compose rendered no --fork-url despite SEPOLIA_FORK_RPC_URL being set"; exit 1; }
+          docker compose up -d
       - name: Wait for the stack
         run: |
           timeout 180 bash -c 'until curl -fsS http://127.0.0.1:9944/health >/dev/null 2>&1; do sleep 3; done'
           timeout 60 bash -c 'until curl -s -o /dev/null http://127.0.0.1:6300; do sleep 3; done'
           timeout 180 bash -c 'until curl -fs -X POST -H "content-type: application/json" -d "{\"query\":\"{__typename}\"}" http://127.0.0.1:8088/api/v3/graphql >/dev/null 2>&1; do sleep 3; done'
+          # Forking fetches the pinned block before serving, so wait for anvil to answer.
+          timeout 120 bash -c 'until curl -fsS -X POST -H "content-type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}" http://127.0.0.1:8545 >/dev/null 2>&1; do sleep 3; done'
           curl -fsS -X POST -H 'content-type: application/json' \
             -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' http://127.0.0.1:8545
-      # The suite's own globalSetup does the rest: deploys the singleton +
-      # the example contract + the test ERC20, creates .env and appends the
-      # fakenet hand-off values, starts the fakenet responder container, and
-      # funds the derived accounts on anvil.
+      # The suite's own globalSetup does the rest: deploys the singleton + the
+      # example contract, defaults ERC20_ADDRESS to real Sepolia USDC, creates
+      # .env and appends the fakenet hand-off values, starts the fakenet
+      # responder container, and deals the derived accounts ETH + USDC on the fork.
       - name: e2e suite — gate spec only
         if: inputs.full-suite != true
         env:

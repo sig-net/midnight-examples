@@ -6,6 +6,7 @@
 
 import { asciiPadded, CAIP2_ID_BYTES, parseSecp256k1PublicKey } from "@sig-net/midnight";
 
+import { UNISWAP_SWAP_ROUTER_02 } from "../evm-swap.ts";
 import { evmAddressBytes } from "../evm-transfer.ts";
 import type { VaultContext } from "../vault-context.ts";
 
@@ -13,6 +14,8 @@ import type { VaultContext } from "../vault-context.ts";
 export interface InitializeOptions {
   /** The vault's EVM address (20-byte 0x hex) to seal into the contract. */
   readonly vaultEvmAddress: string;
+  /** The Uniswap SwapRouter02 to pin; defaults to the Sepolia canonical. */
+  readonly routerAddress?: string;
   /**
    * The MPC response key for THIS vault contract (SEC1 hex, compressed or
    * uncompressed): `f(MPC root key, vault contract address, "midnight
@@ -52,6 +55,7 @@ export async function initialize(context: VaultContext, options: InitializeOptio
 
   const result = await context.vault.callTx.initialize(
     evmAddressBytes(options.vaultEvmAddress),
+    evmAddressBytes(options.routerAddress ?? UNISWAP_SWAP_ROUTER_02),
     context.evmChainId,
     asciiPadded(context.caip2Id, CAIP2_ID_BYTES),
     parseSecp256k1PublicKey(options.mpcResponseKey),

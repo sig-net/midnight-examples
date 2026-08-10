@@ -14,13 +14,11 @@ import {
   assertEnvironment,
   compileContractZk,
   deploySignetContractStep,
-  ensureErc20Deployed,
   ensureMpcResponseKey,
   ensureMpcRootKey,
   ensureMpcSecp256k1Pubkey,
   ensureWalletSeeds,
   ensureWalletsFunded,
-  fundLocalEvmAccounts,
   logSkip,
   persistFakenetHandoffToDotEnv,
   printMpcServerConfig,
@@ -35,14 +33,11 @@ import {
 import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
 import type { TestProject } from "vitest/node";
 
+import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
 import { VAULT_PATH_HEX } from "./mpc-routing.ts";
-import { deployTestUsdc } from "./test-usdc.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 
 const MINUTE = 60_000;
-
-// The derived EVM accounts the local-chain funding step tops up.
-const DERIVED_EVM_ADDRESS_ENV_VARS = ["EVM_USER_ADDRESS", "EVM_VAULT_ADDRESS"] as const;
 
 // The env keys the setup steps populate, in derivation order — the "Minimal
 // .env block" printout reads like the flow that produced it.
@@ -199,6 +194,24 @@ function defaultEvmRpcUrl(env: NodeJS.ProcessEnv): void {
   }
 }
 
+/**
+ * Default `ERC20_ADDRESS` to real Sepolia USDC — the suites run against a Sepolia fork, so the
+ * token is the real (unmintable) USDC rather than a locally deployed test token. Any other
+ * ERC20 (that a fork whale can source) can be pinned explicitly.
+ *
+ * @param env - The suite's env accumulator.
+ */
+function ensureErc20Address(env: NodeJS.ProcessEnv): void {
+  if (env.ERC20_ADDRESS) {
+    logSkip("default ERC20_ADDRESS", `ERC20_ADDRESS is set (${env.ERC20_ADDRESS})`);
+    return;
+  }
+  env.ERC20_ADDRESS = SEPOLIA_USDC;
+  console.log(
+    `defaulted ERC20_ADDRESS=${SEPOLIA_USDC} (real Sepolia USDC — the suites fork Sepolia)`,
+  );
+}
+
 // Step names match what the operator greps for and what STEP_THROUGH prompts show.
 const STEPS: readonly SetupStep[] = [
   [
@@ -211,10 +224,7 @@ const STEPS: readonly SetupStep[] = [
   ["setup: resolve/generate wallet seeds (root + deployer/user/mpc responder)", ensureWalletSeeds],
   ["setup: preflight root funding + fund the role wallets from root", ensureWalletsFunded],
   ["setup: resolve EVM chain id from EVM_RPC_URL", resolveEvmChain],
-  [
-    "setup: check/deploy ERC20 token on the EVM chain",
-    (env) => ensureErc20Deployed(env, deployTestUsdc),
-  ],
+  ["setup: default ERC20_ADDRESS to real Sepolia USDC", ensureErc20Address],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
   ["setup: check/derive MPC_SECP256K1_PUBKEY public key", ensureMpcSecp256k1Pubkey],
   ["setup: deploy signet contract", deploySignetContractStep],
@@ -238,10 +248,7 @@ const STEPS: readonly SetupStep[] = [
   ],
   ["setup: check/derive vault EVM address", ensureVaultEvmAddress],
   ["setup: check/derive user EVM address", ensureUserEvmAddress],
-  [
-    "setup: fund derived EVM accounts (local chain only)",
-    (env) => fundLocalEvmAccounts(env, DERIVED_EVM_ADDRESS_ENV_VARS),
-  ],
+  ["setup: deal derived EVM accounts on the Sepolia fork (ETH + real USDC)", dealForkEvmAccounts],
   [
     "setup: print MPC server configuration",
     (env) => {

@@ -129,6 +129,8 @@ const signetStateProvider = async () => {
 };
 
 const VAULT_EVM = bytes(20, 0xee);
+// The pinned Uniswap SwapRouter02 (initialize arg + swap `to`).
+const ROUTER = bytes(20, 0x11);
 const ERC20 = bytes(20, 0xaa);
 const ZERO_ADDRESS = new Uint8Array(20);
 const AMOUNT = 1_000_000n;
@@ -240,7 +242,7 @@ const strangerContext = async (
 const deployInitialized = async () => {
   const { contract, ctx } = await deployContract();
   const next = (
-    await contract.circuits.initialize(ctx, VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY)
+    await contract.circuits.initialize(ctx, VAULT_EVM, ROUTER, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY)
   ).context;
   return { contract, ctx: next };
 };
@@ -341,21 +343,21 @@ describe("initialize", () => {
     // Deployed with a stranger's commitment; our caller key can't initialize.
     const { contract, ctx } = await deployContract(OTHER_COMMITMENT);
     await expect(
-      contract.circuits.initialize(ctx, VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY),
+      contract.circuits.initialize(ctx, VAULT_EVM, ROUTER, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY),
     ).rejects.toThrow(/Not the deployer/);
   });
 
   it("is one-shot", async () => {
     const { contract, ctx } = await deployInitialized();
     await expect(
-      contract.circuits.initialize(ctx, VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY),
+      contract.circuits.initialize(ctx, VAULT_EVM, ROUTER, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY),
     ).rejects.toThrow(/Already initialized/);
   });
 
   it("rejects a zero chain id", async () => {
     const { contract, ctx } = await deployContract();
     await expect(
-      contract.circuits.initialize(ctx, VAULT_EVM, 0n, CAIP2_ID, MPC_RESPONSE_KEY),
+      contract.circuits.initialize(ctx, VAULT_EVM, ROUTER, 0n, CAIP2_ID, MPC_RESPONSE_KEY),
     ).rejects.toThrow(/Chain ID must be positive/);
   });
 
@@ -364,6 +366,7 @@ describe("initialize", () => {
     const state = ledger(ctx.callContext.currentQueryContext.state);
     expect(state.initialized).toBe(1n);
     expect(state.vaultEvmAddress).toEqual(VAULT_EVM);
+    expect(state.uniswapRouter).toEqual(ROUTER);
     expect(state.evmChainId).toBe(CHAIN_ID);
     expect(state.caip2Id).toEqual(CAIP2_ID);
     expect(state.mpcResponseKey).toEqual(MPC_RESPONSE_KEY);
@@ -810,8 +813,8 @@ const OUTPUT_SUCCESS = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: 
 // completeWithdraw's refund branch.
 const OUTPUT_FALSE = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: false });
 
-// A NEVER-EXECUTED transfer (reverted or replaced): the protocol's fixed
-// 5-byte failure output. Settles through refundWithdraw (Bytes<5>).
+// A NEVER-EXECUTED transfer/swap (reverted or replaced): the protocol's fixed
+// 5-byte failure output. Settles through refund (Bytes<5>).
 const OUTPUT_REVERTED = MPC_FAILURE_OUTPUT;
 
 /**
@@ -1033,7 +1036,7 @@ describe("completeWithdraw settle", () => {
 
 // ---- Refund-withdraw tests ----
 
-describe("refundWithdraw settle", () => {
+describe("refund (withdrawal) settle", () => {
   it("failure output: the WITHDRAWER re-mints the surrendered value and consumes the withdrawal", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
 
@@ -1041,7 +1044,7 @@ describe("refundWithdraw settle", () => {
     // call resolving proves the mint executed, the observable effect is the
     // consumption of the request and its pending-withdrawal marker.
     const next = (
-      await contract.circuits.refundWithdraw(
+      await contract.circuits.refund(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
@@ -1058,8 +1061,8 @@ describe("refundWithdraw settle", () => {
   it("a caller other than the withdrawer cannot take the refund", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     await expect(
-      contract.circuits.refundWithdraw(
-        await strangerContext("refundWithdraw", ctx),
+      contract.circuits.refund(
+        await strangerContext("refund", ctx),
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
@@ -1074,7 +1077,7 @@ describe("refundWithdraw settle", () => {
     // no refund. Guards against width collisions as respond schemas grow.
     const notTheSentinel = bytes(5, 0x01);
     await expect(
-      contract.circuits.refundWithdraw(
+      contract.circuits.refund(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, notTheSentinel),
@@ -1087,7 +1090,7 @@ describe("refundWithdraw settle", () => {
   it("rejects a failure output signed by a key other than the stored MPC response key", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     await expect(
-      contract.circuits.refundWithdraw(
+      contract.circuits.refund(
         ctx,
         requestId,
         respond(IMPOSTER_SECRET, requestId, OUTPUT_REVERTED),
@@ -1103,7 +1106,7 @@ describe("refundWithdraw settle", () => {
     // recomputed digest no longer matches what the signature covers, so the
     // signature check rejects it before the sentinel gate.
     await expect(
-      contract.circuits.refundWithdraw(
+      contract.circuits.refund(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, bytes(5, 0x01)),
@@ -1123,20 +1126,22 @@ describe("refundWithdraw settle", () => {
     const depositId = requestIdBytes(depositIdHex);
 
     await expect(
-      contract.circuits.refundWithdraw(
+      contract.circuits.refund(
         next,
         depositId,
         respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Withdrawal not found/);
+      // Neither refundCommitment nor swapRefundCommitment holds a deposit id, so the
+      // merged refund's swap branch is the one that ultimately rejects.
+    ).rejects.toThrow(/Request not found/);
   });
 
-  it("refunds once: a second refundWithdraw for the same request rejects", async () => {
+  it("refunds once: a second refund for the same request rejects", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     const next = (
-      await contract.circuits.refundWithdraw(
+      await contract.circuits.refund(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
@@ -1145,14 +1150,15 @@ describe("refundWithdraw settle", () => {
       )
     ).context;
     await expect(
-      contract.circuits.refundWithdraw(
+      contract.circuits.refund(
         next,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Withdrawal not found/);
+      // Once consumed, the id is in neither marker map, so the swap branch rejects.
+    ).rejects.toThrow(/Request not found/);
   });
 });
 
@@ -1335,5 +1341,263 @@ describe("claim settle", () => {
         OTHER_WALLET_RECIPIENT,
       ),
     ).rejects.toThrow(/Not the depositor/);
+  });
+});
+
+// ============================ Swap (Uniswap V3) =============================
+
+const EXACT_OUTPUT_SINGLE_SELECTOR = new Uint8Array([0x50, 0x23, 0xb4, 0xdf]);
+const APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
+const MAX_APPROVE = 340282366920938463463374607431768211455n; // 2^128-1
+// exactOutputSingle returns amountIn: the MPC decodes it as uint256, re-packs it as uint64.
+const SWAP_OUTPUT_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint256"}]', 38);
+const SWAP_RESPOND_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint64"}]', 37);
+
+// A second ERC20 (tokenOut) with its own vault-token color.
+const ERC20_OUT = bytes(20, 0xbb);
+const VAULT_TOKEN_COLOR_OUT = hexToBytes(
+  rawTokenType(pureCircuits.vaultTokenDomainSeparator(ERC20_OUT), VAULT_ADDRESS),
+);
+const FEE = 500n;
+const SWAP_AMOUNT_OUT = 995_000n; // exact tokenOut received
+const SWAP_AMOUNT_IN_MAX = AMOUNT; // spend cap = the surrendered coin
+const SWAP_AMOUNT_IN_SPENT = 990_000n; // attested input actually spent (<= the cap)
+
+interface SwapCallArgs {
+  evmNonce: bigint;
+  keyVersion: bigint;
+  swap: {
+    tokenIn: Uint8Array;
+    tokenOut: Uint8Array;
+    fee: bigint;
+    amountOut: bigint;
+    amountInMaximum: bigint;
+  };
+  coin: ReturnType<typeof vaultCoin>;
+}
+
+const VALID_SWAP: SwapCallArgs = {
+  evmNonce: 0n,
+  keyVersion: 1n,
+  swap: {
+    tokenIn: ERC20,
+    tokenOut: ERC20_OUT,
+    fee: FEE,
+    amountOut: SWAP_AMOUNT_OUT,
+    amountInMaximum: SWAP_AMOUNT_IN_MAX,
+  },
+  coin: vaultCoin(SWAP_AMOUNT_IN_MAX),
+};
+
+const swap = (
+  contract: Contract<VaultPrivateState>,
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["swap"]>[0],
+  args: SwapCallArgs,
+) => contract.circuits.swap(ctx, args.evmNonce, args.keyVersion, args.swap, args.coin);
+
+// A successful swap's attested output: the amountIn spent as the MPC serializes it — a
+// Midnight-native little-endian uint64 (8 bytes), the twin of serializeRespondOutput.
+// completeSwap native-deserializes it.
+const swapOutput = (amountIn: bigint): Uint8Array => {
+  const b = new Uint8Array(8);
+  let v = amountIn;
+  for (let i = 0; i < 8 && v > 0n; i++) {
+    b[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return b;
+};
+const OUTPUT_SWAP = swapOutput(SWAP_AMOUNT_IN_SPENT);
+
+describe("approveRouter", () => {
+  it("records an approve(router, ~unlimited) on field 0 from the vault path, no coin", async () => {
+    const { contract, ctx } = await deployInitialized();
+    const { context: next } = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
+
+    const index = toSignBidirectionalEventIndex(
+      ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+    );
+    expect(index.size).toBe(1);
+    const [, record] = first(index.entries(), "indexed approveRouter request");
+
+    // Vault path, approve ON the erc20, spender = pinned router, amount = MAX.
+    expect(record.path).toEqual(asciiPadded("vault", 32));
+    expect(record.txParams.to).toEqual(ERC20);
+    const { calldata } = record.txParams;
+    expect(calldata.is_some).toBe(true);
+    expect(calldata.value.selector).toEqual(APPROVE_SELECTOR);
+    expect(calldata.value.noWords).toBe(2n);
+    expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(ROUTER));
+    expect(calldata.value.words[1]).toEqual(numericAbiWord(MAX_APPROVE));
+  });
+
+  it("is permissionless (a stranger may ready a token) and needs initialize", async () => {
+    const { contract, ctx } = await deployContract();
+    await expect(contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).rejects.toThrow(
+      /Not initialized/,
+    );
+    const ready = await deployInitialized();
+    await expect(
+      ready.contract.circuits.approveRouter(
+        await strangerContext("approveRouter", ready.ctx),
+        ERC20,
+        0n,
+        1n,
+      ),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("swap round-trip", () => {
+  it("burns tokenIn and stores a vault-path exactOutputSingle event on field 11", async () => {
+    const { contract, ctx } = await deployInitialized();
+    const { context: next } = await swap(contract, ctx, VALID_SWAP);
+    const state = ledger(next.callContext.currentQueryContext.state);
+
+    const index = toSignBidirectionalEventIndex(state.swapEventMap);
+    expect(index.size).toBe(1);
+    // Field 0 stays empty: the swap went to the swap map, not the transfer map.
+    expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
+    const [idHex, record] = first(index.entries(), "indexed swap request");
+
+    expect(record.sender).toEqual({ bytes: VAULT_ADDRESS_BYTES });
+    expect(record.path).toEqual(asciiPadded("vault", 32));
+
+    // Contract-fixed envelope: to = pinned router, vault-paid gas.
+    const { calldata, ...envelope } = record.txParams;
+    expect(envelope).toEqual({
+      to: ROUTER,
+      chainId: CHAIN_ID,
+      nonce: VALID_SWAP.evmNonce,
+      gasLimit: 700_000n,
+      maxFeePerGas: 30_000_000_000n,
+      maxPriorityFeePerGas: 1_000_000_000n,
+      value: 0n,
+      accessListEntryCount: 0n,
+      accessList: [],
+    });
+    expect(record.outputDeserializationSchema).toEqual(SWAP_OUTPUT_SCHEMA);
+    expect(record.respondSerializationSchema).toEqual(SWAP_RESPOND_SCHEMA);
+
+    // exactOutputSingle((tokenIn, tokenOut, fee, recipient=vault, amountOut, amountInMaximum, 0)).
+    expect(calldata.is_some).toBe(true);
+    expect(calldata.value.selector).toEqual(EXACT_OUTPUT_SINGLE_SELECTOR);
+    expect(calldata.value.noWords).toBe(7n);
+    expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(ERC20));
+    expect(calldata.value.words[1]).toEqual(evmAddressAbiWord(ERC20_OUT));
+    expect(calldata.value.words[2]).toEqual(numericAbiWord(FEE));
+    expect(calldata.value.words[3]).toEqual(evmAddressAbiWord(VAULT_EVM));
+    expect(calldata.value.words[4]).toEqual(numericAbiWord(SWAP_AMOUNT_OUT));
+    expect(calldata.value.words[5]).toEqual(numericAbiWord(SWAP_AMOUNT_IN_MAX));
+    expect(calldata.value.words[6]).toEqual(numericAbiWord(0n));
+
+    // Pending-swap marker pinned.
+    expect(state.swapRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
+  });
+
+  it("rejects a coin that is not the tokenIn vault color or not amountInMaximum", async () => {
+    const { contract, ctx } = await deployInitialized();
+    await expect(
+      swap(contract, ctx, { ...VALID_SWAP, coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR_OUT) }),
+    ).rejects.toThrow(/Coin is not the vault token for tokenIn/);
+    await expect(
+      swap(contract, ctx, { ...VALID_SWAP, coin: vaultCoin(SWAP_AMOUNT_IN_MAX + 1n) }),
+    ).rejects.toThrow(/Coin value must equal amountInMaximum/);
+  });
+});
+
+// ---- Swap settle fixtures ----
+
+const swapRequested = async () => {
+  const { contract, ctx } = await deployInitialized();
+  const next = (await swap(contract, ctx, VALID_SWAP)).context;
+  const index = toSignBidirectionalEventIndex(
+    ledger(next.callContext.currentQueryContext.state).swapEventMap,
+  );
+  const idHex = first(index.keys(), "indexed swap request");
+  return { contract, ctx: next, requestId: requestIdBytes(idHex) };
+};
+
+describe("completeSwap settle", () => {
+  it("verifies the amountIn attestation, mints tokenOut + change, and cleans up (swapper-gated)", async () => {
+    const { contract, ctx, requestId } = await swapRequested();
+    const next = (
+      await contract.circuits.completeSwap(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        OUTPUT_SWAP,
+        MINT_NONCE,
+      )
+    ).context;
+    const state = ledger(next.callContext.currentQueryContext.state);
+    expect(state.swapEventMap.isEmpty()).toBe(true);
+    expect(state.swapRefundCommitment.isEmpty()).toBe(true);
+  });
+
+  it("a caller other than the swapper cannot take the minted tokenOut", async () => {
+    const { contract, ctx, requestId } = await swapRequested();
+    await expect(
+      contract.circuits.completeSwap(
+        await strangerContext("completeSwap", ctx),
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        OUTPUT_SWAP,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Not the swapper/);
+  });
+
+  it("rejects an attestation signed by the wrong key, and presented bytes that differ", async () => {
+    const { contract, ctx, requestId } = await swapRequested();
+    await expect(
+      contract.circuits.completeSwap(
+        ctx,
+        requestId,
+        respond(IMPOSTER_SECRET, requestId, OUTPUT_SWAP),
+        OUTPUT_SWAP,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Invalid attestation signature/);
+    await expect(
+      contract.circuits.completeSwap(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        swapOutput(1n),
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Invalid attestation signature/);
+  });
+});
+
+describe("refund (swap) settle", () => {
+  it("on the MPC failure output, re-mints tokenIn to the swapper and cleans up", async () => {
+    const { contract, ctx, requestId } = await swapRequested();
+    const next = (
+      await contract.circuits.refund(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      )
+    ).context;
+    const state = ledger(next.callContext.currentQueryContext.state);
+    expect(state.swapEventMap.isEmpty()).toBe(true);
+    expect(state.swapRefundCommitment.isEmpty()).toBe(true);
+  });
+
+  it("is swapper-gated", async () => {
+    const { contract, ctx, requestId } = await swapRequested();
+    await expect(
+      contract.circuits.refund(
+        await strangerContext("refund", ctx),
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Not the swapper/);
   });
 });
