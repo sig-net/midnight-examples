@@ -620,9 +620,9 @@ Two patterns to take from it
 [`complete-withdraw.ts`](integration-tests/src/flows/complete-withdraw.ts)):
 
 - **Coin-spend as authorisation.** `withdraw()` is optimistic: the surrendered
-  coin is BURNED first (`receiveShielded`, paid to the contract and never
-  recorded, so vault tokens are IOUs a refund re-mints), and the refund path
-  exists for when the EVM leg later fails. The spend IS the auth, so anyone may
+  coin is BURNED first (`sendImmediateShielded` forwards its full value to the
+  stdlib's `shieldedBurnAddress()`, so vault tokens are IOUs a refund
+  re-mints), and the refund path exists for when the EVM leg later fails. The spend IS the auth, so anyone may
   withdraw to any destination. Because the vault's account pays the gas, the fee
   envelope is contract-FIXED (a caller-chosen cap would let anyone drain the
   vault's ETH). The request is keyed under the vault's own `"vault"` path so the

@@ -340,7 +340,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // fixed 5-byte failure output to the refund circuit, which
         // re-verifies the attestation in-circuit (digest equality + ECDSA
         // against the stored MPC response key), checks the sentinel bytes, and
-        // re-mints the escrowed shielded value to the withdrawer (this
+        // re-mints the surrendered shielded value to the withdrawer (this
         // session's wallet, which proves the pinned refund commitment) instead
         // of leaving it burned. The request + its pending-withdrawal marker
         // are consumed (double-settle protection). The refunded shielded

@@ -88,7 +88,7 @@ sealed ledger deployer: Bytes<32>;
 // Pending withdrawals: requestId -> the withdrawer's refund commitment (see
 // withdrawRefundCommitment), pinned at request time so ONLY the withdrawer can pull a
 // refund when the EVM transfer fails. Doubles as the pending-withdrawal marker, and is
-// the ONLY per-withdrawal state: the surrendered coin itself is burned at receive time
+// the ONLY per-withdrawal state: the surrendered coin itself is burned at request time
 // (see withdraw), so any number of withdrawals across any ERC20 colours proceed
 // concurrently.
 export ledger refundCommitment: Map<RequestId, Bytes<32>>;
@@ -489,11 +489,11 @@ export circuit withdraw(
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
 
-  // The surrendered value is BURNED here: the receive obliges the transaction to pay
-  // the coin to this contract, and the contract deliberately never records it, so it
-  // can never be spent. Vault tokens are IOUs, and a refund MINTS fresh ones. No
-  // per-withdrawal escrow slot means any number of concurrent withdrawals.
-  receiveShielded(disclose(coin));
+  // The surrendered value is BURNED here: the transaction pays the coin in, and its
+  // full value is immediately forwarded to the stdlib's shielded burn address, where
+  // nothing can ever spend it. Vault tokens are IOUs, and a refund MINTS fresh ones.
+  // No per-withdrawal escrow slot means any number of concurrent withdrawals.
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
 
   // Record the event and pin the withdrawer's refund commitment: only the commitment
   // (a hash) reaches the ledger, the refund recipient's key stays private.
@@ -858,8 +858,8 @@ export circuit swap(
   const requestId = disclose(calculateRequestId<EvmType2TxParams<7, 0, 0>, 38, 37>(request));
   assert(!swapEventMap.member(requestId), "Request already exists");
 
-  // Burn the surrendered tokenIn value (see withdraw): received, never recorded.
-  receiveShielded(disclose(coin));
+  // Burn the surrendered tokenIn value (see withdraw): forwarded whole to the burn address.
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
 
   signetRequestNonce.increment(1);
   swapEventMap.insert(requestId, disclose(request));

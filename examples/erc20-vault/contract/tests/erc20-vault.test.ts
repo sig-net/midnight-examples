@@ -2,6 +2,7 @@
 // @midnight-ntwrk/compact-runtime. No ledger, no network, no proving.
 
 import {
+  type CircuitContext,
   createCircuitContext,
   createConstructorContext,
   rawTokenType,
@@ -79,6 +80,19 @@ const first = <T>(items: Iterable<T>, what: string): T => {
     return item;
   }
   throw new Error(`expected at least one ${what}`);
+};
+
+// The stdlib's shieldedBurnAddress() recipient: the all-zero coin public key.
+// The burn-output assertions below are the lockstep check for this mirror.
+const BURN_ADDRESS_BYTES = new Uint8Array(32);
+
+/** The zswap local state a circuit run produced, failing when there is none. */
+const zswapState = (context: CircuitContext<VaultPrivateState>) => {
+  const state = context.callContext.currentZswapLocalState;
+  if (!state) {
+    throw new Error("expected zswap local state on the circuit context");
+  }
+  return state;
 };
 
 // Identity secrets for the simulated deployer/caller (same key: the deployer
@@ -687,13 +701,27 @@ describe("withdraw round-trip", () => {
 
     // The withdrawer's refund commitment is pinned under the request id;
     // the compiled circuit recomputes it off-chain here (domain-separated
-    // from userCommitment, bound to THIS request id); nonce bumped. The
-    // surrendered coin leaves no other trace: it is burned, by design.
+    // from userCommitment, bound to THIS request id); nonce bumped.
     expect(ledger(state).refundCommitment.member(requestIdBytes(idHex))).toBe(true);
     expect(ledger(state).refundCommitment.lookup(requestIdBytes(idHex))).toEqual(
       pureCircuits.withdrawRefundCommitment(SECRET_KEY, requestIdBytes(idHex)),
     );
     expect(ledger(state).signetRequestNonce).toBe(1n);
+
+    // The burn, observable in the zswap local state: the surrendered coin is
+    // consumed as the call's input, and the single output pays its full value
+    // to the shielded burn address.
+    const zswap = zswapState(next);
+    expect(zswap.inputs).toHaveLength(1);
+    const consumed = first(zswap.inputs, "consumed coin");
+    expect(consumed.color).toEqual(VAULT_TOKEN_COLOR);
+    expect(consumed.value).toBe(AMOUNT);
+    expect(zswap.outputs).toHaveLength(1);
+    const burnOutput = first(zswap.outputs, "burn output");
+    expect(burnOutput.coinInfo.color).toEqual(VAULT_TOKEN_COLOR);
+    expect(burnOutput.coinInfo.value).toBe(AMOUNT);
+    expect(burnOutput.recipient.is_left).toBe(true);
+    expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
   });
 
   it("concurrent withdrawals across DIFFERENT ERC20 colors both land", async () => {
@@ -1493,6 +1521,16 @@ describe("swap round-trip", () => {
 
     // Pending-swap marker pinned.
     expect(state.swapRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
+
+    // Same burn as withdraw: amountInMaximum of the tokenIn vault coin is
+    // consumed and paid, whole, to the shielded burn address.
+    const zswap = zswapState(next);
+    expect(zswap.outputs).toHaveLength(1);
+    const burnOutput = first(zswap.outputs, "burn output");
+    expect(burnOutput.coinInfo.color).toEqual(VAULT_TOKEN_COLOR);
+    expect(burnOutput.coinInfo.value).toBe(SWAP_AMOUNT_IN_MAX);
+    expect(burnOutput.recipient.is_left).toBe(true);
+    expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
   });
 
   it("rejects a coin that is not the tokenIn vault color or not amountInMaximum", async () => {
