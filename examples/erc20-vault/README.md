@@ -15,14 +15,8 @@ vault sends is signed by the MPC network on the vault's request via the
 
 What this example demonstrates, end to end:
 
-- A Compact contract requesting EVM transaction signatures from the Signature
-  Network singleton contract with a cross-contract call on Midnight.
-- The MPC observing the request, signing the EVM transaction (secp256k1), and
-  later attesting the EVM outcome with an ECDSA-signed
-  `RespondBidirectionalEvent`, signed by a response key derived for THIS
-  contract (from the MPC root key, the vault's own address and the fixed path
-  `"midnight response key"`). Both responses are emitted as contract events
-  on Midnight.
+- A Compact contract requesting EVM transaction signatures from the Signature Network singleton contract with a cross-contract call on Midnight.
+- The MPC observing the request, signing the EVM transaction (secp256k1), and later attesting the EVM outcome with an ECDSA-signed `RespondBidirectionalEvent`, signed by a response key derived for THIS contract (from the MPC root key, the vault's own address and the fixed path `"midnight response key"`). Both responses are emitted as contract events on Midnight.
 - The vault verifying that response in-circuit against the response key it
   pinned at `initialize` time, and minting or burning shielded vault tokens
   accordingly, including a refund branch for when the EVM leg fails.
