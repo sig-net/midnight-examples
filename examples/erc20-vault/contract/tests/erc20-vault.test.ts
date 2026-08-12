@@ -715,11 +715,20 @@ describe("withdraw round-trip", () => {
     // what lets the transaction builder pair the two into a same-transaction
     // transient instead of a contract coin-tree spend.
     const zswap = zswapState(next);
+
+    // check inputs, expect 1 input:
+    // - coin for the amount being withdrawn
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
     expect(consumed.color).toEqual(VAULT_TOKEN_COLOR);
     expect(consumed.value).toBe(AMOUNT);
+
+    // check outputs, expect 2 ouputs:
+    // - received coin to the contract address
+    // - burned coin to the burn address
     expect(zswap.outputs).toHaveLength(2);
+
+    // received coin to the contract address
     const received = first(
       zswap.outputs.filter((output) => !output.recipient.is_left),
       "contract-owned receive output",
@@ -730,6 +739,8 @@ describe("withdraw round-trip", () => {
       color: consumed.color,
       value: consumed.value,
     });
+
+    // burned coin to the burn address
     const burnOutput = first(
       zswap.outputs.filter((output) => output.recipient.is_left),
       "burn output",
@@ -1541,7 +1552,32 @@ describe("swap round-trip", () => {
     // detail): amountInMaximum of the tokenIn vault coin is received, spent,
     // and paid whole to the shielded burn address.
     const zswap = zswapState(next);
+
+    // check inputs, expect 1 input:
+    // - coin for the amount being withdrawn
+    expect(zswap.inputs).toHaveLength(1);
+    const consumed = first(zswap.inputs, "consumed coin");
+    expect(consumed.color).toEqual(VAULT_TOKEN_COLOR);
+    expect(consumed.value).toBe(SWAP_AMOUNT_IN_MAX);
+
+    // check outputs, expect 2 ouputs:
+    // - received coin to the contract address
+    // - burned coin to the burn address
     expect(zswap.outputs).toHaveLength(2);
+
+    // received coin to the contract address
+    const received = first(
+      zswap.outputs.filter((output) => !output.recipient.is_left),
+      "contract-owned receive output",
+    );
+    expect(received.recipient.right.bytes).toEqual(VAULT_ADDRESS_BYTES);
+    expect(received.coinInfo).toEqual({
+      nonce: consumed.nonce,
+      color: consumed.color,
+      value: consumed.value,
+    });
+
+    // burned coin to the burn address
     const burnOutput = first(
       zswap.outputs.filter((output) => output.recipient.is_left),
       "burn output",
