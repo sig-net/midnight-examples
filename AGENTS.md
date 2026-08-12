@@ -85,7 +85,14 @@ exception for that specific case.
   adopting it. Before you install, confirm the release is not deprecated and
   `yarn npm audit` reports no new advisory. The compact toolchain is likewise
   pinned: install it with `compact update 0.33.0-rc.2` (the exact version named
-  in the README's prerequisites), and CI installs exactly that version.
+  in the README's prerequisites), and CI installs exactly that version. The
+  toolchain pin lives in several places that move TOGETHER: the workflow's
+  launcher URL (`compact-v0.5.1`) and compiler zip URL, the SHA-256 checksums
+  the workflow verifies for those two downloads (recompute each from a fresh
+  download of the new URL), the workflow cache keys, and the README's
+  Prerequisites table. This trigger is bidirectional: a request to "update the
+  compact version" AND a request to edit the version in the README's table
+  both mean updating every one of these sites in the same change.
   Corollary: a dependency shared by two members MUST resolve to the same
   version in every member. Bump it everywhere in the same change and
   `yarn install` from the root: a single shared version is what keeps the
