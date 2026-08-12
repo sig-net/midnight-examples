@@ -34,6 +34,10 @@ on:
         required: false
         type: string
         default: tests/happy-day-e2e.test.ts
+    secrets:
+      SEPOLIA_FORK_RPC_URL:
+        description: "Sepolia RPC URL the local anvil forks from (see the fork-env comment below)"
+        required: true
 
 jobs:
   example:
@@ -52,6 +56,8 @@ jobs:
       SEPOLIA_FORK_RPC_URL: ${{ secrets.SEPOLIA_FORK_RPC_URL }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: lts/*
@@ -133,9 +139,13 @@ jobs:
         with:
           path: examples/${{ inputs.example-dir }}/contract/src/managed
           key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
+      # Inputs reach run blocks via env, never inline ${{ }} interpolation:
+      # inline expansion into shell is a code-injection surface.
       - name: zk keygen (cache miss only)
         if: steps.zk.outputs.cache-hit != 'true'
-        run: yarn compile:${{ inputs.example-dir }}:zk
+        env:
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+        run: yarn "compile:${EXAMPLE_DIR}:zk"
       - name: Save zk proving keys (immediately — a later flow failure must not lose them)
         if: steps.zk.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -176,12 +186,15 @@ jobs:
         if: inputs.full-suite != true
         env:
           TRUST_PREBUILT_ZK_KEYS: "1"
-        run: yarn test:${{ inputs.example-dir }}:e2e ${{ inputs.gate-spec }}
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+          GATE_SPEC: ${{ inputs.gate-spec }}
+        run: yarn "test:${EXAMPLE_DIR}:e2e" "$GATE_SPEC"
       - name: e2e suite — full
         if: inputs.full-suite == true
         env:
           TRUST_PREBUILT_ZK_KEYS: "1"
-        run: yarn test:${{ inputs.example-dir }}:e2e
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+        run: yarn "test:${EXAMPLE_DIR}:e2e"
       - name: Collect service logs
         if: failure()
         run: |
