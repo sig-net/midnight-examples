@@ -6,8 +6,8 @@
 
 import { asciiPadded, CAIP2_ID_BYTES, parseSecp256k1PublicKey } from "@sig-net/midnight";
 
-import { UNISWAP_SWAP_ROUTER_02 } from "../evm-swap.ts";
 import { AAVE_USDC, STATA_USDC } from "../evm-stata.ts";
+import { UNISWAP_SWAP_ROUTER_02 } from "../evm-swap.ts";
 import { evmAddressBytes } from "../evm-transfer.ts";
 import type { VaultContext } from "../vault-context.ts";
 

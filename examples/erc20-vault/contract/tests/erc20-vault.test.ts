@@ -82,6 +82,19 @@ const first = <T>(items: Iterable<T>, what: string): T => {
   throw new Error(`expected at least one ${what}`);
 };
 
+// The stdlib's shieldedBurnAddress() recipient: the all-zero coin public key.
+// The burn-output assertions below are the lockstep check for this mirror.
+const BURN_ADDRESS_BYTES = new Uint8Array(32);
+
+/** The zswap local state a circuit run produced, failing when there is none. */
+const zswapState = (context: CircuitContext<VaultPrivateState>) => {
+  const state = context.callContext.currentZswapLocalState;
+  if (!state) {
+    throw new Error("expected zswap local state on the circuit context");
+  }
+  return state;
+};
+
 // Identity secrets for the simulated deployer/caller (same key: the deployer
 // deposits in these tests) and for a stranger.
 const SECRET_KEY = bytes(32, 7);
@@ -149,19 +162,6 @@ const CAIP2_ID = asciiPadded("eip155:11155111", 32);
 // field of every event the vault records (kernel.self() again).
 const VAULT_ADDRESS = sampleContractAddress();
 const VAULT_ADDRESS_BYTES = hexToBytes(VAULT_ADDRESS);
-
-// The stdlib's shieldedBurnAddress() recipient: the all-zero coin public key.
-// The burn-output assertions below are the lockstep check for this mirror.
-const BURN_ADDRESS_BYTES = new Uint8Array(32);
-
-/** The zswap local state a circuit run produced, failing when there is none. */
-const zswapState = (context: CircuitContext<VaultPrivateState>) => {
-  const state = context.callContext.currentZswapLocalState;
-  if (!state) {
-    throw new Error("expected zswap local state on the circuit context");
-  }
-  return state;
-};
 
 // The contract-fixed MPC routing of every vault event (mirrors of the
 // in-circuit constants; the round-trip tests below are the lockstep check for
@@ -740,13 +740,53 @@ describe("withdraw round-trip", () => {
 
     // The withdrawer's refund commitment is pinned under the request id;
     // the compiled circuit recomputes it off-chain here (domain-separated
-    // from userCommitment, bound to THIS request id); nonce bumped. The
-    // surrendered coin leaves no other trace: it is burned, by design.
+    // from userCommitment, bound to THIS request id); nonce bumped.
     expect(ledger(state).refundCommitment.member(requestIdBytes(idHex))).toBe(true);
     expect(ledger(state).refundCommitment.lookup(requestIdBytes(idHex))).toEqual(
       pureCircuits.withdrawRefundCommitment(SECRET_KEY, requestIdBytes(idHex)),
     );
     expect(ledger(state).signetRequestNonce).toBe(1n);
+
+    // The burn, observable in the zswap local state: the coin is received (a
+    // contract-owned output) and spent as the call's input, and the burn
+    // output pays its full value to the shielded burn address. The receive
+    // output's coin info must equal the spent coin's exactly: that identity is
+    // what lets the transaction builder pair the two into a same-transaction
+    // transient instead of a contract coin-tree spend.
+    const zswap = zswapState(next);
+
+    // check inputs, expect 1 input:
+    // - coin for the amount being withdrawn
+    expect(zswap.inputs).toHaveLength(1);
+    const consumed = first(zswap.inputs, "consumed coin");
+    expect(consumed.color).toEqual(VAULT_TOKEN_COLOR);
+    expect(consumed.value).toBe(AMOUNT);
+
+    // check outputs, expect 2 ouputs:
+    // - received coin to the contract address
+    // - burned coin to the burn address
+    expect(zswap.outputs).toHaveLength(2);
+
+    // received coin to the contract address
+    const received = first(
+      zswap.outputs.filter((output) => !output.recipient.is_left),
+      "contract-owned receive output",
+    );
+    expect(received.recipient.right.bytes).toEqual(VAULT_ADDRESS_BYTES);
+    expect(received.coinInfo).toEqual({
+      nonce: consumed.nonce,
+      color: consumed.color,
+      value: consumed.value,
+    });
+
+    // burned coin to the burn address
+    const burnOutput = first(
+      zswap.outputs.filter((output) => output.recipient.is_left),
+      "burn output",
+    );
+    expect(burnOutput.coinInfo.color).toEqual(VAULT_TOKEN_COLOR);
+    expect(burnOutput.coinInfo.value).toBe(AMOUNT);
+    expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
   });
 
   it("concurrent withdrawals across DIFFERENT ERC20 colors both land", async () => {
@@ -1546,6 +1586,44 @@ describe("swap round-trip", () => {
 
     // Pending-swap marker pinned.
     expect(state.swapRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
+
+    // Same burn as withdraw (which asserts the receive/spend pairing in
+    // detail): amountInMaximum of the tokenIn vault coin is received, spent,
+    // and paid whole to the shielded burn address.
+    const zswap = zswapState(next);
+
+    // check inputs, expect 1 input:
+    // - coin for the amount being withdrawn
+    expect(zswap.inputs).toHaveLength(1);
+    const consumed = first(zswap.inputs, "consumed coin");
+    expect(consumed.color).toEqual(VAULT_TOKEN_COLOR);
+    expect(consumed.value).toBe(SWAP_AMOUNT_IN_MAX);
+
+    // check outputs, expect 2 ouputs:
+    // - received coin to the contract address
+    // - burned coin to the burn address
+    expect(zswap.outputs).toHaveLength(2);
+
+    // received coin to the contract address
+    const received = first(
+      zswap.outputs.filter((output) => !output.recipient.is_left),
+      "contract-owned receive output",
+    );
+    expect(received.recipient.right.bytes).toEqual(VAULT_ADDRESS_BYTES);
+    expect(received.coinInfo).toEqual({
+      nonce: consumed.nonce,
+      color: consumed.color,
+      value: consumed.value,
+    });
+
+    // burned coin to the burn address
+    const burnOutput = first(
+      zswap.outputs.filter((output) => output.recipient.is_left),
+      "burn output",
+    );
+    expect(burnOutput.coinInfo.color).toEqual(VAULT_TOKEN_COLOR);
+    expect(burnOutput.coinInfo.value).toBe(SWAP_AMOUNT_IN_MAX);
+    expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
   });
 
   it("rejects a coin that is not the tokenIn vault color or not amountInMaximum", async () => {
