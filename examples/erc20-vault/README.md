@@ -15,14 +15,8 @@ vault sends is signed by the MPC network on the vault's request via the
 
 What this example demonstrates, end to end:
 
-- A Compact contract requesting EVM transaction signatures from the Signature
-  Network singleton contract with a cross-contract call on Midnight.
-- The MPC observing the request, signing the EVM transaction (secp256k1), and
-  later attesting the EVM outcome with an ECDSA-signed
-  `RespondBidirectionalEvent`, signed by a response key derived for THIS
-  contract (from the MPC root key, the vault's own address and the fixed path
-  `"midnight response key"`). Both responses are emitted as contract events
-  on Midnight.
+- A Compact contract requesting EVM transaction signatures from the Signature Network singleton contract with a cross-contract call on Midnight.
+- The MPC observing the request, signing the EVM transaction (secp256k1), and later attesting the EVM outcome with an ECDSA-signed `RespondBidirectionalEvent`, signed by a response key derived for THIS contract (from the MPC root key, the vault's own address and the fixed path `"midnight response key"`). Both responses are emitted as contract events on Midnight.
 - The vault verifying that response in-circuit against the response key it
   pinned at `initialize` time, and minting or burning shielded vault tokens
   accordingly, including a refund branch for when the EVM leg fails.
@@ -620,9 +614,9 @@ Two patterns to take from it
 [`complete-withdraw.ts`](integration-tests/src/flows/complete-withdraw.ts)):
 
 - **Coin-spend as authorisation.** `withdraw()` is optimistic: the surrendered
-  coin is BURNED first (`receiveShielded`, paid to the contract and never
-  recorded, so vault tokens are IOUs a refund re-mints), and the refund path
-  exists for when the EVM leg later fails. The spend IS the auth, so anyone may
+  coin is BURNED first (`sendImmediateShielded` forwards its full value to the
+  stdlib's `shieldedBurnAddress()`, so vault tokens are IOUs a refund
+  re-mints), and the refund path exists for when the EVM leg later fails. The spend IS the auth, so anyone may
   withdraw to any destination. Because the vault's account pays the gas, the fee
   envelope is contract-FIXED (a caller-chosen cap would let anyone drain the
   vault's ETH). The request is keyed under the vault's own `"vault"` path so the

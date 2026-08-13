@@ -12,6 +12,8 @@ on:
       - "packages/**"
       - "docker-compose.yaml"
       - "package.json"
+      - "yarn.lock"
+      - ".yarnrc.yml"
       - "tsconfig.base.json"
       - "eslint.config.js"
       - ".prettierrc.json"
@@ -24,6 +26,8 @@ on:
       - "packages/**"
       - "docker-compose.yaml"
       - "package.json"
+      - "yarn.lock"
+      - ".yarnrc.yml"
       - "tsconfig.base.json"
       - "eslint.config.js"
       - ".prettierrc.json"
@@ -37,6 +41,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 concurrency:
   group: erc20-vault-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -44,9 +51,11 @@ concurrency:
 jobs:
   test:
     uses: ./.github/workflows/example-test.yaml
-    # The reusable workflow forks Sepolia via SEPOLIA_FORK_RPC_URL; a reusable
-    # workflow sees no secrets unless the caller passes them, so inherit them.
-    secrets: inherit
+    # The reusable workflow sees no secrets unless the caller passes them.
+    # Passed by name (never `secrets: inherit`): the callee's declared
+    # secrets are the full list of what it can read.
+    secrets:
+      SEPOLIA_FORK_RPC_URL: ${{ secrets.SEPOLIA_FORK_RPC_URL }}
     with:
       example-dir: erc20-vault
       # PR/push gate: happy-day (deposit+withdraw), the swap success path (exactOutput
