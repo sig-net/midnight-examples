@@ -10,6 +10,7 @@
 // This file sits OUTSIDE src/ deliberately: it is a Node entrypoint (env
 // access, lib imports), while everything under src/ stays environment-agnostic.
 
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -181,6 +182,15 @@ interface VaultDeployment {
 async function deployVault(
   env: Record<string, string | undefined> = process.env,
 ): Promise<VaultDeployment> {
+  // The split deploy adds the deferred circuits via maintenance updates, which need a maintenance
+  // authority to sign. Generate an ephemeral one when unset (the deploy and the adds run in this
+  // one process, so it need not persist). A real deploy sets MAINTENANCE_SIGNING_KEY to keep the
+  // contract maintainable afterwards; the deploy uses whatever is set as the sealed authority.
+  if (!process.env.MAINTENANCE_SIGNING_KEY?.trim()) {
+    process.env.MAINTENANCE_SIGNING_KEY = randomBytes(32).toString("hex");
+    console.log("generated an ephemeral MAINTENANCE_SIGNING_KEY for the split deploy");
+  }
+
   const deployConfig = getDeployConfig(env);
   const { networkId } = deployConfig.midnightNodeConfig;
 
