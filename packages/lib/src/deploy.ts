@@ -209,6 +209,159 @@ export async function buildDeployTransaction<C extends Contract.Contract<PS>, PS
   };
 }
 
+/** A circuit held back from the base deploy, added afterwards by a maintenance update. */
+export interface DeferredCircuit {
+  /** The provable circuit id (its name). */
+  readonly circuitId: string;
+  /** The circuit's verifier key bytes, carried to the maintenance-add. */
+  readonly verifierKey: Uint8Array;
+}
+
+/** A base deploy plus the circuits split out for follow-up maintenance updates. */
+export interface SplitDeployTransaction extends DeployTransaction {
+  /** The deferred circuits, in deploy order, to add via {@link buildMaintenanceInsertTransaction}. */
+  readonly deferred: readonly DeferredCircuit[];
+}
+
+const operationIdToString = (id: string | Uint8Array): string =>
+  typeof id === "string" ? id : new TextDecoder().decode(id);
+
+/**
+ * Like {@link buildDeployTransaction}, but registers ONLY the circuits not in
+ * `deferredCircuitIds` in the initial contract state, returning the rest so the
+ * caller can add them with {@link buildMaintenanceInsertTransaction}. A contract
+ * whose full verifier-key set overflows a block (the 14-circuit vault) deploys as
+ * a fitting base plus small per-circuit maintenance adds. The constructor runs
+ * once over the full assets (every key must be present); the split is purely which
+ * operations land in the deployed state. Requires `MAINTENANCE_SIGNING_KEY` so the
+ * contract has an authority to sign the follow-up adds.
+ *
+ * @param compiledContract - The bound contract, from {@link makeCompiledContract}.
+ * @param networkId - The network the transaction targets.
+ * @param coinPublicKeyHex - The deploying wallet's Zswap coin public key (hex).
+ * @param initialPrivateState - The private state the constructor runs against.
+ * @param deferredCircuitIds - Circuit ids to hold back from the base deploy.
+ * @param constructorArgs - The contract's constructor arguments.
+ * @returns The base {@link DeployTransaction} plus the {@link DeferredCircuit}s to add next.
+ * @throws {Error} If the constructor traps or a verifier key is missing (run `compile:zk`).
+ */
+export async function buildDeployTransactionDeferring<C extends Contract.Contract<PS>, PS>(
+  compiledContract: CompiledContract.CompiledContract<C, PS>,
+  networkId: NetworkId,
+  coinPublicKeyHex: string,
+  initialPrivateState: PS,
+  deferredCircuitIds: readonly string[],
+  ...constructorArgs: Contract.Contract.InitializeParameters<C>
+): Promise<SplitDeployTransaction> {
+  const keysLayer = Layer.succeed(Configuration.Keys, {
+    coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
+    getSigningKey: () => resolveMaintenanceSigningKey(),
+  });
+
+  const deployResult = await Effect.runPromise(
+    ContractExecutable.make(compiledContract)
+      .initialize(initialPrivateState, ...constructorArgs)
+      .pipe(
+        Effect.provide(
+          ZKFileConfiguration.layer(CompiledContract.getCompiledAssetsPath(compiledContract)),
+        ),
+        Effect.provide(NodeContext.layer),
+        Effect.provide(keysLayer),
+      ),
+  );
+
+  const fullState = ledger.ContractState.deserialize(deployResult.public.contractState.serialize());
+
+  // Rebuild a base state carrying the same primary data and maintenance authority, but only the
+  // NON-deferred operations. The deferred circuits' verifier keys travel out for the caller to
+  // maintenance-add, which is what keeps the deploy tx under the block limit.
+  const defer = new Set(deferredCircuitIds);
+  const base = new ledger.ContractState();
+  base.data = fullState.data;
+  base.maintenanceAuthority = fullState.maintenanceAuthority;
+  const deferred: DeferredCircuit[] = [];
+  for (const id of fullState.operations()) {
+    const op = fullState.operation(id);
+    if (!op) continue;
+    if (defer.has(operationIdToString(id))) {
+      deferred.push({ circuitId: operationIdToString(id), verifierKey: op.verifierKey });
+    } else {
+      base.setOperation(id, op);
+    }
+  }
+
+  const deploy = new ledger.ContractDeploy(base);
+  const intent = ledger.Intent.new(new Date(Date.now() + DEPLOY_TTL_MS)).addDeploy(deploy);
+  const transaction = ledger.Transaction.fromPartsRandomized(
+    networkId,
+    undefined,
+    undefined,
+    intent,
+  );
+
+  return {
+    contractAddress: deploy.address,
+    serializedTransaction: transaction.serialize(),
+    deferred,
+  };
+}
+
+/**
+ * Build an unproven maintenance-update transaction that inserts `verifierKey` under `circuitId`
+ * on the deployed contract at `contractAddress`, signed by the `MAINTENANCE_SIGNING_KEY` authority.
+ * Ledger-level operation-version `'v4'` (which accepts the v7 verifier keys the compiler emits),
+ * the path proven to be accepted on-chain. Binds to the authority counter read from
+ * `currentContractStateBytes`, so re-query the live state before each add.
+ *
+ * @param networkId - The network the transaction targets.
+ * @param contractAddress - The deployed contract's address (hex).
+ * @param circuitId - The circuit id to install `verifierKey` under.
+ * @param verifierKey - The new circuit's verifier key bytes.
+ * @param currentContractStateBytes - Serialized live contract state (from queryContractState).
+ * @returns The serialized unproven maintenance transaction.
+ * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is unset or malformed.
+ */
+export function buildMaintenanceInsertTransaction(
+  networkId: NetworkId,
+  contractAddress: string,
+  circuitId: string,
+  verifierKey: Uint8Array,
+  currentContractStateBytes: Uint8Array,
+): { serializedTransaction: Uint8Array } {
+  const raw = envOrUndefined(process.env, "MAINTENANCE_SIGNING_KEY");
+  if (!raw) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY must be set to sign a maintenance update for the contract's authority.",
+    );
+  }
+  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hex)) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 key.",
+    );
+  }
+
+  const contractState = ledger.ContractState.deserialize(currentContractStateBytes);
+  const counter = contractState.maintenanceAuthority.counter;
+
+  const versionedKey = new ledger.ContractOperationVersionedVerifierKey("v4", verifierKey);
+  const insert = new ledger.VerifierKeyInsert(circuitId, versionedKey);
+  let update = new ledger.MaintenanceUpdate(contractAddress, [insert], counter);
+  const signingKey = ledger.signingKeyFromBip340(Uint8Array.from(Buffer.from(hex, "hex")));
+  update = update.addSignature(0n, ledger.signData(signingKey, update.dataToSign));
+
+  const intent = ledger.Intent.new(new Date(Date.now() + DEPLOY_TTL_MS)).addMaintenanceUpdate(
+    update,
+  );
+  const transaction = ledger.Transaction.fromPartsRandomized(
+    networkId,
+    undefined,
+    undefined,
+    intent,
+  );
+  return { serializedTransaction: transaction.serialize() };
+}
+
 /**
  * Fail fast when the deployer wallet cannot pay for a transaction: fees are
  * paid in DUST, which only generates on NIGHT registered for dust generation.
