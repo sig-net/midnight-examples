@@ -37,15 +37,10 @@ import { hexToBytes } from "@sig-net/midnight";
 import { Contract, pureCircuits } from "./src/managed/erc20-vault/contract/index.js";
 import { createVaultPrivateState, type VaultPrivateState, witnesses } from "./src/witnesses.ts";
 
-// The Aave circuits held back from the base deploy: the full 14-circuit state overflows a block,
-// so the base registers the core 9 and these are added by maintenance updates right after.
-const DEFERRED_AAVE_CIRCUITS = [
-  "approveStata",
-  "supply",
-  "completeSupply",
-  "redeem",
-  "completeRedeem",
-] as const;
+// The full 14-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
+// post-burn keys are large), so the base registers just ONE small circuit and every other
+// circuit is added by a maintenance update right after (each a tiny, fitting tx).
+const BASE_DEPLOY_CIRCUITS = ["approveRouter"] as const;
 
 const MINUTE_MS = 60_000;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -218,21 +213,22 @@ async function deployVault(
 
   console.log(`deploying erc20-vault to ${networkId} (${deployConfig.midnightNodeConfig.nodeUrl})`);
 
-  // The full 14-circuit deploy overflows a block, so register the core circuits in the base deploy
-  // and hold the Aave circuits back to add via maintenance updates (needs MAINTENANCE_SIGNING_KEY).
+  // The full 14-circuit deploy overflows a block, so register one small circuit in the base deploy
+  // and add every other circuit via maintenance updates (needs MAINTENANCE_SIGNING_KEY).
   const deployTransaction = await buildDeployTransactionDeferring(
     compiledContract,
     networkId,
     accountKeys.shieldedSecretKeys.coinPublicKey,
     createVaultPrivateState(secretKey),
-    DEFERRED_AAVE_CIRCUITS as unknown as string[],
+    BASE_DEPLOY_CIRCUITS as unknown as string[],
     deployerCommitment,
     signetSigner,
   );
   const { contractAddress, deferred } = deployTransaction;
   console.log(`contract address (pre-submit): ${contractAddress}`);
   console.log(
-    `base deploy holds back ${String(deferred.length)} Aave circuits for maintenance adds`,
+    `base deploy registers ${String(BASE_DEPLOY_CIRCUITS.length)} circuit(s); ` +
+      `deferring ${String(deferred.length)} for maintenance adds`,
   );
 
   const txId = await withSyncedWalletFacade(
@@ -258,7 +254,8 @@ async function deployVault(
     deferred,
   );
   console.log(
-    `deployed erc20-vault at ${contractAddress} (all ${String(deferred.length + 9)} circuits installed)`,
+    `deployed erc20-vault at ${contractAddress} ` +
+      `(all ${String(deferred.length + BASE_DEPLOY_CIRCUITS.length)} circuits installed)`,
   );
 
   return { contractAddress, txId };

@@ -227,20 +227,21 @@ const operationIdToString = (id: string | Uint8Array): string =>
   typeof id === "string" ? id : new TextDecoder().decode(id);
 
 /**
- * Like {@link buildDeployTransaction}, but registers ONLY the circuits not in
- * `deferredCircuitIds` in the initial contract state, returning the rest so the
- * caller can add them with {@link buildMaintenanceInsertTransaction}. A contract
- * whose full verifier-key set overflows a block (the 14-circuit vault) deploys as
- * a fitting base plus small per-circuit maintenance adds. The constructor runs
- * once over the full assets (every key must be present); the split is purely which
- * operations land in the deployed state. Requires `MAINTENANCE_SIGNING_KEY` so the
- * contract has an authority to sign the follow-up adds.
+ * Like {@link buildDeployTransaction}, but registers ONLY the circuits in
+ * `baseCircuitIds` in the initial contract state, returning the REST so the caller
+ * can add them with {@link buildMaintenanceInsertTransaction}. A contract whose full
+ * verifier-key set overflows a block (the 14-circuit vault) deploys as a small base
+ * plus per-circuit maintenance adds. Keep `baseCircuitIds` minimal (one small circuit
+ * is enough) so the base tx is well under the block limit; every other circuit is
+ * deferred. The constructor runs once over the full assets (every key must be present);
+ * the split is purely which operations land in the deployed state. Requires
+ * `MAINTENANCE_SIGNING_KEY` so the contract has an authority to sign the follow-up adds.
  *
  * @param compiledContract - The bound contract, from {@link makeCompiledContract}.
  * @param networkId - The network the transaction targets.
  * @param coinPublicKeyHex - The deploying wallet's Zswap coin public key (hex).
  * @param initialPrivateState - The private state the constructor runs against.
- * @param deferredCircuitIds - Circuit ids to hold back from the base deploy.
+ * @param baseCircuitIds - Circuit ids to register in the base deploy; all others are deferred.
  * @param constructorArgs - The contract's constructor arguments.
  * @returns The base {@link DeployTransaction} plus the {@link DeferredCircuit}s to add next.
  * @throws {Error} If the constructor traps or a verifier key is missing (run `compile:zk`).
@@ -250,7 +251,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   networkId: NetworkId,
   coinPublicKeyHex: string,
   initialPrivateState: PS,
-  deferredCircuitIds: readonly string[],
+  baseCircuitIds: readonly string[],
   ...constructorArgs: Contract.Contract.InitializeParameters<C>
 ): Promise<SplitDeployTransaction> {
   const keysLayer = Layer.succeed(Configuration.Keys, {
@@ -273,9 +274,9 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   const fullState = ledger.ContractState.deserialize(deployResult.public.contractState.serialize());
 
   // Rebuild a base state carrying the same primary data and maintenance authority, but only the
-  // NON-deferred operations. The deferred circuits' verifier keys travel out for the caller to
+  // BASE operations. Every other circuit's verifier key travels out for the caller to
   // maintenance-add, which is what keeps the deploy tx under the block limit.
-  const defer = new Set(deferredCircuitIds);
+  const keep = new Set(baseCircuitIds);
   const base = new ledger.ContractState();
   base.data = fullState.data;
   base.maintenanceAuthority = fullState.maintenanceAuthority;
@@ -283,10 +284,10 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   for (const id of fullState.operations()) {
     const op = fullState.operation(id);
     if (!op) continue;
-    if (defer.has(operationIdToString(id))) {
-      deferred.push({ circuitId: operationIdToString(id), verifierKey: op.verifierKey });
-    } else {
+    if (keep.has(operationIdToString(id))) {
       base.setOperation(id, op);
+    } else {
+      deferred.push({ circuitId: operationIdToString(id), verifierKey: op.verifierKey });
     }
   }
 
