@@ -5,14 +5,17 @@
 // deploy.ts and arrives here through the type parameters.
 
 import { NodeContext } from "@effect/platform-node";
+import { ContractState as RuntimeContractState } from "@midnight-ntwrk/compact-runtime";
 import {
   CompiledContract,
-  type Contract,
+  Contract,
   ContractExecutable,
 } from "@midnight-ntwrk/compact-js/effect";
 import { ZKFileConfiguration } from "@midnight-ntwrk/compact-js-node/effect";
 import * as CoinPublicKey from "@midnight-ntwrk/platform-js/effect/CoinPublicKey";
 import * as Configuration from "@midnight-ntwrk/platform-js/effect/Configuration";
+import * as ContractAddress from "@midnight-ntwrk/platform-js/effect/ContractAddress";
+import * as SigningKey from "@midnight-ntwrk/platform-js/effect/SigningKey";
 import * as ledger from "@midnightntwrk/ledger-v9";
 import type { FacadeState } from "@midnightntwrk/wallet-sdk-facade";
 import { Effect, Layer, Option, type Types } from "effect";
@@ -166,13 +169,14 @@ export async function buildDeployTransaction<C extends Contract.Contract<PS>, PS
   initialPrivateState: PS,
   ...constructorArgs: Contract.Contract.InitializeParameters<C>
 ): Promise<DeployTransaction> {
-  // initialize() needs the deployer's coin public key (for the constructor
-  // context) and a signing key for the contract maintenance authority.
-  // Option.none() makes the SDK sample a fresh CMA key (discarded — the
-  // contract can't be maintained later, which is fine for now).
+  // initialize() needs the deployer's coin public key (constructor context)
+  // and the contract maintenance authority's signing key. A set
+  // MAINTENANCE_SIGNING_KEY becomes that authority, so the contract can later
+  // gain circuits via a maintenance update. Unset samples a throwaway
+  // authority, leaving the contract unmaintainable.
   const keysLayer = Layer.succeed(Configuration.Keys, {
     coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
-    getSigningKey: () => Option.none(),
+    getSigningKey: () => resolveMaintenanceSigningKey(),
   });
 
   // Run the contract constructor and attach verifier keys → initial ContractState.
@@ -224,4 +228,92 @@ export function assertDeployerFunded(state: FacadeState): void {
     `deployer wallet has no DUST to pay fees (NIGHT balance: ${String(night)}). ` +
       "Fund the wallet with NIGHT and register it for dust generation, then retry.",
   );
+}
+
+/**
+ * The contract maintenance authority signing key, read from
+ * `MAINTENANCE_SIGNING_KEY` (32-byte BIP-340 key as hex, `0x` optional).
+ * Present makes the deployed contract's authority this key, so it can gain
+ * circuits via a maintenance update later; the same secret must sign those
+ * updates. Absent yields `Option.none()`, leaving the contract unmaintainable.
+ *
+ * @returns The maintenance authority key, or none when the env var is unset.
+ * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is set but not 32 bytes of hex.
+ */
+export function resolveMaintenanceSigningKey(): Option.Option<SigningKey.SigningKey> {
+  const raw = envOrUndefined(process.env, "MAINTENANCE_SIGNING_KEY");
+  if (!raw) return Option.none();
+  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hex)) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
+    );
+  }
+  return Option.some(SigningKey.make(hex));
+}
+
+/**
+ * Build an unproven maintenance-update transaction that installs `verifierKey`
+ * under `circuitId` on the already-deployed contract at `contractAddressHex`,
+ * signed by the authority from `MAINTENANCE_SIGNING_KEY`. This routes through
+ * the same compact-js path as {@link buildDeployTransaction}, so it accepts the
+ * v7 verifier keys the compiler emits. `currentContractStateBytes` is the live
+ * on-chain contract state, whose authority counter the update binds to. Submit
+ * the result like a deploy (balance/sign/prove/submit via a wallet).
+ *
+ * @param verifierKey - The new circuit's verifier key bytes (managed keys dir).
+ * @param currentContractStateBytes - Serialized live contract state (from queryContractState).
+ * @returns The contract address and the serialized unproven maintenance transaction.
+ * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is unset, so no authority can sign.
+ */
+export async function buildInsertVerifierKeyTransaction<C extends Contract.Contract<PS>, PS>(
+  compiledContract: CompiledContract.CompiledContract<C, PS>,
+  networkId: NetworkId,
+  coinPublicKeyHex: string,
+  contractAddressHex: string,
+  circuitId: string,
+  verifierKey: Uint8Array,
+  currentContractStateBytes: Uint8Array,
+): Promise<DeployTransaction> {
+  if (Option.isNone(resolveMaintenanceSigningKey())) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY must be set to sign a maintenance update for the contract's authority.",
+    );
+  }
+  const keysLayer = Layer.succeed(Configuration.Keys, {
+    coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
+    getSigningKey: () => resolveMaintenanceSigningKey(),
+  });
+
+  const contractState = RuntimeContractState.deserialize(currentContractStateBytes);
+
+  const result = await Effect.runPromise(
+    ContractExecutable.make(compiledContract)
+      .addOrReplaceContractOperation(
+        Contract.ProvableCircuitId(circuitId as never),
+        Contract.VerifierKey(verifierKey),
+        {
+          address: ContractAddress.ContractAddress(contractAddressHex),
+          contractState,
+        },
+      )
+      .pipe(
+        Effect.provide(
+          ZKFileConfiguration.layer(CompiledContract.getCompiledAssetsPath(compiledContract)),
+        ),
+        Effect.provide(NodeContext.layer),
+        Effect.provide(keysLayer),
+      ),
+  );
+
+  const intent = ledger.Intent.new(new Date(Date.now() + DEPLOY_TTL_MS)).addMaintenanceUpdate(
+    result.public.maintenanceUpdate,
+  );
+  const transaction = ledger.Transaction.fromPartsRandomized(
+    networkId,
+    undefined,
+    undefined,
+    intent,
+  );
+  return { contractAddress: contractAddressHex, serializedTransaction: transaction.serialize() };
 }

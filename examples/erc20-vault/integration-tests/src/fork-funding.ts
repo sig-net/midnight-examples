@@ -7,9 +7,15 @@ import { ethers } from "ethers";
 /** Real Sepolia USDC (the swap suite's tokenIn), also present on a Sepolia fork. */
 export const SEPOLIA_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const USDC_WHALE = "0x68adf381b8f9e9e100bb6e13d50b14094e3b6a9d"; // USDC/EURC pool, holds USDC on the fork
+
+/** Aave v3 Sepolia USDC (the lending suite's underlying), the stataUSDC wrapper's `asset()`. */
+export const AAVE_USDC = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8";
+// Aave's aEthUSDC aToken custodies the reserve's underlying USDC (~tens of thousands on the fork),
+// so it is the whale for dealing Aave USDC — the lending counterpart of USDC_WHALE.
+const AAVE_USDC_WHALE = "0x16dA4541aD1807f4443d92D26044C1147406EB80";
 const ONE_ETH = "0xDE0B6B3A7640000";
-// 100 USDC (6 decimals): far above every suite's small deposits combined, and safely under the
-// USDC/EURC pool's live balance (~hundreds of USDC) so the impersonated transfer never reverts.
+// 100 USDC (6 decimals): far above every suite's small deposits combined, and safely under each
+// whale's live balance so the impersonated transfer never reverts.
 const USER_USDC = 100_000_000n;
 
 const ERC20_ABI = [
@@ -18,29 +24,46 @@ const ERC20_ABI = [
 ];
 
 /**
- * Deal ETH (+ optional USDC) to `to` on the fork: anvil setBalance + an impersonated whale transfer.
+ * Transfer `amount` of `token` from an impersonated `whale` to `to` on the fork.
+ *
+ * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
+ * @param token - The ERC20 token contract to transfer.
+ * @param whale - The account to impersonate (holds `token` on the fork).
+ * @param to - The recipient address.
+ * @param amount - Base units to transfer.
+ */
+async function whaleTransfer(
+  provider: ethers.JsonRpcProvider,
+  token: string,
+  whale: string,
+  to: string,
+  amount: bigint,
+): Promise<void> {
+  await provider.send("anvil_setBalance", [whale, ONE_ETH]);
+  await provider.send("anvil_impersonateAccount", [whale]);
+  const contract = new ethers.Contract(token, ERC20_ABI, await provider.getSigner(whale));
+  await (await contract.getFunction<ContractWriteMethod>("transfer")(to, amount)).wait();
+  await provider.send("anvil_stopImpersonatingAccount", [whale]);
+}
+
+/**
+ * Deal ETH (+ optional USDC / Aave USDC) to `to` on the fork: anvil setBalance + impersonated
+ * whale transfers.
  *
  * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
  * @param to - The recipient address.
- * @param usdc - USDC base units to deal (0 deals only ETH).
+ * @param usdc - Circle USDC base units to deal (0 deals none).
+ * @param aaveUsdc - Aave USDC base units to deal (0 deals none); the lending suite's underlying.
  */
 export async function dealFork(
   provider: ethers.JsonRpcProvider,
   to: string,
   usdc: bigint,
+  aaveUsdc = 0n,
 ): Promise<void> {
   await provider.send("anvil_setBalance", [to, ONE_ETH]);
-  if (usdc > 0n) {
-    await provider.send("anvil_setBalance", [USDC_WHALE, ONE_ETH]);
-    await provider.send("anvil_impersonateAccount", [USDC_WHALE]);
-    const token = new ethers.Contract(
-      SEPOLIA_USDC,
-      ERC20_ABI,
-      await provider.getSigner(USDC_WHALE),
-    );
-    await (await token.getFunction<ContractWriteMethod>("transfer")(to, usdc)).wait();
-    await provider.send("anvil_stopImpersonatingAccount", [USDC_WHALE]);
-  }
+  if (usdc > 0n) await whaleTransfer(provider, SEPOLIA_USDC, USDC_WHALE, to, usdc);
+  if (aaveUsdc > 0n) await whaleTransfer(provider, AAVE_USDC, AAVE_USDC_WHALE, to, aaveUsdc);
 }
 
 /**
@@ -68,8 +91,14 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
     );
   }
 
+  // The lending suite deposits Aave's own USDC (the stataUSDC wrapper's asset()), a different
+  // token from Circle's USDC. Deal it only when it forks in; on a fork missing it, the lending
+  // e2e self-skips (stataAvailable), so a hard failure here would be too strict.
+  const aaveUsdcOnFork = (await provider.getCode(AAVE_USDC)) !== "0x";
+  const userAaveUsdc = aaveUsdcOnFork ? USER_USDC : 0n;
+
   try {
-    await dealFork(provider, user, USER_USDC);
+    await dealFork(provider, user, USER_USDC, userAaveUsdc);
     await dealFork(provider, vault, 0n);
   } catch (error) {
     throw new Error(
@@ -77,5 +106,8 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
       { cause: error },
     );
   }
-  console.log(`dealt on fork: user ${user} <- 100 USDC + gas; vault ${vault} <- gas`);
+  console.log(
+    `dealt on fork: user ${user} <- 100 USDC${aaveUsdcOnFork ? " + 100 Aave USDC" : ""} + gas; ` +
+      `vault ${vault} <- gas`,
+  );
 }

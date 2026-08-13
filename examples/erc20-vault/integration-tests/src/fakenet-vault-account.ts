@@ -36,15 +36,23 @@ const ERC20_TRANSFER_ABI = [
  *   `EVM_VAULT_ADDRESS`).
  * @param to - Recipient of the drained ERC20 (the suite sends it back to
  *   `EVM_USER_ADDRESS` so the funds keep cycling).
+ * @param tokenAddress - The token to drain; defaults to `ERC20_ADDRESS` (the
+ *   lending refund passes Aave USDC).
  * @returns The drained amount in ERC20 base units — `0n` when the account
  *   held nothing and no transaction was sent.
  * @throws {Error} If the derived address does not match `EVM_VAULT_ADDRESS` (wrong
  *   root key or vault contract address), or the transfer fails to mine.
  */
-export async function drainVaultErc20(env: NodeJS.ProcessEnv, to: string): Promise<bigint> {
+export async function drainVaultErc20(
+  env: NodeJS.ProcessEnv,
+  to: string,
+  tokenAddress?: string,
+): Promise<bigint> {
   const vaultContractAddress = requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
   const expectedAddress = requireEnv(env, "EVM_VAULT_ADDRESS");
-  const erc20Address = requireEnv(env, "ERC20_ADDRESS");
+  // The token to drain; defaults to the suite's ERC20_ADDRESS. The lending refund passes Aave
+  // USDC so the vault holds none when the supply's transferFrom runs.
+  const erc20Address = tokenAddress ?? requireEnv(env, "ERC20_ADDRESS");
 
   // The private-key side of the sig-net v2.0.0 epsilon scheme:
   // epsilon = deriveEpsilon(contract, path) (keccak of the colon-separated

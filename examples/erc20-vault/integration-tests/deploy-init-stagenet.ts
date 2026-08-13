@@ -37,6 +37,9 @@ import {
 } from "./src/vault-providers.ts";
 
 const UNISWAP_SWAP_ROUTER_02 = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E";
+// Aave v3 Sepolia: the underlying USDC the vault lends and its non-rebasing ERC-4626 wrapper.
+const AAVE_USDC = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8";
+const STATA_USDC = "0x8A88124522dbBF1E56352ba3DE1d9F78C143751e";
 const evmAddressBytes = (hex: string) => hexToBytes(stripHexPrefix(hex));
 const contractRef = (addr: string) => ({ bytes: hexToBytes(stripHexPrefix(addr)) });
 
@@ -57,6 +60,8 @@ async function main(): Promise<void> {
   const mpcSecpPub = req("MPC_SECP256K1_PUBKEY");
   const evmChainId = BigInt(req("EVM_CHAIN_ID"));
   const router = env.ROUTER?.trim() ?? UNISWAP_SWAP_ROUTER_02;
+  const stataUnderlying = env.STATA_UNDERLYING?.trim() ?? AAVE_USDC;
+  const stataToken = env.STATA_TOKEN?.trim() ?? STATA_USDC;
 
   const secretKey = parseIdentitySecretKey("VAULT_DEPLOYER_SECRET_KEY", env, deployerSeed);
   const deployerCommitment = pureCircuits.userCommitment(secretKey);
@@ -101,7 +106,7 @@ async function main(): Promise<void> {
     );
     const caip2Id = `eip155:${String(evmChainId)}`;
     console.log(
-      `initialize: vaultEvm=${vaultEvmAddress} router=${router} chain=${String(evmChainId)} responseKey=${mpcResponseKey}`,
+      `initialize: vaultEvm=${vaultEvmAddress} router=${router} stataUnderlying=${stataUnderlying} stataToken=${stataToken} chain=${String(evmChainId)} responseKey=${mpcResponseKey}`,
     );
 
     const initRes = await (
@@ -111,6 +116,8 @@ async function main(): Promise<void> {
     ).callTx.initialize(
       evmAddressBytes(vaultEvmAddress),
       evmAddressBytes(router),
+      evmAddressBytes(stataUnderlying),
+      evmAddressBytes(stataToken),
       evmChainId,
       asciiPadded(caip2Id, CAIP2_ID_BYTES),
       parseSecp256k1PublicKey(mpcResponseKey),
