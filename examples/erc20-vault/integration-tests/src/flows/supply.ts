@@ -274,7 +274,10 @@ export async function runSupplyRoundTrip(
 ): Promise<{ requestId: RequestIdHex; shares: bigint; refunded: boolean } | undefined> {
   const context = await session.vaultContext();
   if (!(await stataAvailable(context.evmRpcUrl))) {
-    logSkip("supply", "stataToken not deployed on this EVM chain (needs Sepolia or a Sepolia fork)");
+    logSkip(
+      "supply",
+      "stataToken not deployed on this EVM chain (needs Sepolia or a Sepolia fork)",
+    );
     return undefined;
   }
 

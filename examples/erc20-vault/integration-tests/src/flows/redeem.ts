@@ -268,7 +268,10 @@ export async function runRedeemRoundTrip(
 ): Promise<{ requestId: RequestIdHex; assets: bigint; refunded: boolean } | undefined> {
   const context = await session.vaultContext();
   if (!(await stataAvailable(context.evmRpcUrl))) {
-    logSkip("redeem", "stataToken not deployed on this EVM chain (needs Sepolia or a Sepolia fork)");
+    logSkip(
+      "redeem",
+      "stataToken not deployed on this EVM chain (needs Sepolia or a Sepolia fork)",
+    );
     return undefined;
   }
 
