@@ -46,6 +46,12 @@ export interface DepositOptions {
   readonly amount: bigint;
   /** Nonce of the user's derived EVM account (the sweep tx sender). */
   readonly evmNonce: bigint;
+  /**
+   * The ERC20 to deposit; defaults to the suite's `ERC20_ADDRESS`. The vault mints a distinct
+   * colour per token (`vaultTokenType(erc20Address, …)`), so the Aave leg deposits its own
+   * underlying (Aave USDC) while the swap/withdraw legs keep the default.
+   */
+  readonly erc20Address?: string;
 }
 
 /**
@@ -79,9 +85,10 @@ export async function deposit(
   if (options.evmNonce < 0n) {
     throw new Error(`evmNonce must be non-negative; got ${String(options.evmNonce)}.`);
   }
-  const erc20 = evmAddressBytes(context.erc20Address);
+  const erc20Address = options.erc20Address ?? context.erc20Address;
+  const erc20 = evmAddressBytes(erc20Address);
   console.log(`vault contract:    ${context.vaultContractAddress}`);
-  console.log(`erc20:             ${context.erc20Address}`);
+  console.log(`erc20:             ${erc20Address}`);
   console.log(
     `amount:            ${String(options.amount)} (evm nonce ${String(options.evmNonce)})`,
   );
@@ -176,6 +183,8 @@ export async function deposit(
 export interface DepositRoundTripOptions {
   /** Deposit amount in ERC20 base units. */
   readonly amount: bigint;
+  /** The ERC20 to deposit; defaults to the suite's `ERC20_ADDRESS`. See {@link DepositOptions}. */
+  readonly erc20Address?: string;
   /**
    * Resume from an existing request instead of calling {@link deposit} —
    * for recovering a run that died mid-round-trip (e.g. the proof server
@@ -249,7 +258,11 @@ export async function runDepositRoundTrip(
     // The sweep tx sender is the user's derived EVM account; its next nonce
     // comes from the chain, exactly as a wallet would fetch it.
     const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmUserAddress);
-    requestId = await deposit(context, { amount: opts.amount, evmNonce });
+    requestId = await deposit(context, {
+      amount: opts.amount,
+      evmNonce,
+      erc20Address: opts.erc20Address,
+    });
   }
   if (!/^[0-9a-f]{64}$/.test(requestId)) {
     throw new Error(`deposit request id is not 64-char lowercase hex: "${requestId}"`);
