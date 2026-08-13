@@ -6,11 +6,7 @@
 
 import { NodeContext } from "@effect/platform-node";
 import { ContractState as RuntimeContractState } from "@midnight-ntwrk/compact-runtime";
-import {
-  CompiledContract,
-  Contract,
-  ContractExecutable,
-} from "@midnight-ntwrk/compact-js/effect";
+import { CompiledContract, Contract, ContractExecutable } from "@midnight-ntwrk/compact-js/effect";
 import { ZKFileConfiguration } from "@midnight-ntwrk/compact-js-node/effect";
 import * as CoinPublicKey from "@midnight-ntwrk/platform-js/effect/CoinPublicKey";
 import * as Configuration from "@midnight-ntwrk/platform-js/effect/Configuration";
