@@ -5,9 +5,9 @@
 // deploy.ts and arrives here through the type parameters.
 
 import { NodeContext } from "@effect/platform-node";
-import { ContractState as RuntimeContractState } from "@midnight-ntwrk/compact-runtime";
 import { CompiledContract, Contract, ContractExecutable } from "@midnight-ntwrk/compact-js/effect";
 import { ZKFileConfiguration } from "@midnight-ntwrk/compact-js-node/effect";
+import { ContractState as RuntimeContractState } from "@midnight-ntwrk/compact-runtime";
 import * as CoinPublicKey from "@midnight-ntwrk/platform-js/effect/CoinPublicKey";
 import * as Configuration from "@midnight-ntwrk/platform-js/effect/Configuration";
 import * as ContractAddress from "@midnight-ntwrk/platform-js/effect/ContractAddress";
@@ -257,6 +257,11 @@ export function resolveMaintenanceSigningKey(): Option.Option<SigningKey.Signing
  * on-chain contract state, whose authority counter the update binds to. Submit
  * the result like a deploy (balance/sign/prove/submit via a wallet).
  *
+ * @param compiledContract - The compiled contract whose circuit is being installed.
+ * @param networkId - The target network id the transaction is built for.
+ * @param coinPublicKeyHex - The fee-payer's coin public key (hex).
+ * @param contractAddressHex - The deployed contract's address (hex).
+ * @param circuitId - The circuit id to install `verifierKey` under.
  * @param verifierKey - The new circuit's verifier key bytes (managed keys dir).
  * @param currentContractStateBytes - Serialized live contract state (from queryContractState).
  * @returns The contract address and the serialized unproven maintenance transaction.
