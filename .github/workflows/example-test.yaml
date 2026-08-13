@@ -34,6 +34,10 @@ on:
         required: false
         type: string
         default: tests/happy-day-e2e.test.ts
+    secrets:
+      SEPOLIA_FORK_RPC_URL:
+        description: "Sepolia RPC URL the local anvil forks from (see the fork-env comment below)"
+        required: true
 
 jobs:
   example:
@@ -51,8 +55,10 @@ jobs:
     env:
       SEPOLIA_FORK_RPC_URL: ${{ secrets.SEPOLIA_FORK_RPC_URL }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: lts/*
           # corepack owns yarn here; the action's cache probe would run
@@ -61,7 +67,7 @@ jobs:
       - name: Enable corepack (yarn 4 via the packageManager field)
         run: corepack enable
       - name: Restore the compact toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.compact
@@ -73,9 +79,13 @@ jobs:
           export PATH="$HOME/.local/bin:$HOME/.compact/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.compact/bin" >> "$GITHUB_PATH"
+          # Launcher pinned to compact-v0.5.1 (never releases/latest), the
+          # same pin the protocol repo's workflows use.
           if ! command -v compact >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -LsSf \
-              https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+            curl --proto '=https' --tlsv1.2 -LsSf --retry 4 -o /tmp/compact-installer.sh \
+              https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.1/compact-installer.sh
+            echo "85e74a53ae4a67b31fa4d854f3b6ffb4c29f7c53e3372c5008b6a4729a8b4a73  /tmp/compact-installer.sh" | sha256sum -c
+            sh /tmp/compact-installer.sh
           fi
           # compactc 0.33.0-rc.2 is the PINNED compiler, part of the ledger-9
           # MATCHED SET (see docker-compose.yaml's image-tag comment: move it
@@ -87,8 +97,9 @@ jobs:
           RC_DIR="$HOME/.compact/versions/0.33.0-rc.2/x86_64-unknown-linux-musl"
           if [ ! -x "$RC_DIR/compactc" ]; then
             mkdir -p "$RC_DIR"
-            curl -fsSL -o /tmp/compactc-rc.zip \
+            curl -fsSL --retry 4 -o /tmp/compactc-rc.zip \
               https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.33.0-rc.2/compactc_v0.33.0-rc.2_x86_64-unknown-linux-musl.zip
+            echo "3055ab92bbc8d5bb0d6282b661b83761d2a0de2ee37e21cf7107e25aaf2a9aad  /tmp/compactc-rc.zip" | sha256sum -c
             unzip -qo /tmp/compactc-rc.zip -d "$RC_DIR"
             chmod +x "$RC_DIR"/*
           fi
@@ -124,16 +135,20 @@ jobs:
         run: yarn lint
       - name: Restore prebuilt zk proving keys
         id: zk
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: examples/${{ inputs.example-dir }}/contract/src/managed
           key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
+      # Inputs reach run blocks via env, never inline ${{ }} interpolation:
+      # inline expansion into shell is a code-injection surface.
       - name: zk keygen (cache miss only)
         if: steps.zk.outputs.cache-hit != 'true'
-        run: yarn compile:${{ inputs.example-dir }}:zk
+        env:
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+        run: yarn "compile:${EXAMPLE_DIR}:zk"
       - name: Save zk proving keys (immediately — a later flow failure must not lose them)
         if: steps.zk.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: examples/${{ inputs.example-dir }}/contract/src/managed
           key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
@@ -171,12 +186,19 @@ jobs:
         if: inputs.full-suite != true
         env:
           TRUST_PREBUILT_ZK_KEYS: "1"
-        run: yarn test:${{ inputs.example-dir }}:e2e ${{ inputs.gate-spec }}
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+          GATE_SPEC: ${{ inputs.gate-spec }}
+        # gate-spec is a space-separated list of spec files: split it into
+        # one argument per file.
+        run: |
+          read -ra specs <<<"$GATE_SPEC"
+          yarn "test:${EXAMPLE_DIR}:e2e" "${specs[@]}"
       - name: e2e suite — full
         if: inputs.full-suite == true
         env:
           TRUST_PREBUILT_ZK_KEYS: "1"
-        run: yarn test:${{ inputs.example-dir }}:e2e
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+        run: yarn "test:${EXAMPLE_DIR}:e2e"
       - name: Collect service logs
         if: failure()
         run: |
@@ -185,7 +207,7 @@ jobs:
           docker ps -a > ci-logs/docker-ps.txt 2>&1 || true
       - name: Upload service logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ inputs.example-dir }}-e2e-logs
           path: ci-logs/
