@@ -13,6 +13,10 @@ export const AAVE_USDC = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8";
 // Aave's aEthUSDC aToken custodies the reserve's underlying USDC (~tens of thousands on the fork),
 // so it is the whale for dealing Aave USDC — the lending counterpart of USDC_WHALE.
 const AAVE_USDC_WHALE = "0x16dA4541aD1807f4443d92D26044C1147406EB80";
+// Aave v3 Sepolia PoolConfigurator + a pool admin: the live USDC reserve is supplied ~2x over its
+// cap, so maxDeposit is 0 and stataUSDC deposits revert. The fork lifts the cap through these.
+const AAVE_POOL_CONFIGURATOR = "0x7Ee60D184C24Ef7AfC1Ec7Be59A0f448A0abd138";
+const AAVE_POOL_ADMIN = "0xfA0e305E0f46AB04f00ae6b5f4560d61a2183E00";
 const ONE_ETH = "0xDE0B6B3A7640000";
 // 100 USDC (6 decimals): far above every suite's small deposits combined, and safely under each
 // whale's live balance so the impersonated transfer never reverts.
@@ -67,6 +71,26 @@ export async function dealFork(
 }
 
 /**
+ * Lift the Aave USDC supply cap on the fork so stataUSDC deposits are accepted. The live Sepolia
+ * reserve is supplied ~2x over its 2B cap, so Aave's maxDeposit is 0 and every deposit reverts.
+ * Impersonate a pool admin and set the cap to 0, which Aave treats as no cap.
+ *
+ * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
+ */
+async function liftAaveUsdcSupplyCap(provider: ethers.JsonRpcProvider): Promise<void> {
+  await provider.send("anvil_setBalance", [AAVE_POOL_ADMIN, ONE_ETH]);
+  await provider.send("anvil_impersonateAccount", [AAVE_POOL_ADMIN]);
+  const configurator = new ethers.Contract(
+    AAVE_POOL_CONFIGURATOR,
+    ["function setSupplyCap(address asset, uint256 newSupplyCap)"],
+    await provider.getSigner(AAVE_POOL_ADMIN),
+  );
+  await (await configurator.getFunction<ContractWriteMethod>("setSupplyCap")(AAVE_USDC, 0n)).wait();
+  await provider.send("anvil_stopImpersonatingAccount", [AAVE_POOL_ADMIN]);
+  console.log("lifted Aave USDC supply cap on the fork (stataUSDC deposits now accepted)");
+}
+
+/**
  * Setup step: deal the derived EVM accounts their gas + tokens on the fork. The user gets ETH +
  * USDC (the deposit source), and the vault gets ETH (withdraw/approve/swap gas, deposits fund
  * its USDC). Requires EVM_RPC_URL to point at a Sepolia fork exposing anvil_* cheatcodes.
@@ -100,6 +124,7 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
   try {
     await dealFork(provider, user, USER_USDC, userAaveUsdc);
     await dealFork(provider, vault, 0n);
+    if (aaveUsdcOnFork) await liftAaveUsdcSupplyCap(provider);
   } catch (error) {
     throw new Error(
       `fork dealing failed for ${rpcUrl}: the EVM must be a Sepolia fork with anvil_* cheatcodes`,
