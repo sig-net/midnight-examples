@@ -201,10 +201,12 @@ jobs:
         run: yarn "test:${EXAMPLE_DIR}:e2e"
       - name: Collect service logs
         if: failure()
+        # timeout: `docker compose logs` can hang (a container mid-restart), so bound it rather than
+        # let a failed run idle to the job timeout.
         run: |
           mkdir -p ci-logs
-          docker compose --profile fakenet logs --no-color > ci-logs/compose.log 2>&1 || true
-          docker ps -a > ci-logs/docker-ps.txt 2>&1 || true
+          timeout 120 docker compose --profile fakenet logs --no-color > ci-logs/compose.log 2>&1 || true
+          timeout 60 docker ps -a > ci-logs/docker-ps.txt 2>&1 || true
       - name: Upload service logs
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
