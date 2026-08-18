@@ -17,6 +17,8 @@
     "test:erc20-vault": "yarn workspace @midnight-examples/erc20-vault-contract test && yarn workspace @midnight-examples/erc20-vault-integration-tests test",
     "test:erc20-vault:e2e": "yarn workspace @midnight-examples/erc20-vault-integration-tests test:e2e",
     "build:erc20-vault": "yarn workspace @midnight-examples/erc20-vault-contract build && yarn workspace @midnight-examples/erc20-vault-integration-tests build",
+    "benchmark:static:erc20-vault": "yarn workspace @midnight-examples/erc20-vault-integration-tests benchmark:static",
+    "benchmark:report:erc20-vault": "yarn workspace @midnight-examples/erc20-vault-integration-tests benchmark:report",
     "build": "yarn workspaces foreach --all --exclude midnight-examples --topological run build",
     "test": "yarn workspaces foreach --all --exclude midnight-examples --topological run test",
     "lint": "eslint . --max-warnings=0 --concurrency=auto",

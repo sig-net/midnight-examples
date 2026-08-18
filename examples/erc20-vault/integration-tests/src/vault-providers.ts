@@ -19,6 +19,7 @@ import {
   createWalletAndMidnightProvider,
   makeCompiledContract,
   type MidnightNodeConfig,
+  type ProofServerObserver,
   type WalletFacade,
 } from "@midnight-examples/lib";
 import type { MidnightProviders } from "@midnight-ntwrk/midnight-js/types";
@@ -61,10 +62,12 @@ export type VaultProviders = MidnightProviders<
 // script). Resolved RELATIVE to this file: the contract package is this
 // example's sibling, and an integrator copies the whole example directory
 // together.
-const managedPath = fileURLToPath(
+/** Absolute path of the vault contract's compiler output dir. */
+export const VAULT_MANAGED_PATH = fileURLToPath(
   new URL("../../contract/src/managed/erc20-vault", import.meta.url),
 );
-const signetManagedPath = fileURLToPath(
+/** Absolute path of the signet callee contract's compiler output dir. */
+export const SIGNET_SIGNER_MANAGED_PATH = fileURLToPath(
   new URL("../../contract/src/managed/SignetSigner", import.meta.url),
 );
 
@@ -76,7 +79,7 @@ const signetManagedPath = fileURLToPath(
 export const vaultCompiledContract = makeCompiledContract<
   Contract<VaultPrivateState>,
   VaultPrivateState
->("erc20-vault", Contract, witnesses, managedPath);
+>("erc20-vault", Contract, witnesses, VAULT_MANAGED_PATH);
 
 /**
  * Build the midnight-js provider set for the vault.
@@ -84,21 +87,23 @@ export const vaultCompiledContract = makeCompiledContract<
  * @param facade - A started (and synced) wallet facade — see lib's `withSyncedWalletFacade`.
  * @param keys - The key material of the same wallet, for balancing and signing.
  * @param config - The Midnight network endpoints to run against.
+ * @param proofObserver - Called after every proof-server /check and /prove round trip.
  * @returns The provider set to hand to `findDeployedContract` / `deployContract`.
  */
 export function buildVaultProviders(
   facade: WalletFacade,
   keys: AccountKeys,
   config: MidnightNodeConfig,
+  proofObserver?: ProofServerObserver,
 ): VaultProviders {
   // Retrieves the ZK artifacts of a contract needed to create proofs.
   // Key methods: getProverKey(id), getVerifierKey(id), getZKIR(id) — id is
   // typed to the circuit-name union.
-  const zkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(managedPath);
+  const zkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH);
 
   // The callee (signet contract) circuits, resolved for the cross-contract
   // proof provider so deposit's whole call tree proves.
-  const signetZkConfigProvider = new NodeZkConfigProvider<string>(signetManagedPath);
+  const signetZkConfigProvider = new NodeZkConfigProvider<string>(SIGNET_SIGNER_MANAGED_PATH);
 
   // The wallet, adapted to midnight-js's balancer + submitter interfaces
   // (the facade itself does not implement WalletProvider/MidnightProvider).
@@ -157,10 +162,11 @@ export function buildVaultProviders(
     // finalizes a recipe; the call transcript is proven here first. Spans the
     // vault AND the signet contract so deposit's cross-contract call
     // resolves keys for the whole call tree.
-    proofProvider: createCrossContractProofServerProvider(config.proofServerUrl, [
-      zkConfigProvider,
-      signetZkConfigProvider,
-    ]),
+    proofProvider: createCrossContractProofServerProvider(
+      config.proofServerUrl,
+      [zkConfigProvider, signetZkConfigProvider],
+      proofObserver,
+    ),
 
     // Creates proven, balanced transactions.
     walletProvider: walletAndMidnightProvider,

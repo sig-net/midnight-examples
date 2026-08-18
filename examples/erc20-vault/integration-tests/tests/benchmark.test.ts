@@ -42,6 +42,9 @@ import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { PROOF_RECORDS_FILE } from "../src/benchmark/paths.ts";
+import { Recorder } from "../src/benchmark/recorder.ts";
+import { BenchmarkLeg } from "../src/benchmark/records.ts";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { claim } from "../src/flows/claim.ts";
@@ -66,10 +69,17 @@ const env = injectE2eEnv();
 /** Assert a setup step populated `name`, failing with a pointed message. */
 const requireEnv = (name: string): string => requireEnvOf(env, name);
 
+// One recorder per run: every proof-server /check and /prove round trip plus
+// each leg's wall clock lands in the JSONL the report generator reads
+// (reports/raw/proof-records.jsonl). Inert offline: it touches no files
+// until the first record.
+const runId = new Date().toISOString().replace(/[:.]/g, "-");
+const recorder = new Recorder(PROOF_RECORDS_FILE, runId);
+
 // Wallet facade + vault context + MPC-style reader shared by every test in
 // this file (lazily built, so the offline path never touches the network);
 // stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, recorder.observer);
 
 // One deposit's worth of value rides the whole benchmark: deposited, claimed,
 // escrowed, withdrawn — 0.1 USDC, the funding preflight's minimum.
@@ -187,9 +197,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requireEnv("EVM_USER_ADDRESS"),
         );
 
+        recorder.setLeg(BenchmarkLeg.DepositRequest);
         const stop = startTimer();
         depositRequestId = await deposit(context, { amount: DEPOSIT_AMOUNT, evmNonce });
-        timings.deposit.deposit = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.deposit.deposit = ms;
+        recorder.recordLeg(BenchmarkLeg.DepositRequest, ms);
 
         expect(depositRequestId).toMatch(/^[0-9a-f]{64}$/);
 
@@ -215,6 +229,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const context = await session.vaultContext();
 
         // Deposit sweeps are signed by the USER's derived account.
+        recorder.setLeg(BenchmarkLeg.DepositPollSignatureResponse);
         const stop = startTimer();
         signedDepositSweepTransaction = await pollSignatureResponse(context, {
           requestId: depositRequestId,
@@ -222,7 +237,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           timeoutMs: 2 * MINUTE,
           expectedSigner: requireEnv("EVM_USER_ADDRESS"),
         });
-        timings.deposit.pollSignatureResponse = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.deposit.pollSignatureResponse = ms;
+        recorder.recordLeg(BenchmarkLeg.DepositPollSignatureResponse, ms);
       },
       5 * MINUTE,
     );
@@ -235,9 +253,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         // broadcastEvm waits for one confirmation and throws if the tx
         // reverted; on a resumed run an already-mined sweep short-circuits.
+        recorder.setLeg(BenchmarkLeg.DepositBroadcastEvm);
         const stop = startTimer();
         await broadcastEvm(context, { transaction: signedDepositSweepTransaction });
-        timings.deposit.broadcastEvm = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.deposit.broadcastEvm = ms;
+        recorder.recordLeg(BenchmarkLeg.DepositBroadcastEvm, ms);
       },
       3 * MINUTE,
     );
@@ -248,13 +270,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(depositRequestId).toBeDefined();
         const context = await session.vaultContext();
 
+        recorder.setLeg(BenchmarkLeg.DepositPollRespondBidirectional);
         const stop = startTimer();
         const attestation = await pollRespondBidirectional(context, {
           requestId: depositRequestId,
           intervalMs: 1000,
           timeoutMs: 2 * MINUTE,
         });
-        timings.deposit.pollRespondBidirectional = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.deposit.pollRespondBidirectional = ms;
+        recorder.recordLeg(BenchmarkLeg.DepositPollRespondBidirectional, ms);
 
         // The claim below can only mint from a success attestation.
         expect(attestation.succeeded, "the MPC must attest the deposit sweep as succeeded").toBe(
@@ -282,9 +308,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           return;
         }
 
+        recorder.setLeg(BenchmarkLeg.DepositClaim);
         const stop = startTimer();
         await claim(context, { requestId: depositRequestId });
-        timings.deposit.claim = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.deposit.claim = ms;
+        recorder.recordLeg(BenchmarkLeg.DepositClaim, ms);
 
         const after = await readLedger();
         expect(
@@ -323,13 +353,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         );
         const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
 
+        recorder.setLeg(BenchmarkLeg.WithdrawRequest);
         const stop = startTimer();
         withdrawRequestId = await withdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress,
           evmNonce,
         });
-        timings.withdraw.withdraw = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.withdraw.withdraw = ms;
+        recorder.recordLeg(BenchmarkLeg.WithdrawRequest, ms);
 
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
 
@@ -355,6 +389,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const context = await session.vaultContext();
 
         // Withdraw transfers are signed by the VAULT's derived account.
+        recorder.setLeg(BenchmarkLeg.WithdrawPollSignatureResponse);
         const stop = startTimer();
         signedWithdrawTransaction = await pollSignatureResponse(context, {
           requestId: withdrawRequestId,
@@ -362,7 +397,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           timeoutMs: 2 * MINUTE,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
         });
-        timings.withdraw.pollSignatureResponse = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.withdraw.pollSignatureResponse = ms;
+        recorder.recordLeg(BenchmarkLeg.WithdrawPollSignatureResponse, ms);
       },
       5 * MINUTE,
     );
@@ -373,9 +411,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(signedWithdrawTransaction).toBeDefined();
         const context = await session.vaultContext();
 
+        recorder.setLeg(BenchmarkLeg.WithdrawBroadcastEvm);
         const stop = startTimer();
         await broadcastEvm(context, { transaction: signedWithdrawTransaction });
-        timings.withdraw.broadcastEvm = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.withdraw.broadcastEvm = ms;
+        recorder.recordLeg(BenchmarkLeg.WithdrawBroadcastEvm, ms);
       },
       3 * MINUTE,
     );
@@ -386,13 +428,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(withdrawRequestId).toBeDefined();
         const context = await session.vaultContext();
 
+        recorder.setLeg(BenchmarkLeg.WithdrawPollRespondBidirectional);
         const stop = startTimer();
         const attestation = await pollRespondBidirectional(context, {
           requestId: withdrawRequestId,
           intervalMs: 1000,
           timeoutMs: 3 * MINUTE,
         });
-        timings.withdraw.pollRespondBidirectional = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.withdraw.pollRespondBidirectional = ms;
+        recorder.recordLeg(BenchmarkLeg.WithdrawPollRespondBidirectional, ms);
 
         // Happy-path benchmark: the broadcast leg saw the transfer mine, so
         // the MPC must attest success (the 1-byte 0x01 result).
@@ -426,9 +472,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           return;
         }
 
+        recorder.setLeg(BenchmarkLeg.WithdrawCompleteWithdraw);
         const stop = startTimer();
         await completeWithdraw(context, { requestId: withdrawRequestId });
-        timings.withdraw.completeWithdraw = stop();
+        const ms = stop();
+        recorder.clearLeg();
+        timings.withdraw.completeWithdraw = ms;
+        recorder.recordLeg(BenchmarkLeg.WithdrawCompleteWithdraw, ms);
 
         const after = await readLedger();
         expect(
