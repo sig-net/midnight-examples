@@ -1,8 +1,8 @@
 // The example's vitest globalSetup: compose the ordered setup pipeline
-// (environment check -> wallet seeds + root funding -> EVM chain + test token
-// -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
-// vault zk compile + deploy -> MPC response key -> EVM addresses ->
-// local funding -> UI hand-off to .env -> MPC hand-off printout) from the
+// (environment check -> wallet seeds + root funding -> EVM chain + token
+// default -> MPC key derivation -> signet deploy -> fakenet responder
+// hand-off -> vault zk compile + deploy -> MPC response key -> EVM addresses
+// -> fork dealing -> UI hand-off to .env -> MPC hand-off printout) from the
 // harness's generic steps plus the vault-specific steps below, and run it via
 // `runSetupPipeline` in vitest's main process. The signet contract needs no zk-compile step: its
 // proving keys ship inside the published @sig-net/midnight-contract package
@@ -15,13 +15,11 @@ import {
   assertEnvironment,
   compileContractZk,
   deploySignetContractStep,
-  ensureErc20Deployed,
   ensureMpcResponseKey,
   ensureMpcRootKey,
   ensureMpcSecp256k1Pubkey,
   ensureWalletSeeds,
   ensureWalletsFunded,
-  fundLocalEvmAccounts,
   generateHexSeed,
   logSkip,
   persistEnvKeysToDotEnv,
@@ -39,19 +37,11 @@ import { deriveEvmAddress } from "@sig-net/midnight";
 import { HDNodeWallet } from "ethers";
 import type { TestProject } from "vitest/node";
 
-import { deployTestUsdc } from "./test-usdc.ts";
+import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
+import { VAULT_PATH_HEX } from "./mpc-routing.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 
 const MINUTE = 60_000;
-
-// The EVM accounts the local-chain funding step tops up: the two MPC-derived
-// accounts the flows move value through, plus user 1's own EVM wallet
-// account (the one the UI's seed dialog opens).
-const FUNDED_EVM_ADDRESS_ENV_VARS = [
-  "EVM_USER1_DEPOSIT_ADDRESS",
-  "EVM_VAULT_ACCOUNT_ADDRESS",
-  "EVM_USER1_WALLET_ADDRESS",
-] as const;
 
 // The env keys the setup steps populate, in derivation order — the "Minimal
 // .env block" printout reads like the flow that produced it.
@@ -127,8 +117,8 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
 
 /**
  * Ensure `EVM_VAULT_ACCOUNT_ADDRESS` matches the vault's derived EVM account
- * (`MPC_ROOT_PUBLIC_KEY` + vault contract address, path `"vault"`),
- * deriving it when absent.
+ * (`MPC_ROOT_PUBLIC_KEY` + vault contract address, path = the hex rendering
+ * of the contract-fixed `pad(32, "vault")` bytes), deriving it when absent.
  *
  * @param env - The suite's env accumulator.
  * @throws {Error} If a preset `EVM_VAULT_ACCOUNT_ADDRESS` mismatches the derivation.
@@ -137,7 +127,7 @@ function ensureVaultEvmAccountAddress(env: NodeJS.ProcessEnv): void {
   const expectedAddress = deriveEvmAddress(
     requireEnv(env, "MPC_ROOT_PUBLIC_KEY"),
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
-    "vault",
+    VAULT_PATH_HEX,
   );
   if (env.EVM_VAULT_ACCOUNT_ADDRESS) {
     console.log(
@@ -164,9 +154,8 @@ function ensureVaultEvmAccountAddress(env: NodeJS.ProcessEnv): void {
 
 /**
  * Ensure `EVM_USER1_DEPOSIT_ADDRESS` matches user 1's derived EVM deposit
- * account (`MPC_ROOT_PUBLIC_KEY` + vault contract address, path = the user
- * identity commitment read as the MPC's path string), deriving it when
- * absent.
+ * account (`MPC_ROOT_PUBLIC_KEY` + vault contract address, path = the hex
+ * rendering of user 1's identity commitment), deriving it when absent.
  *
  * @param env - The suite's env accumulator.
  * @throws {Error} If a preset `EVM_USER1_DEPOSIT_ADDRESS` mismatches the derivation.
@@ -176,7 +165,7 @@ function ensureUser1EvmDepositAddress(env: NodeJS.ProcessEnv): void {
   const expectedAddress = deriveEvmAddress(
     requireEnv(env, "MPC_ROOT_PUBLIC_KEY"),
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
-    identity.pathString,
+    identity.commitmentHex,
   );
   if (env.EVM_USER1_DEPOSIT_ADDRESS) {
     console.log(
@@ -282,6 +271,27 @@ function defaultEvmRpcUrl(env: NodeJS.ProcessEnv): void {
   }
 }
 
+/**
+ * Default `EVM_ERC20_CONTRACT_ADDRESS` to real Sepolia USDC — the suites run
+ * against a Sepolia fork, so the token is the real (unmintable) USDC. Any
+ * other ERC20 (that a fork whale can source) can be pinned explicitly.
+ *
+ * @param env - The suite's env accumulator.
+ */
+function ensureErc20Address(env: NodeJS.ProcessEnv): void {
+  if (env.EVM_ERC20_CONTRACT_ADDRESS) {
+    logSkip(
+      "default EVM_ERC20_CONTRACT_ADDRESS",
+      `EVM_ERC20_CONTRACT_ADDRESS is set (${env.EVM_ERC20_CONTRACT_ADDRESS})`,
+    );
+    return;
+  }
+  env.EVM_ERC20_CONTRACT_ADDRESS = SEPOLIA_USDC;
+  console.log(
+    `defaulted EVM_ERC20_CONTRACT_ADDRESS=${SEPOLIA_USDC} (real Sepolia USDC — the suites fork Sepolia)`,
+  );
+}
+
 // Step names match what the operator greps for and what STEP_THROUGH prompts show.
 const STEPS: readonly SetupStep[] = [
   [
@@ -298,10 +308,7 @@ const STEPS: readonly SetupStep[] = [
   ["setup: preflight root funding + fund the Midnight wallets from root", ensureWalletsFunded],
   ["setup: resolve/generate user 1 EVM wallet seed", ensureUser1EvmWalletSeed],
   ["setup: resolve EVM chain id from EVM_RPC_URL", resolveEvmChain],
-  [
-    "setup: check/deploy ERC20 token on the EVM chain",
-    (env) => ensureErc20Deployed(env, deployTestUsdc),
-  ],
+  ["setup: default EVM_ERC20_CONTRACT_ADDRESS to real Sepolia USDC", ensureErc20Address],
   ["setup: check/derive MPC root private key", ensureMpcRootKey],
   ["setup: check/derive MPC_ROOT_PUBLIC_KEY", ensureMpcSecp256k1Pubkey],
   ["setup: deploy signet contract", deploySignetContractStep],
@@ -326,10 +333,7 @@ const STEPS: readonly SetupStep[] = [
   ["setup: check/derive vault EVM account address", ensureVaultEvmAccountAddress],
   ["setup: check/derive user 1 EVM deposit address", ensureUser1EvmDepositAddress],
   ["setup: check/derive user 1 EVM wallet address", ensureUser1EvmWalletAddress],
-  [
-    "setup: fund the example's EVM accounts (local chain only)",
-    (env) => fundLocalEvmAccounts(env, FUNDED_EVM_ADDRESS_ENV_VARS),
-  ],
+  ["setup: deal derived EVM accounts on the Sepolia fork (ETH + real USDC)", dealForkEvmAccounts],
   [
     "setup: persist UI hand-off values to .env (append-only)",
     (env) => {

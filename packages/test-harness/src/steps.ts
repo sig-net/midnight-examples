@@ -1,15 +1,15 @@
 // The GENERIC setup steps every example's pipeline composes: environment
 // check → wallet seed resolution + root funding (wallets.ts) → EVM chain
-// resolution + test-token deploy (example-supplied) → MPC key derivation →
-// singleton signet deploy → fakenet responder hand-off → local-EVM funding →
-// MPC hand-off printout.
+// resolution → MPC key derivation → singleton signet deploy → fakenet
+// responder hand-off → MPC hand-off printout. EVM token and account funding
+// is example-specific and lives in the example itself.
 // Each step keeps its skip-if-env-var-set semantics (presence of the
 // canonical env var doubles as the skip signal) and mutates the shared env
 // accumulator. Steps that touch an example's own artifacts (its requester
-// contract deploy, its derived EVM addresses, its test token) take those
-// specifics as parameters or live in the example itself. Run by an example's
-// globalSetup via {@link file://./setup-pipeline.ts runSetupPipeline} in
-// vitest's main process, so no `vitest` imports here.
+// contract deploy, its derived EVM addresses) take those specifics as
+// parameters or live in the example itself. Run by an example's globalSetup
+// via {@link file://./setup-pipeline.ts runSetupPipeline} in vitest's main
+// process, so no `vitest` imports here.
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -17,13 +17,11 @@ import { join } from "node:path";
 import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { deriveMidnightResponseKey, formatSecp256k1PublicKey } from "@sig-net/midnight";
 import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
-import { formatEther, formatUnits } from "ethers";
 
 import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv, loadRepoDotEnv } from "./env-file.ts";
-import { getDeployedCode, getEvmChainId } from "./evm.ts";
+import { getEvmChainId } from "./evm.ts";
 import { REPO_ROOT, runCommand, runRootScript } from "./exec.ts";
-import { isLocalEvmChain, topUpLocalAccount } from "./local-evm.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { banner, logSkip } from "./output.ts";
 import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
@@ -86,58 +84,6 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
     );
     console.log(` ➜ 💡 Set as EVM_CHAIN_ID in the environment to pin it explicitly`);
   }
-}
-
-/**
- * Ensure `EVM_ERC20_CONTRACT_ADDRESS` points at a live token: skip when the address has
- * code ON CHAIN (env presence alone is not enough — a kept address can
- * outlive a wiped local chain); otherwise deploy a fresh token through the
- * example-supplied `deployErc20` (only ever on the local dev chain — any
- * other chain demands an explicit, live `EVM_ERC20_CONTRACT_ADDRESS`).
- *
- * @param env - The suite's env accumulator.
- * @param deployErc20 - The example's compile-and-deploy of its own test
- *   token; returns the deployed address. Only invoked on the local dev chain.
- * @throws {Error} If the chain is not the local dev chain and `EVM_ERC20_CONTRACT_ADDRESS` is
- *   unset or has no code.
- */
-export async function ensureErc20Deployed(
-  env: NodeJS.ProcessEnv,
-  deployErc20: (env: NodeJS.ProcessEnv) => Promise<string>,
-): Promise<void> {
-  const rpcUrl = requireEnv(env, "EVM_RPC_URL");
-  const chainId = BigInt(requireEnv(env, "EVM_CHAIN_ID"));
-  const local = isLocalEvmChain(chainId);
-  if (env.EVM_ERC20_CONTRACT_ADDRESS) {
-    const code = await getDeployedCode(rpcUrl, env.EVM_ERC20_CONTRACT_ADDRESS);
-    if (code !== "0x") {
-      logSkip(
-        "check/deploy ERC20 token",
-        `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has code on chain ${String(chainId)}`,
-      );
-      return;
-    }
-    if (!local) {
-      throw new Error(
-        `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has no code on chain ${String(chainId)} — wrong address, or wrong EVM_RPC_URL?`,
-      );
-    }
-    console.log(
-      `EVM_ERC20_CONTRACT_ADDRESS (${env.EVM_ERC20_CONTRACT_ADDRESS}) has no code — the local chain was wiped; redeploying`,
-    );
-  } else if (!local) {
-    throw new Error(
-      `EVM_ERC20_CONTRACT_ADDRESS is not set and chain ${String(chainId)} is not the local dev chain — set the token to use in the environment`,
-    );
-  }
-  env.EVM_ERC20_CONTRACT_ADDRESS = await deployErc20(env);
-  console.log(
-    `deployed a fresh test ERC20 as EVM_ERC20_CONTRACT_ADDRESS=${env.EVM_ERC20_CONTRACT_ADDRESS}`,
-  );
-  console.log(` ➜ the token the example's flows move; open mint funds the derived accounts`);
-  console.log(
-    ` ➜ 💡 Set as EVM_ERC20_CONTRACT_ADDRESS in the environment to pin it for the next run`,
-  );
 }
 
 /**
@@ -537,38 +483,6 @@ export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<voi
   console.log("fakenet-responder container is running");
   console.log(" ➜ watch it: `docker logs -f fakenet-responder` — healthy startup prints");
   console.log('   "MidnightMonitor: polling signet contract events at <signet address>"');
-}
-
-/**
- * Fund the example's EVM accounts from the dev funder — local dev
- * chain only; on any other chain the operator funds them manually (the
- * derive steps print what to fund).
- *
- * @param env - The suite's env accumulator.
- * @param addressEnvVars - The env-var names holding the EVM addresses to top
- *   up (e.g. the example's deposit, vault and user wallet accounts).
- */
-export async function fundLocalEvmAccounts(
-  env: NodeJS.ProcessEnv,
-  addressEnvVars: readonly string[],
-): Promise<void> {
-  const rpcUrl = requireEnv(env, "EVM_RPC_URL");
-  const chainId = BigInt(requireEnv(env, "EVM_CHAIN_ID"));
-  if (!isLocalEvmChain(chainId)) {
-    logSkip(
-      "fund derived EVM accounts",
-      `chain ${String(chainId)} is not the local dev chain — fund the derived accounts manually (see the printed hints)`,
-    );
-    return;
-  }
-  const erc20Address = requireEnv(env, "EVM_ERC20_CONTRACT_ADDRESS");
-  for (const name of addressEnvVars) {
-    const address = requireEnv(env, name);
-    const { ethBalance, tokenBalance } = await topUpLocalAccount(rpcUrl, erc20Address, address);
-    console.log(
-      `topped up ${name}=${address} to ${formatEther(ethBalance)} ETH and ${formatUnits(tokenBalance, 6)} USDC`,
-    );
-  }
 }
 
 /**

@@ -41,22 +41,6 @@ export async function getEvmChainId(rpcUrl: string): Promise<bigint> {
   }
 }
 
-/**
- * Read the bytecode deployed at an address.
- *
- * @param rpcUrl - JSON-RPC endpoint (e.g. `EVM_RPC_URL`).
- * @param address - The address to query.
- * @returns The deployed code as a hex string — `"0x"` when nothing is deployed there.
- */
-export async function getDeployedCode(rpcUrl: string, address: string): Promise<string> {
-  const provider = new JsonRpcProvider(rpcUrl);
-  try {
-    return await provider.getCode(address);
-  } finally {
-    provider.destroy();
-  }
-}
-
 const ERC20_READ_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function decimals() view returns (uint8)",

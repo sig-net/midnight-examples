@@ -19,7 +19,11 @@ prerequisites (Node 20+, Yarn 4 via Corepack, the compact toolchain, a docker
 engine with 16 GB of RAM allocated) are in the repository root's
 [README](../../../README.md).
 
-1. Stand the stack up and deploy the contracts, from the repository root:
+1. Stand the stack up and deploy the contracts, from the repository root.
+   Before `docker compose up -d`, put a Sepolia RPC URL in the repo-root
+   `.env` as `SEPOLIA_FORK_RPC_URL=<url>` (e.g. an Infura or Alchemy Sepolia
+   endpoint): the local EVM forks Sepolia so real USDC is present, and
+   compose only adds the fork flag when the value is set.
 
    ```sh
    corepack enable
@@ -45,7 +49,7 @@ engine with 16 GB of RAM allocated) are in the repository root's
    # appended by the erc20-vault setup (2026-08-07T09:40:58.408Z): UI hand-off values
    MPC_ROOT_PUBLIC_KEY=0x03a8e3c3ffbe8f986da894bf785d7c60b8eb4047205e089f095f173ca2446341de
    MIDNIGHT_VAULT_CONTRACT_ADDRESS=439fa174127586474ad01552af3372033ebf624e68558a72e030a7506b445ad0
-   EVM_ERC20_CONTRACT_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
+   EVM_ERC20_CONTRACT_ADDRESS=0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
    ```
 
 2. Run `yarn dev:erc20-vault-ui` and open http://localhost:5173.
@@ -75,7 +79,7 @@ engine with 16 GB of RAM allocated) are in the repository root's
      in-app, no prompt.
    - **Interact with the vault**: paste the `.env`'s
      `EVM_ERC20_CONTRACT_ADDRESS` into the tracked-tokens field to see the
-     TestUSDC balances.
+     USDC balances (real Sepolia USDC, present on the local fork).
 
 Within this package the scripts are `dev`, `build`, `preview` and `test`.
 `build` typechecks before it bundles, so a type error fails the build.

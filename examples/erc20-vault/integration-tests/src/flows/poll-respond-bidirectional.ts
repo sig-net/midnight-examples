@@ -4,8 +4,9 @@
 // recomputed serialized output for the request, and return the resolved
 // outcome. There is deliberately no push/websocket alternative.
 
-import { type RequestIdHex, sleepUnlessAborted } from "@sig-net/midnight";
+import type { RequestIdHex } from "@sig-net/midnight";
 
+import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { fetchAttestedRespondOutcome, type RespondOutcome } from "./respond-output.ts";
 

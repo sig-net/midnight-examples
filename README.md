@@ -57,8 +57,15 @@ The quickest way to get going with these examples is to get an end to end integr
                                 # to stable.
    yarn compile
    ```
-3. Start the local stack (Midnight node, indexer, proof server, anvil EVM) with `docker compose up -d`. The fakenet MPC responder is not part of this: its compose service sits behind the `fakenet` profile, and the test setup starts it itself mid-run once the hand-off values are in `.env`.
-4. Run the happy day test and watch it go. The first run can take **~20–25 minutes** (it generates zk proving keys, deploys every contract and funds the derived accounts, all automatically, no `.env` inserts needed):
+3. Fork Sepolia on the local EVM. The e2e suites use the **real** Sepolia Uniswap V3 deployment and real USDC (dealt to the derived accounts with anvil cheatcodes), so the anvil service must fork Sepolia. Copy the env template and set a Sepolia RPC:
+   ```sh
+   cp .env.example .env
+   # in .env, set:
+   #   SEPOLIA_FORK_RPC_URL=https://sepolia.infura.io/v3/<your-key>   # required: the EVM forks Sepolia
+   #   SEPOLIA_FORK_BLOCK=<block>                                     # optional: pin a block for determinism (needs an ARCHIVE RPC)
+   ```
+4. Start the local stack (Midnight node, indexer, proof server, anvil EVM forking Sepolia) with `docker compose up -d`. The fakenet MPC responder is not part of this: its compose service sits behind the `fakenet` profile, and the test setup starts it itself mid-run once the hand-off values are in `.env`.
+5. Run the happy day test and watch it go. The first run can take **~20–25 minutes** (it generates zk proving keys, deploys every contract and funds the derived accounts, all automatically. `SEPOLIA_FORK_RPC_URL` is the only `.env` value you set):
    ```sh
    yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
 
@@ -75,7 +82,7 @@ The quickest way to get going with these examples is to get an end to end integr
 Use your /e2e skill to get the erc20-vault happy day test running for me, from fresh clone to green. Recover the run yourself if anything fails along the way.
 ```
 
-**NOTE:** The most common reason that the run fails is as a result of the proof server hanging or crashing when it exhausts memory on a proving leg. This happens routinely, even on a Docker VM with 16 GB of RAM (the heavy claim/settle proofs peak above 12 GiB). This most often presents as the test failing with `connect ECONNREFUSED 127.0.0.1:6300` partway through a claim or settle step, with `docker ps -a` showing the `midnight-proof-server` container as `Exited (137)`, i.e. OOM-killed. If this happens it is usually possible to restart the proof server and pick up the test run at the last successful chain interaction instead of starting over, using variables printed out in banners as the test progresses. See [test run recovery](./examples/erc20-vault/README.md#test-run-recovery) in the erc20-vault integration testing package for more details.
+**NOTE:** The most common reason that the run fails is as a result of the proof server hanging or crashing when it exhausts memory on a proving leg. This happens routinely, even on a Docker VM with 16 GB of RAM (the heavy claim/settle proofs peak above 12 GiB). This most often presents as the test failing with `connect ECONNREFUSED 127.0.0.1:6300` partway through a claim or settle step, with `docker ps -a` showing the `midnight-proof-server` container as `Exited (137)`, i.e. OOM-killed. If this happens it is usually possible to restart the proof server and pick up the test run at the last successful chain interaction, not starting over, using variables printed out in banners as the test progresses. See [test run recovery](./examples/erc20-vault/README.md#test-run-recovery) in the erc20-vault integration testing package for more details.
 
 # Compiling, Building and Running Tests
 
@@ -83,7 +90,7 @@ There are two test layers. The unit tests run offline against a simulated Midnig
 
 ## Unit tests
 
-Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only the contract packages have a compile step, and only they have a zk compile option. Unit tests do not need zk keys, though the vault's deploy-tx suite gates itself on them: without keys it skips visibly (its describe title says so) rather than failing. From the root of the repository:
+Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only the contract packages have a compile step, and only they have a zk compile option. Unit tests do not need zk keys, though the vault's deploy-tx suite gates itself on them: without keys it skips visibly (its describe title says so), so a keyless run stays green. From the root of the repository:
 
 ```sh
 ## --- All packages ---
@@ -130,11 +137,11 @@ yarn dev:erc20-vault-ui      # serves the vault SPA on http://localhost:5173
 CI runs `yarn format:check` and `yarn lint` on every push and pull request, so a
 formatting drift or a lint finding fails the build. ESLint and Prettier are
 configured once at the repo root (`eslint.config.js`, `.prettierrc.json`), which
-covers every workspace member; there are no per-package configs. The config turns
+covers every workspace member. Each package inherits that single config. The config turns
 no rule off, so when a rule fires the fix belongs in the code.
 
 Opening the repo in VS Code will offer to install the ESLint and Prettier
-extensions (`.vscode/extensions.json`); with those in place the workspace
+extensions (`.vscode/extensions.json`), and with those in place the workspace
 settings format on save and apply ESLint's autofixes using the repo's own pinned
 Prettier.
 
@@ -156,7 +163,7 @@ and the environment variables it reads.
 The e2e suites need the running docker stack and the fakenet MPC responder: the [Quickstart](#quickstart) walks the first run end to end, and the [erc20-vault README](examples/erc20-vault/README.md) documents every spec in the suite. From the root:
 
 ```sh
-yarn test:erc20-vault:e2e                              # the full seven-spec suite, requires 'yarn compile'
+yarn test:erc20-vault:e2e                              # the full nine-spec suite, requires 'yarn compile'
 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any tests/*.test.ts name works), requires 'yarn compile'
 ```
 
@@ -176,7 +183,7 @@ yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any test
 
 # Running against Sepolia
 
-By default the EVM leg runs on the local anvil dev chain from `docker-compose.yaml`. To point it at Sepolia instead, only the EVM side changes: the Midnight stack and the fakenet MPC responder stay local. Minimal changes, all in `.env`:
+By default the EVM leg runs on the local anvil chain from `docker-compose.yaml`, which forks Sepolia. To point the tests at the real Sepolia network, only the EVM side changes: the Midnight stack and the fakenet MPC responder stay local. Minimal changes, all in `.env`:
 
 ```sh
 # Both must point at the SAME chain: the tests' endpoint and the responder's
@@ -185,7 +192,7 @@ EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
 FAKENET_EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
 
 # Required on any non-local chain: an existing ERC20
-# with code on Sepolia, e.g. a test USDC deployment.
+# with code on Sepolia, e.g. USDC.
 EVM_ERC20_CONTRACT_ADDRESS=0x...
 ```
 
@@ -194,8 +201,8 @@ Then recreate the responder so it re-reads `.env` (`docker compose --profile fak
 What does NOT happen automatically on a real chain, by design:
 
 - **No auto-funding.** The flows spend from two EVM accounts *derived from the vault contract's address*, so you only learn them mid-run, when setup prints `EVM_VAULT_ACCOUNT_ADDRESS` / `EVM_USER1_DEPOSIT_ADDRESS` with funding hints (the user account needs ≥ 0.01 ETH for gas and ≥ 0.1 USDC, and the vault account needs ETH for withdrawal gas). Fund them when printed, either across two runs (first run derives + prints, second run tests), or in one attended run with `STEP_THROUGH` (below).
-- **No token deploy.** TestUSDC auto-deploys on the local chain only. On Sepolia you bring your own `EVM_ERC20_CONTRACT_ADDRESS`.
-- A redeploy of the vault contract derives **new** accounts: previously funded ones don't move with it.
+- **Bring your own token.** On the real Sepolia network you set `EVM_ERC20_CONTRACT_ADDRESS` to an existing ERC20 with code. The local anvil already has real USDC from the fork.
+- A redeploy of the vault contract derives **new** accounts, and any you already funded do not move with it.
 
 ## Watching a run step by step: `STEP_THROUGH=1`
 
@@ -264,7 +271,7 @@ Integrating a contract on Midnight with the Sig Network MPC consists of:
    sealed ledger deployer: Bytes<32>;
 
    // Recommended: supplies the deployer's identity secret from private state
-   // off-chain; only its commitment (below) ever reaches the ledger.
+   // off-chain. Only its commitment (below) ever reaches the ledger.
    witness witnessDeployerSecretKey(): Bytes<32>;
 
    // Recommended: the deployer identity commitment scheme. Exported so deploy
@@ -393,7 +400,7 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
    await new JsonRpcProvider(foreignChainRpcUrl).broadcastTransaction(signedTx.serialized);
    ```
 
-4. Poll the Signet singleton for the MPC's remote execution attestation (emitted once the MPC observes the transaction execute on the foreign chain). The event carries the request id it answers plus the MPC's ECDSA signature over the attestation digest `keccak256(requestId || serializedOutput)`: neither the digest nor the serialized output goes on chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and select the posted event whose signature verifies over those bytes against your contract's response key. Posts are emitted unverified, so that signature check is what makes a candidate meaningful off chain; the authoritative check is your contract's verify circuit in step 5:
+4. Poll the Signet singleton for the MPC's remote execution attestation (emitted once the MPC observes the transaction execute on the foreign chain). The event carries the request id it answers plus the MPC's ECDSA signature over the attestation digest `keccak256(requestId || serializedOutput)`: neither the digest nor the serialized output goes on chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and select the posted event whose signature verifies over those bytes against your contract's response key. Posts are emitted unverified, so that signature check is what makes a candidate meaningful off chain. The authoritative check is your contract's verify circuit in step 5:
 
    ```ts
    import { deserializeEvmOutput, serializeRespondOutput } from "@sig-net/midnight";
@@ -472,7 +479,7 @@ const calldata = EvmCalldata<2> {
 };
 ```
 
-The readers run the same rules in the other direction, rejecting any non-canonical word instead of silently truncating or coercing it. The serialized output a `RespondBidirectionalEvent` attests is the schema-packed return data of the remote call, delivered to the settle circuit as its own argument (Runtime step 5). Packed booleans are single bytes, so an ERC20 `transfer`'s result reads directly:
+The readers run the same rules in the other direction, rejecting any non-canonical word, never silently truncating or coercing it. The serialized output a `RespondBidirectionalEvent` attests is the schema-packed return data of the remote call, delivered to the settle circuit as its own argument (Runtime step 5). Packed booleans are single bytes, so an ERC20 `transfer`'s result reads directly:
 
 ```compact
 const succeeded = serializedOutput as Field == 1 as Field;
@@ -494,7 +501,7 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
 ├── AGENTS.md                   # Non-negotiable workspace rules for agents & humans.
 ├── CLAUDE.md                   # Points at AGENTS.md.
 ├── package.json                # workspaces: ["packages/*", "examples/*/*"]
-├── tsconfig.base.json          # Shared no-emit TS config; every package extends this.
+├── tsconfig.base.json          # Shared no-emit TS config, extended by every package.
 ├── docker-compose.yaml         # Example-agnostic local stack: midnight node + indexer +
 │                               #   proof server, anvil EVM, fakenet MPC server.
 ├── .env.example

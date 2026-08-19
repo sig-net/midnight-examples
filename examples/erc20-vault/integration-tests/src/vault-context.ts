@@ -139,14 +139,20 @@ export async function createVaultContext(
  * flow invocation (the reader caches fetched request records internally).
  *
  * @param context - The flow's context.
+ * @param requestsPath - The resolved ledger-tree path of the request map.
+ *   Defaults to [0] (deposit/withdraw's signBidirectionalEventMap); swaps
+ *   pass VAULT_SWAP_REQUESTS_PATH ([11], the swapEventMap).
  * @returns The reader.
  */
-export function createResponseReader(context: VaultContext): SignetRequestResponseReader {
+export function createResponseReader(
+  context: VaultContext,
+  requestsPath: readonly number[] = VAULT_REQUESTS_PATH,
+): SignetRequestResponseReader {
   return new SignetRequestResponseReader({
     requesterContractAddress: context.vaultContractAddress,
-    // The vault declares its request index as ledger field 0, path [0]: the
-    // requestsPath its notifications pack (erc20-vault.compact).
-    requesterRequestsPath: VAULT_REQUESTS_PATH,
+    // The requestsPath the vault's notifications pack (erc20-vault.compact):
+    // deposit/withdraw at field 0 path [0], swaps at field 11 path [11].
+    requesterRequestsPath: requestsPath,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,
     // The MPC's responses are read from the contract events the signet

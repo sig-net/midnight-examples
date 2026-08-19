@@ -34,6 +34,10 @@ on:
         required: false
         type: string
         default: tests/happy-day-e2e.test.ts
+    secrets:
+      SEPOLIA_FORK_RPC_URL:
+        description: "Sepolia RPC URL the local anvil forks from (see the fork-env comment below)"
+        required: true
 
 jobs:
   example:
@@ -44,9 +48,17 @@ jobs:
     # runner is marginal — happy-day-only as the PR gate keeps the wall clock
     # and OOM exposure down; the full suite is opt-in via `full-suite`.
     timeout-minutes: ${{ inputs.full-suite && 300 || 150 }}
+    # Job-level so EVERY step (and every docker compose invocation) sees the fork URL. The
+    # setup pipeline recreates the fakenet responder with `docker compose up`; if that step
+    # lacks SEPOLIA_FORK_RPC_URL, compose re-renders the evm service WITHOUT --fork-url, drifts
+    # from the running forked anvil, and recreates local-evm BARE — silently killing the fork.
+    env:
+      SEPOLIA_FORK_RPC_URL: ${{ secrets.SEPOLIA_FORK_RPC_URL }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
           # corepack owns yarn here; the action's cache probe would run
@@ -55,7 +67,7 @@ jobs:
       - name: Enable corepack (yarn 4 via the packageManager field)
         run: corepack enable
       - name: Restore the compact toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.compact
@@ -67,9 +79,13 @@ jobs:
           export PATH="$HOME/.local/bin:$HOME/.compact/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.compact/bin" >> "$GITHUB_PATH"
+          # Launcher pinned to compact-v0.5.1 (never releases/latest), the
+          # same pin the protocol repo's workflows use.
           if ! command -v compact >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -LsSf \
-              https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+            curl --proto '=https' --tlsv1.2 -LsSf --retry 4 -o /tmp/compact-installer.sh \
+              https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.1/compact-installer.sh
+            echo "85e74a53ae4a67b31fa4d854f3b6ffb4c29f7c53e3372c5008b6a4729a8b4a73  /tmp/compact-installer.sh" | sha256sum -c
+            sh /tmp/compact-installer.sh
           fi
           # compactc 0.33.0-rc.2 is the PINNED compiler, part of the ledger-9
           # MATCHED SET (see docker-compose.yaml's image-tag comment: move it
@@ -81,8 +97,9 @@ jobs:
           RC_DIR="$HOME/.compact/versions/0.33.0-rc.2/x86_64-unknown-linux-musl"
           if [ ! -x "$RC_DIR/compactc" ]; then
             mkdir -p "$RC_DIR"
-            curl -fsSL -o /tmp/compactc-rc.zip \
+            curl -fsSL --retry 4 -o /tmp/compactc-rc.zip \
               https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.33.0-rc.2/compactc_v0.33.0-rc.2_x86_64-unknown-linux-musl.zip
+            echo "3055ab92bbc8d5bb0d6282b661b83761d2a0de2ee37e21cf7107e25aaf2a9aad  /tmp/compactc-rc.zip" | sha256sum -c
             unzip -qo /tmp/compactc-rc.zip -d "$RC_DIR"
             chmod +x "$RC_DIR"/*
           fi
@@ -118,16 +135,20 @@ jobs:
         run: yarn lint
       - name: Restore prebuilt zk proving keys
         id: zk
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: examples/${{ inputs.example-dir }}/contract/src/managed
           key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
+      # Inputs reach run blocks via env, never inline ${{ }} interpolation:
+      # inline expansion into shell is a code-injection surface.
       - name: zk keygen (cache miss only)
         if: steps.zk.outputs.cache-hit != 'true'
-        run: yarn compile:${{ inputs.example-dir }}:zk
+        env:
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+        run: yarn "compile:${EXAMPLE_DIR}:zk"
       - name: Save zk proving keys (immediately — a later flow failure must not lose them)
         if: steps.zk.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: examples/${{ inputs.example-dir }}/contract/src/managed
           key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
@@ -135,29 +156,49 @@ jobs:
         run: yarn build
       - name: Unit tests (simulator-only; e2e files self-skip without RUN_INTEGRATION_TESTS)
         run: yarn test
-      - name: Start the local stack (midnight node, indexer, proof server, anvil)
-        run: docker compose up -d
+      - name: Start the local stack (midnight node, indexer, proof server, anvil forking Sepolia)
+        # SEPOLIA_FORK_RPC_URL comes from the job-level env so this AND the setup's fakenet
+        # recreate render the evm service identically-forked. REQUIRED — without it anvil runs
+        # bare (no real tokens) and the fork suites fail. Set it as a repo Actions secret.
+        run: |
+          if [ -z "$SEPOLIA_FORK_RPC_URL" ]; then
+            echo "::error::SEPOLIA_FORK_RPC_URL is empty — set it as a repo Actions secret (caller passes secrets: inherit)."
+            exit 1
+          fi
+          # Fail fast if the fork args don't render, instead of an opaque bare-anvil failure later.
+          docker compose config | grep -q -- '--fork-url' \
+            || { echo "::error::compose rendered no --fork-url despite SEPOLIA_FORK_RPC_URL being set"; exit 1; }
+          docker compose up -d
       - name: Wait for the stack
         run: |
           timeout 180 bash -c 'until curl -fsS http://127.0.0.1:9944/health >/dev/null 2>&1; do sleep 3; done'
           timeout 60 bash -c 'until curl -s -o /dev/null http://127.0.0.1:6300; do sleep 3; done'
           timeout 180 bash -c 'until curl -fs -X POST -H "content-type: application/json" -d "{\"query\":\"{__typename}\"}" http://127.0.0.1:8088/api/v3/graphql >/dev/null 2>&1; do sleep 3; done'
+          # Forking fetches the pinned block before serving, so wait for anvil to answer.
+          timeout 120 bash -c 'until curl -fsS -X POST -H "content-type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}" http://127.0.0.1:8545 >/dev/null 2>&1; do sleep 3; done'
           curl -fsS -X POST -H 'content-type: application/json' \
             -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' http://127.0.0.1:8545
-      # The suite's own globalSetup does the rest: deploys the singleton +
-      # the example contract + the test ERC20, creates .env and appends the
-      # fakenet hand-off values, starts the fakenet responder container, and
-      # funds the derived accounts on anvil.
+      # The suite's own globalSetup does the rest: deploys the singleton + the
+      # example contract, defaults EVM_ERC20_CONTRACT_ADDRESS to real Sepolia USDC, creates
+      # .env and appends the fakenet hand-off values, starts the fakenet
+      # responder container, and deals the derived accounts ETH + USDC on the fork.
       - name: e2e suite — gate spec only
         if: inputs.full-suite != true
         env:
           TRUST_PREBUILT_ZK_KEYS: "1"
-        run: yarn test:${{ inputs.example-dir }}:e2e ${{ inputs.gate-spec }}
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+          GATE_SPEC: ${{ inputs.gate-spec }}
+        # gate-spec is a space-separated list of spec files: split it into
+        # one argument per file.
+        run: |
+          read -ra specs <<<"$GATE_SPEC"
+          yarn "test:${EXAMPLE_DIR}:e2e" "${specs[@]}"
       - name: e2e suite — full
         if: inputs.full-suite == true
         env:
           TRUST_PREBUILT_ZK_KEYS: "1"
-        run: yarn test:${{ inputs.example-dir }}:e2e
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+        run: yarn "test:${EXAMPLE_DIR}:e2e"
       - name: Collect service logs
         if: failure()
         run: |
@@ -166,7 +207,7 @@ jobs:
           docker ps -a > ci-logs/docker-ps.txt 2>&1 || true
       - name: Upload service logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.example-dir }}-e2e-logs
           path: ci-logs/

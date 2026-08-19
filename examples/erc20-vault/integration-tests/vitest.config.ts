@@ -23,6 +23,8 @@ const FILE_ORDER = [
   "benchmark.test.ts",
   "false-claimer.test.ts",
   "bearer-transfer.test.ts",
+  "swap-e2e.test.ts",
+  "swap-refund-e2e.test.ts",
   "deploy-only.test.ts",
 ];
 

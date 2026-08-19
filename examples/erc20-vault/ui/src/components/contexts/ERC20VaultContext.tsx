@@ -254,10 +254,13 @@ export interface CallerIdentity {
   readonly secretKey: Uint8Array;
   /** `userCommitment(secretKey)`, via the compiled circuit. */
   readonly commitment: Uint8Array;
-  /** Canonical lowercase hex of the commitment (no 0x prefix). */
+  /**
+   * Canonical lowercase hex of the commitment (no 0x prefix). Doubles as
+   * the MPC's epsilon-derivation PATH STRING for the caller's deposit
+   * account: the MPC renders a record's 32 path bytes as their full-width
+   * lowercase hex.
+   */
   readonly commitmentHex: string;
-  /** The commitment read as the MPC's derivation path string. */
-  readonly pathString: string;
   /**
    * The caller's derived EVM deposit account, or null when
    * `VITE_MPC_ROOT_PUBLIC_KEY` is unset.
@@ -322,14 +325,13 @@ function buildCallerIdentity(
   mpcPubkey: string | null,
 ): CallerIdentity {
   const commitment = ERC20Vault.pureCircuits.userCommitment(secretKey);
-  const pathString = ERC20Vault.pathStringOfBytes(commitment);
+  const commitmentHex = bytesToHex(commitment);
   return {
     secretKey,
     commitment,
-    commitmentHex: bytesToHex(commitment),
-    pathString,
+    commitmentHex,
     depositEvmAddress:
-      mpcPubkey === null ? null : deriveEvmAddress(mpcPubkey, contractAddress, pathString),
+      mpcPubkey === null ? null : deriveEvmAddress(mpcPubkey, contractAddress, commitmentHex),
   };
 }
 
