@@ -6,6 +6,7 @@
 // the network.
 
 import { VAULT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
+import type { ProofServerObserver } from "@midnight-examples/lib";
 import {
   createE2eSession,
   type E2eSession,
@@ -39,9 +40,13 @@ export interface VaultSession {
  * hand out a stale wallet.
  *
  * @param env - The setup-populated env accumulator.
+ * @param proofObserver - Called after every proof-server /check and /prove round trip.
  * @returns The session lifecycle.
  */
-export function createVaultSession(env: NodeJS.ProcessEnv): VaultSession {
+export function createVaultSession(
+  env: NodeJS.ProcessEnv,
+  proofObserver?: ProofServerObserver,
+): VaultSession {
   const session: E2eSession = createE2eSession({
     env,
     requesterAddressEnvVar: "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
@@ -54,7 +59,7 @@ export function createVaultSession(env: NodeJS.ProcessEnv): VaultSession {
       // wallet() re-awaits synced state on every call; the context itself is
       // built once (findDeployedContract needs the setup-deployed vault).
       const wallet = await session.wallet();
-      sharedContext ??= await createVaultContext(env, wallet);
+      sharedContext ??= await createVaultContext(env, wallet, proofObserver);
       return sharedContext;
     },
 

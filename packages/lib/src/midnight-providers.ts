@@ -62,6 +62,40 @@ export function createWalletAndMidnightProvider(
   };
 }
 
+/** Phase of one proof-server round trip reported to a {@link ProofServerObserver}. */
+export enum ProofServerPhase {
+  Check = "check",
+  Prove = "prove",
+}
+
+/**
+ * One observed proof-server round trip (a /check or /prove call), as reported
+ * to a {@link ProofServerObserver}. `keyLocation` attributes the round trip to
+ * a circuit: `contract:<addr>/<circuitId>?vk=…` for contract circuits,
+ * `midnight/...` for protocol builtins.
+ */
+export interface ProofServerObservation {
+  /** Which endpoint the round trip hit. */
+  readonly phase: ProofServerPhase;
+  /** Canonical proving key location of the call being checked/proved. */
+  readonly keyLocation: string;
+  /** Wall-clock duration of the round trip. */
+  readonly ms: number;
+  /** The serialized proof preimage sent to the proof server. */
+  readonly serializedPreimage: Uint8Array;
+  /** The proof returned by /prove (successful {@link ProofServerPhase.Prove} observations only). */
+  readonly proof?: Uint8Array;
+  /** Error message when the round trip threw (the error is rethrown after observing). */
+  readonly error?: string;
+}
+
+/**
+ * Sink for {@link ProofServerObservation}s, called synchronously after each
+ * /check and /prove round trip of a provider built with
+ * {@link createCrossContractProofServerProvider}. Must not throw.
+ */
+export type ProofServerObserver = (observation: ProofServerObservation) => void;
+
 /**
  * Build the {@link ProofProvider} for a contract's provider set: proving via
  * the proof server's /check + /prove endpoints, with proving/verifier keys
@@ -91,12 +125,14 @@ export function createWalletAndMidnightProvider(
  *
  * @param proofServerUrl - The proof server's HTTP endpoint.
  * @param zkConfigProviders - One provider per compiled contract in the call tree; must be non-empty.
+ * @param observer - Called after every /check and /prove round trip (also on failure, before the error rethrows).
  * @returns The proof provider to place in a contract's midnight-js provider set.
  * @throws {Error} If `zkConfigProviders` is empty.
  */
 export function createCrossContractProofServerProvider(
   proofServerUrl: string,
   zkConfigProviders: readonly ZKConfigProvider<string>[],
+  observer?: ProofServerObserver,
 ): ProofProvider {
   if (zkConfigProviders.length === 0) {
     throw new Error(
@@ -143,5 +179,61 @@ export function createCrossContractProofServerProvider(
   };
 
   const provingProvider: ProvingProvider = { ...base, lookupKey };
-  return createProofProvider(provingProvider);
+  if (observer === undefined) {
+    return createProofProvider(provingProvider);
+  }
+
+  const observed: ProvingProvider = {
+    async check(serializedPreimage, keyLocation) {
+      const start = performance.now();
+      try {
+        const result = await provingProvider.check(serializedPreimage, keyLocation);
+        observer({
+          phase: ProofServerPhase.Check,
+          keyLocation,
+          serializedPreimage,
+          ms: performance.now() - start,
+        });
+        return result;
+      } catch (error) {
+        observer({
+          phase: ProofServerPhase.Check,
+          keyLocation,
+          serializedPreimage,
+          ms: performance.now() - start,
+          error: String(error),
+        });
+        throw error;
+      }
+    },
+    async prove(serializedPreimage, keyLocation, overwriteBindingInput) {
+      const start = performance.now();
+      try {
+        const proof = await provingProvider.prove(
+          serializedPreimage,
+          keyLocation,
+          overwriteBindingInput,
+        );
+        observer({
+          phase: ProofServerPhase.Prove,
+          keyLocation,
+          serializedPreimage,
+          proof,
+          ms: performance.now() - start,
+        });
+        return proof;
+      } catch (error) {
+        observer({
+          phase: ProofServerPhase.Prove,
+          keyLocation,
+          serializedPreimage,
+          ms: performance.now() - start,
+          error: String(error),
+        });
+        throw error;
+      }
+    },
+    lookupKey,
+  };
+  return createProofProvider(observed);
 }
