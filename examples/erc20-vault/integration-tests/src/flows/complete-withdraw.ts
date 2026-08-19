@@ -7,7 +7,11 @@
 // `refund`. Both refund paths demand proof of the identity
 // commitment pinned at withdraw time.
 
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import {
+  requestIdBytes,
+  type RequestIdHex,
+  respondBidirectionalEventToCircuitInput,
+} from "@sig-net/midnight";
 
 import type { VaultContext } from "../vault-context.ts";
 import { fetchAttestedRespondOutcome } from "./respond-output.ts";
@@ -72,7 +76,7 @@ export async function completeWithdraw(
     console.log("EVM transfer never executed: refunding to this wallet (the withdrawer)");
     const result = await context.vault.callTx.refund(
       requestIdBytes(options.requestId),
-      outcome.event,
+      respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
       mintNonce,
     );
@@ -87,7 +91,7 @@ export async function completeWithdraw(
   );
   const result = await context.vault.callTx.completeWithdraw(
     requestIdBytes(options.requestId),
-    outcome.event,
+    respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
     mintNonce,
   );

@@ -19,6 +19,7 @@ import {
   requestIdBytes,
   type RequestIdHex,
   requestIdHex,
+  respondBidirectionalEventToCircuitInput,
   serializeRespondOutput,
   type SignBidirectionalEvent,
   SIGNET_DEFAULT_KEY_VERSION,
@@ -282,7 +283,7 @@ export async function settleSwap(
     console.log("swap tx never executed: refunding tokenIn to this wallet");
     const r = await context.vault.callTx.refund(
       requestIdBytes(requestId),
-      outcome.event,
+      respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
       mintNonce,
     );
@@ -291,7 +292,7 @@ export async function settleSwap(
   }
   const r = await context.vault.callTx.completeSwap(
     requestIdBytes(requestId),
-    outcome.event,
+    respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
     mintNonce,
   );

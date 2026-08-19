@@ -10,7 +10,11 @@
 import type { EncPublicKey } from "@midnight-examples/lib";
 import { type CoinPublicKey, encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
 import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import {
+  requestIdBytes,
+  type RequestIdHex,
+  respondBidirectionalEventToCircuitInput,
+} from "@sig-net/midnight";
 
 import type { VaultContext } from "../vault-context.ts";
 import { fetchAttestedRespondOutcome } from "./respond-output.ts";
@@ -119,7 +123,7 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
             await context.vault.callTx.claim(
               txCtx,
               requestIdBytes(options.requestId),
-              outcome.event,
+              respondBidirectionalEventToCircuitInput(outcome.event),
               outcome.serializedOutput,
               mintNonce,
               recipient,
@@ -133,7 +137,7 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
         )
       : await context.vault.callTx.claim(
           requestIdBytes(options.requestId),
-          outcome.event,
+          respondBidirectionalEventToCircuitInput(outcome.event),
           outcome.serializedOutput,
           mintNonce,
           recipient,

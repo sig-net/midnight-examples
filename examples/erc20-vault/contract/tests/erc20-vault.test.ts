@@ -29,6 +29,7 @@ import {
   requestIdBytes,
   requestIdHex,
   type RespondBidirectionalEvent,
+  respondBidirectionalEventToCircuitInput,
   serializeRespondOutput,
   type SignBidirectionalEventLedgerMap,
   SignetEventName,
@@ -875,19 +876,26 @@ const OUTPUT_REVERTED = MPC_FAILURE_OUTPUT;
  * Sign a REAL RespondBidirectionalEvent for (requestId, serializedOutput)
  * with `secretKey`: the digest comes from the library's sanctioned TS twin
  * (pinned byte-for-byte against the compiled oracles in signet-midnight's
- * own tests), exactly like the MPC. The event carries ONLY the stored-form
- * signature (big-endian SEC1, bigR as a full point): the digest is recomputed
- * by whoever verifies, and the output travels as a separate circuit argument.
+ * own tests), exactly like the MPC. The wire event carries ONLY the
+ * stored-form signature (big-endian SEC1, bigR as a full point), and it is
+ * returned flipped to verifyRespondBidirectionalEvent's circuit-input form,
+ * which is what a client hands to the settle circuits: the digest is
+ * recomputed by whoever verifies, and the output travels as a separate
+ * circuit argument.
  */
 const respond = (
   secretKey: Uint8Array,
   requestId: Uint8Array,
   serializedOutput: Uint8Array,
-): RespondBidirectionalEvent => ({
-  signature: ecdsaSignatureToMpcSignature(
-    signAttestationDigest(calculateSignetAttestationDigest(requestId, serializedOutput), secretKey),
-  ),
-});
+): RespondBidirectionalEvent =>
+  respondBidirectionalEventToCircuitInput({
+    signature: ecdsaSignatureToMpcSignature(
+      signAttestationDigest(
+        calculateSignetAttestationDigest(requestId, serializedOutput),
+        secretKey,
+      ),
+    ),
+  });
 
 // ---- Complete-withdraw fixtures ----
 
