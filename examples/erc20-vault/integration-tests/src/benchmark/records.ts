@@ -18,6 +18,10 @@ export enum BenchRecordKind {
  * match the keys of that file's `timings` report.
  */
 export enum BenchmarkLeg {
+  Initialize = "initialize.initialize",
+  ApproveRequest = "approve.approveRouter",
+  ApprovePollSignatureResponse = "approve.pollSignatureResponse",
+  ApproveBroadcastEvm = "approve.broadcastEvm",
   DepositRequest = "deposit.deposit",
   DepositPollSignatureResponse = "deposit.pollSignatureResponse",
   DepositBroadcastEvm = "deposit.broadcastEvm",
@@ -28,6 +32,16 @@ export enum BenchmarkLeg {
   WithdrawBroadcastEvm = "withdraw.broadcastEvm",
   WithdrawPollRespondBidirectional = "withdraw.pollRespondBidirectional",
   WithdrawCompleteWithdraw = "withdraw.completeWithdraw",
+  SwapRequest = "swap.swap",
+  SwapPollSignatureResponse = "swap.pollSignatureResponse",
+  SwapBroadcastEvm = "swap.broadcastEvm",
+  SwapPollOutcome = "swap.pollSwapOutcome",
+  SwapSettle = "swap.completeSwap",
+  RefundWithdraw = "refund.withdraw",
+  RefundPollSignatureResponse = "refund.pollSignatureResponse",
+  RefundBroadcastEvm = "refund.broadcastEvm",
+  RefundPollRespondBidirectional = "refund.pollRespondBidirectional",
+  RefundSettle = "refund.refund",
 }
 
 /**
