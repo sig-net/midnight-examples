@@ -5,7 +5,7 @@
 
 import { ledger } from "@midnight-examples/erc20-vault-contract";
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js-types";
-import { bytesToHex, toSignBidirectionalEventIndex } from "@sig-net/midnight";
+import { bytesToHex, hexToBytes, toSignBidirectionalEventIndex } from "@sig-net/midnight";
 
 /** The decoded vault public ledger state, as the generated `ledger()` returns it. */
 export type VaultLedgerState = ReturnType<typeof ledger>;
@@ -35,15 +35,20 @@ export async function readVaultLedger(
  * signature requests. No proving keys or transactions involved.
  *
  * @param publicDataProvider - The provider to query raw contract state through.
- * @param vaultContractAddress - The deployed vault contract address.
- * @throws {Error} If no contract state exists at `vaultContractAddress`.
+ * @param vaultContractAddress - The deployed vault contract address, as bare hex.
+ * @throws {Error} If `vaultContractAddress` is not hex, or no contract state
+ *   exists there.
  */
 export async function printVaultState(
   publicDataProvider: PublicDataProvider,
   vaultContractAddress: string,
 ): Promise<void> {
-  const state = await readVaultLedger(publicDataProvider, vaultContractAddress);
-  console.log(`vault contract:    ${vaultContractAddress}`);
+  // Re-encode the address through bytes before it reaches the log: hexToBytes
+  // rejects anything that is not hex, so an env secret misrouted into the
+  // address variable is never printed.
+  const address = bytesToHex(hexToBytes(vaultContractAddress));
+  const state = await readVaultLedger(publicDataProvider, address);
+  console.log(`vault contract:    ${address}`);
   console.log(`initialized:       ${String(state.initialized)}`);
   console.log(`vault EVM address: 0x${bytesToHex(state.vaultEvmAddress)}`);
   // caip2Id is zero-padded ASCII; NUL-trim for display.
