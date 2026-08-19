@@ -15,14 +15,8 @@ vault sends is signed by the MPC network on the vault's request via the
 
 What this example demonstrates, end to end:
 
-- A Compact contract requesting EVM transaction signatures from the Signature
-  Network singleton contract with a cross-contract call on Midnight.
-- The MPC observing the request, signing the EVM transaction (secp256k1), and
-  later attesting the EVM outcome with an ECDSA-signed
-  `RespondBidirectionalEvent`, signed by a response key derived for THIS
-  contract (from the MPC root key, the vault's own address and the fixed path
-  `"midnight response key"`). Both responses are emitted as contract events
-  on Midnight.
+- A Compact contract requesting EVM transaction signatures from the Signature Network singleton contract with a cross-contract call on Midnight.
+- The MPC observing the request, signing the EVM transaction (secp256k1), and later attesting the EVM outcome with an ECDSA-signed `RespondBidirectionalEvent`, signed by a response key derived for THIS contract (from the MPC root key, the vault's own address and the fixed path `"midnight response key"`). Both responses are emitted as contract events on Midnight.
 - The vault verifying that response in-circuit against the response key it
   pinned at `initialize` time, and minting or burning shielded vault tokens
   accordingly, including a refund branch for when the EVM leg fails.
@@ -91,13 +85,14 @@ as INPUT, so they cannot exist at construction time: the deployer-gated
 one-shot `initialize` circuit pins them right after deploy, when the address
 (and therefore the derivations) exist.
 
-One subtlety for raw-hash paths: the MPC reads the 32 opaque path bytes as a
-UTF-8 string with NUL bytes stripped when it composes the derivation string.
-For the ASCII literals (`"vault"`) that reading is the obvious one, and for
-the user's commitment (a raw hash) it is lossy but deterministic, so client
-code deriving the user's EVM address must apply the exact same reading (see
-`pathStringOfBytes` in the integration tests' `vault-identity.ts`, and the
-reader setup snippet in the deposit walkthrough below).
+The MPC composes the derivation string by rendering the 32 opaque path bytes
+as their full-width lowercase hex (no `0x` prefix, padding included), a total
+and injective rendering that accepts any bytes the contract chooses. Client
+code deriving an account off-chain must feed `deriveEvmAddress` the same
+rendering: `bytesToHex` of the stored path bytes, so the vault's own account
+derives from the hex of `pad(32, "vault")` and the user's account from the
+hex of the identity commitment (see the reader setup snippet in the deposit
+walkthrough below).
 
 # Integration walkthrough
 
@@ -312,19 +307,16 @@ const reader = new SignetRequestResponseReader({
   eventSource: signetEventSourceFromPublicDataProvider(publicDataProvider),
 });
 
-// The MPC reads the 32 opaque path bytes as UTF-8 with NULs stripped (see
-// Derived keys and accounts above), so the commitment is read the same way:
-const pathStringOfBytes = (path: Uint8Array) =>
-  Buffer.from(path).toString("utf8").replace(/\0/g, "");
-
 // Deposit sweeps are signed by the USER's deposit account: the derivation
 // path is the caller's identity commitment, computed with the vault's
-// compiled circuit (never a TypeScript re-implementation).
+// compiled circuit (never a TypeScript re-implementation) and rendered as
+// its full-width lowercase hex, the MPC's rendering of every record's 32
+// opaque path bytes (see Derived keys and accounts above).
 const userCommitment = pureCircuits.userCommitment(callerSecretKey);
 const evmUserAddress = deriveEvmAddress(
   mpcRootPublicKey,
   vaultContractAddress,
-  pathStringOfBytes(userCommitment),
+  bytesToHex(userCommitment),
 );
 ```
 
@@ -622,9 +614,9 @@ Two patterns to take from it
 [`complete-withdraw.ts`](integration-tests/src/flows/complete-withdraw.ts)):
 
 - **Coin-spend as authorisation.** `withdraw()` is optimistic: the surrendered
-  coin is BURNED first (`receiveShielded`, paid to the contract and never
-  recorded, so vault tokens are IOUs a refund re-mints), and the refund path
-  exists for when the EVM leg later fails. The spend IS the auth, so anyone may
+  coin is BURNED first (`sendImmediateShielded` forwards its full value to the
+  stdlib's `shieldedBurnAddress()`, so vault tokens are IOUs a refund
+  re-mints), and the refund path exists for when the EVM leg later fails. The spend IS the auth, so anyone may
   withdraw to any destination. Because the vault's account pays the gas, the fee
   envelope is contract-FIXED (a caller-chosen cap would let anyone drain the
   vault's ETH). The request is keyed under the vault's own `"vault"` path so the

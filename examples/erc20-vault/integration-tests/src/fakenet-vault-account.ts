@@ -8,8 +8,10 @@ import {
   type ContractWriteMethod,
   requireEnv,
 } from "@midnight-examples/test-harness";
-import { deriveEpsilon, SECP256K1_ORDER } from "@sig-net/midnight";
+import { deriveEpsilon, SECP256K1_ORDER, stripHexPrefix } from "@sig-net/midnight";
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
+
+import { VAULT_PATH_HEX } from "./mpc-routing.ts";
 
 const ERC20_TRANSFER_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -20,7 +22,7 @@ const ERC20_TRANSFER_ABI = [
  * Drain the vault's derived EVM account of its FULL `ERC20_ADDRESS` balance,
  * transferring it to `to` and waiting for one confirmation. Fakenet ONLY: it
  * re-derives the vault account's private key from `MPC_ROOT_KEY` (epsilon
- * path `"vault"`, the private-key twin of signet-midnight's
+ * path {@link VAULT_PATH_HEX}, the private-key twin of signet-midnight's
  * `deriveEvmAddress`) and refuses to sign unless the derived address matches
  * `EVM_VAULT_ADDRESS`.
  *
@@ -47,8 +49,10 @@ export async function drainVaultErc20(env: NodeJS.ProcessEnv, to: string): Promi
   // The private-key side of the sig-net v2.0.0 epsilon scheme:
   // epsilon = deriveEpsilon(contract, path) (keccak of the colon-separated
   // "<prefix>:<chainId>:<contract>:<path>" derivation string reduced mod the
-  // curve order), derivedPriv = rootPriv + epsilon mod n.
-  const epsilon = deriveEpsilon(vaultContractAddress, "vault");
+  // curve order), derivedPriv = rootPriv + epsilon mod n. deriveEpsilon
+  // takes the requester verbatim, so render the address the way
+  // deriveEvmAddress does (lowercase, no 0x prefix).
+  const epsilon = deriveEpsilon(stripHexPrefix(vaultContractAddress).toLowerCase(), VAULT_PATH_HEX);
   const rootKey = BigInt(requireEnv(env, "MPC_ROOT_KEY"));
   const derivedPriv = (rootKey + epsilon) % SECP256K1_ORDER;
 
