@@ -29,6 +29,7 @@ import {
   requestIdBytes,
   requestIdHex,
   type RespondBidirectionalEvent,
+  respondBidirectionalEventToCircuitInput,
   serializeRespondOutput,
   type SignBidirectionalEventLedgerMap,
   SignetEventName,
@@ -738,13 +739,16 @@ describe("withdraw round-trip", () => {
     // TS-twin lockstep: the ledger map key is the id the library recomputes.
     expect(idHex).toBe(requestIdHex(calculateRequestId(record)));
 
-    // The withdrawer's refund commitment is pinned under the request id;
-    // the compiled circuit recomputes it off-chain here (domain-separated
-    // from userCommitment, bound to THIS request id); nonce bumped.
+    // The withdrawer's settle view is pinned under the request id: the refund
+    // commitment (recomputed off-chain here via the compiled circuit,
+    // domain-separated from userCommitment and bound to THIS request id) plus
+    // the typed token + amount settle circuits read back; nonce bumped.
     expect(ledger(state).refundCommitment.member(requestIdBytes(idHex))).toBe(true);
-    expect(ledger(state).refundCommitment.lookup(requestIdBytes(idHex))).toEqual(
-      pureCircuits.withdrawRefundCommitment(SECRET_KEY, requestIdBytes(idHex)),
-    );
+    expect(ledger(state).refundCommitment.lookup(requestIdBytes(idHex))).toEqual({
+      commitment: pureCircuits.withdrawRefundCommitment(SECRET_KEY, requestIdBytes(idHex)),
+      erc20: ERC20,
+      amount: AMOUNT,
+    });
     expect(ledger(state).signetRequestNonce).toBe(1n);
 
     // The burn, observable in the zswap local state: the coin is received (a
@@ -914,19 +918,26 @@ const OUTPUT_REVERTED = MPC_FAILURE_OUTPUT;
  * Sign a REAL RespondBidirectionalEvent for (requestId, serializedOutput)
  * with `secretKey`: the digest comes from the library's sanctioned TS twin
  * (pinned byte-for-byte against the compiled oracles in signet-midnight's
- * own tests), exactly like the MPC. The event carries ONLY the stored-form
- * signature (big-endian SEC1, bigR as a full point): the digest is recomputed
- * by whoever verifies, and the output travels as a separate circuit argument.
+ * own tests), exactly like the MPC. The wire event carries ONLY the
+ * stored-form signature (big-endian SEC1, bigR as a full point), and it is
+ * returned flipped to verifyRespondBidirectionalEvent's circuit-input form,
+ * which is what a client hands to the settle circuits: the digest is
+ * recomputed by whoever verifies, and the output travels as a separate
+ * circuit argument.
  */
 const respond = (
   secretKey: Uint8Array,
   requestId: Uint8Array,
   serializedOutput: Uint8Array,
-): RespondBidirectionalEvent => ({
-  signature: ecdsaSignatureToMpcSignature(
-    signAttestationDigest(calculateSignetAttestationDigest(requestId, serializedOutput), secretKey),
-  ),
-});
+): RespondBidirectionalEvent =>
+  respondBidirectionalEventToCircuitInput({
+    signature: ecdsaSignatureToMpcSignature(
+      signAttestationDigest(
+        calculateSignetAttestationDigest(requestId, serializedOutput),
+        secretKey,
+      ),
+    ),
+  });
 
 // ---- Complete-withdraw fixtures ----
 
@@ -1161,7 +1172,7 @@ describe("refund (withdrawal) settle", () => {
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Not the withdrawer/);
+    ).rejects.toThrow(/Not the requester/);
   });
 
   it("rejects a genuinely attested 5-byte output that is not the failure output", async () => {
@@ -1729,7 +1740,7 @@ describe("refund (swap) settle", () => {
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Not the swapper/);
+    ).rejects.toThrow(/Not the requester/);
   });
 });
 
@@ -2054,6 +2065,6 @@ describe("refund (supply/redeem) settle", () => {
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Not the supplier/);
+    ).rejects.toThrow(/Not the requester/);
   });
 });

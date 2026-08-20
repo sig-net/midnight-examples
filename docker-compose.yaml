@@ -102,7 +102,7 @@ services:
     # compose network), never the host's 127.0.0.1 view. The un-prefixed
     # names inside the container are what the fakenet image itself expects.
     container_name: 'fakenet-responder'
-    image: 'ghcr.io/sig-net/fakenet:0.16.0'
+    image: 'ghcr.io/sig-net/fakenet:0.17.0'
     profiles: ['fakenet']
     depends_on:
       indexer:

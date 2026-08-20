@@ -18,6 +18,7 @@ import {
   requestIdBytes,
   type RequestIdHex,
   requestIdHex,
+  respondBidirectionalEventToCircuitInput,
   serializeRespondOutput,
   type SignBidirectionalEvent,
   SIGNET_DEFAULT_KEY_VERSION,
@@ -228,7 +229,7 @@ export async function completeRedeem(
     console.log("redeem tx never executed: refunding the shares to this wallet");
     const r = await context.vault.callTx.refund(
       requestIdBytes(requestId),
-      outcome.event,
+      respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
       mintNonce,
     );
@@ -237,7 +238,7 @@ export async function completeRedeem(
   }
   const r = await context.vault.callTx.completeRedeem(
     requestIdBytes(requestId),
-    outcome.event,
+    respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
     mintNonce,
   );

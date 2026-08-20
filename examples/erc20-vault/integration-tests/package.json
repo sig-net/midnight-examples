@@ -8,7 +8,9 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "RUN_INTEGRATION_TESTS=1 vitest run --disable-console-intercept --bail 1",
-    "read-state": "tsx scripts/read-state.ts"
+    "read-state": "tsx scripts/read-state.ts",
+    "benchmark:static": "tsx scripts/benchmark-static.ts",
+    "benchmark:report": "tsx scripts/benchmark-report.ts"
   },
   "dependencies": {
     "@midnight-examples/erc20-vault-contract": "*",
@@ -20,11 +22,12 @@
     "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.6",
     "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.6",
     "@midnight-ntwrk/midnight-js-types": "5.0.0-beta.6",
-    "@sig-net/midnight": "0.20.0-rc.1",
+    "@sig-net/midnight": "0.21.0-rc.1",
     "ethers": "^6.17.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "compact-zkir-lint": "0.2.0",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

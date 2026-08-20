@@ -19,6 +19,7 @@ import {
   requestIdBytes,
   type RequestIdHex,
   requestIdHex,
+  respondBidirectionalEventToCircuitInput,
   serializeRespondOutput,
   type SignBidirectionalEvent,
   SIGNET_DEFAULT_KEY_VERSION,
@@ -153,7 +154,7 @@ export async function swap(context: VaultContext, options: SwapOptions): Promise
 }
 
 /** The resolved attested outcome of a swap (uint64 amountIn spent, or the failure output). */
-interface SwapOutcome {
+export interface SwapOutcome {
   readonly event: Awaited<ReturnType<SignetReader["getRespondBidirectionalEvents"]>>[number];
   readonly serializedOutput: Uint8Array;
   readonly amountIn: bigint;
@@ -225,8 +226,85 @@ async function fetchSwapOutcome(
   return undefined;
 }
 
+/** Options for {@link pollSwapOutcome}. */
+export interface PollSwapOutcomeOptions {
+  /** The swap request id to resolve. */
+  readonly requestId: RequestIdHex;
+  /** Poll interval; 1s when omitted. */
+  readonly intervalMs?: number;
+  /** Give-up horizon; 6 minutes when omitted. */
+  readonly timeoutMs?: number;
+}
+
 /**
- * Poll until the swap outcome resolves, then settle via completeSwap / refund.
+ * Poll until the MPC posts a signature-verified attestation for the swap
+ * (see {@link fetchSwapOutcome} for candidate resolution).
+ *
+ * @param context - The flow context.
+ * @param options - The request id and poll cadence.
+ * @returns The resolved outcome (attested amountIn spent, or the failure output).
+ * @throws {Error} If no matching attestation posts within the timeout.
+ */
+export async function pollSwapOutcome(
+  context: VaultContext,
+  options: PollSwapOutcomeOptions,
+): Promise<SwapOutcome> {
+  const end = Date.now() + (options.timeoutMs ?? 6 * MINUTE);
+  let outcome: SwapOutcome | undefined;
+  while (
+    Date.now() < end &&
+    (outcome = await fetchSwapOutcome(context, options.requestId)) === undefined
+  ) {
+    await new Promise((r) => setTimeout(r, options.intervalMs ?? 1000));
+  }
+  if (!outcome)
+    throw new Error(`timed out waiting for a swap attestation for ${options.requestId}`);
+  return outcome;
+}
+
+/**
+ * Settle a resolved swap outcome through the circuit its width selects:
+ * `completeSwap` for an attested amountIn (mints the exact amountOut of
+ * tokenOut plus the unspent tokenIn as change), `refund` for the fixed MPC
+ * failure output (re-mints the surrendered amountInMaximum).
+ *
+ * @param context - The flow context.
+ * @param requestId - The swap request id being settled.
+ * @param outcome - The attested outcome from {@link pollSwapOutcome}.
+ * @returns The attested amountIn spent (0 on refund) and whether the swap was refunded.
+ */
+export async function settleSwap(
+  context: VaultContext,
+  requestId: RequestIdHex,
+  outcome: SwapOutcome,
+): Promise<{ amountIn: bigint; refunded: boolean }> {
+  const mintNonce = crypto.getRandomValues(new Uint8Array(32));
+  if (outcome.matchedFailureOutput) {
+    console.log("swap tx never executed: refunding tokenIn to this wallet");
+    const r = await context.vault.callTx.refund(
+      requestIdBytes(requestId),
+      respondBidirectionalEventToCircuitInput(outcome.event),
+      outcome.serializedOutput,
+      mintNonce,
+    );
+    console.log(`refund settled in tx ${r.public.txId}`);
+    return { amountIn: 0n, refunded: true };
+  }
+  const r = await context.vault.callTx.completeSwap(
+    requestIdBytes(requestId),
+    respondBidirectionalEventToCircuitInput(outcome.event),
+    outcome.serializedOutput,
+    mintNonce,
+  );
+  console.log(
+    `completeSwap settled in tx ${r.public.txId} (spent ${String(outcome.amountIn)} tokenIn)`,
+  );
+  return { amountIn: outcome.amountIn, refunded: false };
+}
+
+/**
+ * Poll until the swap outcome resolves, then settle: {@link pollSwapOutcome}
+ * followed by {@link settleSwap}.
  *
  * @param context - The flow context.
  * @param requestId - The swap request id to settle.
@@ -236,35 +314,8 @@ export async function completeSwap(
   context: VaultContext,
   requestId: RequestIdHex,
 ): Promise<{ amountIn: bigint; refunded: boolean }> {
-  const end = Date.now() + 6 * MINUTE;
-  let outcome: SwapOutcome | undefined;
-  while (Date.now() < end && (outcome = await fetchSwapOutcome(context, requestId)) === undefined) {
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-  if (!outcome) throw new Error(`timed out waiting for a swap attestation for ${requestId}`);
-
-  const mintNonce = crypto.getRandomValues(new Uint8Array(32));
-  if (outcome.matchedFailureOutput) {
-    console.log("swap tx never executed: refunding tokenIn to this wallet");
-    const r = await context.vault.callTx.refund(
-      requestIdBytes(requestId),
-      outcome.event,
-      outcome.serializedOutput,
-      mintNonce,
-    );
-    console.log(`refund settled in tx ${r.public.txId}`);
-    return { amountIn: 0n, refunded: true };
-  }
-  const r = await context.vault.callTx.completeSwap(
-    requestIdBytes(requestId),
-    outcome.event,
-    outcome.serializedOutput,
-    mintNonce,
-  );
-  console.log(
-    `completeSwap settled in tx ${r.public.txId} (spent ${String(outcome.amountIn)} tokenIn)`,
-  );
-  return { amountIn: outcome.amountIn, refunded: false };
+  const outcome = await pollSwapOutcome(context, { requestId });
+  return settleSwap(context, requestId, outcome);
 }
 
 /** Options for {@link runSwapRoundTrip}. */

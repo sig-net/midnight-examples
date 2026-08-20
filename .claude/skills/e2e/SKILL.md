@@ -208,6 +208,33 @@ raw traced EVM output from it, so a poll that times out with
   spends a fresh deposit). On the resumed/rerun invocation the interrupted
   proof is the FIRST on a fresh server and the rest of the file fits in the
   remaining headroom.
+- **A signature poll timing out on a request the responder NEVER logged as
+  "New request"**, while the responder container is up and its log shows no
+  errors (an idle poll loop, or only re-answers of OLD requests): the signet's
+  event history has outgrown a single indexer page and the responder's
+  request discovery is starved — it reads the event registry through
+  `@sig-net/midnight`'s `querySignetEvents`, and SDK versions up to
+  0.20.0-rc.1 issue ONE un-paged `queryContractEvents` call, which the
+  indexer provider caps at 100 events. Every notification past event #100 is
+  then invisible to a responder image built on those SDKs, and every response
+  past #100 is equally invisible to a test suite pinning them. This only
+  applies when a fakenet image before 0.17.0 (or an SDK before 0.21.0-rc.1,
+  the first version that paginates the read) is in play — with the compose
+  file's pins, both sides page and a full registry is harmless. Confirm by
+  counting (the threshold is 100):
+  ```bash
+  curl -s http://127.0.0.1:8088/api/v3/graphql -H 'Content-Type: application/json' \
+    -d '{"query":"query { contractEvents(filter: { contractAddress: \"<MIDNIGHT_SIGNET_CONTRACT_ADDRESS>\" }, limit: 1000) { id } }"}'
+  ```
+  Responder restarts do NOT help (the same first page is re-read, and each
+  re-answered old request emits MORE events, pushing live traffic further past
+  the horizon). Recover by moving to the paginating pins, or on a stack that
+  must keep an old image, by tearing the whole stack down and redeploying
+  (`docker compose --profile fakenet down && docker compose up -d`, then the
+  redeploy flow above) so the registry starts empty, keeping redeploy
+  campaigns short of ~30 requests. Every fresh vault deploy leaves its
+  requests in the shared registry forever, so frequent redeploys against one
+  long-lived stack are what fill the page.
 - **A signature poll timing out on a request the responder DID log as "New
   request"**, with `respond(0x…) … FAILED` + a proof-server
   transport error in `docker logs fakenet-responder`: the responder proves
