@@ -85,13 +85,24 @@ export ledger caip2Id: Bytes<32>;
 // Identity commitment of the deployer. Only they may call initialize().
 sealed ledger deployer: Bytes<32>;
 
-// Pending withdrawals: requestId -> the withdrawer's refund commitment (see
-// withdrawRefundCommitment), pinned at request time so ONLY the withdrawer can pull a
-// refund when the EVM transfer fails. Doubles as the pending-withdrawal marker, and is
-// the ONLY per-withdrawal state: the surrendered coin itself is burned at request time
-// (see withdraw), so any number of withdrawals across any ERC20 colours proceed
+// Pending withdrawals: requestId -> the settle view. The commitment (see
+// withdrawRefundCommitment) is pinned at request time so ONLY the withdrawer can pull a
+// refund when the EVM transfer fails, and the token + amount are typed copies of the
+// values the withdraw circuit validated and bound to Uint<64> before the burn: settle
+// circuits read them here as typed fields, never by decoding the request record's ABI
+// calldata words (each decode costs a whole 32-byte decomposition in-circuit). The view
+// and the request record are written by the same circuit in the same call, so they
+// cannot drift. Doubles as the pending-withdrawal marker, and is the ONLY
+// per-withdrawal state: the surrendered coin itself is burned at request time (see
+// withdraw), so any number of withdrawals across any ERC20 colours proceed
 // concurrently.
-export ledger refundCommitment: Map<RequestId, Bytes<32>>;
+struct WithdrawSettleView {
+  commitment: Bytes<32>;
+  erc20: Bytes<20>;
+  amount: Uint<64>;
+}
+
+export ledger refundCommitment: Map<RequestId, WithdrawSettleView>;
 
 // ---- Swap state (Uniswap V3) --------------------------------------------------------
 // The pinned Uniswap SwapRouter02: the ONLY spender approveRouter grants an allowance to,
@@ -107,9 +118,19 @@ export ledger uniswapRouter: Bytes<20>;
 // after the first deploy.
 export ledger swapEventMap: SignBidirectionalEventMap<EvmType2TxParams<7, 0, 0>, 38, 37>;
 
-// Pending-swap marker + swapper refund gate, mirroring refundCommitment for withdrawals
+// Pending-swap marker + swapper settle view, mirroring refundCommitment for withdrawals
 // (kept separate so a swap requestId can never be settled through a withdraw circuit).
-export ledger swapRefundCommitment: Map<RequestId, Bytes<32>>;
+// All four values are typed copies the swap circuit validated and bounded before the
+// burn: completeSwap and refund read them here, never from the 7-word request record.
+struct SwapSettleView {
+  commitment: Bytes<32>;
+  tokenIn: Bytes<20>;
+  tokenOut: Bytes<20>;
+  amountOut: Uint<64>;
+  amountInMaximum: Uint<64>;
+}
+
+export ledger swapRefundCommitment: Map<RequestId, SwapSettleView>;
 
 // ---- Aave lending state (single asset: USDC) ----------------------------------------
 // The pinned USDC pair the vault lends: the underlying ERC20 and its non-rebasing ERC-4626
@@ -126,12 +147,30 @@ export ledger stataToken: Bytes<20>;
 // uint256 shares the MPC repacks to uint64. A separate map from swap: the calldata width
 // and the schema widths are part of the ledger type.
 export ledger supplyEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 36, 35>;
-export ledger supplyRefundCommitment: Map<RequestId, Bytes<32>>;
+
+// Supplier settle view: the refund arm re-mints `amount` of the pinned stataUnderlying
+// colour, so the amount (bounded to Uint<64> before the burn) rides along with the gate
+// commitment. completeSupply mints the ATTESTED shares instead and needs only the gate.
+struct SupplySettleView {
+  commitment: Bytes<32>;
+  amount: Uint<64>;
+}
+
+export ledger supplyRefundCommitment: Map<RequestId, SupplySettleView>;
 
 // Redeem requests: stataToken.redeem(shares, receiver, owner) is 3 calldata words returning
 // a uint256 assets the MPC repacks to uint64.
 export ledger redeemEventMap: SignBidirectionalEventMap<EvmType2TxParams<3, 0, 0>, 36, 35>;
-export ledger redeemRefundCommitment: Map<RequestId, Bytes<32>>;
+
+// Redeemer settle view: the refund arm re-mints `shares` of the pinned stataToken
+// colour (bounded to Uint<64> before the burn). completeRedeem mints the ATTESTED
+// assets instead and needs only the gate.
+struct RedeemSettleView {
+  commitment: Bytes<32>;
+  shares: Uint<64>;
+}
+
+export ledger redeemRefundCommitment: Map<RequestId, RedeemSettleView>;
 
 // ---- Fixed MPC routing --------------------------------------------------------------
 // This vault does exactly one thing: have the MPC sign ERC20 `transfer` calls on an EVM
@@ -550,11 +589,16 @@ export circuit withdraw(
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
 
-  // Record the event and pin the withdrawer's refund commitment: only the commitment
-  // (a hash) reaches the ledger, the refund recipient's key stays private.
+  // Record the event and pin the withdrawer's settle view: the commitment (a hash)
+  // keeps the refund recipient's key private, and the token + amount are already
+  // public in the request record above.
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
-  refundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
+  refundCommitment.insert(requestId, WithdrawSettleView {
+    commitment: disclose(withdrawRefundCommitment(callerSecretKey(), requestId)),
+    erc20: disclose(withdrawRequest.erc20Address),
+    amount: disclose(withdrawRequest.amount as Uint<64>),
+  });
 
   // Notify the MPC (ledger-tree path [0] at depth 1 = signBidirectionalEventMap, see
   // its declaration).
@@ -608,9 +652,12 @@ export circuit completeWithdraw(
 
   // Double-settle protection: refundCommitment is the pending-withdrawal marker.
   // Deposits never insert it, so a deposit request cannot be settled through this
-  // circuit (its own settle is claim, which is depositor-gated).
+  // circuit (its own settle is claim, which is depositor-gated). The settle view
+  // carries the typed token + amount, so the request record itself is only removed,
+  // never read (the withdraw-time insert keeps view and record in lockstep, so the
+  // consumed entry is the right one).
   assert(refundCommitment.member(disclosedRequestId), "Withdrawal not found");
-  const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
+  const view = refundCommitment.lookup(disclosedRequestId);
   signBidirectionalEventMap.remove(disclosedRequestId);
 
   // Branch on the EVM result, deserialized into the schema's struct (0x01 is
@@ -618,22 +665,20 @@ export circuit completeWithdraw(
   // public anyway (a mint is observable).
   const succeeded = disclose(deserialize<VaultResponse, 1>(serializedOutput).success);
 
-  // The commitment, amount decode and domain separator sit OUTSIDE the guard on
-  // purpose: the proving circuit evaluates both branches regardless, so hoisting
-  // the hashes costs nothing on the success path and keeps the guarded region to
-  // the mint alone. Moving them back inside re-inflates the circuit.
+  // The commitment and domain separator sit OUTSIDE the guard on purpose: the
+  // proving circuit evaluates both branches regardless, so hoisting the hashes
+  // costs nothing on the success path and keeps the guarded region to the mint
+  // alone. Moving them back inside re-inflates the circuit.
   const myCommitment = withdrawRefundCommitment(callerSecretKey(), disclosedRequestId);
-  assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
-  const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
-  const domainSep = vaultTokenDomainSeparator(signatureRequest.txParams.to);
+  const domainSep = vaultTokenDomainSeparator(view.erc20);
 
   if (!succeeded) {
     // Refund path only: it mints a private coin, so it is withdrawer-only (the
     // caller proves the secret behind the commitment pinned at withdraw time).
     // The success branch skips this, as cleanup needs no identity.
-    assert(myCommitment == refundCommitment.lookup(disclosedRequestId), "Not the withdrawer");
+    assert(myCommitment == view.commitment, "Not the withdrawer");
     const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-    mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), recipient);
+    mintShieldedToken(domainSep, view.amount, disclose(mintNonce), recipient);
   }
 
   refundCommitment.remove(disclosedRequestId);
@@ -695,59 +740,59 @@ export circuit refund(
     "Request not found"
   );
 
-  // All four refund shapes mint the surrendered value (withdrawals: calldata word 1
-  // of the transfer, token in txParams.to; swaps: amountInMaximum in word 5, tokenIn
-  // in word 0's low 20 bytes; supplies: the deposit amount in word 0, colour pinned
-  // in stataUnderlying; redeems: the shares in word 0, colour pinned in stataToken),
-  // so the branch-dependent (amount word, token) pair is selected here and decoded
-  // ONCE after the join: a per-branch decode + mint pays the hash and mint cost per
-  // arm. The conditions are public, so an untaken arm's lookup never executes in
-  // the ledger transcript.
-  const amountWord = isWithdrawal
-    ? signBidirectionalEventMap.lookup(disclosedRequestId).txParams.calldata.value.words[1]
+  // All four refund shapes re-mint the surrendered value the request pinned in its
+  // settle view (withdrawals and swaps carry their token in the view; supply and
+  // redeem colours are the pinned stataUnderlying/stataToken cells), so the
+  // branch-dependent (commitment, token, amount) triple is selected here as typed
+  // fields and minted ONCE after the join: no ABI-word decode, no request-record
+  // read, and a per-branch mint would pay the hash and mint cost per arm. The
+  // conditions are public, so an untaken arm's lookup never executes in the ledger
+  // transcript.
+  const commitment = isWithdrawal
+    ? refundCommitment.lookup(disclosedRequestId).commitment
     : isSwap
-      ? swapEventMap.lookup(disclosedRequestId).txParams.calldata.value.words[5]
+      ? swapRefundCommitment.lookup(disclosedRequestId).commitment
       : isSupply
-        ? supplyEventMap.lookup(disclosedRequestId).txParams.calldata.value.words[0]
-        : redeemEventMap.lookup(disclosedRequestId).txParams.calldata.value.words[0];
+        ? supplyRefundCommitment.lookup(disclosedRequestId).commitment
+        : redeemRefundCommitment.lookup(disclosedRequestId).commitment;
   const tokenAddr = isWithdrawal
-    ? signBidirectionalEventMap.lookup(disclosedRequestId).txParams.to
+    ? refundCommitment.lookup(disclosedRequestId).erc20
     : isSwap
-      ? slice<20>(swapEventMap.lookup(disclosedRequestId).txParams.calldata.value.words[0], 12)
+      ? swapRefundCommitment.lookup(disclosedRequestId).tokenIn
       : isSupply
         ? stataUnderlying
         : stataToken;
+  const amount = isWithdrawal
+    ? refundCommitment.lookup(disclosedRequestId).amount
+    : isSwap
+      ? swapRefundCommitment.lookup(disclosedRequestId).amountInMaximum
+      : isSupply
+        ? supplyRefundCommitment.lookup(disclosedRequestId).amount
+        : redeemRefundCommitment.lookup(disclosedRequestId).shares;
+
+  // Requester-only in every arm: a refund mints a private coin, so the caller proves
+  // the secret behind the commitment pinned at request time. The mintNonce must be
+  // caller-chosen RANDOM (one derived from the public requestId would link the coin
+  // to the request).
+  assert(myCommitment == commitment, "Not the requester");
 
   if (isWithdrawal) {
-    // Withdrawal refund: withdrawer-only, under a caller-chosen random mintNonce
-    // (one derived from the public requestId would link the coin to the withdrawal).
-    assert(myCommitment == refundCommitment.lookup(disclosedRequestId), "Not the withdrawer");
     signBidirectionalEventMap.remove(disclosedRequestId);
     refundCommitment.remove(disclosedRequestId);
   } else if (isSwap) {
-    // Swap refund: swapper-only. The swap never executed, so the full surrendered
-    // amountInMaximum re-mints and nothing was spent.
-    assert(myCommitment == swapRefundCommitment.lookup(disclosedRequestId), "Not the swapper");
     swapEventMap.remove(disclosedRequestId);
     swapRefundCommitment.remove(disclosedRequestId);
   } else if (isSupply) {
-    // Supply refund: supplier-only. The deposit never executed, so the surrendered
-    // USDC re-mints in the pinned underlying colour.
-    assert(myCommitment == supplyRefundCommitment.lookup(disclosedRequestId), "Not the supplier");
     supplyEventMap.remove(disclosedRequestId);
     supplyRefundCommitment.remove(disclosedRequestId);
   } else {
-    // Redeem refund: redeemer-only. The redeem never executed, so the surrendered
-    // stataToken shares re-mint in the pinned wrapper colour.
-    assert(myCommitment == redeemRefundCommitment.lookup(disclosedRequestId), "Not the redeemer");
     redeemEventMap.remove(disclosedRequestId);
     redeemRefundCommitment.remove(disclosedRequestId);
   }
 
-  const amount = abiWordToUint128(amountWord);
   const domainSep = vaultTokenDomainSeparator(tokenAddr);
   const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-  mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), recipient);
+  mintShieldedToken(domainSep, amount, disclose(mintNonce), recipient);
 }
 
 // ---- Swap: approveRouter ------------------------------------------------------------
@@ -945,7 +990,13 @@ export circuit swap(
 
   signetRequestNonce.increment(1);
   swapEventMap.insert(requestId, disclose(request));
-  swapRefundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
+  swapRefundCommitment.insert(requestId, SwapSettleView {
+    commitment: disclose(withdrawRefundCommitment(callerSecretKey(), requestId)),
+    tokenIn: disclose(swapRequest.tokenIn),
+    tokenOut: disclose(swapRequest.tokenOut),
+    amountOut: disclose(swapRequest.amountOut as Uint<64>),
+    amountInMaximum: disclose(swapRequest.amountInMaximum as Uint<64>),
+  });
 
   // Notify the MPC (ledger-tree path [1,7] at depth 2 = swapEventMap, chunked past 15 fields).
   signetSigner.signBidirectional(
@@ -989,38 +1040,33 @@ export circuit completeSwap(
 
   // Double-settle protection: swapRefundCommitment is the pending-swap marker (withdraw's
   // refundCommitment is separate, so a withdrawal cannot be settled here and vice versa).
+  // The settle view carries the typed tokens + amounts, so the 7-word request record is
+  // only removed, never read (the swap-time insert keeps view and record in lockstep).
   assert(swapRefundCommitment.member(disclosedRequestId), "Swap not found");
-  const signatureRequest = swapEventMap.lookup(disclosedRequestId);
+  const view = swapRefundCommitment.lookup(disclosedRequestId);
   swapEventMap.remove(disclosedRequestId);
 
   // Swapper gate: minting to the swapper, so prove the swap-time commitment.
   assert(
-    withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
-      == swapRefundCommitment.lookup(disclosedRequestId),
+    withdrawRefundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
     "Not the swapper"
   );
   swapRefundCommitment.remove(disclosedRequestId);
 
-  assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
   const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
 
-  // Mint the EXACT amountOut of tokenOut the swap requested: calldata word 4 (amountOut) of
-  // tokenOut (word 1, low 20 bytes). amountOut was bounded to Uint<64> in swap, before the
-  // burn, so this never strands the surrendered coin.
-  const amountOut = abiWordToUint128(signatureRequest.txParams.calldata.value.words[4]);
-  const tokenOut = slice<20>(signatureRequest.txParams.calldata.value.words[1], 12);
-  mintShieldedToken(vaultTokenDomainSeparator(tokenOut), amountOut as Uint<64>, disclose(mintNonce), recipient);
+  // Mint the EXACT amountOut of tokenOut the swap requested (a request input, not the
+  // result), so this never strands the surrendered coin.
+  mintShieldedToken(vaultTokenDomainSeparator(view.tokenOut), view.amountOut, disclose(mintNonce), recipient);
 
-  // Return the unspent tokenIn as change: amountInMaximum (word 5) - amountIn spent (the
-  // attested result, native-deserialized). tokenIn is word 0. amountInMaximum was bounded to
-  // Uint<64>, so change (<= amountInMaximum) fits the mint API. Change is 0 on an exact spend,
-  // which mints a 0-value coin, harmless. A distinct nonce keeps the two coins unlinkable.
+  // Return the unspent tokenIn as change: amountInMaximum - amountIn spent (the attested
+  // result, native-deserialized). change <= amountInMaximum, so it fits the Uint<64> mint
+  // API. Change is 0 on an exact spend, which mints a 0-value coin, harmless. A distinct
+  // nonce keeps the two coins unlinkable.
   const amountIn = disclose(deserialize<ExactOutputSingleReturnValue, 8>(serializedOutput).amountIn);
-  const amountInMaximum = abiWordToUint128(signatureRequest.txParams.calldata.value.words[5]);
-  const change = amountInMaximum - (amountIn as Uint<128>);
-  const tokenIn = slice<20>(signatureRequest.txParams.calldata.value.words[0], 12);
+  const change = view.amountInMaximum - amountIn;
   const changeNonce = persistentHash<Vector<2, Bytes<32>>>([disclose(mintNonce), pad(32, "change")]);
-  mintShieldedToken(vaultTokenDomainSeparator(tokenIn), change as Uint<64>, changeNonce, recipient);
+  mintShieldedToken(vaultTokenDomainSeparator(view.tokenIn), change as Uint<64>, changeNonce, recipient);
 }
 
 // ---- Aave: approveStata -------------------------------------------------------------
@@ -1136,7 +1182,10 @@ export circuit supply(
 
   signetRequestNonce.increment(1);
   supplyEventMap.insert(requestId, disclose(request));
-  supplyRefundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
+  supplyRefundCommitment.insert(requestId, SupplySettleView {
+    commitment: disclose(withdrawRefundCommitment(callerSecretKey(), requestId)),
+    amount: disclose(amount as Uint<64>),
+  });
 
   // Notify the MPC (ledger-tree path [1,11] at depth 2 = supplyEventMap, chunked past 15 fields).
   signetSigner.signBidirectional(
@@ -1170,7 +1219,7 @@ export circuit completeSupply(
   supplyEventMap.remove(disclosedRequestId);
   assert(
     withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
-      == supplyRefundCommitment.lookup(disclosedRequestId),
+      == supplyRefundCommitment.lookup(disclosedRequestId).commitment,
     "Not the supplier"
   );
   supplyRefundCommitment.remove(disclosedRequestId);
@@ -1242,7 +1291,10 @@ export circuit redeem(
 
   signetRequestNonce.increment(1);
   redeemEventMap.insert(requestId, disclose(request));
-  redeemRefundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
+  redeemRefundCommitment.insert(requestId, RedeemSettleView {
+    commitment: disclose(withdrawRefundCommitment(callerSecretKey(), requestId)),
+    shares: disclose(shares as Uint<64>),
+  });
 
   // Notify the MPC (ledger-tree path [1,13] at depth 2 = redeemEventMap, chunked past 15 fields).
   signetSigner.signBidirectional(
@@ -1274,7 +1326,7 @@ export circuit completeRedeem(
   redeemEventMap.remove(disclosedRequestId);
   assert(
     withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
-      == redeemRefundCommitment.lookup(disclosedRequestId),
+      == redeemRefundCommitment.lookup(disclosedRequestId).commitment,
     "Not the redeemer"
   );
   redeemRefundCommitment.remove(disclosedRequestId);
