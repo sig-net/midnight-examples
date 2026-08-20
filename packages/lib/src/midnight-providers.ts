@@ -96,6 +96,39 @@ export interface ProofServerObservation {
  */
 export type ProofServerObserver = (observation: ProofServerObservation) => void;
 
+// A proof server that dies mid-run refuses the next connection. midnight-js's own retry covers
+// only HTTP 500/503, so a refused connection rejects at once and fails a flow that is minutes in.
+// Retry the connection-level failures. They are transient by definition, and a request that never
+// reached the server cannot have been applied, so a retry is safe.
+const CONNECTION_ERROR = /ECONNREFUSED|ECONNRESET|EPIPE|socket hang up|fetch failed|network error/i;
+const PROOF_ATTEMPTS = 3;
+const PROOF_RETRY_DELAY_MS = 5_000;
+
+/**
+ * Run a proof-server call, retrying it when the connection itself fails.
+ *
+ * @param what - The call being made ("check" or "prove"), for the warning line.
+ * @param call - The call to run.
+ * @returns The call's result.
+ * @throws {Error} The last error when the attempts run out, or immediately for any non-connection error.
+ */
+async function withConnectionRetry<T>(what: string, call: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      const cause =
+        error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
+      const message = error instanceof Error ? `${error.message} ${cause}` : String(error);
+      if (attempt >= PROOF_ATTEMPTS || !CONNECTION_ERROR.test(message)) throw error;
+      console.warn(
+        `proof server ${what}: connection lost on attempt ${String(attempt)}, retrying. ${message}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, PROOF_RETRY_DELAY_MS * attempt));
+    }
+  }
+}
+
 /**
  * Build the {@link ProofProvider} for a contract's provider set: proving via
  * the proof server's /check + /prove endpoints, with proving/verifier keys
@@ -178,7 +211,16 @@ export function createCrossContractProofServerProvider(
     return undefined;
   };
 
-  const provingProvider: ProvingProvider = { ...base, lookupKey };
+  const provingProvider: ProvingProvider = {
+    ...base,
+    lookupKey,
+    check: (serializedPreimage, keyLocation) =>
+      withConnectionRetry("check", () => base.check(serializedPreimage, keyLocation)),
+    prove: (serializedPreimage, keyLocation, overwriteBindingInput) =>
+      withConnectionRetry("prove", () =>
+        base.prove(serializedPreimage, keyLocation, overwriteBindingInput),
+      ),
+  };
   if (observer === undefined) {
     return createProofProvider(provingProvider);
   }
