@@ -147,6 +147,9 @@ const VAULT_EVM = bytes(20, 0xee);
 // The pinned Uniswap SwapRouter02 (initialize arg + swap `to`).
 const ROUTER = bytes(20, 0x11);
 const ERC20 = bytes(20, 0xaa);
+// The pinned Aave USDC pair (initialize args): the underlying and its stataUSDC wrapper.
+const STATA_UNDERLYING = bytes(20, 0xdd); // supply burns this colour, redeem mints it
+const STATA_TOKEN = bytes(20, 0xcc); // supply/redeem `to`; supply mints this colour
 const ZERO_ADDRESS = new Uint8Array(20);
 const AMOUNT = 1_000_000n;
 const UINT64_MAX = 18446744073709551615n;
@@ -257,7 +260,16 @@ const strangerContext = async (
 const deployInitialized = async () => {
   const { contract, ctx } = await deployContract();
   const next = (
-    await contract.circuits.initialize(ctx, VAULT_EVM, ROUTER, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY)
+    await contract.circuits.initialize(
+      ctx,
+      VAULT_EVM,
+      ROUTER,
+      STATA_UNDERLYING,
+      STATA_TOKEN,
+      CHAIN_ID,
+      CAIP2_ID,
+      MPC_RESPONSE_KEY,
+    )
   ).context;
   return { contract, ctx: next };
 };
@@ -358,21 +370,48 @@ describe("initialize", () => {
     // Deployed with a stranger's commitment; our caller key can't initialize.
     const { contract, ctx } = await deployContract(OTHER_COMMITMENT);
     await expect(
-      contract.circuits.initialize(ctx, VAULT_EVM, ROUTER, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY),
+      contract.circuits.initialize(
+        ctx,
+        VAULT_EVM,
+        ROUTER,
+        STATA_UNDERLYING,
+        STATA_TOKEN,
+        CHAIN_ID,
+        CAIP2_ID,
+        MPC_RESPONSE_KEY,
+      ),
     ).rejects.toThrow(/Not the deployer/);
   });
 
   it("is one-shot", async () => {
     const { contract, ctx } = await deployInitialized();
     await expect(
-      contract.circuits.initialize(ctx, VAULT_EVM, ROUTER, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY),
+      contract.circuits.initialize(
+        ctx,
+        VAULT_EVM,
+        ROUTER,
+        STATA_UNDERLYING,
+        STATA_TOKEN,
+        CHAIN_ID,
+        CAIP2_ID,
+        MPC_RESPONSE_KEY,
+      ),
     ).rejects.toThrow(/Already initialized/);
   });
 
   it("rejects a zero chain id", async () => {
     const { contract, ctx } = await deployContract();
     await expect(
-      contract.circuits.initialize(ctx, VAULT_EVM, ROUTER, 0n, CAIP2_ID, MPC_RESPONSE_KEY),
+      contract.circuits.initialize(
+        ctx,
+        VAULT_EVM,
+        ROUTER,
+        STATA_UNDERLYING,
+        STATA_TOKEN,
+        0n,
+        CAIP2_ID,
+        MPC_RESPONSE_KEY,
+      ),
     ).rejects.toThrow(/Chain ID must be positive/);
   });
 
@@ -428,7 +467,7 @@ describe("deposit round-trip", () => {
     expect(decodeSignBidirectionalNotification(notificationPost.event)).toEqual({
       version: 1,
       callerAddress: bytesToHex(VAULT_ADDRESS_BYTES),
-      requestsPath: [0],
+      requestsPath: [0, 0],
     });
 
     // The contract-composed envelope: the deposit's token on the
@@ -649,7 +688,7 @@ describe("withdraw round-trip", () => {
     expect(decodeSignBidirectionalNotification(notificationPost.event)).toEqual({
       version: 1,
       callerAddress: bytesToHex(VAULT_ADDRESS_BYTES),
-      requestsPath: [0],
+      requestsPath: [0, 0],
     });
 
     // The derivation path is the contract-fixed 32-byte literal "vault": the
@@ -1699,5 +1738,330 @@ describe("refund (swap) settle", () => {
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the swapper/);
+  });
+});
+
+// ---- Aave: supply/redeem fixtures ----
+
+const DEPOSIT_SELECTOR = new Uint8Array([0x6e, 0x55, 0x3f, 0x65]);
+const REDEEM_SELECTOR = new Uint8Array([0xba, 0x08, 0x76, 0x52]);
+const SUPPLY_OUTPUT_SCHEMA = asciiPadded('[{"name":"shares","type":"uint256"}]', 36);
+const SUPPLY_RESPOND_SCHEMA = asciiPadded('[{"name":"shares","type":"uint64"}]', 35);
+const REDEEM_OUTPUT_SCHEMA = asciiPadded('[{"name":"assets","type":"uint256"}]', 36);
+const REDEEM_RESPOND_SCHEMA = asciiPadded('[{"name":"assets","type":"uint64"}]', 35);
+
+// Vault-token colours of the pinned pair, computed like a wallet (off-chain twin
+// of the in-circuit tokenType(domainSep, kernel.self())).
+const STATA_UNDERLYING_COLOR = hexToBytes(
+  rawTokenType(pureCircuits.vaultTokenDomainSeparator(STATA_UNDERLYING), VAULT_ADDRESS),
+);
+const STATA_COLOR = hexToBytes(
+  rawTokenType(pureCircuits.vaultTokenDomainSeparator(STATA_TOKEN), VAULT_ADDRESS),
+);
+
+const SUPPLY_AMOUNT = AMOUNT; // USDC surrendered
+const SUPPLY_SHARES = 360_679n; // attested stataUSDC shares minted
+const REDEEM_SHARES = AMOUNT; // stataUSDC surrendered
+const REDEEM_ASSETS = 2_780_944n; // attested USDC assets minted (principal + interest)
+
+const supply = (
+  contract: Contract<VaultPrivateState>,
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["supply"]>[0],
+  amount: bigint,
+  coin: ReturnType<typeof vaultCoin>,
+) => contract.circuits.supply(ctx, 0n, 1n, amount, coin);
+
+const redeem = (
+  contract: Contract<VaultPrivateState>,
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["redeem"]>[0],
+  shares: bigint,
+  coin: ReturnType<typeof vaultCoin>,
+) => contract.circuits.redeem(ctx, 0n, 1n, shares, coin);
+
+describe("approveStata", () => {
+  it("records approve(stataToken, MAX) on field 0 from the vault path, to = the underlying", async () => {
+    const { contract, ctx } = await deployInitialized();
+    const { context: next } = await contract.circuits.approveStata(ctx, 0n, 1n);
+
+    const index = toSignBidirectionalEventIndex(
+      ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+    );
+    expect(index.size).toBe(1);
+    const [, record] = first(index.entries(), "indexed approveStata request");
+    expect(record.path).toEqual(asciiPadded("vault", 32));
+    // approve is called ON the underlying USDC, spender = the pinned wrapper.
+    expect(record.txParams.to).toEqual(STATA_UNDERLYING);
+    const { calldata } = record.txParams;
+    expect(calldata.value.selector).toEqual(APPROVE_SELECTOR);
+    expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(STATA_TOKEN));
+    expect(calldata.value.words[1]).toEqual(numericAbiWord(MAX_APPROVE));
+  });
+});
+
+describe("supply round-trip", () => {
+  it("burns the underlying and stores a vault-path deposit event on the supply map", async () => {
+    const { contract, ctx } = await deployInitialized();
+    const { context: next } = await supply(
+      contract,
+      ctx,
+      SUPPLY_AMOUNT,
+      vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
+    );
+    const state = ledger(next.callContext.currentQueryContext.state);
+
+    const index = toSignBidirectionalEventIndex(state.supplyEventMap);
+    expect(index.size).toBe(1);
+    const [idHex, record] = first(index.entries(), "indexed supply request");
+    expect(record.sender).toEqual({ bytes: VAULT_ADDRESS_BYTES });
+    expect(record.path).toEqual(asciiPadded("vault", 32));
+    expect(record.txParams.to).toEqual(STATA_TOKEN);
+    expect(record.outputDeserializationSchema).toEqual(SUPPLY_OUTPUT_SCHEMA);
+    expect(record.respondSerializationSchema).toEqual(SUPPLY_RESPOND_SCHEMA);
+
+    // deposit(amount, receiver=vault).
+    const { calldata } = record.txParams;
+    expect(calldata.value.selector).toEqual(DEPOSIT_SELECTOR);
+    expect(calldata.value.noWords).toBe(2n);
+    expect(calldata.value.words[0]).toEqual(numericAbiWord(SUPPLY_AMOUNT));
+    expect(calldata.value.words[1]).toEqual(evmAddressAbiWord(VAULT_EVM));
+
+    expect(state.supplyRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
+
+    // Same burn as withdraw (which asserts the receive/spend pairing in
+    // detail): the underlying vault coin is received, spent, and paid whole to
+    // the shielded burn address.
+    const zswap = zswapState(next);
+
+    expect(zswap.inputs).toHaveLength(1);
+    const consumed = first(zswap.inputs, "consumed coin");
+    expect(consumed.color).toEqual(STATA_UNDERLYING_COLOR);
+    expect(consumed.value).toBe(SUPPLY_AMOUNT);
+
+    expect(zswap.outputs).toHaveLength(2);
+
+    // received coin to the contract address (the receive/spend transient)
+    const received = first(
+      zswap.outputs.filter((output) => !output.recipient.is_left),
+      "contract-owned receive output",
+    );
+    expect(received.recipient.right.bytes).toEqual(VAULT_ADDRESS_BYTES);
+    expect(received.coinInfo).toEqual({
+      nonce: consumed.nonce,
+      color: consumed.color,
+      value: consumed.value,
+    });
+
+    // burned coin to the burn address
+    const burnOutput = first(
+      zswap.outputs.filter((output) => output.recipient.is_left),
+      "burn output",
+    );
+    expect(burnOutput.coinInfo.color).toEqual(STATA_UNDERLYING_COLOR);
+    expect(burnOutput.coinInfo.value).toBe(SUPPLY_AMOUNT);
+    expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
+  });
+
+  it("rejects a coin that is not the underlying color or not the amount", async () => {
+    const { contract, ctx } = await deployInitialized();
+    await expect(
+      supply(contract, ctx, SUPPLY_AMOUNT, vaultCoin(SUPPLY_AMOUNT, STATA_COLOR)),
+    ).rejects.toThrow(/Coin is not the vault token for the underlying/);
+    await expect(
+      supply(contract, ctx, SUPPLY_AMOUNT, vaultCoin(SUPPLY_AMOUNT + 1n, STATA_UNDERLYING_COLOR)),
+    ).rejects.toThrow(/Coin value must equal amount/);
+  });
+});
+
+const supplyRequested = async () => {
+  const { contract, ctx } = await deployInitialized();
+  const next = (
+    await supply(contract, ctx, SUPPLY_AMOUNT, vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR))
+  ).context;
+  const index = toSignBidirectionalEventIndex(
+    ledger(next.callContext.currentQueryContext.state).supplyEventMap,
+  );
+  const idHex = first(index.keys(), "indexed supply request");
+  return { contract, ctx: next, requestId: requestIdBytes(idHex) };
+};
+
+describe("completeSupply settle", () => {
+  it("verifies the shares attestation, mints stataToken, and cleans up (supplier-gated)", async () => {
+    const { contract, ctx, requestId } = await supplyRequested();
+    const out = swapOutput(SUPPLY_SHARES);
+    const next = (
+      await contract.circuits.completeSupply(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, out),
+        out,
+        MINT_NONCE,
+      )
+    ).context;
+    const state = ledger(next.callContext.currentQueryContext.state);
+    expect(state.supplyEventMap.isEmpty()).toBe(true);
+    expect(state.supplyRefundCommitment.isEmpty()).toBe(true);
+  });
+
+  it("a caller other than the supplier cannot take the minted shares", async () => {
+    const { contract, ctx, requestId } = await supplyRequested();
+    const out = swapOutput(SUPPLY_SHARES);
+    await expect(
+      contract.circuits.completeSupply(
+        await strangerContext("completeSupply", ctx),
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, out),
+        out,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Not the supplier/);
+  });
+});
+
+describe("redeem round-trip", () => {
+  it("burns the stataToken and stores a vault-path redeem event on the redeem map", async () => {
+    const { contract, ctx } = await deployInitialized();
+    const { context: next } = await redeem(
+      contract,
+      ctx,
+      REDEEM_SHARES,
+      vaultCoin(REDEEM_SHARES, STATA_COLOR),
+    );
+    const state = ledger(next.callContext.currentQueryContext.state);
+
+    const index = toSignBidirectionalEventIndex(state.redeemEventMap);
+    expect(index.size).toBe(1);
+    const [idHex, record] = first(index.entries(), "indexed redeem request");
+    expect(record.txParams.to).toEqual(STATA_TOKEN);
+    expect(record.outputDeserializationSchema).toEqual(REDEEM_OUTPUT_SCHEMA);
+    expect(record.respondSerializationSchema).toEqual(REDEEM_RESPOND_SCHEMA);
+
+    // redeem(shares, receiver=vault, owner=vault).
+    const { calldata } = record.txParams;
+    expect(calldata.value.selector).toEqual(REDEEM_SELECTOR);
+    expect(calldata.value.noWords).toBe(3n);
+    expect(calldata.value.words[0]).toEqual(numericAbiWord(REDEEM_SHARES));
+    expect(calldata.value.words[1]).toEqual(evmAddressAbiWord(VAULT_EVM));
+    expect(calldata.value.words[2]).toEqual(evmAddressAbiWord(VAULT_EVM));
+
+    expect(state.redeemRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
+
+    // Same burn as supply: the wrapper vault coin is received, spent, and paid
+    // whole to the shielded burn address.
+    const zswap = zswapState(next);
+
+    expect(zswap.inputs).toHaveLength(1);
+    const consumed = first(zswap.inputs, "consumed coin");
+    expect(consumed.color).toEqual(STATA_COLOR);
+    expect(consumed.value).toBe(REDEEM_SHARES);
+
+    expect(zswap.outputs).toHaveLength(2);
+
+    // received coin to the contract address (the receive/spend transient)
+    const received = first(
+      zswap.outputs.filter((output) => !output.recipient.is_left),
+      "contract-owned receive output",
+    );
+    expect(received.recipient.right.bytes).toEqual(VAULT_ADDRESS_BYTES);
+    expect(received.coinInfo).toEqual({
+      nonce: consumed.nonce,
+      color: consumed.color,
+      value: consumed.value,
+    });
+
+    // burned coin to the burn address
+    const burnOutput = first(
+      zswap.outputs.filter((output) => output.recipient.is_left),
+      "burn output",
+    );
+    expect(burnOutput.coinInfo.color).toEqual(STATA_COLOR);
+    expect(burnOutput.coinInfo.value).toBe(REDEEM_SHARES);
+    expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
+  });
+
+  it("rejects a coin that is not the wrapper color or not the shares", async () => {
+    const { contract, ctx } = await deployInitialized();
+    await expect(
+      redeem(contract, ctx, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_UNDERLYING_COLOR)),
+    ).rejects.toThrow(/Coin is not the vault token for the wrapper/);
+    await expect(
+      redeem(contract, ctx, REDEEM_SHARES, vaultCoin(REDEEM_SHARES + 1n, STATA_COLOR)),
+    ).rejects.toThrow(/Coin value must equal shares/);
+  });
+});
+
+const redeemRequested = async () => {
+  const { contract, ctx } = await deployInitialized();
+  const next = (await redeem(contract, ctx, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_COLOR)))
+    .context;
+  const index = toSignBidirectionalEventIndex(
+    ledger(next.callContext.currentQueryContext.state).redeemEventMap,
+  );
+  const idHex = first(index.keys(), "indexed redeem request");
+  return { contract, ctx: next, requestId: requestIdBytes(idHex) };
+};
+
+describe("completeRedeem settle", () => {
+  it("verifies the assets attestation, mints the underlying, and cleans up", async () => {
+    const { contract, ctx, requestId } = await redeemRequested();
+    const out = swapOutput(REDEEM_ASSETS);
+    const next = (
+      await contract.circuits.completeRedeem(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, out),
+        out,
+        MINT_NONCE,
+      )
+    ).context;
+    const state = ledger(next.callContext.currentQueryContext.state);
+    expect(state.redeemEventMap.isEmpty()).toBe(true);
+    expect(state.redeemRefundCommitment.isEmpty()).toBe(true);
+  });
+});
+
+describe("refund (supply/redeem) settle", () => {
+  it("supply: on the MPC failure output, re-mints the underlying to the supplier and cleans up", async () => {
+    const { contract, ctx, requestId } = await supplyRequested();
+    const next = (
+      await contract.circuits.refund(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      )
+    ).context;
+    const state = ledger(next.callContext.currentQueryContext.state);
+    expect(state.supplyEventMap.isEmpty()).toBe(true);
+    expect(state.supplyRefundCommitment.isEmpty()).toBe(true);
+  });
+
+  it("redeem: on the MPC failure output, re-mints the stataToken to the redeemer and cleans up", async () => {
+    const { contract, ctx, requestId } = await redeemRequested();
+    const next = (
+      await contract.circuits.refund(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      )
+    ).context;
+    const state = ledger(next.callContext.currentQueryContext.state);
+    expect(state.redeemEventMap.isEmpty()).toBe(true);
+    expect(state.redeemRefundCommitment.isEmpty()).toBe(true);
+  });
+
+  it("is supplier/redeemer-gated (a stranger cannot trigger the re-mint)", async () => {
+    const { contract, ctx, requestId } = await supplyRequested();
+    await expect(
+      contract.circuits.refund(
+        await strangerContext("refund", ctx),
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Not the supplier/);
   });
 });
