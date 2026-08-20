@@ -97,9 +97,11 @@ export async function createVaultContext(
   }
   const evmChainId = BigInt(evmChainIdRaw);
 
-  const erc20Address = requireEnv(env, "ERC20_ADDRESS");
+  const erc20Address = requireEnv(env, "EVM_ERC20_CONTRACT_ADDRESS");
   if (!/^0x[0-9a-fA-F]{40}$/.test(erc20Address)) {
-    throw new Error(`ERC20_ADDRESS must be a 20-byte 0x hex address; got "${erc20Address}".`);
+    throw new Error(
+      `EVM_ERC20_CONTRACT_ADDRESS must be a 20-byte 0x hex address; got "${erc20Address}".`,
+    );
   }
 
   const vaultContractAddress = requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
@@ -121,8 +123,8 @@ export async function createVaultContext(
     evmChainId,
     caip2Id: `eip155:${String(evmChainId)}`,
     erc20Address,
-    evmVaultAddress: requireEnv(env, "EVM_VAULT_ADDRESS"),
-    evmUserAddress: requireEnv(env, "EVM_USER_ADDRESS"),
+    evmVaultAddress: requireEnv(env, "EVM_VAULT_ACCOUNT_ADDRESS"),
+    evmUserAddress: requireEnv(env, "EVM_USER1_DEPOSIT_ADDRESS"),
     identity,
     providers,
     vault,

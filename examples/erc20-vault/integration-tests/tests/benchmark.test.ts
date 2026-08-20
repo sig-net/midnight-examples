@@ -108,9 +108,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the withdraw gas budget",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const userAddress = requireEnv("EVM_USER_ADDRESS");
-        const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-        const erc20Address = requireEnv("ERC20_ADDRESS");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+        const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
         // Same minimums as the happy-day deposit leg: the user's derived
         // account pays the sweep gas and supplies the deposited ERC20.
@@ -184,7 +184,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // brackets only the flow call under measurement.
         const evmNonce = await getTransactionNonce(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_USER_ADDRESS"),
+          requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
         );
 
         const stop = startTimer();
@@ -220,7 +220,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requestId: depositRequestId,
           intervalMs: 1000,
           timeoutMs: 2 * MINUTE,
-          expectedSigner: requireEnv("EVM_USER_ADDRESS"),
+          expectedSigner: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
         });
         timings.deposit.pollSignatureResponse = stop();
       },
@@ -319,9 +319,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // nonce fetch stays outside the timed span.
         const evmNonce = await getTransactionNonce(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
+          requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
-        const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
+        const destEvmAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
 
         const stop = startTimer();
         withdrawRequestId = await withdraw(context, {
@@ -360,7 +360,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requestId: withdrawRequestId,
           intervalMs: 1000,
           timeoutMs: 2 * MINUTE,
-          expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+          expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         });
         timings.withdraw.pollSignatureResponse = stop();
       },

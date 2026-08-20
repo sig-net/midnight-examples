@@ -20,6 +20,15 @@ import { vaultTokenType } from "../src/vault-token.ts";
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
+// The deployer's session, for initialize only: the circuit is gated to the
+// deployer identity (the deployer wallet seed's bytes, whose commitment the
+// deploy sealed), so the user session cannot drive it. Lazily built like
+// every session — a rerun against an initialized vault never starts it.
+const deployerSession = createVaultSession({
+  ...env,
+  MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
+});
+
 // 1 USDC (6 decimals). The wrapper's exchange rate is live, so the shares minted and the assets
 // redeemed are read from the settle result, not hardcoded.
 const SUPPLY_AMOUNT = 1_000_000n;
@@ -28,6 +37,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave lending e2
   installFlowHooks();
   afterAll(async () => {
     await session.stop();
+    await deployerSession.stop();
   });
 
   it(
@@ -46,15 +56,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave lending e2
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
       if (!(await readLedger()).initialized) {
-        await initialize(context, {
+        await initialize(await deployerSession.vaultContext(), {
           vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
+          mpcResponseKey: requireEnvOf(env, "MPC_VAULT_RESPONSE_PUBLIC_KEY"),
         });
       }
 
       // Fund the vault + mint the caller a shielded USDC coin equal to the amount we supply.
       // Deposit Aave's USDC specifically (the wrapper's underlying), independent of the suite's
-      // default ERC20_ADDRESS: the vault mints a distinct colour per token.
+      // default EVM_ERC20_CONTRACT_ADDRESS: the vault mints a distinct colour per token.
       await runDepositRoundTrip(session, { amount: SUPPLY_AMOUNT, erc20Address: AAVE_USDC });
 
       // The caller's own shielded balances (owner-readable): supply mints stataUSDC shares, redeem

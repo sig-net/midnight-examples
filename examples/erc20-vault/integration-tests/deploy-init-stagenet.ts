@@ -1,19 +1,19 @@
 // One-shot deploy + initialize of the swap-capable vault to a REMOTE network (stagenet),
 // reusing the vault's midnight-js providers. Deploys the vault referencing the given signet
 // contract, then runs the deployer-gated initialize (vault EVM address + router + chain +
-// MPC response key derived from MPC_SECP256K1_PUBKEY + the new contract address). Prints the
+// MPC response key derived from MPC_ROOT_PUBLIC_KEY + the new contract address). Prints the
 // address to set as NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS in the frontend.
 //
-// Env: NETWORK_ID, MIDNIGHT_NODE_URL, MIDNIGHT_NODE_INDEXER_URL, MIDNIGHT_NODE_INDEXER_WS_URL,
-//      MIDNIGHT_NODE_PROOF_SERVER_URL, DEPLOYER_SEED (funded), MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
-//      MPC_SECP256K1_PUBKEY, EVM_CHAIN_ID, ROUTER (optional).
+// Env: MIDNIGHT_NETWORK_ID, MIDNIGHT_NODE_URL, MIDNIGHT_INDEXER_URL, MIDNIGHT_INDEXER_WS_URL,
+//      MIDNIGHT_PROOF_SERVER_URL, MIDNIGHT_DEPLOYER_WALLET_SEED (funded),
+//      MIDNIGHT_SIGNET_CONTRACT_ADDRESS, MPC_ROOT_PUBLIC_KEY, EVM_CHAIN_ID, ROUTER (optional).
 import { createVaultPrivateState, pureCircuits } from "@midnight-examples/erc20-vault-contract";
 import {
   assertDeployerFunded,
   buildDeployTransaction,
   deriveAccountKeys,
   getMidnightNodeConfig,
-  parseIdentitySecretKey,
+  identitySecretFromSeed,
   submitUnprovenTransaction,
   withSyncedWalletFacade,
 } from "@midnight-examples/lib";
@@ -55,15 +55,15 @@ async function main(): Promise<void> {
   const { networkId } = nodeConfig;
   setNetworkId(networkId);
 
-  const deployerSeed = req("DEPLOYER_SEED");
+  const deployerSeed = req("MIDNIGHT_DEPLOYER_WALLET_SEED");
   const signetAddr = req("MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
-  const mpcSecpPub = req("MPC_SECP256K1_PUBKEY");
+  const mpcSecpPub = req("MPC_ROOT_PUBLIC_KEY");
   const evmChainId = BigInt(req("EVM_CHAIN_ID"));
   const router = env.ROUTER?.trim() ?? UNISWAP_SWAP_ROUTER_02;
   const stataUnderlying = env.STATA_UNDERLYING?.trim() ?? AAVE_USDC;
   const stataToken = env.STATA_TOKEN?.trim() ?? STATA_USDC;
 
-  const secretKey = parseIdentitySecretKey("VAULT_DEPLOYER_SECRET_KEY", env, deployerSeed);
+  const secretKey = identitySecretFromSeed(deployerSeed);
   const deployerCommitment = pureCircuits.userCommitment(secretKey);
   const accountKeys = deriveAccountKeys(deployerSeed, networkId);
 

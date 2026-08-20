@@ -11,7 +11,7 @@
 // failure attestation (the 0xdeadbeef error sentinel) is for. The drain
 // signs with the vault account's fakenet-derived key (test-support only, see
 // src/fakenet-vault-account.ts) and sends the balance back to
-// EVM_USER_ADDRESS, so the suite's EVM funds keep cycling. Amounts are
+// EVM_USER1_DEPOSIT_ADDRESS, so the suite's EVM funds keep cycling. Amounts are
 // computed from live balances, never assumed.
 //
 // The arrange stage runs a full deposit round trip first (the caller must
@@ -98,9 +98,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the withdraw gas budget",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const userAddress = requireEnv("EVM_USER_ADDRESS");
-        const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-        const erc20Address = requireEnv("ERC20_ADDRESS");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+        const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
         // Same minimums as the happy-day deposit leg: the user's derived
         // account pays the sweep gas and supplies the deposited ERC20.
@@ -176,13 +176,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "arrange: drain the vault's EVM ERC20 balance (fakenet-only) so the withdraw transfer must revert",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-        const erc20Address = requireEnv("ERC20_ADDRESS");
+        const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+        const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
         // Send the vault's FULL live balance (the arrange sweep plus any
         // prior-run leftovers) back to the user's derived account. A zero
         // balance means a prior aborted run already drained it.
-        const drained = await drainVaultErc20(env, requireEnv("EVM_USER_ADDRESS"));
+        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
         if (drained === 0n) {
           logSkip("drain", "the vault's derived account already holds no ERC20");
         }
@@ -218,12 +218,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // signed transfer is the vault account's next expected tx.
         const evmNonce = await getTransactionNonce(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
+          requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
 
         withdrawRequestId = await withdraw(context, {
           amount: WITHDRAW_AMOUNT,
-          destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
+          destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
           evmNonce,
         });
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
@@ -254,7 +254,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requestId: withdrawRequestId,
           intervalMs: 1000,
           timeoutMs: 2 * MINUTE,
-          expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+          expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         });
 
         banner([

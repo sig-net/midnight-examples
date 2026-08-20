@@ -177,15 +177,15 @@ FAKENET_EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
 
 # Required on any non-local chain: an existing ERC20
 # with code on Sepolia, e.g. USDC.
-ERC20_ADDRESS=0x...
+EVM_ERC20_CONTRACT_ADDRESS=0x...
 ```
 
 Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialize.
 
 What does NOT happen automatically on a real chain, by design:
 
-- **No auto-funding.** The flows spend from two EVM accounts *derived from the vault contract's address*, so you only learn them mid-run, when setup prints `EVM_VAULT_ADDRESS` / `EVM_USER_ADDRESS` with funding hints (the user account needs ≥ 0.01 ETH for gas and ≥ 0.1 USDC, and the vault account needs ETH for withdrawal gas). Fund them when printed, either across two runs (first run derives + prints, second run tests), or in one attended run with `STEP_THROUGH` (below).
-- **Bring your own token.** On the real Sepolia network you set `ERC20_ADDRESS` to an existing ERC20 with code. The local anvil already has real USDC from the fork.
+- **No auto-funding.** The flows spend from two EVM accounts *derived from the vault contract's address*, so you only learn them mid-run, when setup prints `EVM_VAULT_ACCOUNT_ADDRESS` / `EVM_USER1_DEPOSIT_ADDRESS` with funding hints (the user account needs ≥ 0.01 ETH for gas and ≥ 0.1 USDC, and the vault account needs ETH for withdrawal gas). Fund them when printed, either across two runs (first run derives + prints, second run tests), or in one attended run with `STEP_THROUGH` (below).
+- **Bring your own token.** On the real Sepolia network you set `EVM_ERC20_CONTRACT_ADDRESS` to an existing ERC20 with code. The local anvil already has real USDC from the fork.
 - A redeploy of the vault contract derives **new** accounts, and any you already funded do not move with it.
 
 ## Watching a run step by step: `STEP_THROUGH=1`

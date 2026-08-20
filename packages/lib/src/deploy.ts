@@ -49,20 +49,20 @@ function isGenesisSeed(seed: string): boolean {
 /**
  * Resolve the deployer seed for `networkId`. On the local standalone chain
  * the genesis mint wallet is the default; on every deployed network the
- * genesis wallet is unfunded, so a `DEPLOYER_SEED` funded via that network's
+ * genesis wallet is unfunded, so a `MIDNIGHT_DEPLOYER_WALLET_SEED` funded via that network's
  * faucet is required. The single consumer is {@link getDeployConfig}.
  *
- * @param env - The environment to read `DEPLOYER_SEED` from.
+ * @param env - The environment to read `MIDNIGHT_DEPLOYER_WALLET_SEED` from.
  * @param networkId - The network the deploy targets.
  * @returns The seed (hex or mnemonic) that funds & signs deploys.
- * @throws {Error} If a deployed network has no `DEPLOYER_SEED`, or it is set to the
+ * @throws {Error} If a deployed network has no `MIDNIGHT_DEPLOYER_WALLET_SEED`, or it is set to the
  *   (unfunded-here) genesis mint seed.
  */
 function resolveDeployerSeed(
   env: Record<string, string | undefined>,
   networkId: NetworkId,
 ): string {
-  const provided = envOrUndefined(env, "DEPLOYER_SEED");
+  const provided = envOrUndefined(env, "MIDNIGHT_DEPLOYER_WALLET_SEED");
   if (isLocalStandaloneNetwork(networkId)) {
     return provided ?? GENESIS_MINT_WALLET_SEED;
   }
@@ -72,14 +72,14 @@ function resolveDeployerSeed(
     : "fund a wallet via the network's faucet";
   if (!provided) {
     throw new Error(
-      `DEPLOYER_SEED is required on "${networkId}": the genesis mint seed only holds funds on the local ` +
-        `standalone chain. Set DEPLOYER_SEED (hex or mnemonic) to a funded wallet: ${fundHint}.`,
+      `MIDNIGHT_DEPLOYER_WALLET_SEED is required on "${networkId}": the genesis mint seed only holds funds on the local ` +
+        `standalone chain. Set MIDNIGHT_DEPLOYER_WALLET_SEED (hex or mnemonic) to a funded wallet: ${fundHint}.`,
     );
   }
   if (isGenesisSeed(provided)) {
     throw new Error(
-      `DEPLOYER_SEED is the local genesis mint seed, which holds no funds on "${networkId}". ` +
-        `${fundHint} and set DEPLOYER_SEED to it.`,
+      `MIDNIGHT_DEPLOYER_WALLET_SEED is the local genesis mint seed, which holds no funds on "${networkId}". ` +
+        `${fundHint} and set MIDNIGHT_DEPLOYER_WALLET_SEED to it.`,
     );
   }
   return provided;
@@ -88,12 +88,12 @@ function resolveDeployerSeed(
 /**
  * Read a {@link DeployConfig} from the environment. Node config comes from
  * {@link getMidnightNodeConfig}; the deployer seed from {@link resolveDeployerSeed}
- * (genesis mint wallet on the local chain, a required funded `DEPLOYER_SEED`
+ * (genesis mint wallet on the local chain, a required funded `MIDNIGHT_DEPLOYER_WALLET_SEED`
  * on every deployed network).
  *
  * @param env - The environment to read from; defaults to `process.env`.
  * @returns The resolved deploy configuration.
- * @throws {Error} If a deployed network lacks a valid funded `DEPLOYER_SEED` (see
+ * @throws {Error} If a deployed network lacks a valid funded `MIDNIGHT_DEPLOYER_WALLET_SEED` (see
  *   {@link resolveDeployerSeed}).
  */
 export function getDeployConfig(

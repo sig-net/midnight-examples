@@ -47,7 +47,7 @@ export interface DepositOptions {
   /** Nonce of the user's derived EVM account (the sweep tx sender). */
   readonly evmNonce: bigint;
   /**
-   * The ERC20 to deposit; defaults to the suite's `ERC20_ADDRESS`. The vault mints a distinct
+   * The ERC20 to deposit; defaults to the suite's `EVM_ERC20_CONTRACT_ADDRESS`. The vault mints a distinct
    * colour per token (`vaultTokenType(erc20Address, …)`), so the Aave leg deposits its own
    * underlying (Aave USDC) while the swap/withdraw legs keep the default.
    */
@@ -183,7 +183,7 @@ export async function deposit(
 export interface DepositRoundTripOptions {
   /** Deposit amount in ERC20 base units. */
   readonly amount: bigint;
-  /** The ERC20 to deposit; defaults to the suite's `ERC20_ADDRESS`. See {@link DepositOptions}. */
+  /** The ERC20 to deposit; defaults to the suite's `EVM_ERC20_CONTRACT_ADDRESS`. See {@link DepositOptions}. */
   readonly erc20Address?: string;
   /**
    * Resume from an existing request instead of calling {@link deposit} —

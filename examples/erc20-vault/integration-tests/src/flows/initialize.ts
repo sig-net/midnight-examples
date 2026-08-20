@@ -24,7 +24,7 @@ export interface InitializeOptions {
   /**
    * The MPC response key for THIS vault contract (SEC1 hex, compressed or
    * uncompressed): `f(MPC root key, vault contract address, "midnight
-   * response key")`, the setup pipeline's `MPC_RESPONSE_KEY`. claim and
+   * response key")`, the setup pipeline's `MPC_VAULT_RESPONSE_PUBLIC_KEY`. claim and
    * completeWithdraw accept only responses ECDSA-signed by it.
    */
   readonly mpcResponseKey: string;
@@ -38,7 +38,8 @@ export interface InitializeOptions {
  *
  * The caller must be the DEPLOYER identity: the circuit compares the
  * `callerSecretKey` witness commitment against the sealed `deployer` field,
- * so `VAULT_USER_SECRET_KEY` must hold the deployer's secret for this call.
+ * so `context` must come from a session whose wallet seed is the deployer's
+ * (`MIDNIGHT_DEPLOYER_WALLET_SEED` — identity is always the seed's bytes).
  *
  * @param context - The flow context.
  * @param options - The initialize arguments.

@@ -242,8 +242,8 @@ export circuit initialize(
 The gate prevents front-running: nobody else can initialise the vault to
 point at their own address, chain or key. Flow function:
 [`initialize.ts`](integration-tests/src/flows/initialize.ts). The setup
-pipeline derives and prints all three derived values as `EVM_VAULT_ADDRESS`,
-`EVM_USER_ADDRESS` and `MPC_RESPONSE_KEY`.
+pipeline derives and prints all three derived values as `EVM_VAULT_ACCOUNT_ADDRESS`,
+`EVM_USER1_DEPOSIT_ADDRESS` and `MPC_VAULT_RESPONSE_PUBLIC_KEY`.
 
 ## Runtime: the deposit round trip
 
@@ -252,7 +252,7 @@ account on the EVM chain, then mints the same amount of shielded vault tokens
 on Midnight. Before step 1 the user's deposit account must hold the ERC20
 being deposited plus some ETH for gas: the local-stack setup pipeline funds
 it automatically, and on a real chain you fund the printed
-`EVM_USER_ADDRESS`.
+`EVM_USER1_DEPOSIT_ADDRESS`.
 
 Every circuit call goes through the deployed vault, joined once with the
 caller's secret key as private state (the witnesses answer the contract's

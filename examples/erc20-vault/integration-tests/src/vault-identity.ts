@@ -1,10 +1,10 @@
 // The user's vault identity: secret key -> commitment -> MPC derivation path.
 // Derivation calls the compiled circuits, never a TS re-implementation. The
-// secret itself is parsed by lib's `parseIdentitySecretKey`
-// (`VAULT_USER_SECRET_KEY`, defaulting to the `USER_SEED` bytes).
+// secret is the session's wallet seed bytes (lib's `identitySecretFromSeed`),
+// so one seed is both the wallet that spends and the identity that gates.
 
 import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
-import { parseIdentitySecretKey } from "@midnight-examples/lib";
+import { identitySecretFromSeed } from "@midnight-examples/lib";
 import { resolveUserSeed } from "@midnight-examples/test-harness";
 import { bytesToHex } from "@sig-net/midnight";
 
@@ -31,16 +31,16 @@ export interface UserIdentity {
 }
 
 /**
- * Derive the user's vault identity from the environment: the secret from
- * `VAULT_USER_SECRET_KEY` (falling back to the `USER_SEED` bytes) and the
- * commitment via the vault's compiled `userCommitment` circuit.
+ * Derive the user's vault identity from the environment: the secret is the
+ * session's wallet seed bytes (`MIDNIGHT_USER1_WALLET_SEED`) and the
+ * commitment comes from the vault's compiled `userCommitment` circuit.
  *
- * @param env - The environment holding the identity secret (or seed).
+ * @param env - The environment holding the session's wallet seed.
  * @returns The derived identity.
- * @throws {ParseError} If the identity secret/seed is malformed.
+ * @throws {ParseError} If the seed is malformed or not exactly 32 bytes of hex.
  */
 export function resolveUserIdentity(env: NodeJS.ProcessEnv): UserIdentity {
-  const secretKey = parseIdentitySecretKey("VAULT_USER_SECRET_KEY", env, resolveUserSeed(env));
+  const secretKey = identitySecretFromSeed(resolveUserSeed(env));
   const commitment = pureCircuits.userCommitment(secretKey);
   return {
     secretKey,

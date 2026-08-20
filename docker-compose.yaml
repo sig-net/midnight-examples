@@ -86,16 +86,21 @@ services:
   fakenet:
     # The MPC fakenet responder (sig-net/solana-signet-program, fakenet-signer
     # workspace) in Midnight-only mode (DISABLE_SOLANA). Polls the signet contract's
-    # notification registry via the indexer, signs with keys derived from MPC_ROOT_KEY,
-    # and posts responses through the proof server.
+    # notification registry via the indexer, signs with keys derived from its
+    # root private key, and posts responses through the proof server.
     #
-    # Only runs with `--profile fakenet` as it needs MPC_ROOT_KEY and
+    # Only runs with `--profile fakenet` as it needs MPC_ROOT_PRIVATE_KEY and
     # MIDNIGHT_SIGNET_CONTRACT_ADDRESS, which exist only once the test-harness
     # setup has derived the key and deployed the contract. The setup does the
     # whole hand-off itself: it appends the two values to the repo-root .env
     # (append-only — existing lines are never touched) and starts this
     # service. Manual equivalent (and the FAKENET_MANAGED=0 path):
     #   docker compose --profile fakenet up -d --force-recreate fakenet
+    #
+    # Interpolation convention: every `FAKENET_*`-prefixed variable below is
+    # the CONTAINER's view of the stack (service-name hosts inside the
+    # compose network), never the host's 127.0.0.1 view. The un-prefixed
+    # names inside the container are what the fakenet image itself expects.
     container_name: 'fakenet-responder'
     image: 'ghcr.io/sig-net/fakenet:0.16.0'
     profiles: ['fakenet']
@@ -120,16 +125,19 @@ services:
       # Container-side twin of the tests' EVM RPC endpoint — both must point
       # at the SAME chain.
       EVM_RPC_URL: '${FAKENET_EVM_RPC_URL:-http://evm:8545}'
+      # The network id is vantage-independent (the responder must be on the
+      # SAME Midnight network as the tests), so it inherits the host's value
+      # directly — no FAKENET_ twin to keep in sync.
       MIDNIGHT_NETWORK_ID: '${MIDNIGHT_NETWORK_ID:-undeployed}'
-      MIDNIGHT_INDEXER_URL: '${MIDNIGHT_INDEXER_URL:-http://indexer:8088/api/v3/graphql}'
-      MIDNIGHT_INDEXER_WS_URL: '${MIDNIGHT_INDEXER_WS_URL:-ws://indexer:8088/api/v3/graphql/ws}'
-      MIDNIGHT_NODE_URL: '${MIDNIGHT_NODE_URL:-http://node:9944}'
-      MIDNIGHT_PROOF_SERVER_URL: '${MIDNIGHT_PROOF_SERVER_URL:-http://proof-server:6300}'
-      # The responder's fee-paying wallet: the mpc_responder role seed the
+      MIDNIGHT_INDEXER_URL: '${FAKENET_MIDNIGHT_INDEXER_URL:-http://indexer:8088/api/v3/graphql}'
+      MIDNIGHT_INDEXER_WS_URL: '${FAKENET_MIDNIGHT_INDEXER_WS_URL:-ws://indexer:8088/api/v3/graphql/ws}'
+      MIDNIGHT_NODE_URL: '${FAKENET_MIDNIGHT_NODE_URL:-http://node:9944}'
+      MIDNIGHT_PROOF_SERVER_URL: '${FAKENET_MIDNIGHT_PROOF_SERVER_URL:-http://proof-server:6300}'
+      # The responder's fee-paying wallet: the MPC responder seed the
       # test-harness setup generates and funds from root (falls back to the
       # local genesis wallet for a manual undeployed run).
-      MIDNIGHT_WALLET_SEED: '${MPC_RESPONDER_SEED:-0000000000000000000000000000000000000000000000000000000000000001}'
+      MIDNIGHT_WALLET_SEED: '${MIDNIGHT_MPC_RESPONDER_WALLET_SEED:-0000000000000000000000000000000000000000000000000000000000000001}'
       # Both are appended to the repo-root .env by the test-harness setup
       # (which also starts this service).
-      MPC_ROOT_KEY: '${MPC_ROOT_KEY:-}'
+      MPC_ROOT_KEY: '${MPC_ROOT_PRIVATE_KEY:-}'
       MIDNIGHT_SIGNET_CONTRACT_ADDRESS: '${MIDNIGHT_SIGNET_CONTRACT_ADDRESS:-}'

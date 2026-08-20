@@ -18,6 +18,15 @@ import { vaultTokenType } from "../src/vault-token.ts";
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
+// The deployer's session, for initialize only: the circuit is gated to the
+// deployer identity (the deployer wallet seed's bytes, whose commitment the
+// deploy sealed), so the user session cannot drive it. Lazily built like
+// every session — a rerun against an initialized vault never starts it.
+const deployerSession = createVaultSession({
+  ...env,
+  MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
+});
+
 const EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
 const FEE = 500n;
 // exactOutput refund: request AMOUNT_OUT but cap the spend BELOW its real cost, so the router
@@ -29,6 +38,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
   installFlowHooks();
   afterAll(async () => {
     await session.stop();
+    await deployerSession.stop();
   });
 
   it(
@@ -46,9 +56,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
       if (!(await readLedger()).initialized) {
-        await initialize(context, {
+        await initialize(await deployerSession.vaultContext(), {
           vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
+          mpcResponseKey: requireEnvOf(env, "MPC_VAULT_RESPONSE_PUBLIC_KEY"),
         });
       }
 

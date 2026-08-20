@@ -52,7 +52,7 @@ async function readContractState(pdp: Pdp, addr: string) {
 async function main(): Promise<void> {
   const nodeConfig = getMidnightNodeConfig(env);
   setNetworkId(nodeConfig.networkId);
-  const deployerSeed = req("DEPLOYER_SEED");
+  const deployerSeed = req("MIDNIGHT_DEPLOYER_WALLET_SEED");
   const addr = req("VAULT_CONTRACT_ADDRESS");
   const maintHex = req("MAINTENANCE_SIGNING_KEY").replace(/^0x/i, "");
   const accountKeys = deriveAccountKeys(deployerSeed, nodeConfig.networkId);

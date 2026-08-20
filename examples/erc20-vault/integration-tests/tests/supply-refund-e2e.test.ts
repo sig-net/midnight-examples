@@ -19,6 +19,15 @@ import { vaultTokenType } from "../src/vault-token.ts";
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
+// The deployer's session, for initialize only: the circuit is gated to the
+// deployer identity (the deployer wallet seed's bytes, whose commitment the
+// deploy sealed), so the user session cannot drive it. Lazily built like
+// every session — a rerun against an initialized vault never starts it.
+const deployerSession = createVaultSession({
+  ...env,
+  MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
+});
+
 // 1 USDC (6 decimals): deposited, surrendered by the doomed supply, and refunded whole.
 const SUPPLY_AMOUNT = 1_000_000n;
 
@@ -26,6 +35,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
   installFlowHooks();
   afterAll(async () => {
     await session.stop();
+    await deployerSession.stop();
   });
 
   it(
@@ -43,9 +53,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
       if (!(await readLedger()).initialized) {
-        await initialize(context, {
+        await initialize(await deployerSession.vaultContext(), {
           vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
+          mpcResponseKey: requireEnvOf(env, "MPC_VAULT_RESPONSE_PUBLIC_KEY"),
         });
       }
 
