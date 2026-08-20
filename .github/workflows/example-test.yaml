@@ -214,7 +214,7 @@ jobs:
           timeout 60 docker ps -a > ci-logs/docker-ps.txt 2>&1 || true
           # Exit code, OOM kill and restart count per container: `docker ps` shows a container that
           # died and came back as merely "Up", which hides the death that failed the run.
-          timeout 60 docker inspect $(docker ps -aq) \
+          docker ps -aq | xargs -r timeout 60 docker inspect \
             --format '{{.Name}} running={{.State.Running}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}} restarts={{.RestartCount}} startedAt={{.State.StartedAt}}' \
             > ci-logs/docker-state.txt 2>&1 || true
           timeout 30 free -m > ci-logs/memory.txt 2>&1 || true
