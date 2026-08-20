@@ -517,34 +517,6 @@ export circuit withdraw(
 }
 
 // ---- Runtime step 5 (withdraw): the shared refund block -----------------------------
-// The withdrawer gate plus re-mint bookkeeping both refund paths share. Deliberately
-// NOT exported: completeWithdraw's false-return branch and refund call it after
-// their own width-specific verification, and nothing here re-checks that verification,
-// so it must never be callable on its own. Withdrawer-only: a refund mints a private
-// coin, so the caller must prove the secret behind the commitment pinned at withdraw
-// time. Amount and token come from the consumed request: calldata word 1 and
-// txParams.to. mintNonce must be RANDOM (see the callers).
-circuit refundSurrenderedValue(
-  disclosedRequestId: RequestId,
-  signatureRequest: SignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>,
-  mintNonce: Bytes<32>
-): [] {
-  assert(
-    withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
-      == refundCommitment.lookup(disclosedRequestId),
-    "Not the withdrawer"
-  );
-
-  // Re-mint the surrendered value to the withdrawer's own wallet key.
-  assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
-  const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
-  const erc20Addr = signatureRequest.txParams.to;
-
-  const domainSep = vaultTokenDomainSeparator(erc20Addr);
-  const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-  mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), recipient);
-}
-
 // ---- Runtime step 5 (withdraw): completeWithdraw ------------------------------------
 // Settles an EXECUTED withdrawal in both branches, decided by the MPC-attested output,
 // never the caller. The transfer ran on the EVM, so its packed bool result is one byte:
@@ -594,11 +566,22 @@ export circuit completeWithdraw(
   // public anyway (a mint is observable).
   const succeeded = disclose(deserialize<VaultResponse, 1>(serializedOutput).success);
 
+  // The commitment, amount decode and domain separator sit OUTSIDE the guard on
+  // purpose: the proving circuit evaluates both branches regardless, so hoisting
+  // the hashes costs nothing on the success path and keeps the guarded region to
+  // the mint alone. Moving them back inside re-inflates the circuit.
+  const myCommitment = withdrawRefundCommitment(callerSecretKey(), disclosedRequestId);
+  assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
+  const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
+  const domainSep = vaultTokenDomainSeparator(signatureRequest.txParams.to);
+
   if (!succeeded) {
-    // Refund path only: it mints a private coin, so it is withdrawer-only (the shared
-    // block proves the withdraw-time commitment). The success branch above skips all
-    // of this, as cleanup needs no identity.
-    refundSurrenderedValue(disclosedRequestId, signatureRequest, mintNonce);
+    // Refund path only: it mints a private coin, so it is withdrawer-only (the
+    // caller proves the secret behind the commitment pinned at withdraw time).
+    // The success branch skips this, as cleanup needs no identity.
+    assert(myCommitment == refundCommitment.lookup(disclosedRequestId), "Not the withdrawer");
+    const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
+    mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), recipient);
   }
 
   refundCommitment.remove(disclosedRequestId);
@@ -647,34 +630,46 @@ export circuit refund(
   // Route by which pending marker holds the id: withdrawals and swaps use SEPARATE maps
   // (different calldata widths), so exactly one matches. The marker is public ledger
   // state, so the branch condition is public.
-  if (disclose(refundCommitment.member(disclosedRequestId))) {
-    // Withdrawal refund: withdrawer-only, re-minting the surrendered value under a
-    // caller-chosen random mintNonce (completeWithdraw's failure branch verbatim).
-    const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
+  const myCommitment = withdrawRefundCommitment(callerSecretKey(), disclosedRequestId);
+  const isWithdrawal = disclose(refundCommitment.member(disclosedRequestId));
+
+  // This gate must precede the conditional lookups below: each marker map is
+  // inserted and removed together with its event map, so membership here is what
+  // guarantees the taken arm's lookup finds its record. An id in neither map
+  // (a deposit, or an already-settled request) fails here with a clean message.
+  assert(isWithdrawal || swapRefundCommitment.member(disclosedRequestId), "Request not found");
+
+  // Both refund shapes mint the surrendered value (withdrawals: calldata word 1 of
+  // the transfer, token in txParams.to; swaps: amountInMaximum in word 5, tokenIn in
+  // word 0's low 20 bytes), so the branch-dependent (amount word, token) pair is
+  // selected here and decoded ONCE after the join: a per-branch decode + mint pays
+  // the hash and mint cost twice. The condition is public, so the untaken arm's
+  // lookup never executes in the ledger transcript.
+  const amountWord = isWithdrawal
+    ? signBidirectionalEventMap.lookup(disclosedRequestId).txParams.calldata.value.words[1]
+    : swapEventMap.lookup(disclosedRequestId).txParams.calldata.value.words[5];
+  const tokenAddr = isWithdrawal
+    ? signBidirectionalEventMap.lookup(disclosedRequestId).txParams.to
+    : slice<20>(swapEventMap.lookup(disclosedRequestId).txParams.calldata.value.words[0], 12);
+
+  if (isWithdrawal) {
+    // Withdrawal refund: withdrawer-only, under a caller-chosen random mintNonce
+    // (one derived from the public requestId would link the coin to the withdrawal).
+    assert(myCommitment == refundCommitment.lookup(disclosedRequestId), "Not the withdrawer");
     signBidirectionalEventMap.remove(disclosedRequestId);
-    refundSurrenderedValue(disclosedRequestId, signatureRequest, mintNonce);
     refundCommitment.remove(disclosedRequestId);
   } else {
-    // Swap refund: swapper-only, re-minting the surrendered amountInMaximum of tokenIn.
-    assert(swapRefundCommitment.member(disclosedRequestId), "Request not found");
-    const signatureRequest = swapEventMap.lookup(disclosedRequestId);
+    // Swap refund: swapper-only. The swap never executed, so the full surrendered
+    // amountInMaximum re-mints and nothing was spent.
+    assert(myCommitment == swapRefundCommitment.lookup(disclosedRequestId), "Not the swapper");
     swapEventMap.remove(disclosedRequestId);
-    assert(
-      withdrawRefundCommitment(callerSecretKey(), disclosedRequestId)
-        == swapRefundCommitment.lookup(disclosedRequestId),
-      "Not the swapper"
-    );
     swapRefundCommitment.remove(disclosedRequestId);
-
-    // Re-mint the full surrendered amountInMaximum (calldata word 5) of tokenIn (word 0, low
-    // 20 bytes) to the swapper. The swap never executed, so nothing was spent.
-    assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
-    const amountInMaximum = abiWordToUint128(signatureRequest.txParams.calldata.value.words[5]);
-    const tokenIn = slice<20>(signatureRequest.txParams.calldata.value.words[0], 12);
-    const domainSep = vaultTokenDomainSeparator(tokenIn);
-    const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-    mintShieldedToken(domainSep, amountInMaximum as Uint<64>, disclose(mintNonce), recipient);
   }
+
+  const amount = abiWordToUint128(amountWord);
+  const domainSep = vaultTokenDomainSeparator(tokenAddr);
+  const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
+  mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), recipient);
 }
 
 // ---- Swap: approveRouter ------------------------------------------------------------
