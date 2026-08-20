@@ -10,7 +10,7 @@ import "./provided-context.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { afterAll, beforeEach, inject } from "vitest";
+import { afterAll, beforeAll, beforeEach, inject } from "vitest";
 
 import { testHeader } from "./output.ts";
 import { waitForGo } from "./waitForGo.ts";
@@ -23,7 +23,45 @@ const execFileAsync = promisify(execFile);
 const PROOF_SERVER_CONTAINER = "midnight-proof-server";
 
 /**
- * Poll `url` until it answers (any HTTP response) or the deadline passes.
+ * Whether the proof server answers at all. Any HTTP response counts: the server binds its port
+ * only once it can serve, so a reply is the readiness signal.
+ *
+ * @param url - The proof server URL to probe.
+ * @returns True when the server replied, false otherwise.
+ */
+async function proofServerAnswers(url: string): Promise<boolean> {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The proof server container's state, as one line. `docker ps` reports a container that died and
+ * came back as merely "Up", which hides the death; `OOMKilled`, `ExitCode` and `RestartCount` do
+ * not. Returns a marker string rather than throwing, so it is safe inside an error path.
+ *
+ * @returns One line of container state, or a marker when docker cannot be reached.
+ */
+async function proofServerContainerState(): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("docker", [
+      "inspect",
+      PROOF_SERVER_CONTAINER,
+      "--format",
+      "running={{.State.Running}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}} restarts={{.RestartCount}} startedAt={{.State.StartedAt}}",
+    ]);
+    return stdout.trim();
+  } catch (error) {
+    return `state unavailable (${String(error)})`;
+  }
+}
+
+/**
+ * Poll `url` until it answers or the deadline passes. Reports the container's state on timeout,
+ * so a failure says whether the server is missing, dead or merely slow.
  *
  * @param url - The proof server URL to probe.
  * @param timeoutMs - How long to keep polling before giving up.
@@ -31,30 +69,66 @@ const PROOF_SERVER_CONTAINER = "midnight-proof-server";
 async function waitForProofServer(url: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    try {
-      await fetch(url, { signal: AbortSignal.timeout(5_000) });
-      return;
-    } catch {
-      if (Date.now() > deadline) {
-        throw new Error(`proof server did not become reachable at ${url} after a restart`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    if (await proofServerAnswers(url)) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `proof server did not answer at ${url} after a restart; container: ${await proofServerContainerState()}`,
+      );
     }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 }
 
 /**
- * Recycle the LOCAL proof server after each flow file. Heavy proofs accumulate memory across a
- * long sequential run (fileParallelism is off), and a single never-restarted server OOMs late in
- * the suite (ECONNREFUSED on the next prove). Restarting between files reclaims it, so each file
- * starts against a fresh server. Skipped when SKIP_PROOF_SERVER_RESTART is set, the proof server
- * is not local (a user's own / a remote one), or docker is unavailable.
+ * The local proof server URL, or null when the recycle does not apply: `SKIP_PROOF_SERVER_RESTART`
+ * is set, or the configured server is not local (a user's own, or a remote one).
+ *
+ * @returns The local proof server URL, or null when the recycle does not apply.
+ */
+function localProofServerUrl(): string | null {
+  if (process.env.SKIP_PROOF_SERVER_RESTART) return null;
+  const url = process.env.MIDNIGHT_PROOF_SERVER_URL ?? "http://127.0.0.1:6300";
+  return /127\.0\.0\.1|localhost/.test(url) ? url : null;
+}
+
+/**
+ * Keep the LOCAL proof server alive across a long sequential run.
+ *
+ * Heavy proofs accumulate memory (fileParallelism is off, so one file follows another against one
+ * server), and a never-restarted server dies late in the suite. The next prove then fails with
+ * ECONNREFUSED, an hour in, naming nothing.
+ *
+ * Two hooks, because a recycle after each file is not enough on its own:
+ * - `beforeAll` refuses to start a file against a dead server. The previous file's recycle can
+ *   have failed, or the server can have died after it.
+ * - `afterAll` reports the container's state, THEN recycles. Reporting first is the point: the
+ *   restart hides a mid-file death, so without this a server that died is invisible in a run that
+ *   otherwise passes.
+ *
+ * Neither hook fails the run when docker is unavailable. A missing local server surfaces as the
+ * test's own error, which is no worse than before.
  */
 function installProofServerRecycle(): void {
+  beforeAll(async () => {
+    const url = localProofServerUrl();
+    if (url === null) return;
+    if (await proofServerAnswers(url)) return;
+    console.warn(
+      `proof server not answering before this file; container: ${await proofServerContainerState()}`,
+    );
+    try {
+      await execFileAsync("docker", ["restart", PROOF_SERVER_CONTAINER]);
+    } catch (error) {
+      console.warn(`proof-server restart skipped (docker unavailable?): ${String(error)}`);
+      return;
+    }
+    await waitForProofServer(url, 3 * MINUTE);
+  }, 5 * MINUTE);
+
   afterAll(async () => {
-    if (process.env.SKIP_PROOF_SERVER_RESTART) return;
-    const url = process.env.MIDNIGHT_PROOF_SERVER_URL ?? "http://127.0.0.1:6300";
-    if (!/127\.0\.0\.1|localhost/.test(url)) return;
+    const url = localProofServerUrl();
+    if (url === null) return;
+    console.log(`proof server after this file: ${await proofServerContainerState()}`);
     try {
       await execFileAsync("docker", ["restart", PROOF_SERVER_CONTAINER]);
     } catch (error) {
