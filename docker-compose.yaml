@@ -14,6 +14,10 @@ services:
     container_name: 'midnight-proof-server'
     image: 'midnightntwrk/proof-server:9.0.0-rc.5_experimental'
     command: ['midnight-proof-server -v']
+    # Proving is memory-hungry and a long e2e run has killed this server outright. Bring it back
+    # on its own: paired with the prove retry in `createCrossContractProofServerProvider`, a death
+    # costs seconds instead of the rest of the run. `docker stop` is still respected.
+    restart: 'unless-stopped'
     ports:
       - '127.0.0.1:6300:6300'
     environment:
