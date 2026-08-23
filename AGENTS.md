@@ -349,3 +349,25 @@ apply to all of them:
   a regex, and only one of the two paths gets tested. Config is read from the
   passed map (never `process.env` directly, never mutated), so every process
   reads the SAME variable for the same thing.
+
+# Diagrams
+
+- **The style guide and workflow in [docs/diagramming.md](docs/diagramming.md) are
+  binding** for every draw.io diagram in this repo: the committed `.drawio` +
+  `.drawio.png` pair, the palette, the label styles, the shapes, the icon bank. Copy
+  styled cells from `docs/diagram-palette.drawio` rather than authoring styles by hand.
+- **Diagram labels are verbatim from source**: circuit names with parentheses
+  (`deposit(...)`), event and ledger field names exactly as exported. A label is correct
+  iff it greps in the source.
+- **NEVER:** hand-export from the draw.io UI, screenshot, pass ad hoc scale or border
+  overrides (resolution changes are edits to [drawio.config.json](drawio.config.json),
+  re-rendering every pair in the same change), commit a PNG not rendered from the
+  `.drawio` source beside it, leave an edge without `source` and `target` attachments,
+  or embed a draw.io SVG export in docs (it renders theme-mangled in dark-mode viewers).
+- **`drawio.config.json` lives ONCE at the repo root**, exactly as `eslint.config.js` and
+  `.prettierrc.json` do: it is found by upward search from each diagram, and one root file
+  is what reaches both `docs/` and every `examples/*/docs/`. A copy inside a docs directory
+  would govern only its siblings and drift from the rest.
+- **Eyeball every render before finishing**: downscale the PNG and read it as an image.
+  Broken edge labels, escaped containment and missing icons are visible at a glance and
+  invisible in the XML.
