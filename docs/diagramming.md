@@ -54,6 +54,29 @@ shapes unfilled.
 - Dashed edge for key derivations.
 - Circle (`strokeWidth=2`, font size 20) for step numbers, in the step's colour.
 
+## Layered composition (NEVER BREAK)
+
+A diagram is composed in layers, and each layer must stand on its own:
+
+1. **Layer 1: shapes and their labels.** Boxes, hexagons, icons, notes. Composed FIRST,
+   as a deliberate arrangement: siblings align on shared coordinates (the circuits inside
+   a contract stack at one x with even vertical spacing), gaps are consistent, captions
+   sit where the caption rule says. The test: delete every line from the diagram and what
+   remains still looks intentionally placed. A layer-1 item never sits somewhere that only
+   makes sense once the lines are drawn (an indented circuit "making room" for an edge is
+   a defect: the edge routes around, the circuit stays in its column).
+2. **Layer 2: lines and step circles.** Routed around layer 1 per the edge rules below.
+3. **Layer 3: line text.** Edge labels annotate layer 2 without colliding with either layer.
+
+## Captions and anchors
+
+- **An icon's caption sits above the icon, centred** (text before image), everywhere:
+  actors, servers, chains, the lot.
+- **Edges anchor at the centre of the side they meet** (`0.5` on that axis). Never anchor
+  at or near a corner of a text or image bounding box. On a shape taller than one line of
+  text an off-centre anchor is allowed, but it keeps clear padding from the shape's edge,
+  never hugging it.
+
 ## Edge routing (NEVER BREAK)
 
 - **NO diagonal segments, ever.** Every edge is built from strictly horizontal and
@@ -70,6 +93,16 @@ shapes unfilled.
 - **Paired right angles align.** When two edges take the same style of corner near each
   other (along, then up, then along), their vertical runs line up on one x coordinate,
   as mirror images or both the same way. Two nearly-aligned verticals are a defect.
+- **Step lines travel together.** All edges of one step (one colour) that leave the same
+  shape anchor at one shared base, or immediately adjacent points on one side, and
+  separate with one or two explicit 90 degree jogs. Never scatter a step's edges across
+  different sides or distant anchors of a shape when a shared base is possible: prefer
+  crossing another step's line over splitting your own step's lines apart.
+- **A step never crosses itself.** Two edges of the same colour must not cross each
+  other. When two edges share a source shape, order their anchors to match their targets
+  so they fan out without crossing. A T-junction off a shared trunk is the sanctioned
+  form of fan-out. Where different steps must cross, put `jumpStyle=arc` on the crossing
+  edge so the crossing reads as a jump, never as a junction.
 - **Every edge pins its route.** Connection points are fixed in the edge's style
   (`exitX`/`exitY`/`entryX`/`entryY`) and every jog is an explicit waypoint, never left
   for the router to invent. A pinned route is a literal polyline in the XML, so all the
