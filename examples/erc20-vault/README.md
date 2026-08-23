@@ -1,11 +1,10 @@
 # ERC20 Vault
 
-This example demonstrates bridging ERC20 assets from an EVM chain into shielded
-tokens on Midnight, and back again, without a custodian. A Midnight contract
+This example demonstrates bridging ERC20 assets from an EVM chain into shielded tokens on Midnight and back again. A Midnight contract
 (the vault) owns an EVM account whose key nobody holds. The address is derived
 from the Signature Network MPC's root public key, and every EVM transaction the
 vault sends is signed by the MPC network on the vault's request via the
-[sign-bidirectional flow](https://docs.sig.network/architecture/sign-bidirectional).
+[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow).
 
 > ## ⚠️ CAUTION ⚠️
 >
@@ -20,6 +19,29 @@ What this example demonstrates, end to end:
 - The vault verifying that response in-circuit against the response key it
   pinned at `initialize` time, and minting or burning shielded vault tokens
   accordingly, including a refund branch for when the EVM leg fails.
+
+# The Actors
+
+## Non-User Specific Actors
+- MPC
+- Midnight Blockchain (Source Chain)
+  - Sig Network Singleton Contract
+  - ERC20 Vault Contract (Main contract of this example)
+- EVM Blockchain (Destination Chain)
+  - ERC20 Token Contract
+  - Swap Contract
+  - Aave Contract
+  - EVM Vault Account Address
+
+## User Specific Actors
+- User 1
+  - User 1 Midnight Wallet
+  - User 1 EVM Wallet
+  - User 1 EVM Deposit Address
+- User 2
+  - User 2 Midnight Wallet
+  - User 2 EVM Wallet
+  - User 2 EVM Deposit Address  
 
 # The vault's circuits
 
