@@ -54,6 +54,31 @@ shapes unfilled.
 - Dashed edge for key derivations.
 - Circle (`strokeWidth=2`, font size 20) for step numbers, in the step's colour.
 
+## Edge routing (NEVER BREAK)
+
+- **NO diagonal segments, ever.** Every edge is built from strictly horizontal and
+  strictly vertical runs joined by clean 90 degree corners.
+- **No almost-straight segments, ever.** A run is either perfectly straight or a
+  deliberate 90 degree jog. An edge that is off-vertical or off-horizontal by a few
+  pixels is a defect, not a route.
+- **Edges are thicker than lane borders**: every connecting line carries `strokeWidth=2`
+  (swimlane borders stay at the default 1), dashed derivation edges included.
+- **Route around shapes.** An edge crosses another EDGE when it must (prefer a visible
+  jump where the crossing is busy), but it never cuts through a shape while a route
+  around exists. Event hexagons set their label as `Event` on the first row and the
+  event name below it, which keeps them compact enough to route around.
+- **Paired right angles align.** When two edges take the same style of corner near each
+  other (along, then up, then along), their vertical runs line up on one x coordinate,
+  as mirror images or both the same way. Two nearly-aligned verticals are a defect.
+- **Every edge pins its route.** Connection points are fixed in the edge's style
+  (`exitX`/`exitY`/`entryX`/`entryY`) and every jog is an explicit waypoint, never left
+  for the router to invent. A pinned route is a literal polyline in the XML, so all the
+  rules above are checked mechanically rather than by eye. When editing by hand in the
+  draw.io UI, add corners with right-click and "Add Waypoint" (dragging a segment alone
+  does not create one), and re-verify after moving any shape: pinned endpoints follow
+  the shape while waypoints stay put, and the router bridges the gap with exactly the
+  diagonals and stutters these rules forbid.
+
 ## Working size
 
 A diagram's content stays inside roughly 1300 x 800 model units, the size at which
