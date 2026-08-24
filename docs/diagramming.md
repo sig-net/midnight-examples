@@ -25,16 +25,21 @@ result on your behalf.
 
 ## Colour palette
 
-Colours mean protocol steps. Everything that belongs to runtime step N, the numbered
-circle and every arrow of that step, uses that step's colour, and nothing else does.
+Colours mean protocol phases. Everything that belongs to one runtime step, the numbered
+circle and every arrow of that step, uses its phase's colour, and nothing else does. Step
+numbers are ordinals per diagram, 1..N in that flow's execution order, so a phase keeps
+its colour in every diagram whatever number it carries there. The fund phase is the
+user's own wallet moving value on the foreign chain before any contract is involved, and
+it appears only in flows that begin with such a transfer.
 
-| Step | Meaning | Colour |
-|------|---------|--------|
-| 1 | request | `#E73F74` |
-| 2 | signature | `#3969AC` |
-| 3 | broadcast | `#11A579` |
-| 4 | attestation | `#FDAE61` |
-| 5 | settle | `#7F3C8D` |
+| Phase | Colour |
+|-------|--------|
+| fund | `#008695` |
+| request | `#E73F74` |
+| signature | `#3969AC` |
+| broadcast | `#11A579` |
+| attestation | `#FDAE61` |
+| settle | `#7F3C8D` |
 
 Everything else stays neutral: default black strokes on a white background, swimlanes and
 shapes unfilled.
@@ -131,7 +136,7 @@ A diagram is composed in layers, and each layer must stand on its own:
    a defect: the edge routes around, the circuit stays in its column).
 2. **Layer 2: lines and step circles.** Routed around layer 1 per the edge rules below.
    A numbered circle sits at touching distance from its step's MOST SALIENT edge, the
-   one a reader would name as "the step happening" (for step 1 that is the dApp calling
+   one a reader would name as "the step happening" (for the request step that is the dApp calling
    the circuit, not the user tapping the dApp). When no edge is obviously more salient
    than its siblings, use the step's first edge at its source shape. Never floating in
    whitespace, never equidistant between two steps.
