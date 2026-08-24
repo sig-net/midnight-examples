@@ -274,7 +274,11 @@ apply to all of them:
   styled cells from `docs/diagram-palette.drawio` rather than authoring styles by hand.
 - **Diagram labels are verbatim from source**: circuit names with parentheses
   (`deposit(...)`), event and ledger field names exactly as exported. A label is correct
-  iff it greps in the source.
+  iff it greps in the source. One exemption: the generic protocol diagram
+  (`docs/sign-bidirectional-flow.*`) depicts a hypothetical integrating contract, so its
+  placeholder circuits (`startCrossChain(...)`, `completeCrossChain(...)`) grep nowhere
+  by design. Every real name in it (events, singleton circuits, ledger fields) still
+  must grep.
 - **NEVER:** hand-export from the draw.io UI, screenshot, pass ad hoc scale or border
   overrides (resolution changes are edits to [drawio.config.json](drawio.config.json),
   re-rendering every pair in the same change), commit a PNG not rendered from the

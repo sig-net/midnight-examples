@@ -66,6 +66,11 @@ A diagram is composed in layers, and each layer must stand on its own:
    makes sense once the lines are drawn (an indented circuit "making room" for an edge is
    a defect: the edge routes around, the circuit stays in its column).
 2. **Layer 2: lines and step circles.** Routed around layer 1 per the edge rules below.
+   A numbered circle sits at touching distance from its step's MOST SALIENT edge, the
+   one a reader would name as "the step happening" (for step 1 that is the dApp calling
+   the circuit, not the user tapping the dApp). When no edge is obviously more salient
+   than its siblings, use the step's first edge at its source shape. Never floating in
+   whitespace, never equidistant between two steps.
 3. **Layer 3: line text.** Edge labels annotate layer 2 without colliding with either layer.
 
 ## Captions and anchors
@@ -76,6 +81,16 @@ A diagram is composed in layers, and each layer must stand on its own:
   at or near a corner of a text or image bounding box. On a shape taller than one line of
   text an off-centre anchor is allowed, but it keeps clear padding from the shape's edge,
   never hugging it.
+- **An edge label rides its line**: it sits ON the edge at the midpoint of the run between
+  the two things it connects, with the background knockout breaking the line behind the
+  text. Offsets exist only to dodge a collision, and slide the label along the line,
+  never off it.
+- **Boxes hug their content.** A text shape's bounding box is sized to its text plus a few
+  units, so an anchor on the box edge is an anchor on the content. An arrowhead that
+  visibly stops short of the text means the box is too big, not the arrow too short.
+- **Code labels centre optically**: the code-label style carries `spacingTop=-4;spacing=2`
+  so the text sits on the box's optical midline and a `0.5` side anchor meets the text
+  centre. Copy the cell from the palette card, which carries these values.
 
 ## Edge routing (NEVER BREAK)
 
@@ -103,6 +118,24 @@ A diagram is composed in layers, and each layer must stand on its own:
   so they fan out without crossing. A T-junction off a shared trunk is the sanctioned
   form of fan-out. Where different steps must cross, put `jumpStyle=arc` on the crossing
   edge so the crossing reads as a jump, never as a junction.
+- **Tails and leads run at least 40 units.** On any edge with a corner, the first segment
+  out of the source and the final segment into the arrowhead each run at least 40 units
+  before bending. A bend hard against a shape reads cramped.
+- **Arrowheads land in clear space.** No other line passes within 20 units of an
+  arrowhead's landing point (the arrow glyph itself occupies real space), and no line of
+  the SAME colour passes within 40: an unrelated same-colour line near an arrowhead
+  reads as a junction. An arrowhead never sits on another edge: lengthen or reroute to
+  make room. Several arrowheads deliberately sharing one anchor point are the allowed
+  exception.
+- **Prefer: corners need a cause.** Every corner should be justified by an obstacle or
+  another rule. If sliding an anchor within its side's allowed band removes a corner
+  without breaking anything, remove it: straight beats stepped. Review question per
+  corner: "what does this corner avoid?" The anchor rules ALWAYS win over straightness:
+  never slide an anchor toward a corner of a shape to straighten an edge, and a corner
+  caused by keeping a centred or padded anchor is a caused corner.
+- **Prefer: same-direction edges share anchors.** Edges leaving or entering one shape in
+  the same direction share one anchor point, or a tight cluster on that side: at most one
+  anchor per side unless directions genuinely differ.
 - **Every edge pins its route.** Connection points are fixed in the edge's style
   (`exitX`/`exitY`/`entryX`/`entryY`) and every jog is an explicit waypoint, never left
   for the router to invent. A pinned route is a literal polyline in the XML, so all the
