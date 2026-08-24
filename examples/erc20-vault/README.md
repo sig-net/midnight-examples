@@ -193,9 +193,9 @@ Two vault-specific points:
 
 - The contract package exports the event map's resolved ledger-tree path as
   `VAULT_REQUESTS_PATH` so off-chain readers cannot drift from it. The vault
-  has 15 or fewer ledger fields, so the map at field 0 has the depth-1 path
-  `[0]`, and the request circuits pack it into their notifications as
-  `requestsPathDepth` 1 + `requestsPath` [0, 0, 0, 0]. The compiler records
+  has 19 ledger fields, past the 15-field flat limit, so the map at field 0 has
+  the depth-2 path `[0, 0]`, and the request circuits pack it into their
+  notifications as `requestsPathDepth` 2 + `requestsPath` [0, 0, 0, 0]. The compiler records
   the same path as the field's "index" in the compiled
   `contract-info.json`.
 - The deploy tooling ([`contract/deploy.ts`](contract/deploy.ts)) computes
@@ -293,7 +293,7 @@ const reader = new SignetRequestResponseReader({
   // The deployed vault contract.
   requesterContractAddress: vaultContractAddress,
 
-  // signBidirectionalEventMap sits at ledger field 0, path [0] (Setup step 3).
+  // signBidirectionalEventMap sits at ledger field 0, path [0, 0] (Setup step 3).
   requesterRequestsPath: VAULT_REQUESTS_PATH,
 
   // The Signet singleton contract.
@@ -376,7 +376,7 @@ export circuit deposit(
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
-  // ...and notify it, carrying the map's ledger-tree path ([0] at depth 1,
+  // ...and notify it, carrying the map's ledger-tree path ([0,0] at depth 2,
   // Setup step 3).
   signetSigner.signBidirectional(
     requestId,

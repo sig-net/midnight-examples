@@ -39,14 +39,18 @@ import "@sig-net/midnight/src/Signet";
 // for an ERC20 transfer(address,uint256): <2 calldata words, 0 access-list entries,
 // 0 storage keys>. Schema widths are 34 bytes, the exact length of
 // vaultResponseSchema() (schemas are exact-width by protocol convention, never padded).
-// This declaration is ledger FIELD 0, so its resolved ledger-tree path is [0] at
-// depth 1 (this contract has 15 or fewer fields, so each field sits directly in the
-// state tree's root array). The request circuits pack this path into their
-// notifications, and the MPC follows it to locate the map. The compiled path is
-// recorded as this field's "index" in managed/erc20-vault/compiler/contract-info.json.
-// The map must stay first and never move after the first deploy. General rule: any field a
-// notification names by position must hold that position. swapEventMap (field 11) is the
-// other such field, since the swap notification hardcodes its path [11, 0, 0, 0].
+// This declaration is ledger FIELD 0. The contract has 19 ledger fields, past the
+// 15-field flat limit, so the compiler chunks the state tree and every field resolves to
+// a depth-2 [chunk, slot] path. This one is [0, 0]. The request circuits pack that path
+// into their notifications, and the MPC follows it to locate the map. Read the compiled
+// path from this field's "index" in managed/erc20-vault/compiler/contract-info.json
+// rather than deriving it.
+// CAUTION: the compiler packs the trailing chunks to 15 and puts the remainder first, so
+// ANY change to the ledger field count re-indexes the tree. Appending a 20th field moves
+// swapEventMap from [1,7] to [1,6] and supplyEventMap from [1,11] to [1,10]. Four fields
+// are named by position in a notification and must keep their compiled path across a
+// deploy: signBidirectionalEventMap [0,0], swapEventMap [1,7], supplyEventMap [1,11],
+// redeemEventMap [1,13]. After any ledger change, re-read every path and redeploy.
 export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // The Signet singleton, pinned at deploy. The request circuits cross-contract call it
@@ -373,8 +377,8 @@ export circuit deposit(
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
   // Notify the MPC via the Signet singleton's notification event. The path arguments
-  // carry the resolved ledger-tree path of signBidirectionalEventMap: depth 1, path
-  // [0], as the map is ledger field 0 (see its declaration).
+  // carry the resolved ledger-tree path of signBidirectionalEventMap: [0,0] at depth 2,
+  // chunked past 15 fields (see its declaration).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
@@ -556,8 +560,8 @@ export circuit withdraw(
   signBidirectionalEventMap.insert(requestId, disclose(request));
   refundCommitment.insert(requestId, disclose(withdrawRefundCommitment(callerSecretKey(), requestId)));
 
-  // Notify the MPC (ledger-tree path [0] at depth 1 = signBidirectionalEventMap, see
-  // its declaration).
+  // Notify the MPC (ledger-tree path [0,0] at depth 2 = signBidirectionalEventMap,
+  // chunked past 15 fields, see its declaration).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
@@ -831,7 +835,8 @@ export circuit approveRouter(
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
-  // Notify the MPC (ledger-tree path [0] at depth 1 = signBidirectionalEventMap). The
+  // Notify the MPC (ledger-tree path [0,0] at depth 2 = signBidirectionalEventMap,
+  // chunked past 15 fields). The
   // client polls the SignatureRespondedEvent and broadcasts, and no attestation is consumed.
   signetSigner.signBidirectional(
     requestId,

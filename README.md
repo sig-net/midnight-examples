@@ -296,7 +296,7 @@ The path shape comes from how compactc lays out state. The compiler packs a cont
 
 Do not derive the path by hand: the compiler records it in your compiled artifacts. Compile your contract, then look up your map's `"index"` in `managed/<contract>/compiler/contract-info.json` (a bare number `4` means path `[4]`). The generated `managed/<contract>/contract/index.js` accessors walk the same indices, for example `state.asArray()[1].asArray()[14]` for a map recorded at `[1, 14]`. That path packs as `requestsPathDepth = 2` and `requestsPath = [1, 14, 0, 0]`.
 
-The [erc20-vault example](examples/erc20-vault) is a worked flat case: its 10-field ledger stores the map at field 0, so its notifications carry depth `1` and path `[0, 0, 0, 0]`, and its contract package exports the path as `VAULT_REQUESTS_PATH` for off-chain readers.
+The [erc20-vault example](examples/erc20-vault) is a worked chunked case: its 19-field ledger stores the map at field 0, which resolves to `[0, 0]`, so its notifications carry depth `2` and path `[0, 0, 0, 0]`. Its contract package exports the path as `VAULT_REQUESTS_PATH` for off-chain readers. Note that the padded path literal is unchanged from the flat case — only the depth tells them apart.
 
 ## Runtime
 
@@ -354,7 +354,8 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
    signBidirectionalEventMap.insert(requestId, disclose(request));
 
    // Notify the MPC of the SignBidirectionalEvent and the location of your signBidirectionalEventMap.
-   // The map is at ledger field 0 (Setup step 3), so its path is [0] at depth 1
+   // The map is at ledger field 0 (Setup step 3). With 15 or fewer ledger fields that
+   // resolves to [0] at depth 1; past 15 the tree chunks and it becomes [0, 0] at depth 2.
    // (see The request map's ledger-tree path).
    signetSigner.signBidirectional(
       requestId,
