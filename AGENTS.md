@@ -274,7 +274,8 @@ apply to all of them:
   styled cells from `docs/diagram-palette.drawio` rather than authoring styles by hand.
 - **Diagram labels are verbatim from source**: circuit names with parentheses
   (`deposit(...)`), event and ledger field names exactly as exported. A label is correct
-  iff it greps in the source. One exemption: the generic protocol diagram
+  iff it greps in the source. When a term exists in several sources, truth priority is
+  code > README > diagram: take it from the leftmost source that has it. One exemption: the generic protocol diagram
   (`docs/sign-bidirectional-flow.*`) depicts a hypothetical integrating contract, so its
   placeholder circuits (`startCrossChain(...)`, `completeCrossChain(...)`) grep nowhere
   by design. Every real name in it (events, singleton circuits, ledger fields) still
