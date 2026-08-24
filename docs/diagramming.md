@@ -112,10 +112,18 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   behaviour responsibilities: they are nodes and edges land on them. Sibling
   responsibilities share one colon-led scaffold (`Signs: <object> With:
   <instrument>`), verbs aligned across siblings, the greppable instrument bold.
-- Ledger state renders in a dotted box with the database cylinder
-  (`shape=mxgraph.flowchart.database`) at its left. A record or map type is a
-  record block: bold type name with its opening brace, fields indented beneath,
-  closing brace. A scalar field is its single line.
+- Contract-member nodes (ledger state, circuits) are grouped cells: a
+  dotted-border box, a text-height icon inside it at the left, and the member's
+  code text beside the icon, grouped so they move as one. The icon is 16 units
+  tall: the database cylinder (`shape=mxgraph.flowchart.database`) for ledger
+  state, the cog (`shape=mxgraph.ios7.icons.settings`) for circuits. The icon
+  sits 8 in from the border with a 6-unit gap before the text. The code text
+  opens with the compact keyword (`ledger`, `circuit`) in the code style's
+  keyword colour, ALWAYS at normal weight: keywords are never bold. Bold is
+  reserved for the greppable name, the thing that greps in the contract
+  source, and a keyword is syntax, not a name. A record or map type is a record block: bold type name with
+  its opening brace, fields indented beneath, closing brace. A scalar field is
+  its single line.
 - A circuit's behaviour is a bullet list inside that circuit's dotted box, never a
   separate floating note.
 - Dashed no-fill rectangle for an actor cluster: it draws a visible dashed outline
