@@ -13,6 +13,8 @@ Jump to the [Quickstart](#quickstart) to get an example running, read the [Integ
 
 # Sign Bidirectional Flow
 
+![Sign bidirectional flow](docs/sign-bidirectional-flow.drawio.png)
+
 The flow comprises 5 steps:
 
 1. Client calls a contract on Midnight which requests a signature for a transaction destined for a foreign chain. The signature is made with a key derived for the requesting contract (see [Derived keys](#derived-keys)).
@@ -42,6 +44,12 @@ The key the MPC signs remote execution attestations with when posting them back 
 `responseKey = f(mpcRootKey[keyVersion], contractAddress, "midnight response key")`
 
 The same derivation, but with the path fixed to the literal `"midnight response key"`, giving each contract one well-known response key. A contract pins its own response key in its ledger after deploy and verifies every response against it in-circuit (step 5 of the flow above).
+
+# The Examples
+
+| Example | What it demonstrates |
+|---------|----------------------|
+| [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding ERC20 tokens on an EVM chain: private deposits into MPC-derived accounts, withdrawals, Uniswap swaps and Aave supply/redeem, all driven through the sign bidirectional flow. Each MPC interaction has its own flow page under [examples/erc20-vault/docs/](examples/erc20-vault/docs/deposit.md) |
 
 # Quickstart
 

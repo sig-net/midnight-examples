@@ -80,12 +80,16 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   (Midnight) uses the logo alone as the unit. A lane for a Signet-controlled contract
   uses the Sig Network logo as its icon.
 - The MPC lane draws its servers as the palette's server-cluster group, three server
-  towers around the Sig Network roundel, at the TOP RIGHT of the lane. The lane's width
-  is minimised: just wide enough that reasonable padding (15 units or more) separates
-  the lane's widest text (header unit, behaviour notes) from the cluster and the
-  border. Dead space is the defect: shrink the lane rather than re-centring the
-  cluster to fill it, and the vertical gap between the cluster and the note column
-  below it matches the note-to-note gap, so the lane keeps one rhythm.
+  towers around the Sig Network roundel. The cluster sits horizontally CENTRED in the
+  lane when nothing shares its vertical band; when other content overlaps that band
+  on one side within the minimum padding, the cluster moves to the top corner AWAY
+  from it (content on the left pushes it top-right, content on the right pushes it
+  top-left). The lane's width is minimised: just wide enough that reasonable padding
+  (15 units or more) separates the lane's widest text (header unit, behaviour notes)
+  from the cluster and the border. Dead space is the defect: shrink the lane rather
+  than stretching content to fill it, and the vertical gap between the cluster and
+  the note column below it matches the note-to-note gap, so the lane keeps one
+  rhythm.
 - Plain rectangle (`rounded=0`, bold) for actors and apps, with the app's icon
   embedded INSIDE the box, left of the text and vertically centred, so the box reads
   as a component. The box hugs its icon and text with 12 units of padding: an actor
@@ -93,7 +97,12 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   icons only.
 - The User actor is the composite group from the palette card: bold caption above,
   the blue person shape behind, the wallet icon in front.
-- Hexagon for events.
+- Hexagon for events, hugging its two-row label (`Event` over the bold name): the
+  text is centred on both axes, the sloped sides run at 45 degrees (`fixedSize=1`
+  with `size` equal to half the hexagon's height), and the hexagon is sized so the
+  text clears the slopes by the uniform padding and no more. Excess width or height
+  around a centred label is dead space, and a width-relative slope is forbidden:
+  it forces wide hexagons to grow instead of hug.
 - Dotted-bordered text box (`dashed=1;dashPattern=1 2;strokeColor=default`) for
   behaviour responsibilities: they are nodes and edges land on them. Sibling
   responsibilities share one colon-led scaffold (`Signs: <object> With:
