@@ -44,13 +44,30 @@ shapes unfilled.
 - Prose labels use the default font (Helvetica).
 - Circuit labels render as code: Menlo/Monaco monospace at 12px, the keyword (`circuit`)
   in `#AF00DB`, the identifier in `#202020`. Copy the sample cell from the palette card.
+- **Truth priority: code > README > diagram.** When a term exists in more than one
+  place, a label takes it from the leftmost source that has it: circuit, event and
+  ledger-field spellings come from the contract source, step phrasing comes from the
+  README, and a diagram invents wording only where neither has any.
+- **Step captions.** Each numbered circle pairs with a step-caption cell (the dashed
+  behaviour-note style) carrying its canonical step string verbatim, circle and caption
+  together at touching distance from the step's salient edge. An edge may additionally
+  carry a short human-friendly riding label, which never replaces the canonical string.
 
 ## Shapes
 
-- Swimlane per chain or system, nested swimlanes for contracts.
-- Plain rectangle (`rounded=0`, bold) for actors and apps.
+- Swimlane per chain or system, nested swimlanes for contracts. A lane's icon sits
+  small at the left of its header beside the title. A lane for a Signet-controlled
+  contract carries the Sig Network logo there. A chain lane whose logo includes its
+  wordmark (Midnight) shows the centred logo alone in the header, no title text.
+- Plain rectangle (`rounded=0`, bold) for actors and apps, with the app's icon
+  embedded INSIDE the box, left of the text and vertically centred, so the box reads
+  as a component. The caption-above rule applies to standalone icons only.
+- The User actor is the composite group from the palette card: bold caption above,
+  the blue person shape behind, the wallet icon in front.
 - Hexagon for events.
 - Dashed borderless text box for behaviour notes.
+- Dashed no-fill rectangle for an actor cluster: it draws a visible dashed outline
+  around the shapes that act as one party (the User composite with its wallets).
 - Dashed edge for key derivations.
 - Circle (`strokeWidth=2`, font size 20) for step numbers, in the step's colour.
 
