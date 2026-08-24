@@ -39,6 +39,23 @@ circle and every arrow of that step, uses that step's colour, and nothing else d
 Everything else stays neutral: default black strokes on a white background, swimlanes and
 shapes unfilled.
 
+## Visual weight is semantics
+
+Three visual channels carry meaning, and each is reserved for exactly that meaning:
+
+- **Dotted outlines mark connectable nodes.** Ledger state, circuits and behaviour
+  responsibilities render in dotted-border boxes, and edges anchor only to nodes
+  (outlined boxes, icons, hexagons, actor boxes, lanes). Borderless text is
+  annotation: it rides an edge and never takes an arrow.
+- **Bold marks the greppable name.** In prose (edge labels, notes), exactly the
+  verbatim names that grep in source (events, circuits, keys, ledger fields) are
+  bold, and nothing else is: bold text is the visible anchor tying the diagram to
+  the code.
+- **Arrow flow marks sequence.** When one lane performs an ordered sequence within a
+  step, the sequence is drawn as edges threading through its boxes in the step's
+  colour, entering the first box and leaving the last toward its destination. Boxes
+  with only sideways edges hide their order.
+
 ## Labels
 
 - Prose labels use the default font (Helvetica).
@@ -67,14 +84,26 @@ shapes unfilled.
   is minimised: just wide enough that reasonable padding (15 units or more) separates
   the lane's widest text (header unit, behaviour notes) from the cluster and the
   border. Dead space is the defect: shrink the lane rather than re-centring the
-  cluster to fill it.
+  cluster to fill it, and the vertical gap between the cluster and the note column
+  below it matches the note-to-note gap, so the lane keeps one rhythm.
 - Plain rectangle (`rounded=0`, bold) for actors and apps, with the app's icon
   embedded INSIDE the box, left of the text and vertically centred, so the box reads
-  as a component. The caption-above rule applies to standalone icons only.
+  as a component. The box hugs its icon and text with 12 units of padding: an actor
+  box is no taller or wider than that. The caption-above rule applies to standalone
+  icons only.
 - The User actor is the composite group from the palette card: bold caption above,
   the blue person shape behind, the wallet icon in front.
 - Hexagon for events.
-- Dashed borderless text box for behaviour notes.
+- Dotted-bordered text box (`dashed=1;dashPattern=1 2;strokeColor=default`) for
+  behaviour responsibilities: they are nodes and edges land on them. Sibling
+  responsibilities share one colon-led scaffold (`Signs: <object> With:
+  <instrument>`), verbs aligned across siblings, the greppable instrument bold.
+- Ledger state renders in a dotted box with the database cylinder
+  (`shape=mxgraph.flowchart.database`) at its left. A record or map type is a
+  record block: bold type name with its opening brace, fields indented beneath,
+  closing brace. A scalar field is its single line.
+- A circuit's behaviour is a bullet list inside that circuit's dotted box, never a
+  separate floating note.
 - Dashed no-fill rectangle for an actor cluster: it draws a visible dashed outline
   around the shapes that act as one party (the User composite with its wallets).
 - Dashed edge for key derivations.
@@ -111,12 +140,17 @@ A diagram is composed in layers, and each layer must stand on its own:
   the two things it connects, with the background knockout breaking the line behind the
   text. Offsets exist only to dodge a collision, and slide the label along the line,
   never off it.
-- **Boxes hug their content.** A text shape's bounding box is sized to its text plus a few
-  units, so an anchor on the box edge is an anchor on the content. An arrowhead that
-  visibly stops short of the text means the box is too big, not the arrow too short.
-- **Code labels centre optically**: the code-label style carries `spacingTop=-4;spacing=2`
-  so the text sits on the box's optical midline and a `0.5` side anchor meets the text
-  centre. Copy the cell from the palette card, which carries these values.
+- **Boxes hug their content with ONE uniform padding.** A node box's border keeps
+  exactly 8 units of padding at the sides and 6 above and below the text (a
+  single-line code cell is 28 units tall), so an anchor on the box edge is an anchor
+  on the content. Roomier reads as emptiness, tighter reads as clipping, and every
+  sibling box in a column carries the identical padding so the column reads as one
+  family. An arrowhead that visibly stops short of the text means the box is too
+  big, not the arrow too short.
+- **Text sits visibly centred in its box**: node cells carry `verticalAlign=middle`
+  with the uniform padding, so a `0.5` side anchor meets the text centre and the
+  border frames the text evenly. Verify the centring in the render, never only in
+  the XML. Copy the cell from the palette card, which carries these values.
 
 ## Edge routing (NEVER BREAK)
 
