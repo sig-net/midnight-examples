@@ -121,8 +121,7 @@ export ledger swapRefundCommitment: Map<RequestId, Bytes<32>>;
 // asset() on-chain, so the underlying-to-wrapper pairing is trusted config, not derivable.
 // stataUnderlying gives supply's burn colour and redeem's mint colour; stataToken is the
 // ONLY spender approveStata grants an allowance to and the ONLY `to` a supply/redeem call
-// sends to. Appended AFTER the swap state so existing field positions, and thus existing
-// circuits' verifier keys, never move.
+// sends to.
 export ledger stataUnderlying: Bytes<20>;
 export ledger stataToken: Bytes<20>;
 
@@ -138,10 +137,10 @@ export ledger redeemEventMap: SignBidirectionalEventMap<EvmType2TxParams<3, 0, 0
 export ledger redeemRefundCommitment: Map<RequestId, Bytes<32>>;
 
 // ---- Fixed MPC routing --------------------------------------------------------------
-// This vault does exactly one thing: have the MPC sign ERC20 `transfer` calls on an EVM
-// chain. The event fields that follow from that are contract CONSTANTS, never circuit
-// arguments: algo is always ecdsa, dest always unused, params always blank, and both
-// serialisation schemas are the schema below.
+// Every EVM call this vault has the MPC sign shares the same routing, so these event
+// fields are contract CONSTANTS, never circuit arguments: algo is always ecdsa, dest
+// always unused, params always blank. Only the serialisation schemas vary, one output and
+// one respond schema per call shape (transfer, exactOutputSingle, approve, deposit, redeem).
 
 // The ABI-style JSON schema of an ERC20 `transfer` result, used in both directions: it
 // tells the MPC how to deserialise the EVM execution output and how to serialise that
