@@ -61,6 +61,12 @@ without repeating the detail.
 
 # Vault Sign Bidirectional Flow
 
+Each MPC interaction flow has its own walkthrough page pairing the flow's
+diagram, its step-by-step description and its sequence diagram:
+
+- [Deposit](docs/deposit.md)
+
+
 The flow comprises 5 runtime steps: request a signature on Midnight, receive
 the MPC's signature, broadcast on the foreign chain, receive the MPC's
 attestation of the outcome, and verify that attestation in-circuit. The vault
