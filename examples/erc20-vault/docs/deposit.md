@@ -8,12 +8,11 @@ bracketing one MPC-signed EVM transaction.
 
 ## The protocol underneath
 
-![Sign bidirectional flow](../../../docs/sign-bidirectional-flow.drawio.png)
-
-Every flow in this example is an instance of this generic protocol. The five
-steps, the derived keys and the events are described in the
-[repository README](../../../README.md#sign-bidirectional-flow) and in the
-[Sig Network documentation](https://docs.sig.network/architecture/sign-bidirectional).
+It is best to understand the
+[sign bidirectional flow](../../../README.md#sign-bidirectional-flow) before
+you continue here. For more detail see the
+[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow)
+in the midnight integration repository.
 
 ## The deposit round trip
 
