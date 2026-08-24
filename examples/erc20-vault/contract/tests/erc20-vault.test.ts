@@ -1441,7 +1441,7 @@ describe("claim settle", () => {
 
 const EXACT_OUTPUT_SINGLE_SELECTOR = new Uint8Array([0x50, 0x23, 0xb4, 0xdf]);
 const APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
-const MAX_APPROVE = 340282366920938463463374607431768211455n; // 2^128-1
+const MAX_APPROVE = pureCircuits.unlimitedAllowance();
 // exactOutputSingle returns amountIn: the MPC decodes it as uint256, re-packs it as uint64.
 const SWAP_OUTPUT_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint256"}]', 38);
 const SWAP_RESPOND_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint64"}]', 37);

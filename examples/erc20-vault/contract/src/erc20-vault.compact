@@ -202,6 +202,15 @@ struct RedeemReturnValue {
   assets: Uint<64>;
 }
 
+// ---- EVM calldata constants ----------------------------------------------------------
+// The allowance both approve circuits grant: 2^128-1, far above any token supply, so one
+// approve per spender suffices forever. Exported so off-chain code reads it from the
+// compiled circuit, never a TS re-declaration. Off-chain callers rebuild this calldata to
+// compare against what the MPC signed, so a divergent copy breaks the flow at runtime.
+export pure circuit unlimitedAllowance(): Uint<128> {
+  return 340282366920938463463374607431768211455;
+}
+
 // ---- Token model --------------------------------------------------------------------
 // Each ERC20 the vault handles gets its own shielded token colour: the domain separator
 // encodes the ERC20 address, and tokenType() binds it to this contract via
@@ -786,14 +795,13 @@ export circuit approveRouter(
   assert(initialized >= 1, "Not initialized");
   assert(erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
 
-  // approve(uniswapRouter, 2^128-1). The amount is effectively unlimited (far above any
-  // token supply), so one approve per token suffices forever.
+  // approve(uniswapRouter, unlimitedAllowance()).
   const calldata = EvmCalldata<2> {
     selector: Bytes [0x09, 0x5e, 0xa7, 0xb3], // approve(address,uint256)
     noWords: 2 as Uint<16>,
     words: [
       evmAddressAbiWord(uniswapRouter),
-      numericAbiWord(340282366920938463463374607431768211455 as Uint<128>),
+      numericAbiWord(unlimitedAllowance()),
     ]
   };
 
@@ -1050,7 +1058,7 @@ export circuit approveStata(
     noWords: 2 as Uint<16>,
     words: [
       evmAddressAbiWord(stataToken),
-      numericAbiWord(340282366920938463463374607431768211455 as Uint<128>),
+      numericAbiWord(unlimitedAllowance()),
     ]
   };
   const txParams = EvmType2TxParams<2, 0, 0> {
