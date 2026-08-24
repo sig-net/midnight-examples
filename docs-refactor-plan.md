@@ -111,15 +111,18 @@ actor map back. Never rebuild the background from scratch.
 
 ### ERC20 vault example
 
-- [ ] Actor map (IN FLIGHT): `system-map` stripped to background, all 14
-      circuit names in grouped anatomy, `deposit-flow` rebuilt as background +
-      deposit layer. Executing now under the pre-restructure names.
+- [x] Actor map: `system-map` stripped to background, all 14 circuit names in
+      grouped anatomy, `deposit-flow` rebuilt as background + deposit layer
+      (byte-prefix proof holds). Delivered under the pre-restructure names.
 - [ ] Docs restructure to the flow-folder layout: create `docs/deposit/`, move
       `deposit.md` into it, rename `deposit-flow.drawio(.png)` to
       `deposit/deposit.drawio(.png)`, rename `system-map.drawio(.png)` to
       `actor-map.drawio(.png)`, and update every link, embed and plan/rule
       reference (mover pays: grep `system-map`, `deposit-flow` and
       `docs/deposit.md` repo-wide, zero hits on the old names at the end).
+      Includes the diagram page name: both vault .drawio files carry
+      `<diagram name="system-map" ...>` inside, renamed to actor-map in BOTH
+      files in the same change so the background-equality proof keeps holding.
 - [x] `docs/deposit.md`: full flow page (pointer section, flow diagram, six
       canonical headings with the deep dive folded per step, mermaid, footer).
 - [x] Vault README first rewrite: actor map embedded over the actors list,
@@ -243,6 +246,11 @@ tokens in the diagram's `name(...)` form, no backticks:
 - [ ] Lint: consider flagging a label centred on its OWN edge's run when the
       label has no background colour (the strike class the eyeball keeps
       finding and the checker deliberately skips today).
+- [x] Palette `circuit-node` sample text cell widened to the measured Menlo
+      advance (7.21 u/char: 196u for 27 chars, box 234) so copies inherit a
+      cell that fits its own text.
+- [ ] `render` rejects `--force` with a bare "unexpected argument": say in the
+      error that render always overwrites derived outputs, no flag needed.
 
 ## Workflow
 
