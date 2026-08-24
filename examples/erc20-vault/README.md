@@ -22,26 +22,35 @@ What this example demonstrates, end to end:
 
 # The Actors
 
-## Non-User Specific Actors
-- MPC
-- Midnight Blockchain (Source Chain)
-  - Sig Network Singleton Contract
-  - ERC20 Vault Contract (Main contract of this example)
-- EVM Blockchain (Destination Chain)
-  - ERC20 Token Contract
-  - Swap Contract
-  - Aave Contract
-  - EVM Vault Account Address
+![ERC20 vault actor map](docs/system-map.drawio.png)
 
-## User Specific Actors
-- User 1
-  - User 1 Midnight Wallet
-  - User 1 EVM Wallet
-  - User 1 EVM Deposit Address
-- User 2
-  - User 2 Midnight Wallet
-  - User 2 EVM Wallet
-  - User 2 EVM Deposit Address  
+The actor map lays out every actor in the example and the vault's fourteen
+exported circuits. The only edges it draws are the dashed key derivations:
+every runtime interaction between these actors belongs to a specific MPC flow,
+and each flow's own walkthrough page draws its steps (see
+[Vault Sign Bidirectional Flow](#vault-sign-bidirectional-flow)).
+
+- **Sig Network Distributed MPC**: signs requested transactions with keys
+  derived for the requesting contract, and attests their execution outcomes.
+  It only ever signs.
+- **Midnight Blockchain (source chain)** hosts two contracts: the
+  **Sig Network Singleton Contract**, which the vault notifies of each request
+  and through which the MPC posts its responses as contract events, and the
+  **ERC20 Vault Contract**, this example's contract, whose fourteen exported
+  circuits appear on the map.
+- **EVM Blockchain (destination chain)** hosts what the vault transacts with:
+  the ERC20 token contract being bridged, the Uniswap V3 router (`swap`) and
+  the Aave stataToken wrapper (`supply` / `redeem`), plus the vault's own
+  derived EVM account holding the pooled tokens.
+- **Vault dApp (Relayer)**: the off-chain client. It polls the singleton's
+  emitted events for the MPC's signature, assembles and broadcasts the
+  MPC-signed transaction to the EVM chain, then polls for the MPC's
+  attestation and hands the attested output back for settling. The MPC only
+  signs: broadcasting is the relayer's responsibility.
+- **Users**: each user holds a Midnight wallet (calls the circuits and
+  receives the shielded vault tokens), their own EVM wallet, and a derived
+  EVM deposit account the MPC signs deposit sweeps from (see
+  [Derived keys and accounts](#derived-keys-and-accounts)).
 
 # The vault's circuits
 
@@ -65,15 +74,19 @@ without repeating the detail.
 # Vault Sign Bidirectional Flow
 
 Each MPC interaction flow has its own walkthrough page pairing the flow's
-diagram, its step-by-step description and its sequence diagram:
+diagram, its step-by-step description with the full code excerpts, and its
+sequence diagram:
 
 - [Deposit](docs/deposit.md)
 
 
-The flow comprises 5 runtime steps: request a signature on Midnight, receive
-the MPC's signature, broadcast on the foreign chain, receive the MPC's
-attestation of the outcome, and verify that attestation in-circuit. The vault
-runs the whole flow twice, once per direction:
+The cross-flow skeleton is the protocol's six phases: fund the sending
+account, request a signature on Midnight, receive the MPC's signature,
+broadcast on the foreign chain, receive the MPC's attestation of the outcome,
+and settle by verifying that attestation in-circuit. Step numbers are
+ordinals per flow: deposit opens with a fund step and runs steps 1 to 6,
+while withdraw has nothing to fund (the value to move is already pooled in
+the vault's account) and runs steps 1 to 5 starting at the request phase.
 
 | # | Step | Deposit round trip | Withdraw round trip |
 |---|---|---|---|
@@ -122,8 +135,8 @@ and injective rendering that accepts any bytes the contract chooses. Client
 code deriving an account off-chain must feed `deriveEvmAddress` the same
 rendering: `bytesToHex` of the stored path bytes, so the vault's own account
 derives from the hex of `pad(32, "vault")` and the user's account from the
-hex of the identity commitment (see the reader setup snippet in the deposit
-walkthrough below).
+hex of the identity commitment (see the reader setup snippet in the
+[deposit walkthrough](docs/deposit.md)).
 
 # Integration walkthrough
 
@@ -372,7 +385,7 @@ opens a PR recording the new address in the contract package's per-network
 table, served to consumers by `getVaultContractAddress` (when the initialise
 failed after that point, the PR says to run it by hand before merging).
 
-## Runtime: the deposit round trip
+## Runtime: joining the deployed vault
 
 A deposit moves ERC20 value from the user's deposit account into the vault's
 account on the EVM chain, then mints the same amount of shielded vault tokens
@@ -748,11 +761,11 @@ each one changes. Full code lives in the flow files under
 
 ### Withdraw (`startWithdraw` / `completeWithdraw` / `refundWithdraw`)
 
-The same five steps with the roles swapped: the caller surrenders shielded vault
+The same phases with the roles swapped: the caller surrenders shielded vault
 tokens up front, and the requested EVM transfer spends from the vault's own
 account.
 
-| | Deposit round trip | Withdraw round trip |
+| | Deposit round trip (steps 1 to 6) | Withdraw round trip (steps 1 to 5) |
 |---|---|---|
 | Runtime step 1 | `startDeposit()` | `startWithdraw()`, which also takes (and burns) the surrendered coin |
 | Derivation path → signer | The caller's identity commitment → the user's deposit account | `"vault"` → the vault's own account |
@@ -769,7 +782,7 @@ Two patterns to take from it
   coin is BURNED first (`sendImmediateShielded` forwards its full value to the
   stdlib's `shieldedBurnAddress()`, so vault tokens are IOUs a refund
   re-mints), and the refund path exists for when the EVM leg later fails. The spend IS the auth, so anyone may
-  withdraw to any destination. Because the vault's account pays the gas, the fee
+  withdraw to any destination. The vault's account pays the gas, so the fee
   envelope is contract-FIXED (a caller-chosen cap would let anyone drain the
   vault's ETH). The request is keyed under the vault's own `"vault"` path so the
   MPC signs with the vault account, and a settle view carrying the withdrawer's
