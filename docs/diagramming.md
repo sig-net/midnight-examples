@@ -55,10 +55,19 @@ shapes unfilled.
 
 ## Shapes
 
-- Swimlane per chain or system, nested swimlanes for contracts. A lane's icon sits
-  small at the left of its header beside the title. A lane for a Signet-controlled
-  contract carries the Sig Network logo there. A chain lane whose logo includes its
-  wordmark (Midnight) shows the centred logo alone in the header, no title text.
+- Swimlane per chain or system, nested swimlanes for contracts. Every lane header
+  shows ONE centred unit: the lane's icon, a small gap, then the bold title, centred
+  horizontally and vertically in the header band, no exceptions. The lane cell's own
+  value stays empty; the unit is a group (icon + title text) copied from the palette
+  card and centred at the lane's midpoint. A lane whose logo includes its wordmark
+  (Midnight) uses the logo alone as the unit. A lane for a Signet-controlled contract
+  uses the Sig Network logo as its icon.
+- The MPC lane draws its servers as the palette's server-cluster group, three server
+  towers around the Sig Network roundel, at the TOP RIGHT of the lane. The lane's width
+  is minimised: just wide enough that reasonable padding (15 units or more) separates
+  the lane's widest text (header unit, behaviour notes) from the cluster and the
+  border. Dead space is the defect: shrink the lane rather than re-centring the
+  cluster to fill it.
 - Plain rectangle (`rounded=0`, bold) for actors and apps, with the app's icon
   embedded INSIDE the box, left of the text and vertically centred, so the box reads
   as a component. The caption-above rule applies to standalone icons only.
