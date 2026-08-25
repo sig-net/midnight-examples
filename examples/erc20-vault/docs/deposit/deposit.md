@@ -6,7 +6,7 @@ Midnight once the MPC has attested the transfer. It is one full pass through the
 sign bidirectional flow: two Midnight transactions (`deposit(...)`, `claim(...)`)
 bracketing one MPC-signed EVM transaction.
 
-## The protocol underneath
+## The protocol
 
 It is best to understand the
 [sign bidirectional flow](../../../../README.md#sign-bidirectional-flow) before
@@ -14,7 +14,19 @@ you continue here. For more detail see the
 [sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow)
 in the midnight integration repository.
 
+## The integration
+
+To wire this shape into a contract of your own, start from the
+[Integration guide](../../../../README.md#integration-guide) in the repo README.
+For the full walkthrough see the
+[Integrator Guide](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide)
+in the midnight integration repository.
+
 ## The deposit round trip
+
+The round trip runs in six steps, from the user funding their derived deposit
+account on the EVM chain to the vault minting their shielded balance on
+Midnight.
 
 ![Deposit flow](deposit.drawio.png)
 
@@ -32,7 +44,7 @@ example's executable documentation. The `vault` and `reader` objects the
 snippets use are constructed once per run: see
 [The shared vault and reader setup](#the-shared-vault-and-reader-setup) below.
 
-### Runtime step 1: fund the user's deposit account
+### Step 1: fund the user's deposit account
 
 The user transfers the ERC20 being deposited plus gas ETH from their own EVM
 wallet into their derived deposit account, directly on the EVM chain. No vault
@@ -46,7 +58,7 @@ on Midnight. The local-stack setup pipeline funds the deposit account
 automatically, and on a real chain you fund the printed
 `EVM_USER1_DEPOSIT_ADDRESS`.
 
-### Runtime step 2: deposit(...) records the request
+### Step 2: deposit(...) records the request
 
 The user calls `deposit(...)` with their private amount. The circuit constructs
 the EVM sweep transaction `transfer(vaultEvmAddress, amount)`, records the
@@ -149,7 +161,7 @@ const requestId = requestIdHex(calculateRequestId(expectedRecord));
 `expectedRecord` reconstruction, byte for byte, and asserts the recomputed id
 appears as a ledger map key after the call.
 
-### Runtime step 3: poll for the MPC's signature
+### Step 3: poll for the MPC's signature
 
 The MPC reads the recorded request from the vault's ledger, signs the sweep
 transaction with the user's derived signing key, and posts the signature back
@@ -170,7 +182,7 @@ const { verified } = await reader.getVerifiedSignatureRespondedEvent(requestId, 
 Flow function:
 [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts).
 
-### Runtime step 4: broadcast the sweep to the EVM chain
+### Step 4: broadcast the sweep to the EVM chain
 
 The dApp assembles the MPC-signed transaction and broadcasts it to the EVM
 chain. The MPC only signs: broadcasting is the relayer's responsibility. The
@@ -192,7 +204,7 @@ Flow function: [`broadcast-evm.ts`](../../integration-tests/src/flows/broadcast-
 (idempotent: an already-mined sweep short-circuits cleanly, a reverted or
 nonce-burned one throws).
 
-### Runtime step 5: poll for the MPC's attestation
+### Step 5: poll for the MPC's attestation
 
 The MPC watches the EVM chain for the transaction's execution and posts an
 attestation of its output through the singleton's `respondBidirectional(...)`.
@@ -269,7 +281,7 @@ and [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts)
 (which also handles the failure case: a reverted or replaced transaction is
 attested as the protocol's fixed 5-byte failure output, `0xdeadbeef01`).
 
-### Runtime step 6: claim(...) verifies and mints
+### Step 6: claim(...) verifies and mints
 
 The user calls `claim(...)` with the execution output and the attestation. The
 circuit recomputes the attestation digest, verifies the MPC's signature
@@ -411,22 +423,22 @@ sequenceDiagram
     participant MPC as Sig Network Distributed MPC
     participant EVM as EVM Blockchain
 
-    Note over User,EVM: Runtime step 1: fund the user's deposit account
+    Note over User,EVM: Step 1: fund the user's deposit account
     User->>EVM: funds the deposit account with the ERC20 being deposited plus gas ETH
-    Note over User,Singleton: Runtime step 2: deposit(...) records the request
+    Note over User,Singleton: Step 2: deposit(...) records the request
     User->>Vault: deposit(...)
     Vault->>Singleton: signBidirectional(...)
-    Note over DApp,MPC: Runtime step 3: poll for the MPC's signature
+    Note over DApp,MPC: Step 3: poll for the MPC's signature
     MPC->>Vault: reads the recorded request
     MPC->>Singleton: respond(...) posts the signature
     DApp->>Singleton: polls for the signature
-    Note over DApp,EVM: Runtime step 4: broadcast the sweep to the EVM chain
+    Note over DApp,EVM: Step 4: broadcast the sweep to the EVM chain
     DApp->>EVM: broadcasts the MPC-signed transfer(vaultEvmAddress, amount)
-    Note over DApp,EVM: Runtime step 5: poll for the MPC's attestation
+    Note over DApp,EVM: Step 5: poll for the MPC's attestation
     MPC->>EVM: watches for transaction execution
     MPC->>Singleton: respondBidirectional(...) posts the attestation
     DApp->>Singleton: polls for the attestation
-    Note over User,Vault: Runtime step 6: claim(...) verifies and mints
+    Note over User,Vault: Step 6: claim(...) verifies and mints
     User->>Vault: claim(...)
 ```
 

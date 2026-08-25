@@ -190,7 +190,10 @@ the deleted cells used to be. A band of empty space whose only explanation is
 - **An edge label rides its line**: it sits ON the edge at the midpoint of the run between
   the two things it connects, with the background knockout breaking the line behind the
   text. Offsets exist only to dodge a collision, and slide the label along the line,
-  never off it.
+  never off it. A label on a single-run VERTICAL edge is the one exception: every
+  along-the-line position leaves the run crossing the text, so wrap or shorten the label
+  to fit a clear strip beside the run and offset it perpendicular, or failing that set
+  `labelBackgroundColor`.
 - **Boxes hug their content with ONE uniform padding.** A node box's border keeps
   exactly 8 units of padding at the sides and 6 above and below the text (a
   single-line code cell is 28 units tall), so an anchor on the box edge is an anchor
