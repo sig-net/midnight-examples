@@ -1,10 +1,8 @@
 # ERC20 Vault
 
-This example demonstrates bridging ERC20 assets from an EVM chain into shielded tokens on Midnight and back again. A Midnight contract
-(the vault) owns an EVM account whose key nobody holds. The address is derived
-from the Signature Network MPC's root public key, and every EVM transaction the
-vault sends is signed by the MPC network on the vault's request via the
-[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow).
+This example bridges ERC20 assets from an EVM chain into shielded tokens on
+Midnight and back again, through a Midnight contract (the vault) that owns an
+EVM account whose key nobody holds.
 
 > ## ⚠️ CAUTION ⚠️
 >
@@ -12,7 +10,7 @@ vault sends is signed by the MPC network on the vault's request via the
 > Expect rapid iteration.
 > **Use at your own risk.**
 
-What this example demonstrates, end to end:
+## The vault's circuits
 
 - A Compact contract requesting EVM transaction signatures from the Signature Network singleton contract with a cross-contract call on Midnight.
 - The MPC observing the request, signing the EVM transaction (secp256k1), and later attesting the EVM outcome with an ECDSA-signed `RespondBidirectionalEvent`, signed by a response key derived for THIS contract (from the MPC root key, the vault's own address and the fixed path `"midnight response key"`). Both responses are emitted as contract events on Midnight.
@@ -20,7 +18,19 @@ What this example demonstrates, end to end:
   pinned at `initialise` time, and minting or burning shielded vault tokens
   accordingly, including a refund branch for when the EVM leg fails.
 
-# The Actors
+| Circuit(s) | What it does |
+|---|---|
+| [`initialize`](#setup-step-4-pin-the-derived-addresses-and-the-response-key) | Deployment setup rather than an MPC flow: the deployer-gated one-shot that pins the vault's derived EVM address, the EVM chain, the Uniswap router, the Aave stataToken pair and the MPC response key. |
+| [`deposit`](docs/deposit/deposit.md) → [`claim`](docs/deposit/deposit.md) | **The reference flow, documented in full in the [deposit walkthrough](docs/deposit/deposit.md).** Request → sign → broadcast → attest → verify-and-mint. |
+| [`withdraw`](docs/withdraw/withdraw.md) / [`completeWithdraw`](docs/withdraw/withdraw.md) | The same flow in the other direction, plus the coin-spend-as-authorisation pattern and a settle circuit that branches on the EVM result. |
+| [`refund`](docs/withdraw/withdraw.md) | Settling a request whose transaction never executed, routed by the 5-byte failure-output width (shared by the withdraw, swap, supply and redeem failure paths). |
+| [`approveRouter`](docs/swap/swap.md) | A sign-only request, with no settle circuit at all. |
+| [`swap`](docs/swap/swap.md) / [`completeSwap`](docs/swap/swap.md) | A second request map at its own ledger field and calldata width, reusing the same optimistic burn-then-mint shape. `exactOutputSingle`: mint the exact `amountOut` of `tokenOut` plus the unspent `tokenIn` as change. |
+| [`approveStata`](docs/supply/supply.md) | A second sign-only approval, mirroring `approveRouter`: a one-time `approve(stataToken, MAX)` on the underlying so the ERC-4626 wrapper can pull it during `supply`. |
+| [`supply`](docs/supply/supply.md) / [`completeSupply`](docs/supply/supply.md) | The vault lending on Aave through the stataToken wrapper: `supply` burns the surrendered underlying vault coin and records the wrapper's `deposit(amount, vault)`, and `completeSupply` mints shielded stataToken vault tokens for the attested shares. |
+| [`redeem`](docs/redeem/redeem.md) / [`completeRedeem`](docs/redeem/redeem.md) | The return leg: `redeem` burns the surrendered stataToken coin and records the wrapper's `redeem(shares, vault, vault)`, and `completeRedeem` mints shielded underlying vault tokens for the attested assets (principal plus accrued interest). |
+
+## The actors
 
 ![ERC20 vault actor map](docs/actor-map.drawio.png)
 
@@ -28,7 +38,7 @@ The actor map lays out every actor in the example and the vault's fourteen
 exported circuits. The only edges it draws are the dashed key derivations:
 every runtime interaction between these actors belongs to a specific MPC flow,
 and each flow's own walkthrough page draws its steps (see
-[Vault Sign Bidirectional Flow](#vault-sign-bidirectional-flow)).
+[The flows](#the-flows)).
 
 - **Sig Network Distributed MPC**: signs requested transactions with keys
   derived for the requesting contract, and attests their execution outcomes.
@@ -52,7 +62,7 @@ and each flow's own walkthrough page draws its steps (see
   EVM deposit account the MPC signs deposit sweeps from (see
   [Derived keys and accounts](#derived-keys-and-accounts)).
 
-# The vault's circuits
+## The underlying protocol
 
 Every circuit is a variation on one shape: record a signature request, let the
 MPC sign and broadcast it, then settle in-circuit against the MPC's attestation.
@@ -71,7 +81,15 @@ without repeating the detail.
 | `startSupply` / `completeSupply` | Aave lending via the pinned ERC-4626 stataUSDC wrapper: burn shielded USDC, record `deposit(amount, vault)`, then mint shielded stataUSDC for the MPC-attested shares. |
 | `startRedeem` / `completeRedeem` | The Aave exit: burn shielded stataUSDC, record `redeem(shares, vault, vault)`, then mint shielded USDC for the MPC-attested assets (principal + accrued interest). |
 
-# Vault Sign Bidirectional Flow
+Integrating any Compact contract with the Signature Network is the same shape
+every time: add the protocol dependencies, import the Signet module, declare
+the protocol-required ledger fields, and pin the derived addresses and the
+response key after deploy. Read
+[Integration guide](../../README.md#integration-guide) in the repo README for
+that overview, and the [Integration walkthrough](#integration-walkthrough)
+below for the vault's own code, step by step.
+
+## The flows
 
 Each MPC interaction flow has its own walkthrough page pairing the flow's
 diagram, its step-by-step description with the full code excerpts, and its
@@ -83,6 +101,11 @@ sequence diagram:
 - [Supply](docs/supply/supply.md)
 - [Redeem](docs/redeem/redeem.md)
 
+Each page numbers its own steps from 1 in that flow's execution order, so a
+step number identifies a step within one flow and never across two: deposit
+opens with a fund step and runs steps 1 to 6, while withdraw has nothing to
+fund (the value to move is already pooled in the vault's account) and runs
+steps 1 to 5 starting at the request phase.
 
 The cross-flow skeleton is the protocol's six phases: fund the sending
 account, request a signature on Midnight, receive the MPC's signature,
@@ -142,7 +165,7 @@ derives from the hex of `pad(32, "vault")` and the user's account from the
 hex of the identity commitment (see the reader setup snippet in the
 [deposit walkthrough](docs/deposit/deposit.md)).
 
-# Integration walkthrough
+## Integration walkthrough
 
 Integrating the vault with the Sig Network MPC consists of 4 once-off
 **setup** steps and 5 per-request **runtime** steps. Each Compact snippet is
@@ -156,8 +179,6 @@ those names reaches the full code in its section.
 Each off-chain snippet has an executable counterpart in
 [`integration-tests/src/flows/`](integration-tests/src/flows/), the example's
 executable documentation.
-
-## Setup (once per vault deployment)
 
 ### Setup step 1: add the protocol dependencies
 
@@ -297,6 +318,9 @@ the deployer-gated one-shot `initialise` circuit:
 ```compact
 export circuit initialise(
   vaultEvm: Bytes<20>,
+  swapRouter: Bytes<20>,
+  stataUnderlyingAddr: Bytes<20>,
+  stataTokenAddr: Bytes<20>,
   chainId: Uint<64>,
   chainCaip2Id: Bytes<32>,
   responseKey: Secp256k1Point
@@ -306,6 +330,9 @@ export circuit initialise(
   assert(chainId > 0 as Uint<64>, "Chain ID must be positive");
   initialised.increment(1);
   vaultEvmAddress = disclose(vaultEvm);
+  uniswapRouter = disclose(swapRouter);
+  stataUnderlying = disclose(stataUnderlyingAddr);
+  stataToken = disclose(stataTokenAddr);
   evmChainId = disclose(chainId);
   caip2Id = disclose(chainCaip2Id);
   mpcResponseKey = disclose(responseKey);
@@ -389,7 +416,7 @@ opens a PR recording the new address in the contract package's per-network
 table, served to consumers by `getVaultContractAddress` (when the initialise
 failed after that point, the PR says to run it by hand before merging).
 
-## Runtime: joining the deployed vault
+### Runtime: joining the deployed vault
 
 A deposit moves ERC20 value from the user's deposit account into the vault's
 account on the EVM chain, then mints the same amount of shielded vault tokens
@@ -829,7 +856,7 @@ functions: [`approve-router.ts`](integration-tests/src/flows/approve-router.ts),
 | [`deploy/`](deploy/) | Deploying and post-deploy initialisation: the split base-deploy-plus-maintenance-adds, the deployer-gated `initialise`, and the configuration those resolve, as typed functions taking an environment map plus thin CLI entrypoints over them, so a hand-run deploy and the e2e setup execute identical code. Also the Node half of the vault's client surface those flows and the integration tests share: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. Everything here needs Node, which is why it is not in the contract package. |
 | [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
 
-# Running it
+## Running it
 
 Everything runs from the repo root against the local docker stack (Midnight
 node, indexer, proof server, anvil forking Sepolia, fakenet MPC responder).
@@ -880,7 +907,7 @@ you using this [skill](../../.claude/skills/e2e/SKILL.md). It knows the whole
 operational runbook (rerun vs redeploy modes, the fakenet responder hand-off,
 failure recovery) and will drive it for you.
 
-# The e2e suite
+## The e2e suite
 
 Twelve specs run serially in a pinned order (see
 `integration-tests/vitest.config.ts`). `happy-day-e2e` runs first because it
@@ -913,7 +940,7 @@ setup pipeline's deploys (a few minutes) on top, and a cold clone adds the
 ~10 minute zk key generation. The claim/settle proofs are the heavy legs: the
 proof server peaks above 12 GiB, so give the docker VM 16 GB.
 
-# Test run recovery
+### Test run recovery
 
 The proof server being OOM-killed mid-run is routine on a 16 GB Docker VM and
 not a defect. It presents as a spec failing with

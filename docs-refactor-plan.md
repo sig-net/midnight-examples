@@ -189,22 +189,55 @@ actor map back. Never rebuild the background from scratch.
 - [x] Vault README first rewrite: actor map embedded over the actors list,
       relayer in the actor story, deposit deep-dive migrated out, phase-keyed
       step table, circuits table extended to all 14 circuits.
-- [ ] Vault README aligned to layout 3: headline + circuits-table head, "The
+- [x] Vault README aligned to layout 3: headline + circuits-table head, "The
       underlying protocol" and "Integration guide" pointer sections (up to the
       root README, no images), flows list, operational tail ordered as derived
       keys / setup walkthrough / package layout / running / e2e suite.
-- [ ] Root README rewritten to layout 1: thin headline + examples table, the
+- [x] Root README rewritten to layout 1: thin headline + examples table, the
       flow section keeps the only generic-diagram embed, new Integration guide
       and Contributor guide sections, Prerequisites, repository layout
       radically simplified.
-- [ ] `docs/withdraw/` trio (withdraw / completeWithdraw / refund, settle as an
-      explicit branch).
-- [ ] `docs/swap/` trio (approveRouter precursor, swap / completeSwap).
-- [ ] `docs/supply/` trio (approveStata precursor, supply / completeSupply).
-      No README coverage exists today: written fresh.
-- [ ] `docs/redeem/` trio (redeem / completeRedeem). Same.
-- [ ] Circuits table links every exported circuit to its flow page (deposit
-      and claim link today; the rest as their pages land).
+- [ ] `docs/withdraw/withdraw.drawio(.png)`: derive withdraw's canonical step
+      strings and freeze them in the correspondence section, then build the
+      diagram as an actor-map byte-copy plus withdraw's step layer
+      (withdraw / completeWithdraw / refund, settle as an explicit branch).
+- [ ] `docs/withdraw/withdraw.md`: flow page over the frozen strings. Start
+      the prose from the withdraw deep-dive at
+      `git show beeb8f3:examples/erc20-vault/README.md` (section "Runtime:
+      the other circuits"), not from scratch.
+- [ ] `docs/swap/swap.drawio(.png)`: canonical strings frozen first, then the
+      diagram (approveRouter precursor, swap / completeSwap).
+- [ ] `docs/swap/swap.md`: flow page over the frozen strings. The same
+      `beeb8f3` section carries the swap prose to start from.
+- [ ] `docs/supply/supply.drawio(.png)`: canonical strings frozen first, then
+      the diagram (approveStata precursor, supply / completeSupply).
+- [ ] `docs/supply/supply.md`: flow page over the frozen strings. No README
+      coverage exists for supply: written fresh from the contract and
+      `integration-tests/src/flows/`.
+- [ ] `docs/redeem/redeem.drawio(.png)`: canonical strings frozen first, then
+      the diagram (redeem / completeRedeem).
+- [ ] `docs/redeem/redeem.md`: flow page over the frozen strings. Written
+      fresh, as for supply.
+
+Per flow, the diagram item runs FIRST: its captions force the canonical
+strings to be concrete, and the page then writes against a frozen vocabulary
+(the correspondence contract makes the page derivative of the diagram's
+captions). Diagram items for different flows parallelise freely (each
+byte-copies the same background into its own folder). A flow's page item
+starts only after its diagram item is reviewed.
+- [x] Circuits table links every exported circuit to its flow page by full
+      path, ahead of the pages landing. `initialize`, being deployment setup
+      rather than an MPC flow, links its own Setup step 4 heading instead.
+- [ ] Vault README e2e numbers refreshed from an executed run: the README says
+      eight specs / 78 tests, while `integration-tests/vitest.config.ts` pins
+      ten specs in `FILE_ORDER` and `benchmark-tooling.test.ts` also exists.
+      Three sites move together: the Package layout `integration-tests/` row,
+      the `test:erc20-vault:e2e` script comment, and the e2e suite table.
+      Counts come from running the suite, never from reading it.
+- [ ] Real-network operating guidance re-homed under the vault README's
+      "Running it": Running against Sepolia, `STEP_THROUGH=1`, the roughly
+      20–25 minute first run and what a green run prints. Source text:
+      `git show beeb8f3:README.md`.
 - [ ] Contract comment markers in `erc20-vault.compact` still carry the old
       five-step numbering (`Runtime step 1 (deposit)`, `Runtime step 5
       (deposit)`). Renumber to the six-step deposit ordinals so the greppable
@@ -418,13 +451,12 @@ authoring conversation:
 
 ## Execution order (remaining)
 
-1. (in flight) Actor map strip + grouped anatomy + deposit-flow rebuild.
-2. Docs restructure to flow folders (moves, renames incl. actor-map, every
-   link updated) + root README thin rewrite + vault README aligned to
-   layout 3.
-3. C1 checks 1, 2 and 4 over the flow pages. Plant a violation, watch it
+1. C1 checks 1, 2 and 4 over the flow pages. Plant a violation, watch it
    fail, restore.
-4. Withdraw trio, then C1 checks 3 and 5.
-5. Swap, supply, redeem trios. C3 rules.
-6. C2 CI wiring.
-7. C5 integration repo PR.
+2. Withdraw diagram, then the withdraw page, then C1 checks 3 and 5.
+3. Swap, supply and redeem, each as diagram then page (diagrams may run in
+   parallel across flows). C3 rules.
+4. C2 CI wiring.
+5. C5 integration repo PR.
+6. The two vault README follow-ups (e2e numbers from an executed run, the
+   re-homed real-network guidance), schedulable any time.
