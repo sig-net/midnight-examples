@@ -1213,6 +1213,14 @@ export circuit redeem(
 ): [] {
   assert(initialized >= 1, "Not initialized");
   assert(shares > 0 as Uint<128>, "shares must be positive");
+  // CAUTION: this bounds `shares`, not the USDC that comes back. Aave sets that amount, and
+  // completeRedeem mints it as a single coin through the Uint<64> mint API. The coin is already
+  // burned by then, so there is nothing to check and nothing to undo. rate() on the wrapper is
+  // Aave's getReserveNormalizedIncome: it starts at 1 and only grows, so assets >= shares and
+  // bounding shares does not bound assets. completeSupply has the same shape and is safe for the
+  // opposite reason, since shares = amount / rate <= amount. Out of reach for USDC, which would
+  // need 18.4 trillion, about 460x the supply. The cap is on UNITS, so an 18-decimal underlying
+  // caps the whole vault near 18.4 tokens. See #43 before lending anything but USDC.
   assert(shares <= 18446744073709551615 as Uint<128>, "shares exceeds Uint<64> max");
 
   const color = tokenType(vaultTokenDomainSeparator(stataToken), kernel.self());
