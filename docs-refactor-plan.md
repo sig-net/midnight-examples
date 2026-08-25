@@ -179,7 +179,7 @@ The membership rule and the `Step N` vocabulary above are the binding shape
 for every flow diagram and flow page. The deposit pair predates both, so it
 migrates first: no new flow work starts until these land.
 
-- [ ] Deposit diagram trimmed to the membership rule:
+- [x] Deposit diagram trimmed to the membership rule:
       `docs/deposit/deposit.drawio`'s vault contract box keeps only the
       ledger fields and circuits the deposit flow interacts with (read from
       `erc20-vault.compact` and `integration-tests/src/flows/`, list the
@@ -187,6 +187,22 @@ migrates first: no new flow work starts until these land.
       byte-identical to the actor map's in id, value and style. Captions
       respelled from `Runtime step N:` to the re-frozen `Step N:` strings.
       Lint, re-render, eyeball, and run the workflow's membership proof.
+- [x] Deposit diagram reclaims the trimmed space (the "Trimming reclaims the
+      space it frees" rule in docs/diagramming.md): the band between the
+      Midnight lane's bottom and the EVM lane is dead space left by the
+      deleted circuit columns. Lift the EVM lane (and everything at or below
+      its depth) to restore the normal inter-lane gap, re-placing the step
+      circles, captions and edge runs crossing that band without collisions,
+      then lint, membership proof, re-render, eyeball.
+- [ ] Deposit diagram's intra-lane underhang closed: inside the Midnight
+      lane, the region below the vault contract box (roughly x 310..921,
+      y 424..528) is explained only by the deleted circuit rows. The
+      singleton lane cannot lift (its circuits are pinned level with the MPC
+      note column), so closing it means re-seating the vault box within its
+      lane and re-routing `e1a`, `e1b`, `e5`, `e2b`, `d2`, `d3` plus the
+      step 2 and step 6 blocks, then re-lifting everything below again.
+      Decide the vault-box seating rule ONCE here: every other flow diagram
+      trims the same box and inherits the answer.
 - [ ] `docs/deposit/deposit.md` restructured to flow-page layout item 4:
       "The protocol underneath" becomes `## The protocol`, a new
       `## The integration` pointer section follows it (targeting the root
@@ -395,6 +411,22 @@ on they are byte-frozen.
       cell that fits its own text.
 - [ ] `render` rejects `--force` with a bare "unexpected argument": say in the
       error that render always overwrites derived outputs, no flag needed.
+- [ ] `measure` on an edge label returns `box 0x0u, no ink found` (relative
+      geometry maps to nothing): resolve the label's absolute anchor from its
+      parent edge's polyline and report its ink like any other cell.
+- [ ] `measure` ink heights disagree between identically rendered cells (two
+      three-line 12px captions came back 38.3u and 47.3u): find out why
+      before trusting ink for placement maths.
+- [ ] `measure`'s calibration warning ("residual exceeds 6px") names no
+      cell, so it reads as noise: report which cell's ink overhangs the
+      model bounds.
+- [ ] `cells` truncates style strings and omits declared width/height: a
+      `--full` mode printing untruncated style plus declared geometry would
+      remove the last reason to grep raw XML for placement work.
+- [ ] `measure --cell <group>` measures the group's border stroke, not its
+      children: accept a group id and report the children together, so
+      box-hug questions (text padded inside its box) are answerable
+      directly.
 
 ## Workflow (edit, verify, report)
 
@@ -407,8 +439,10 @@ on they are byte-frozen.
    change touched. Never copy a PNG.
 4. Eyeball every render: downscale (`sips -Z 1600`), read it as an image, and
    zoom (`sips -c`) into dense regions. Broken labels, overlaps, escaped
-   containment and missing icons are visible at a glance and invisible in
-   the XML. The `measure` verb answers padding questions in numbers.
+   containment, missing icons and dead bands of empty space (area only a
+   deleted or moved cell explains) are visible at a glance and invisible in
+   the XML. Ask of every render: does any region read as "something used to
+   be here"? The `measure` verb answers padding questions in numbers.
 5. Grep the correspondence: each canonical string exactly once in its flow
    diagram, exactly twice on its flow page (one heading, one mermaid note).
    Round-trip checks against a rendered PNG's embedded model are cell-level,

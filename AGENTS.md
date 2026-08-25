@@ -303,5 +303,6 @@ apply to all of them:
   is what reaches both `docs/` and every `examples/*/docs/`. A copy inside a docs directory
   would govern only its siblings and drift from the rest.
 - **Eyeball every render before finishing**: downscale the PNG and read it as an image.
-  Broken edge labels, escaped containment and missing icons are visible at a glance and
-  invisible in the XML.
+  Broken edge labels, escaped containment, missing icons and dead bands of empty space
+  (area only a deleted or moved cell explains) are visible at a glance and invisible in
+  the XML. Ask of every render: does any region read as "something used to be here"?
