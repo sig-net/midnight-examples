@@ -3,12 +3,5 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": [
-    "src",
-    "tests",
-    "scripts",
-    "vitest.config.ts",
-    "deploy-init-stagenet.ts",
-    "insert-aave-circuits-stagenet.ts"
-  ]
+  "include": ["src", "tests", "scripts", "vitest.config.ts", "deploy-init-stagenet.ts"]
 }
