@@ -125,22 +125,30 @@ bank, the generic pair). `drawio.config.json` stays at the repo root.
 **4. Flow page** (`examples/<name>/docs/<flow>/<flow>.md`), exactly:
 
 1. Title + one-paragraph summary of what the flow moves and settles.
-2. "The protocol underneath": one or two sentences, NO diagram embed, pointing
-   to the root README's flow section.
-3. The flow diagram (`<flow>.drawio.png`) + a short reading guide.
-4. One `### <canonical step string>` heading per step: concise paragraph
+2. `## The protocol`: one or two sentences, NO diagram embed, pointing to the
+   root README's flow section.
+3. `## The integration`: the same pointer shape, to the root README's
+   Integration guide section.
+4. `## The <flow> round trip`: a one-liner naming the round trip, then the
+   flow diagram (`<flow>.drawio.png`), then a short reading guide.
+5. One `### <canonical step string>` heading per step: concise paragraph
    first, the deep code walkthrough beneath it (a canonical heading appears
-   exactly once per page).
-5. A mermaid `sequenceDiagram` carrying the canonical strings as notes.
-6. Footer: previous/next flow links in the layout's flow order, each by full
+   exactly once per page). Supporting sections the walkthrough needs (shared
+   setup, reader plumbing) follow the steps.
+6. A mermaid `sequenceDiagram` carrying the canonical strings as notes.
+7. Footer: previous/next flow links in the layout's flow order, each by full
    `<flow>/<flow>.md` path whether or not the sibling page exists yet, and
    links up to the example README.
 
 **Diagram architecture: background + one flow.** `actor-map.drawio` is the
-static background every reader learns once (actors, circuit names,
-derivations). Each flow diagram is a byte-copy of that background plus that
-one flow's coloured step layer appended: strip the layer and `cmp` gives the
-actor map back. Never rebuild the background from scratch.
+static background every reader learns once, and the ONLY diagram carrying the
+contract's full anatomy (every circuit, every ledger field). Each flow diagram
+is a copy of that background with the contract members the flow does not
+interact with deleted, plus that one flow's coloured step layer appended. Kept
+cells stay byte-identical to the actor map's in id, value and style, with only
+geometry free to adapt: the "Flow diagram membership" section of
+docs/diagramming.md is the binding rule. Never rebuild the background from
+scratch.
 
 ## Status checklist
 
@@ -150,7 +158,8 @@ actor map back. Never rebuild the background from scratch.
       (code > README > diagram), layered composition, captions/anchors, uniform
       padding (8/6 nodes, 12 actor boxes), visual-weight semantics (dotted
       nodes, bold greppable names, pipeline arrow flow), lane header units,
-      cluster placement, hexagon hug, edge routing NEVER BREAKs, working size.
+      cluster placement, hexagon hug, edge routing NEVER BREAKs, working
+      size, flow diagram membership.
 - [x] Palette card pair: every styled cell, the icon bank, the User composite,
       the MPC server cluster, lane header units, ledger record block, dotted
       node samples.
@@ -163,6 +172,28 @@ actor map back. Never rebuild the background from scratch.
       conventions applied through iterative agent rounds.
 - [x] Embedded in the root README's "Sign Bidirectional Flow" section.
 - [ ] Replaces the integration repo's copy (C5 below).
+
+### Step-pattern refactor (before the remaining flows)
+
+The membership rule and the `Step N` vocabulary above are the binding shape
+for every flow diagram and flow page. The deposit pair predates both, so it
+migrates first: no new flow work starts until these land.
+
+- [ ] Deposit diagram trimmed to the membership rule:
+      `docs/deposit/deposit.drawio`'s vault contract box keeps only the
+      ledger fields and circuits the deposit flow interacts with (read from
+      `erc20-vault.compact` and `integration-tests/src/flows/`, list the
+      survivors in the report), every other member cell deleted, kept cells
+      byte-identical to the actor map's in id, value and style. Captions
+      respelled from `Runtime step N:` to the re-frozen `Step N:` strings.
+      Lint, re-render, eyeball, and run the workflow's membership proof.
+- [ ] `docs/deposit/deposit.md` restructured to flow-page layout item 4:
+      "The protocol underneath" becomes `## The protocol`, a new
+      `## The integration` pointer section follows it (targeting the root
+      README's Integration guide), `## The deposit round trip` opens with a
+      one-liner before the diagram, and the six `###` headings and six
+      mermaid notes respell to the re-frozen `Step N:` strings, byte-equal
+      across all three renderings.
 
 ### ERC20 vault example
 
@@ -199,8 +230,9 @@ actor map back. Never rebuild the background from scratch.
       radically simplified.
 - [ ] `docs/withdraw/withdraw.drawio(.png)`: derive withdraw's canonical step
       strings and freeze them in the correspondence section, then build the
-      diagram as an actor-map byte-copy plus withdraw's step layer
-      (withdraw / completeWithdraw / refund, settle as an explicit branch).
+      diagram per the background + flow construction (actor-map copy, trimmed
+      to withdraw's interacted members, step layer appended) for
+      withdraw / completeWithdraw / refund, settle as an explicit branch.
 - [ ] `docs/withdraw/withdraw.md`: flow page over the frozen strings. Start
       the prose from the withdraw deep-dive at
       `git show beeb8f3:examples/erc20-vault/README.md` (section "Runtime:
@@ -240,12 +272,13 @@ starts only after its diagram item is reviewed.
       `git show beeb8f3:README.md`.
 - [ ] Contract comment markers in `erc20-vault.compact` still carry the old
       five-step numbering (`Runtime step 1 (deposit)`, `Runtime step 5
-      (deposit)`). Renumber to the six-step deposit ordinals so the greppable
-      marker correspondence can return to the docs.
+      (deposit)`). Respell to the `Step N (deposit)` vocabulary and renumber
+      to the six-step deposit ordinals so the greppable marker correspondence
+      can return to the docs.
 
 ### Enforcement and machinery
 
-- [ ] C1 `scripts/check-diagram-labels.mjs`: the five checks below, iterating
+- [ ] C1 `scripts/check-diagram-labels.mjs`: the six checks below, iterating
       every `examples/*/docs/*/*.md` flow page. Planted violation proven.
 - [ ] C2 CI wiring (check script on every PR; pin the render tool checkout by
       commit for check 5).
@@ -261,8 +294,10 @@ Every numbered step label appears IDENTICALLY, name and number, in three places
 per flow: the flow diagram's step captions, the flow page's mermaid notes, and
 the flow page's `###` headings. One vocabulary, three renderings, per flow page.
 
-**Numbering scheme.** `Runtime step N`, ordinals per flow, 1..N in that flow's
-execution order. The cross-flow skeleton is carried by the phase COLOURS (fund,
+**Numbering scheme.** `Step N`, ordinals per flow, 1..N in that flow's
+execution order. The label carries no runtime qualifier: a flow page holds
+only runtime steps, so the word said nothing (setup lives in the example
+README, nowhere else). The cross-flow skeleton is carried by the phase COLOURS (fund,
 request, signature, broadcast, attestation, settle), not by the numbers: deposit
 runs six steps because it begins with the user's own wallet funding the deposit
 account (fund phase), while a flow with no fund step starts at 1 with request.
@@ -284,12 +319,12 @@ and the source is the leftmost of code > README > diagram that has the term:
 circuits). Wording from the README headings under truth priority, circuit
 tokens in the diagram's `name(...)` form, no backticks:
 
-1. `Runtime step 1: fund the user's deposit account`
-2. `Runtime step 2: deposit(...) records the request`
-3. `Runtime step 3: poll for the MPC's signature`
-4. `Runtime step 4: broadcast the sweep to the EVM chain`
-5. `Runtime step 5: poll for the MPC's attestation`
-6. `Runtime step 6: claim(...) verifies and mints`
+1. `Step 1: fund the user's deposit account`
+2. `Step 2: deposit(...) records the request`
+3. `Step 3: poll for the MPC's signature`
+4. `Step 4: broadcast the sweep to the EVM chain`
+5. `Step 5: poll for the MPC's attestation`
+6. `Step 6: claim(...) verifies and mints`
 
 **Deriving a new flow's canonical strings.** The skeleton is the phase
 sequence: fund only where the flow begins with the user's own wallet moving
@@ -302,9 +337,9 @@ MPC's attestation"), and the broadcast step names what is broadcast in README
 vocabulary. Once authored, add the flow's strings to this section: from then
 on they are byte-frozen.
 
-**The five checks** (C1 implements, per flow page):
+**The six checks** (C1 implements, per flow page):
 
-1. Collect every heading matching `^### Runtime step \d:` in each
+1. Collect every heading matching `^### Step \d+:` in each
    `examples/*/docs/*/*.md` flow page. Assert the set is non-empty per page (a
    structurally blinded guard must fail loudly).
 2. Each collected heading string appears verbatim inside a ` ```mermaid ` block
@@ -316,6 +351,10 @@ on they are byte-frozen.
 5. `extract` each committed `.drawio.png` and assert the embedded cells match
    the committed `.drawio` beside it. Cell-level comparison ONLY, never a byte
    `diff` (the webapp re-serialises the embedded model).
+6. Strip each flow diagram's step layer and assert every remaining cell
+   matches the actor map's cell of the same id on id, value and style
+   (geometry excluded), and that the remaining id set is a subset of the
+   actor map's.
 
 ## Tool harvest checklist (draw-io-cli)
 
@@ -375,10 +414,12 @@ on they are byte-frozen.
    Round-trip checks against a rendered PNG's embedded model are cell-level,
    never byte-level (`extract --decode-entities` makes apostrophes
    greppable).
-6. Flow diagrams carry the background-equality proof: remove the appended
-   step-layer cells, then byte-compare the `<root>...</root>` contents against
-   the actor map's. The `<diagram>` tag is excluded on purpose: each file
-   carries its own page name and id there.
+6. Flow diagrams carry the membership proof: remove the appended step-layer
+   cells, then check every remaining cell against the actor map's cell of the
+   same id (id, value and style byte-identical, geometry excluded) and assert
+   the remaining id set is a subset of the actor map's. Cell-level, never a
+   whole-file byte compare. The `<diagram>` tag is excluded on purpose: each
+   file carries its own page name and id there.
 7. After writing any automated check: plant a violation, watch it fail,
    restore. A guard never seen failing is not known to work.
 8. Run C1 (once it exists). The `.drawio` and its `.drawio.png` change (and
@@ -403,7 +444,7 @@ authoring conversation:
   `~/.claude/skills`), which loads for any task that touches draw.io files.
 - **Identifying a step layer:** every step-layer cell is an edge stroked in a
   phase colour (the style guide's colour table), a numbered circle in one, or
-  a caption cell whose value starts "Runtime step"; labels riding step edges
+  a caption cell whose value starts "Step"; labels riding step edges
   die with their edge. The background contains NO phase-stroked cells: the
   zero-hit check over the actor map greps `strokeColor=<phase colour>`,
   anchored to `strokeColor=` on purpose. The palette's User composite FILLS
@@ -411,11 +452,13 @@ authoring conversation:
   colour, so a bare colour grep false-positives on every actor map that
   copies it. Any automated form of this check inherits the anchor.
 - **The background + flow construction:** a new `docs/<flow>/<flow>.drawio`
-  starts as a byte-copy of the example's `docs/actor-map.drawio`, its
-  `<diagram>` tag renamed to the flow's own name and id, plus that flow's
-  step edges, circles and canonical captions appended. Never rebuild the
-  background from scratch: copy it, so every flow diagram stays
-  pixel-identical behind its coloured layer.
+  starts as a copy of the example's `docs/actor-map.drawio`, its `<diagram>`
+  tag renamed to the flow's own name and id, the contract members the flow
+  does not interact with deleted (the membership rule in
+  docs/diagramming.md), and that flow's step edges, circles and canonical
+  captions appended. Never rebuild the background from scratch: copy and
+  trim, so every kept cell stays byte-identical to the actor map's in id,
+  value and style, geometry free to adapt as the contract box tightens.
 - **Protocol semantics:** the five-step walkthrough in this repo's root README
   ("Sign Bidirectional Flow") and the per-flow evidence in
   `examples/erc20-vault/integration-tests/src/flows/` (the flow files document
@@ -451,12 +494,14 @@ authoring conversation:
 
 ## Execution order (remaining)
 
-1. C1 checks 1, 2 and 4 over the flow pages. Plant a violation, watch it
+1. Step-pattern refactor of the deposit pair: the diagram trim + caption
+   respell, then the page restructure + heading/note respell.
+2. C1 checks 1, 2 and 4 over the flow pages. Plant a violation, watch it
    fail, restore.
-2. Withdraw diagram, then the withdraw page, then C1 checks 3 and 5.
-3. Swap, supply and redeem, each as diagram then page (diagrams may run in
+3. Withdraw diagram, then the withdraw page, then C1 checks 3, 5 and 6.
+4. Swap, supply and redeem, each as diagram then page (diagrams may run in
    parallel across flows). C3 rules.
-4. C2 CI wiring.
-5. C5 integration repo PR.
-6. The two vault README follow-ups (e2e numbers from an executed run, the
+5. C2 CI wiring.
+6. C5 integration repo PR.
+7. The two vault README follow-ups (e2e numbers from an executed run, the
    re-homed real-network guidance), schedulable any time.

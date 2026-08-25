@@ -25,7 +25,7 @@ result on your behalf.
 
 ## Colour palette
 
-Colours mean protocol phases. Everything that belongs to one runtime step, the numbered
+Colours mean protocol phases. Everything that belongs to one step, the numbered
 circle and every arrow of that step, uses its phase's colour, and nothing else does. Step
 numbers are ordinals per diagram, 1..N in that flow's execution order, so a phase keeps
 its colour in every diagram whatever number it carries there. The fund phase is the
@@ -149,6 +149,24 @@ A diagram is composed in layers, and each layer must stand on its own:
    than its siblings, use the step's first edge at its source shape. Never floating in
    whitespace, never equidistant between two steps.
 3. **Layer 3: line text.** Edge labels annotate layer 2 without colliding with either layer.
+
+## Flow diagram membership (NEVER BREAK)
+
+An example's actor map is the ONLY diagram showing the contract's full anatomy:
+every exported circuit and every ledger field. A flow diagram's contract box
+carries ONLY the ledger fields and circuits that flow interacts with, so a new
+circuit or field dirties one diagram, not one per flow. Membership is read from
+the contract source and the flow's executable flow files
+(`integration-tests/src/flows/`), never from prose.
+
+A flow diagram starts as a copy of the actor map with its `<diagram>` tag
+renamed, the non-interacted contract members deleted, and the flow's step layer
+appended. Every kept cell, contract members and the rest of the background
+alike, keeps its id, value and style byte-identical to the actor map's cell of
+the same id: copy, never re-author. Only geometry may adapt, as the contract
+box tightens around the surviving members. The check is cell-level, never a
+whole-file diff: strip the step layer, then each remaining cell's id, value
+and style must match the actor map's.
 
 ## Captions and anchors
 
