@@ -9,14 +9,14 @@ bracketing one MPC-signed EVM transaction.
 ## The protocol underneath
 
 It is best to understand the
-[sign bidirectional flow](../../../README.md#sign-bidirectional-flow) before
+[sign bidirectional flow](../../../../README.md#sign-bidirectional-flow) before
 you continue here. For more detail see the
 [sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow)
 in the midnight integration repository.
 
 ## The deposit round trip
 
-![Deposit flow](deposit-flow.drawio.png)
+![Deposit flow](deposit.drawio.png)
 
 The vault's actors carry the six deposit steps. The first step is the user's
 own EVM wallet acting alone, funding the deposit account before any contract
@@ -25,9 +25,9 @@ Vault dApp (Relayer) does the polling and the broadcast, and the MPC reads,
 signs and attests.
 
 Each Compact snippet below is abridged from
-[`contract/src/erc20-vault.compact`](../contract/src/erc20-vault.compact), and
+[`contract/src/erc20-vault.compact`](../../contract/src/erc20-vault.compact), and
 each off-chain snippet has an executable counterpart in
-[`integration-tests/src/flows/`](../integration-tests/src/flows/), the
+[`integration-tests/src/flows/`](../../integration-tests/src/flows/), the
 example's executable documentation. The `vault` and `reader` objects the
 snippets use are constructed once per run: see
 [The shared vault and reader setup](#the-shared-vault-and-reader-setup) below.
@@ -145,7 +145,7 @@ await vault.callTx.deposit(
 const requestId = requestIdHex(calculateRequestId(expectedRecord));
 ```
 
-[`deposit.ts`](../integration-tests/src/flows/deposit.ts) shows the full
+[`deposit.ts`](../../integration-tests/src/flows/deposit.ts) shows the full
 `expectedRecord` reconstruction, byte for byte, and asserts the recomputed id
 appears as a ledger map key after the call.
 
@@ -168,7 +168,7 @@ const { verified } = await reader.getVerifiedSignatureRespondedEvent(requestId, 
 ```
 
 Flow function:
-[`poll-signature-response.ts`](../integration-tests/src/flows/poll-signature-response.ts).
+[`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts).
 
 ### Runtime step 4: broadcast the sweep to the EVM chain
 
@@ -188,7 +188,7 @@ await new JsonRpcProvider(evmRpcUrl).broadcastTransaction(signedSweep.serialized
 ```
 
 The ERC20 moves from the user's deposit account into the vault's account.
-Flow function: [`broadcast-evm.ts`](../integration-tests/src/flows/broadcast-evm.ts)
+Flow function: [`broadcast-evm.ts`](../../integration-tests/src/flows/broadcast-evm.ts)
 (idempotent: an already-mined sweep short-circuits cleanly, a reverted or
 nonce-burned one throws).
 
@@ -264,8 +264,8 @@ const attestation = await reader.getVerifiedRespondBidirectionalEvent(
 ```
 
 Flow functions:
-[`poll-respond-bidirectional.ts`](../integration-tests/src/flows/poll-respond-bidirectional.ts)
-and [`respond-output.ts`](../integration-tests/src/flows/respond-output.ts)
+[`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts)
+and [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts)
 (which also handles the failure case: a reverted or replaced transaction is
 attested as the protocol's fixed 5-byte failure output, `0xdeadbeef01`).
 
@@ -338,7 +338,7 @@ await vault.callTx.claim(requestIdBytes(requestId), attestation, serializedOutpu
 ```
 
 The deposited amount is in the caller's wallet as shielded vault tokens.
-Flow function: [`claim.ts`](../integration-tests/src/flows/claim.ts), including
+Flow function: [`claim.ts`](../../integration-tests/src/flows/claim.ts), including
 how to mint to a different wallet's coin public key.
 
 ## The shared vault and reader setup
@@ -346,7 +346,7 @@ how to mint to a different wallet's coin public key.
 Every circuit call goes through the deployed vault, joined once with the
 caller's secret key as private state: the `vault` object in the snippets
 above comes from the `findDeployedContract` joining snippet in the
-[README's integration walkthrough](../README.md#integration-walkthrough).
+[README's integration walkthrough](../../README.md#integration-walkthrough).
 
 The off-chain steps (3 to 5) share one `SignetRequestResponseReader` over the
 vault / singleton pair, and the expected signer of the deposit sweep is the
@@ -432,4 +432,4 @@ sequenceDiagram
 
 ---
 
-Up: [ERC20 Vault](../README.md) · Protocol: [Sign Bidirectional Flow](../../../README.md#sign-bidirectional-flow)
+Next: [Withdraw](../withdraw/withdraw.md) · Up: [ERC20 Vault](../../README.md) · Protocol: [Sign Bidirectional Flow](../../../../README.md#sign-bidirectional-flow)

@@ -22,7 +22,7 @@ What this example demonstrates, end to end:
 
 # The Actors
 
-![ERC20 vault actor map](docs/system-map.drawio.png)
+![ERC20 vault actor map](docs/actor-map.drawio.png)
 
 The actor map lays out every actor in the example and the vault's fourteen
 exported circuits. The only edges it draws are the dashed key derivations:
@@ -77,7 +77,11 @@ Each MPC interaction flow has its own walkthrough page pairing the flow's
 diagram, its step-by-step description with the full code excerpts, and its
 sequence diagram:
 
-- [Deposit](docs/deposit.md)
+- [Deposit](docs/deposit/deposit.md)
+- [Withdraw](docs/withdraw/withdraw.md)
+- [Swap](docs/swap/swap.md)
+- [Supply](docs/supply/supply.md)
+- [Redeem](docs/redeem/redeem.md)
 
 
 The cross-flow skeleton is the protocol's six phases: fund the sending
@@ -136,7 +140,7 @@ code deriving an account off-chain must feed `deriveEvmAddress` the same
 rendering: `bytesToHex` of the stored path bytes, so the vault's own account
 derives from the hex of `pad(32, "vault")` and the user's account from the
 hex of the identity commitment (see the reader setup snippet in the
-[deposit walkthrough](docs/deposit.md)).
+[deposit walkthrough](docs/deposit/deposit.md)).
 
 # Integration walkthrough
 
