@@ -49,7 +49,7 @@ The same derivation, but with the path fixed to the literal `"midnight response 
 
 | Example | What it demonstrates |
 |---------|----------------------|
-| [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding ERC20 tokens on an EVM chain: private deposits into MPC-derived accounts, withdrawals, Uniswap swaps and Aave supply/redeem, all driven through the sign bidirectional flow. Each MPC interaction has its own flow page under [examples/erc20-vault/docs/](examples/erc20-vault/docs/deposit.md) |
+| [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding ERC20 tokens on an EVM chain: private deposits into MPC-derived accounts, withdrawals, Uniswap swaps and Aave supply/redeem, all driven through the sign bidirectional flow. Each MPC interaction has its own flow page: [deposit](examples/erc20-vault/docs/deposit/deposit.md), [withdraw](examples/erc20-vault/docs/withdraw/withdraw.md), [swap](examples/erc20-vault/docs/swap/swap.md), [supply](examples/erc20-vault/docs/supply/supply.md) and [redeem](examples/erc20-vault/docs/redeem/redeem.md). |
 
 # Quickstart
 

@@ -22,7 +22,7 @@ What this example demonstrates, end to end:
 
 # The Actors
 
-![ERC20 vault actor map](docs/system-map.drawio.png)
+![ERC20 vault actor map](docs/actor-map.drawio.png)
 
 The actor map lays out every actor in the example and the vault's fourteen
 exported circuits. The only edges it draws are the dashed key derivations:
@@ -56,13 +56,13 @@ and each flow's own walkthrough page draws its steps (see
 
 Every circuit is a variation on one shape: record a signature request, let the
 MPC sign it, have the relayer broadcast it, then settle in-circuit against the
-MPC's attestation. The [deposit walkthrough](docs/deposit.md) documents that
+MPC's attestation. The [deposit walkthrough](docs/deposit/deposit.md) documents that
 shape in full for **`deposit` → `claim`**. The rest of the circuits reuse it,
 so the table names each and what it adds without repeating the detail.
 
 | Circuit(s) | What it adds over `deposit` → `claim` |
 |---|---|
-| [`deposit`](docs/deposit.md) → [`claim`](docs/deposit.md) | **The reference flow, documented in full in the [deposit walkthrough](docs/deposit.md).** Request → sign → broadcast → attest → verify-and-mint. |
+| [`deposit`](docs/deposit/deposit.md) → [`claim`](docs/deposit/deposit.md) | **The reference flow, documented in full in the [deposit walkthrough](docs/deposit/deposit.md).** Request → sign → broadcast → attest → verify-and-mint. |
 | `withdraw` / `completeWithdraw` | The same flow in the other direction, plus the coin-spend-as-authorisation pattern and a settle circuit that branches on the EVM result. |
 | `refund` | Settling a request whose transaction never executed, routed by the 5-byte failure-output width (shared by the withdraw, swap, supply and redeem failure paths). |
 | `approveRouter` | A sign-only request, with no settle circuit at all. |
@@ -77,7 +77,11 @@ Each MPC interaction flow has its own walkthrough page pairing the flow's
 diagram, its step-by-step description with the full code excerpts, and its
 sequence diagram:
 
-- [Deposit](docs/deposit.md)
+- [Deposit](docs/deposit/deposit.md)
+- [Withdraw](docs/withdraw/withdraw.md)
+- [Swap](docs/swap/swap.md)
+- [Supply](docs/supply/supply.md)
+- [Redeem](docs/redeem/redeem.md)
 
 
 The cross-flow skeleton is the protocol's six phases: fund the sending
@@ -137,7 +141,7 @@ code deriving an account off-chain must feed `deriveEvmAddress` the same
 rendering: `bytesToHex` of the stored path bytes, so the vault's own account
 derives from the hex of `pad(32, "vault")` and the user's account from the
 hex of the identity commitment (see the reader setup snippet in the
-[deposit walkthrough](docs/deposit.md)).
+[deposit walkthrough](docs/deposit/deposit.md)).
 
 # Integration walkthrough
 
@@ -312,11 +316,11 @@ const vault = await findDeployedContract(providers, {
 
 From here, each flow's per-request steps live on its own walkthrough page:
 the deposit round trip, from funding the deposit account through `claim()`,
-is documented step by step with full code in [docs/deposit.md](docs/deposit.md).
+is documented step by step with full code in [docs/deposit/deposit.md](docs/deposit/deposit.md).
 
 ## Runtime: the other circuits
 
-The remaining circuits reuse the [`deposit` → `claim` shape](docs/deposit.md). Below is only what
+The remaining circuits reuse the [`deposit` → `claim` shape](docs/deposit/deposit.md). Below is only what
 each one changes. Full code lives in the flow files under
 [`integration-tests/src/flows/`](integration-tests/src/flows/).
 

@@ -1,5 +1,53 @@
 # Diagramming plan for the midnight examples repo (working scratch)
 
+## How to execute an item from this plan
+
+This file is written so that "execute item X from docs-refactor-plan.md" is a
+complete brief. Prime in this order before touching anything:
+
+1. Read this file end to end: the layout section is the target state, the
+   status checklist is the work, the correspondence contract governs every
+   step label, and the context section carries the domain knowledge.
+2. Read the binding rules chain (first bullet of "Context for executing
+   agents"): AGENTS.md "Diagrams", docs/diagramming.md,
+   docs/diagram-palette.drawio (through the CLI's reports, never raw), and
+   drawio.config.json.
+3. For markdown tasks, additionally read every document the task touches end
+   to end, plus this file's layout spec for that document's altitude.
+4. Check the tooling: run the CLI's `doctor` verb (see "The diagramming
+   tool" in the context section).
+
+Execute under the standing constraints below, verify per the workflow
+section, and report: ordered command log, per-change outcomes, verification
+evidence, every judgement call, and friction with the tool, skill, rules or
+palette (friction reports drive tool improvements: be specific).
+
+## Standing constraints (every task)
+
+- NEVER run `git commit`, `git push`, or `git add`: report the changed file
+  list instead. Committing is the repo owner's per-batch decision. Reading
+  git state (`status`, `show`, `log`) is fine.
+- NEVER install anything, anywhere, by any means (no npm/yarn/pip/brew,
+  global or project-local). Allowed: Node's standard library, the drawio
+  CLI, and preinstalled macOS tools (`sips` for downscaling and cropping).
+- File content moves FILE-TO-FILE only: `cp`, shell redirection, and scripts
+  that read source files and write destination files, printing only short
+  confirmations (counts, booleans, asserts). NEVER retype or echo base64,
+  embedded image payloads, or whole-file XML through your own output,
+  heredocs, or editor tool calls: an agent has died on the output-token
+  ceiling doing exactly that. Read payload-heavy models via
+  `extract --elide-images`.
+- Edit a `.drawio` by scripted string surgery on unique substrings with
+  asserted match counts, never by retyping regions.
+- Modify ONLY the files the task names. Concurrent work may dirty other
+  files: leave them alone and note them in the report.
+- Scratch files go in a temp directory outside the repo, filename-prefixed
+  with the task's name.
+- On a judgement call the rules under-determine and that is expensive to
+  redo: if an orchestrator channel exists (you were spawned as a subagent),
+  ask a concise question before guessing; otherwise make the call, and
+  record it with its reasoning in the report.
+
 ## Documentation project layout
 
 Four altitudes, each thin, each pointing DOWN the chain for depth: flow page
@@ -34,7 +82,13 @@ Naming: flow files carry their flow's name inside the folder
 background is `actor-map.drawio`: the file IS the actor map, so the name says
 so. Flow folders are named by the contract's own circuit vocabulary (truth
 priority): `supply`, never "lend". Five flows exist because the contract has
-five MPC round trips: deposit, withdraw, swap, supply, redeem.
+five MPC round trips: deposit, withdraw, swap, supply, redeem. A markdown
+link whose visible text is a literal path keeps text and target in lockstep:
+a path shown to the reader is a claim about the tree. Links to flow pages
+always target the full `<flow>/<flow>.md` path, even before that page lands:
+the layout above fixes every flow's path, so links land ahead of pages, and
+a link-resolution check classifies these targets as known-future, never as
+broken.
 
 **1. Root README** (thin, minimal duplication of the integration repo):
 
@@ -78,8 +132,9 @@ bank, the generic pair). `drawio.config.json` stays at the repo root.
    first, the deep code walkthrough beneath it (a canonical heading appears
    exactly once per page).
 5. A mermaid `sequenceDiagram` carrying the canonical strings as notes.
-6. Footer: previous/next flow links (as siblings exist) and links up to the
-   example README.
+6. Footer: previous/next flow links in the layout's flow order, each by full
+   `<flow>/<flow>.md` path whether or not the sibling page exists yet, and
+   links up to the example README.
 
 **Diagram architecture: background + one flow.** `actor-map.drawio` is the
 static background every reader learns once (actors, circuit names,
@@ -114,15 +169,21 @@ actor map back. Never rebuild the background from scratch.
 - [x] Actor map: `system-map` stripped to background, all 14 circuit names in
       grouped anatomy, `deposit-flow` rebuilt as background + deposit layer
       (byte-prefix proof holds). Delivered under the pre-restructure names.
-- [ ] Docs restructure to the flow-folder layout: create `docs/deposit/`, move
+- [x] Docs restructure to the flow-folder layout: create `docs/deposit/`, move
       `deposit.md` into it, rename `deposit-flow.drawio(.png)` to
       `deposit/deposit.drawio(.png)`, rename `system-map.drawio(.png)` to
       `actor-map.drawio(.png)`, and update every link, embed and plan/rule
       reference (mover pays: grep `system-map`, `deposit-flow` and
-      `docs/deposit.md` repo-wide, zero hits on the old names at the end).
-      Includes the diagram page name: both vault .drawio files carry
-      `<diagram name="system-map" ...>` inside, renamed to actor-map in BOTH
-      files in the same change so the background-equality proof keeps holding.
+      `docs/deposit.md` repo-wide, zero hits on the old names at the end,
+      EXCLUDING this plan file: its prose and closed checklist entries record
+      the old names as history, which is their job).
+      Includes the diagram page names: `actor-map.drawio` gets
+      `<diagram name="actor-map" id="erc20-vault-actor-map-1">`, and each flow
+      file gets its own flow's name (`<diagram name="deposit"
+      id="erc20-vault-deposit-1">`), which is why the background-equality
+      proof compares `<root>` contents, never whole files.
+      Where a markdown link's visible text is the literal path
+      (`[docs/deposit.md](docs/deposit.md)`), text and target move together.
 - [x] `docs/deposit.md`: full flow page (pointer section, flow diagram, six
       canonical headings with the deep dive folded per step, mermaid, footer).
 - [x] Vault README first rewrite: actor map embedded over the actors list,
@@ -197,6 +258,17 @@ tokens in the diagram's `name(...)` form, no backticks:
 5. `Runtime step 5: poll for the MPC's attestation`
 6. `Runtime step 6: claim(...) verifies and mints`
 
+**Deriving a new flow's canonical strings.** The skeleton is the phase
+sequence: fund only where the flow begins with the user's own wallet moving
+value on the foreign chain, then request, signature, broadcast, attestation,
+settle, numbered 1..N in that flow's execution order. Wording follows the
+deposit strings' shape: circuit-bearing steps read `<circuit>(...) <verb
+phrase from the vault README under truth priority>`, the two poll steps reuse
+the deposit wording verbatim ("poll for the MPC's signature", "poll for the
+MPC's attestation"), and the broadcast step names what is broadcast in README
+vocabulary. Once authored, add the flow's strings to this section: from then
+on they are byte-frozen.
+
 **The five checks** (C1 implements, per flow page):
 
 1. Collect every heading matching `^### Runtime step \d:` in each
@@ -252,17 +324,32 @@ tokens in the diagram's `name(...)` form, no backticks:
 - [ ] `render` rejects `--force` with a bare "unexpected argument": say in the
       error that render always overwrites derived outputs, no flag needed.
 
-## Workflow
+## Workflow (edit, verify, report)
 
-1. Edit the committed `.drawio` XML: every edge has `source` and `target` and a
-   pinned, waypointed route.
-2. Render the PNG (the repo config supplies scale and border).
-3. Lint, then look at the downscaled render before committing.
-4. Run C1 (once it exists). Commit the `.drawio` and `.drawio.png` together.
-
-The generic procedure is the global `drawio-diagrams` skill (in the draw-io-cli
-repo, symlinked into `~/.claude/skills`). `drawio-cli doctor` verifies the
-render path.
+1. Edit the committed `.drawio` XML: every edge has `source` and `target` and
+   a pinned, waypointed route.
+2. `lint --strict` must pass. Read every advisory note it prints: fix what is
+   fixable, justify what is anchor-caused in the report.
+3. Render the PNG with the CLI from the final XML state (the repo config
+   supplies scale and border: pass no overrides). Render EVERY pair the
+   change touched. Never copy a PNG.
+4. Eyeball every render: downscale (`sips -Z 1600`), read it as an image, and
+   zoom (`sips -c`) into dense regions. Broken labels, overlaps, escaped
+   containment and missing icons are visible at a glance and invisible in
+   the XML. The `measure` verb answers padding questions in numbers.
+5. Grep the correspondence: each canonical string exactly once in its flow
+   diagram, exactly twice on its flow page (one heading, one mermaid note).
+   Round-trip checks against a rendered PNG's embedded model are cell-level,
+   never byte-level (`extract --decode-entities` makes apostrophes
+   greppable).
+6. Flow diagrams carry the background-equality proof: remove the appended
+   step-layer cells, then byte-compare the `<root>...</root>` contents against
+   the actor map's. The `<diagram>` tag is excluded on purpose: each file
+   carries its own page name and id there.
+7. After writing any automated check: plant a violation, watch it fail,
+   restore. A guard never seen failing is not known to work.
+8. Run C1 (once it exists). The `.drawio` and its `.drawio.png` change (and
+   are later committed) together, always.
 
 ## Context for executing agents
 
@@ -273,13 +360,29 @@ authoring conversation:
   `docs/diagramming.md`, `docs/diagram-palette.drawio` (the copy source for
   every styled cell, icon and composite group) and `drawio.config.json`. Read
   all four before touching a diagram.
+- **The diagramming tool:** `drawio-cli`, from the `BRBussy/draw-io-cli`
+  repo, checked out at `/Users/bernard/Projects/github.com/BRBussy/draw-io-cli`
+  (local checkouts mirror `github.com/<org>/<repo>`). Invoke as
+  `node /Users/bernard/Projects/github.com/BRBussy/draw-io-cli/src/cli.js <verb>`
+  with verbs extract, render, lint [--strict], cells, styles, measure,
+  doctor. `doctor` verifies the render path. The generic diagram-editing
+  procedure is the global `drawio-diagrams` skill (same repo, symlinked into
+  `~/.claude/skills`), which loads for any task that touches draw.io files.
+- **Identifying a step layer:** every step-layer cell is an edge stroked in a
+  phase colour (the style guide's colour table), a numbered circle in one, or
+  a caption cell whose value starts "Runtime step"; labels riding step edges
+  die with their edge. The background contains NO phase-stroked cells: the
+  zero-hit check over the actor map greps `strokeColor=<phase colour>`,
+  anchored to `strokeColor=` on purpose. The palette's User composite FILLS
+  the person shape with #3969AC, byte-identical to the signature phase
+  colour, so a bare colour grep false-positives on every actor map that
+  copies it. Any automated form of this check inherits the anchor.
 - **The background + flow construction:** a new `docs/<flow>/<flow>.drawio`
-  starts as a byte-copy of the example's `docs/actor-map.drawio` plus that
-  flow's step edges, circles and canonical captions appended. Never rebuild
-  the background from scratch: copy it, so every flow diagram stays
-  pixel-identical behind its coloured layer. (Until the docs restructure
-  lands, the background still bears its pre-restructure name
-  `system-map.drawio`.)
+  starts as a byte-copy of the example's `docs/actor-map.drawio`, its
+  `<diagram>` tag renamed to the flow's own name and id, plus that flow's
+  step edges, circles and canonical captions appended. Never rebuild the
+  background from scratch: copy it, so every flow diagram stays
+  pixel-identical behind its coloured layer.
 - **Protocol semantics:** the five-step walkthrough in this repo's root README
   ("Sign Bidirectional Flow") and the per-flow evidence in
   `examples/erc20-vault/integration-tests/src/flows/` (the flow files document
@@ -290,6 +393,15 @@ authoring conversation:
   `export circuit`. The authoritative listing is
   `ls node_modules/@sig-net/midnight-contract/dist/managed/zkir/`
   (`signBidirectional`, `respond`, `respondBidirectional`).
+- **The integration repo:** `sig-net/midnight-integration`. Links written
+  into documents always target the published main branch: the external
+  deep-dive every protocol pointer targets is
+  `https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow`.
+  Any WORK in that repo (task C5, which replaces its diagram pair with this
+  repo's rebuilt generic pair via a separate PR) happens in the docs-branch
+  workspace checkout at
+  `/Users/bernard/Projects/github.com/sig-net/midnight-integration-docs-diagrams`,
+  never on a main checkout.
 - **Vault semantics:** the contract is
   `examples/erc20-vault/contract/src/erc20-vault.compact` (grep
   `export circuit` and `export ledger`), the executable flows are
