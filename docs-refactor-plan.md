@@ -138,7 +138,9 @@ bank, the generic pair). `drawio.config.json` stays at the repo root.
 6. A mermaid `sequenceDiagram` carrying the canonical strings as notes.
 7. Footer: previous/next flow links in the layout's flow order, each by full
    `<flow>/<flow>.md` path whether or not the sibling page exists yet, and
-   links up to the example README.
+   links up to the example README. The first flow page carries no previous
+   link and the last no next: only the links that exist appear, never a
+   "Previous: none" placeholder.
 
 **Diagram architecture: background + one flow.** `actor-map.drawio` is the
 static background every reader learns once, and the ONLY diagram carrying the
@@ -194,7 +196,7 @@ migrates first: no new flow work starts until these land.
       its depth) to restore the normal inter-lane gap, re-placing the step
       circles, captions and edge runs crossing that band without collisions,
       then lint, membership proof, re-render, eyeball.
-- [ ] Deposit diagram's intra-lane underhang closed: inside the Midnight
+- [x] Deposit diagram's intra-lane underhang closed: inside the Midnight
       lane, the region below the vault contract box (roughly x 310..921,
       y 424..528) is explained only by the deleted circuit rows. The
       singleton lane cannot lift (its circuits are pinned level with the MPC
@@ -203,18 +205,30 @@ migrates first: no new flow work starts until these land.
       step 2 and step 6 blocks, then re-lifting everything below again.
       Decide the vault-box seating rule ONCE here: every other flow diagram
       trims the same box and inherits the answer.
-- [ ] Deposit diagram's three own-edge label touches slid clear: lint's
+- [x] Deposit diagram's three own-edge label touches slid clear: lint's
       own-edge check flags `f1-l`, `g3-l` and `e4b-l`, each pixel-corroborated
       by `measure` (full-height ink where the vertical run meets the text).
       Fix before the other flows copy these riding labels into their own
       step layers.
-- [ ] `docs/deposit/deposit.md` restructured to flow-page layout item 4:
+- [x] `docs/deposit/deposit.md` restructured to flow-page layout item 4:
       "The protocol underneath" becomes `## The protocol`, a new
       `## The integration` pointer section follows it (targeting the root
       README's Integration guide), `## The deposit round trip` opens with a
       one-liner before the diagram, and the six `###` headings and six
       mermaid notes respell to the re-frozen `Step N:` strings, byte-equal
       across all three renderings.
+- [ ] Deposit diagram's horizontal vault-to-singleton gap settled: trimming
+      took roughly 210 units off the vault box's width, growing the `vl` to
+      `sl` gap from 70 (actor map) to roughly 280. Two binding texts point
+      opposite ways: docs/diagramming.md says "every lane beside or below
+      the shrunk containers moves in", which by its letter slides the
+      singleton lane left, while the underhang item scoped its re-seat to
+      the vertical band and named only vertically-affected edges. Decide
+      ONCE: either pull the singleton lane (and what sits right of it) left
+      to restore a normal gap, re-routing the runs that cross the band, or
+      record here why the wide gap stands (the step and derivation runs
+      crossing it keep it from reading as empty). Every other flow diagram
+      trims the same box and inherits the answer.
 
 ### ERC20 vault example
 
@@ -442,6 +456,45 @@ on they are byte-frozen.
 - [x] `measure --cell <group-or-container>` now also reports every vertex
       child's ink and padding, so box-hug questions are answerable directly.
       Verified against the deposit vault box (`vl` reports all six members).
+- [ ] `cells --xml <id>` (or `extract --raw-slice <id>`): print the exact
+      source bytes of one cell's element from the raw file. `cells` and
+      `extract` both re-serialise (`/>` spacing, geometry elements
+      self-closed differently from the file), so substrings copied from
+      their reports fail to match the file in string surgery: the underhang
+      edit script failed 12 of 13 patches this way on its first run.
+- [ ] Editing verbs that write the raw file in place preserving its
+      serialisation: `set-geometry <id> --x/--y/--width/--height`,
+      `set-waypoints <id> "x1,y1 x2,y2 ..."`, `set-label-offset <id> <dx>
+      <dy>`. Every geometry change today is hand-computed model arithmetic
+      (lane interiors, box centres, polyline lengths for label `pos`) turned
+      into regex surgery, which carries both arithmetic and serialisation
+      risk.
+- [ ] `measure` on an edge label: report the label's own text-ink bbox
+      separately from foreign ink inside the estimated box, and tighten the
+      char-width estimate toward measured Helvetica ink (about 6 u/char
+      against the roughly 7.08 used). `g3-l` reported all-zero padding,
+      which reads as "a line touches this text on all four sides", when the
+      cause was the over-wide estimated box clipping an unrelated edge that
+      the crop shows 27 units clear of the text.
+- [ ] `measure` calibration warning: suppress it below a threshold or behind
+      a `--quiet-calibration` flag once the residual is fully attributed. On
+      the deposit diagram it fires twice per invocation, always naming the
+      same four bound-setting cells for an explained, harmless 27px
+      residual.
+- [ ] `measure --gaps <container>`: report each child's clearance to the
+      container's four sides and the largest empty rectangle inside it. The
+      underhang item, a pure dead-space question, was answered by
+      transcribing lane geometry out of `cells` and subtracting by hand.
+- [ ] Lint: flag an edge-label box overhanging the model bounds by more than
+      the render border. Labels never extend the export bounds, so a slid
+      label clips silently: `e4b-l`'s clearance inside the right bound was
+      hand-checked against the border arithmetic.
+- [ ] Skill: concurrent-editor guard: hash the target `.drawio` before and
+      after every edit batch and re-check before finishing. Mid-task an open
+      draw.io editor re-serialised `deposit.drawio` under the executing
+      agent (cell order rewritten to webapp order, `d2`'s waypoints
+      collapsed 4 to 2), detected only via `git diff --stat`, and an editor
+      holding a stale buffer can save over finished work after the fact.
 
 ## Workflow (edit, verify, report)
 
@@ -460,6 +513,10 @@ on they are byte-frozen.
    be here"? The `measure` verb answers padding questions in numbers.
 5. Grep the correspondence: each canonical string exactly once in its flow
    diagram, exactly twice on its flow page (one heading, one mermaid note).
+   Grep the FULL `Step N: ...` string, never a fragment (circuit tokens like
+   `deposit(...)` recur legitimately in prose and code): the heading
+   occurrence matches `^### Step \d+:`, the note occurrence sits on a
+   `Note over` line inside the mermaid fence.
    Round-trip checks against a rendered PNG's embedded model are cell-level,
    never byte-level (`extract --decode-entities` makes apostrophes
    greppable).
@@ -508,6 +565,21 @@ authoring conversation:
   captions appended. Never rebuild the background from scratch: copy and
   trim, so every kept cell stays byte-identical to the actor map's in id,
   value and style, geometry free to adapt as the contract box tightens.
+- **Vault-box seating after trimming (decided once on the deposit diagram,
+  every flow diagram inherits it):** seat a trimmed contract lane centred
+  vertically in its parent lane's interior band, the band from the bottom of
+  the parent's header (`lane.y + startSize`) to the parent's bottom edge.
+  The parent's height is fixed by whatever inside it cannot move (in the
+  Midnight lane, the singleton lane pinned level with the MPC note column),
+  so trimming leaves slack that cannot leave the diagram: an even split
+  reads as lane padding, any uneven split leaves the larger band reading as
+  a deletion scar. Never stretch the box's contents to fill the slack.
+  Re-route corollaries: every edge landing on a moved member shifts by the
+  same delta, a jog the delta shortens under about 40 units straightens
+  instead, a previously straight edge the delta would leave diagonal gets an
+  explicit two-corner jog in the nearest gutter (the anchor rules beat
+  straightness), and an off-centre anchor needed for a straight run goes on
+  the tall source box, never on the note the arrowhead lands in.
 - **Protocol semantics:** the five-step walkthrough in this repo's root README
   ("Sign Bidirectional Flow") and the per-flow evidence in
   `examples/erc20-vault/integration-tests/src/flows/` (the flow files document
@@ -521,7 +593,10 @@ authoring conversation:
 - **The integration repo:** `sig-net/midnight-integration`. Links written
   into documents always target the published main branch: the external
   deep-dive every protocol pointer targets is
-  `https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow`.
+  `https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow`,
+  and every integration pointer's external twin is the same README's
+  `#integrator-guide` anchor, the one the root README's own Integration
+  guide section links onward to.
   Any WORK in that repo (task C5, which replaces its diagram pair with this
   repo's rebuilt generic pair via a separate PR) happens in the docs-branch
   workspace checkout at
