@@ -203,6 +203,11 @@ migrates first: no new flow work starts until these land.
       step 2 and step 6 blocks, then re-lifting everything below again.
       Decide the vault-box seating rule ONCE here: every other flow diagram
       trims the same box and inherits the answer.
+- [ ] Deposit diagram's three own-edge label touches slid clear: lint's
+      own-edge check flags `f1-l`, `g3-l` and `e4b-l`, each pixel-corroborated
+      by `measure` (full-height ink where the vertical run meets the text).
+      Fix before the other flows copy these riding labels into their own
+      step layers.
 - [ ] `docs/deposit/deposit.md` restructured to flow-page layout item 4:
       "The protocol underneath" becomes `## The protocol`, a new
       `## The integration` pointer section follows it (targeting the root
@@ -396,37 +401,47 @@ on they are byte-frozen.
 - [x] Fix the label strike the new lint found in
       `docs/sign-bidirectional-flow.drawio`: both left-gutter labels slid clear
       via offset points, verified by lint and render.
-- [ ] Two milder own-edge label touches remain in the generic diagram
-      (`e-watch-notif-l` on its blue vertical, `e-start-signbi-l` near its pink
-      run): lint skips a label's own edge, so only the eyeball sees them.
-      Slide them clear in the next generic-diagram round.
-- [ ] `cells` report: print an edge label's offset point (it shows only the
-      relative position today), so agents need not extract the XML to learn
-      whether an offset exists.
-- [ ] Lint: consider flagging a label centred on its OWN edge's run when the
-      label has no background colour (the strike class the eyeball keeps
-      finding and the checker deliberately skips today).
+- [x] Own-edge label touches in the generic diagram slid clear via offset
+      points: the new own-edge lint check (below) flagged five
+      (`e-user-dapp-l`, `e-start-map-l`, `e-watch-notif-l`, `e-read-map-l`,
+      `e-watch-foreign-l`, all pixel-corroborated by `measure`), and
+      `e-start-signbi-l` (the near-parallel touch class lint cannot see) was
+      slid above its run by hand. Verified by lint, re-render and eyeball.
+- [x] `cells` report: an `ELBL` row now shows its owning edge, relative
+      position and offset point instead of a meaningless absolute origin.
+      Smoke-proven.
+- [x] Lint: own-edge label check implemented as an advisory note, scoped to a
+      backgroundless label crossed by its own edge's VERTICAL run (pixel
+      evidence shows the webapp knocks the line out behind the text, so a
+      label along its own horizontal run is fine, while a perpendicular
+      crossing leaves a touching gap). Smoke-proven with a planted violation
+      and a background-colour control.
 - [x] Palette `circuit-node` sample text cell widened to the measured Menlo
       advance (7.21 u/char: 196u for 27 chars, box 234) so copies inherit a
       cell that fits its own text.
-- [ ] `render` rejects `--force` with a bare "unexpected argument": say in the
-      error that render always overwrites derived outputs, no flag needed.
-- [ ] `measure` on an edge label returns `box 0x0u, no ink found` (relative
-      geometry maps to nothing): resolve the label's absolute anchor from its
-      parent edge's polyline and report its ink like any other cell.
-- [ ] `measure` ink heights disagree between identically rendered cells (two
-      three-line 12px captions came back 38.3u and 47.3u): find out why
-      before trusting ink for placement maths.
-- [ ] `measure`'s calibration warning ("residual exceeds 6px") names no
-      cell, so it reads as noise: report which cell's ink overhangs the
-      model bounds.
-- [ ] `cells` truncates style strings and omits declared width/height: a
-      `--full` mode printing untruncated style plus declared geometry would
-      remove the last reason to grep raw XML for placement work.
-- [ ] `measure --cell <group>` measures the group's border stroke, not its
-      children: accept a group id and report the children together, so
-      box-hug questions (text padded inside its box) are answerable
-      directly.
+- [x] `render --force` now fails with "render always overwrites its derived
+      outputs, no flag needed: drop --force". Smoke-proven.
+- [x] `measure` on an edge label resolves its anchor from the parent edge's
+      pinned polyline (helpers shared with lint) and measures ink inside its
+      estimated box, reporting anchor, position and offset. Ink includes the
+      edge's own stroke on purpose: zero top or bottom padding on a riding
+      label is how a touching line shows up in numbers. Smoke-proven.
+- [x] `measure` ink-height disagreement resolved: no tool defect. The two
+      captions wrap to different line counts (step 1 to three lines in its
+      110u box, step 4 to four in its 85u box), confirmed by crops, and ink
+      is glyph and line-count dependent by design. Trust the verb.
+- [x] `measure`'s calibration warning now names suspects: estimated
+      edge-label boxes overhanging the model bounds (labels never count
+      toward bounds, the usual cause), or failing that the cells that set
+      each bound. On the generic diagram it names `e-extract-sigs-l` (~106u)
+      and `e-submit-l` (~62u), the deliberately offset left-gutter labels,
+      fully explaining the residual.
+- [x] `cells --full` prints untruncated style strings (image payloads stay
+      elided). Declared width/height was already in every vertex row.
+      Smoke-proven.
+- [x] `measure --cell <group-or-container>` now also reports every vertex
+      child's ink and padding, so box-hug questions are answerable directly.
+      Verified against the deposit vault box (`vl` reports all six members).
 
 ## Workflow (edit, verify, report)
 
