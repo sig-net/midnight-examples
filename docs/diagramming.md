@@ -145,8 +145,9 @@ A diagram is composed in layers, and each layer must stand on its own:
 2. **Layer 2: lines and step circles.** Routed around layer 1 per the edge rules below.
    A numbered circle sits at touching distance from its step's MOST SALIENT edge, the
    one a reader would name as "the step happening" (for the request step that is the dApp calling
-   the circuit, not the user tapping the dApp). When no edge is obviously more salient
-   than its siblings, use the step's first edge at its source shape. Never floating in
+   the circuit, not the user tapping the dApp). The salient edge is the acting actor's
+   own call edge, never a downstream edge of the same colour. When no edge is obviously
+   more salient than its siblings, use the step's first edge at its source shape. Never floating in
    whitespace, never equidistant between two steps.
 3. **Layer 3: line text.** Edge labels annotate layer 2 without colliding with either layer.
 
@@ -167,6 +168,16 @@ the same id: copy, never re-author. Only geometry may adapt, as the contract
 box tightens around the surviving members. The check is cell-level, never a
 whole-file diff: strip the step layer, then each remaining cell's id, value
 and style must match the actor map's.
+
+**Trimming reclaims the space it frees.** Deleting members shrinks the
+containers, and every lane beside or below the shrunk containers moves in to
+restore the normal inter-lane gaps, re-placing the step circles, captions and
+edge runs that lived in the affected band. Tightening one box while the page
+keeps its old extents is half the job: the freed area must leave the diagram,
+pulling it back toward the working-size budget. The eyeball test: a reader
+who has never seen the untrimmed diagram must not be able to point at where
+the deleted cells used to be. A band of empty space whose only explanation is
+"something was deleted here" is a defect, exactly as a broken label is.
 
 ## Captions and anchors
 
