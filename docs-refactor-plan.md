@@ -788,12 +788,17 @@ each arm's string still appears exactly once per diagram and twice per page
 - [x] `measure --cell <group-or-container>` now also reports every vertex
       child's ink and padding, so box-hug questions are answerable directly.
       Verified against the deposit vault box (`vl` reports all six members).
-- [ ] `cells --xml <id>` (or `extract --raw-slice <id>`): print the exact
+- [x] `cells --xml <id>` (or `extract --raw-slice <id>`): print the exact
       source bytes of one cell's element from the raw file. `cells` and
       `extract` both re-serialise (`/>` spacing, geometry elements
       self-closed differently from the file), so substrings copied from
       their reports fail to match the file in string surgery: the underhang
       edit script failed 12 of 13 patches this way on its first run.
+      DONE as `cells --xml <id>`, with `--elide-images` for payload cells:
+      byte-verbatim slice (id-bearing `object`/`UserObject` wrappers
+      sliced whole), unknown and duplicate ids fail loudly. Smoke-proven
+      with planted violations, byte-verbatim re-verified on the actor
+      map's `code-witness-icon`.
 - [ ] Editing verbs that write the raw file in place preserving its
       serialisation: `set-geometry <id> --x/--y/--width/--height`,
       `set-waypoints <id> "x1,y1 x2,y2 ..."`, `set-label-offset <id> <dx>
@@ -808,11 +813,17 @@ each arm's string still appears exactly once per diagram and twice per page
       which reads as "a line touches this text on all four sides", when the
       cause was the over-wide estimated box clipping an unrelated edge that
       the crop shows 27 units clear of the text.
-- [ ] `measure` calibration warning: suppress it below a threshold or behind
+- [x] `measure` calibration warning: suppress it below a threshold or behind
       a `--quiet-calibration` flag once the residual is fully attributed. On
       the deposit diagram it fires twice per invocation, always naming the
       same four bound-setting cells for an explained, harmless 27px
       residual.
+      DONE, both halves: a residual at or below the render border in
+      pixels (`border * scale`) AND fully attributed to named edge-label
+      overhangs demotes to a one-line note (the deposit and withdraw
+      pairs now demote), and `--quiet-calibration` drops the calibration
+      lines but NEVER a live WARNING (the generic pair's unexplained
+      residual stays loud). Smoke-proven both directions.
 - [ ] `measure --gaps <container>`: report each child's clearance to the
       container's four sides and the largest empty rectangle inside it. The
       underhang item, a pure dead-space question, was answered by
@@ -821,10 +832,14 @@ each arm's string still appears exactly once per diagram and twice per page
       the render border. Labels never extend the export bounds, so a slid
       label clips silently: `e4b-l`'s clearance inside the right bound was
       hand-checked against the border arithmetic.
-- [ ] `measure` (or `render`) prints the model-to-pixel affine on request
+- [x] `measure` (or `render`) prints the model-to-pixel affine on request
       (scale and offset per axis), so a `sips -c` crop of a model region is
       one computation instead of three. Every crop in the actor-map upgrade
       needed the calibration line transcribed and applied by hand.
+      DONE as `measure --affine` (valid with no `--cell`): four
+      substituted formulas, px from mx and back per axis, printed from
+      the same calibration the verb measures with. Hand-applying them to
+      `n-read`'s box reproduced measure's own ink numbers exactly.
 - [ ] Lint: check leads as well as tails (the tail check catches a first
       segment under 40 units out of the source, but nothing checks the
       final segment into the arrowhead), and flag a shape-to-edge clearance
@@ -907,12 +922,17 @@ each arm's string still appears exactly once per diagram and twice per page
       offline renderer and violates the icons rule, and nothing caught it:
       the failure is invisible in the XML and only an eyeball of the render
       shows the empty box.
-- [ ] `measure --fit <cell>`: print the box implied by the uniform-padding
+- [x] `measure --fit <cell>`: print the box implied by the uniform-padding
       rule (8 side, 6 vertical) for the cell's measured text ink, so sizing
       a box takes one pass. Character-width estimates are off by about 10%
       (8.1 predicted against roughly 7.4 actual for bold Helvetica caps),
       which cost a render-measure-adjust loop per box across five boxes in
       the keyDerivation alignment.
+      DONE: prints implied box (ink + 16x12) beside the declared box with
+      the delta, always measuring the cell in full first. An edge label
+      says "nothing to fit" rather than a delta against an estimated box.
+      The ink-wider-than-box LINT item below stays open and still pairs
+      with the measured-ink edge-label rework.
 - [ ] Lint: the floating-connection warning fires on palette sample edges
       whose endpoints are zero-area point shapes, where exit and entry
       sides are geometrically meaningless. The samples were pinned to

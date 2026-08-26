@@ -398,8 +398,12 @@ Icons come from the bank, never from ad hoc downloads:
 the generic ones are draw.io built-in library references. Custom icons are embedded into
 each diagram as base64 copies of the bank files, which keeps every diagram
 self-contained and portable. Copy the icon cells from the palette card's Iconography
-section rather than re-encoding the files. When an icon changes, update the bank file,
-the palette card, and every diagram embedding it in the same change.
+section rather than re-encoding the files. An Iconography entry is a captioned card
+exhibit: when copying it into a diagram, take the cell's style byte-identically and
+leave the destination cell's value empty, so the caption stays on the card (the
+label-position tokens the style carries are inert on a cell with no value). When an
+icon changes, update the bank file, the palette card, and every diagram embedding it
+in the same change.
 
 ## Editing workflow
 
