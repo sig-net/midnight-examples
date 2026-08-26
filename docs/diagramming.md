@@ -94,6 +94,16 @@ working-size section).
   short for the label to cross it, the label sits alongside as close as possible, and
   the run then passes on the label's LEFT (vertical run) or its top or bottom
   (horizontal run), never its right.
+- **The knockout hugs the text, and the run survives it**: the break a label makes in
+  its run covers the text ink plus a small margin and never the label box's empty
+  padding, and visible line remains on BOTH sides of the break. An arrowhead sitting
+  straight on the text, or a stub too short to read as a line, means the run is too
+  short for the label it carries: grow the gap between the shapes the run joins until
+  the line reads (the golden precedence), and never shrink the label or slide it off
+  its run instead. Keep the run's own furniture clear of the break too, since a step
+  circle beside the last few units of a stub leaves no clean line to read. A label on
+  a vertical run is free to slide ALONG it to find that clean space, its horizontal
+  centring being the part the seating rule fixes.
 - **Alignment follows the crossing axis**: `align=left` when the run crosses the label
   horizontally, `align=center` when the run is vertical, the alongside case included.
 - **The edge starts at the initiator**: the source is the party performing the action,
@@ -176,7 +186,9 @@ same change as its first label.
 - Dotted-bordered text box (`dashed=1;dashPattern=1 2;strokeColor=default`) for
   behaviour responsibilities: they are nodes and edges land on them. Sibling
   responsibilities share one colon-led scaffold (`Signs: <object> With:
-  <instrument>`), verbs aligned across siblings, the greppable instrument bold.
+  <instrument>`) and their boxes left-align on ONE shared x, so the opening
+  verbs read as a column down the page whatever width each box takes. The
+  greppable instrument is bold.
   A note stacks as many colon-led pairs as the behaviour needs (`Reads:
   <object> On: <trigger>`, `Attests: <object> With: <instrument>`), each
   keyword bold, colon-terminated, opening its own line.
