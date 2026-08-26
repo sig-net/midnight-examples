@@ -52,10 +52,12 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   responsibilities render in dotted-border boxes, and edges anchor only to nodes
   (outlined boxes, icons, hexagons, actor boxes, lanes). Borderless text is
   annotation: it rides an edge and never takes an arrow.
-- **Bold marks the greppable name.** In prose (edge labels, notes), exactly the
-  verbatim names that grep in source (events, circuits, keys, ledger fields) are
-  bold, and nothing else is: bold text is the visible anchor tying the diagram to
-  the code.
+- **Bold marks the greppable name.** In prose (edge labels, notes), the verbatim
+  names that grep in source (events, circuits, keys, ledger fields) are bold, plus
+  exactly two structural classes: an edge label's acting-party prefix and a note's
+  colon-led keywords. Nothing else is bold, verbs included: bold text is the
+  visible anchor tying the diagram to the code, and the two structural classes are
+  the scaffolding around it.
 - **Arrow flow marks sequence.** When one lane performs an ordered sequence within a
   step, the sequence is drawn as edges threading through its boxes in the step's
   colour, entering the first box and leaving the last toward its destination. Boxes
@@ -79,6 +81,54 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   behaviour-note style) carrying its canonical step string verbatim, circle and caption
   together at touching distance from the step's salient edge. An edge may additionally
   carry a short human-friendly riding label, which never replaces the canonical string.
+
+### Edge-label golden rules (NEVER BREAK)
+
+Edge labels are the diagrams' descriptions, and these rules hold ALWAYS: follow them no
+matter what, growing the diagram until they fit (the golden precedence in the
+working-size section).
+
+- **The run passes through the label's centre**: a horizontal run through the label's
+  vertical midpoint, a vertical run through its horizontal midpoint, the background
+  knockout breaking the line behind the text. The ONE exception: when the run is too
+  short for the label to cross it, the label sits alongside as close as possible, and
+  the run then passes on the label's LEFT (vertical run) or its top or bottom
+  (horizontal run), never its right.
+- **Alignment follows the crossing axis**: `align=left` when the run crosses the label
+  horizontally, `align=center` when the run is vertical, the alongside case included.
+- **The edge starts at the initiator**: the source is the party performing the action,
+  the arrowhead lands on the acted-upon. A read points AT the thing read.
+- **Strict label format**: the first line is the acting party, bold and
+  colon-terminated (`MPC:`, `dApp/relayer:`, `startCrossChain circuit:`: an actor, a
+  lane, or a circuit), and the body starts with a capitalised verb from the verb table.
+  Verbs stay normal weight: bold remains reserved for the acting-party prefix and the
+  greppable names.
+- **Label texts never overlap one another.**
+
+### The verb table
+
+One verb, one meaning, everywhere an edge label or note describes an action:
+
+| Verb | Who says it | Means exactly |
+|------|-------------|---------------|
+| Interacts with | User | drives a dApp's UI, no chain involved yet |
+| Funds | User's own wallet | moves value on the foreign chain before any contract is involved (the fund phase) |
+| Starts | dApp/relayer | kicks the flow off by calling the entry circuit |
+| Calls | a circuit | one circuit invoking another |
+| Constructs | a circuit | builds and stores a request on the ledger |
+| Reads | MPC | pulls stored state off the ledger |
+| Picks up | MPC | notices an on-chain occurrence it polls or watches for |
+| Posts | MPC | writes a response event back on-chain |
+| Signs | MPC | produces the signature (note scaffold) |
+| Attests | MPC | produces the execution attestation (note scaffold) |
+| Extracts | dApp/relayer | pulls a field out of an event or receipt it already has |
+| Broadcasts | dApp/relayer | sends a signed transaction to a chain |
+| Submits | dApp/relayer | hands data into a circuit call to settle or complete |
+
+Sending a signed transaction to a CHAIN is always Broadcasts, and handing data into a
+CIRCUIT call is always Submits. Step-caption verbs live in the frozen canonical strings
+under the correspondence contract, not here. A new verb lands as one row here, in the
+same change as its first label.
 
 ## Shapes
 
@@ -119,6 +169,9 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   behaviour responsibilities: they are nodes and edges land on them. Sibling
   responsibilities share one colon-led scaffold (`Signs: <object> With:
   <instrument>`), verbs aligned across siblings, the greppable instrument bold.
+  A note stacks as many colon-led pairs as the behaviour needs (`Reads:
+  <object> On: <trigger>`, `Attests: <object> With: <instrument>`), each
+  keyword bold, colon-terminated, opening its own line.
 - Contract-member nodes (ledger state, circuits) are grouped cells: a
   dotted-border box, a text-height icon inside it at the left, and the member's
   code text beside the icon, grouped so they move as one. The icon is 16 units
@@ -218,13 +271,9 @@ the deleted cells used to be. A band of empty space whose only explanation is
   at or near a corner of a text or image bounding box. On a shape taller than one line of
   text an off-centre anchor is allowed, but it keeps clear padding from the shape's edge,
   never hugging it.
-- **An edge label rides its line**: it sits ON the edge at the midpoint of the run between
-  the two things it connects, with the background knockout breaking the line behind the
-  text. Offsets exist only to dodge a collision, and slide the label along the line,
-  never off it. A label on a single-run VERTICAL edge is the one exception: every
-  along-the-line position leaves the run crossing the text, so wrap or shorten the label
-  to fit a clear strip beside the run and offset it perpendicular, or failing that set
-  `labelBackgroundColor`.
+- **An edge label sits per the edge-label golden rules** in the Labels section:
+  centred on its run, or legally alongside when the run is too short to cross it.
+  Offsets exist only to reach that seat.
 - **Boxes hug their content with ONE uniform padding.** A node box's border keeps
   exactly 8 units of padding at the sides and 6 above and below the text (a
   single-line code cell is 28 units tall), so an anchor on the box edge is an anchor
@@ -297,6 +346,13 @@ default-font text is still legible at README column width. A diagram that outgro
 box gets split into more diagrams (or its sequencing moves to a mermaid diagram in the
 README), never squeezed: smaller fonts and higher resolution both fail, since the
 displayed width is fixed and only the model size decides legibility.
+
+The golden precedence: the clarity rules on this page outrank the budget. When labels,
+padding or routing cannot satisfy their rules in the space available, the diagram GROWS
+until they can, and only then does the budget decide between accepting the size and
+splitting. Shrinking anything below rule compliance is never the fix: follow the rules
+no matter what, make things bigger until they hold, and the diagram comes out with
+enough space and clarity on its own.
 
 ## Iconography
 
