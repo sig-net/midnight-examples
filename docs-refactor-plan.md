@@ -230,6 +230,97 @@ migrates first: no new flow work starts until these land.
       crossing it keep it from reading as empty). Every other flow diagram
       trims the same box and inherits the answer.
 
+### Derivation story upgrade (prerequisite before the remaining flows)
+
+Design decision, frozen here: the user's vault identity secret is its OWN
+random value, separate from any wallet seed (the Lace wallet cannot expose
+its secret, so the `callerSecretKey` witness needs a value the app holds
+itself). The contract and integration-test changes land later, so today the
+repo still derives the secret from `MIDNIGHT_USER1_WALLET_SEED` via
+`identitySecretFromSeed`. The diagrams and docs move ahead of the code.
+
+**Frozen names.** The secret's future env var is `MIDNIGHT_USER1_VAULT_SECRET`
+(the `USER1` spelling matching `MIDNIGHT_USER1_WALLET_SEED` and
+`EVM_USER1_WALLET_SEED`, no underscore before the digit and no leading
+underscore), and the diagram node carries that exact name. Derivation notes
+spell each argument as the env var that supplies it in the integration
+tests, and name the SDK functions verbatim, one note per derived value:
+
+- User's deposit account: `deriveEvmAddress(MPC_ROOT_PUBLIC_KEY,
+  MIDNIGHT_VAULT_CONTRACT_ADDRESS,
+  userCommitment(MIDNIGHT_USER1_VAULT_SECRET))`
+- Vault's own account (pinned into `vaultEvmAddress`):
+  `deriveEvmAddress(MPC_ROOT_PUBLIC_KEY,
+  MIDNIGHT_VAULT_CONTRACT_ADDRESS, "vault")`
+- Response key (pinned into `mpcResponseKey`):
+  `deriveMidnightResponseKey(MPC_ROOT_PUBLIC_KEY,
+  MIDNIGHT_VAULT_CONTRACT_ADDRESS)` (the dedicated SDK function, always,
+  never a generic-function rendering: key derivation must read identically
+  in docs, diagrams and code)
+
+Every token above greps today (`deriveEvmAddress` and
+`deriveMidnightResponseKey` in `@sig-net/midnight`'s
+`epsilon-derivation.d.ts`, the env vars in `packages/test-harness` and the
+integration tests, `"vault"` and `userCommitment` in the contract) EXCEPT
+`MIDNIGHT_USER1_VAULT_SECRET`, which is design-ahead by decision: the
+exemption clears, and the labels get re-verified, when the vault-secret
+env var and contract/test changes land.
+
+- [ ] Actor map upgraded with the derivation story
+      (`examples/erc20-vault/docs/actor-map.drawio(.png)`), the background
+      every flow diagram inherits, so this item runs FIRST:
+      - New dotted-border node `MIDNIGHT_USER1_VAULT_SECRET` inside the
+        dashed User cluster beside the two wallets (the point of the
+        drawing: the secret lives in neither wallet), with a key/secret
+        icon chosen from draw.io's built-in libraries. Add the styled cell
+        to the palette card in the same change.
+      - Contract anatomy completed: `witness callerSecretKey(...)` as a
+        member row (keyword `witness` in the keyword colour, name bold),
+        and the four `export pure circuit` rows the map is missing
+        (`vaultResponseSchema(...)`, `vaultTokenDomainSeparator(...)`,
+        `userCommitment(...)`, `withdrawRefundCommitment(...)`, keyword
+        `pure circuit`). Widen the anatomy wording in AGENTS.md and
+        docs/diagramming.md from "every exported circuit, every ledger
+        field" to include pure circuits and witnesses, in the same change.
+      - The three `path = ...` riding labels replaced by three dotted
+        derivation-note nodes carrying the frozen call texts above, each
+        with one dashed edge into what it derives: the deposit-account
+        note into `User's deposit account`, the vault note into
+        `ledger vaultEvmAddress`, the response-key note into
+        `ledger mpcResponseKey`. The existing dashed
+        `vaultEvmAddress ╌> Vault's own account` edge stays, unlabelled.
+      - One dashed edge `MIDNIGHT_USER1_VAULT_SECRET ╌> witness
+        callerSecretKey(...)` showing how the secret enters the contract.
+      - The dashed MPC-origin edge into `mpcResponseKey` deleted: the MPC
+        USES the key (its `Attests: ... With: mpcResponseKey` note already
+        says so) and is not the derivation's source. The MPC root key
+        appears only as the `MPC_ROOT_PUBLIC_KEY` argument in the notes.
+      - The oversized vertical gap between the Midnight lane and the EVM
+        Blockchain lane closed to the normal inter-lane gap, re-seating
+        what the derivation notes and edges need in that band.
+      - Lint --strict, render, eyeball, and re-render the vault README's
+        embed (path unchanged). The zero-hit phase-stroke check over the
+        background still holds (derivation cells are neutral, never
+        phase-coloured).
+- [ ] Deposit pair and docs inherit the derivation story, after the actor
+      map item is reviewed:
+      - `docs/deposit/deposit.drawio(.png)`: copy the new background cells
+        byte-identically (id, value, style) from the upgraded actor map.
+        Membership grows by `witness callerSecretKey(...)` and
+        `circuit userCommitment(...)` (the flows call
+        `pureCircuits.userCommitment` directly in `vault-identity.ts`, and
+        the derivation note names it). The response-key note is the
+        natural occupant of the vault-to-singleton horizontal band, which
+        may settle the gap item above: decide them together. Re-run lint,
+        membership proof, render, eyeball, and the correspondence grep
+        (step strings are untouched by this change).
+      - `docs/deposit/deposit.md` and the vault README's "Derived keys and
+        accounts" section respelled to the frozen vocabulary: the secret
+        as `MIDNIGHT_USER1_VAULT_SECRET` (noting the env var lands with the
+        code change), derivation always via the two named SDK functions.
+      - Design update only: no contract, test, or env-var code changes in
+        this item.
+
 ### ERC20 vault example
 
 - [x] Actor map: `system-map` stripped to background, all 14 circuit names in
@@ -622,10 +713,12 @@ authoring conversation:
    respell, then the page restructure + heading/note respell.
 2. C1 checks 1, 2 and 4 over the flow pages. Plant a violation, watch it
    fail, restore.
-3. Withdraw diagram, then the withdraw page, then C1 checks 3, 5 and 6.
-4. Swap, supply and redeem, each as diagram then page (diagrams may run in
+3. Derivation story upgrade: the actor map item first, then the deposit
+   inherit item, deciding the vault-to-singleton gap item alongside it.
+4. Withdraw diagram, then the withdraw page, then C1 checks 3, 5 and 6.
+5. Swap, supply and redeem, each as diagram then page (diagrams may run in
    parallel across flows). C3 rules.
-5. C2 CI wiring.
-6. C5 integration repo PR.
-7. The two vault README follow-ups (e2e numbers from an executed run, the
+6. C2 CI wiring.
+7. C5 integration repo PR.
+8. The two vault README follow-ups (e2e numbers from an executed run, the
    re-homed real-network guidance), schedulable any time.
