@@ -105,6 +105,14 @@ working-size section).
   greppable names.
 - **Label texts never overlap one another.**
 
+Two narrow exemptions, and only these: a label whose WHOLE text is a call
+expression (`transfer(vaultEvmAddress, amount)`) is a code label, exempt from
+the format rule. A label on a specimen edge (both endpoints degenerate points
+of 4 units or smaller, the palette card's swatch construction) is a legend
+caption naming the style it demonstrates, exempt from the format and
+alignment rules: the seating rule still applies to it, a legend caption
+riding its swatch crookedly is a defect on a copy-source card.
+
 ### The verb table
 
 One verb, one meaning, everywhere an edge label or note describes an action:
