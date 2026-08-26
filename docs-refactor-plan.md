@@ -112,8 +112,9 @@ bank, the generic pair). `drawio.config.json` stays at the repo root.
 
 - Headline: one line on what the example is, then the circuits table: every
   exported circuit, each row linking to its flow page.
-- The actors: the ACTOR MAP embedded once (every actor, every circuit name,
-  only dashed derivation edges) with short actor prose including the relayer.
+- The actors: the ACTOR MAP embedded once (every actor, every member name,
+  only dashed derivation edges and derivation notes, no step layer) with
+  short actor prose including the relayer.
   No per-flow diagrams here: those live on the flow pages.
 - The underlying protocol: no image, two sentences pointing UP to the root
   README's flow section (which points on to the integration repo).
@@ -144,7 +145,8 @@ bank, the generic pair). `drawio.config.json` stays at the repo root.
 
 **Diagram architecture: background + one flow.** `actor-map.drawio` is the
 static background every reader learns once, and the ONLY diagram carrying the
-contract's full anatomy (every circuit, every ledger field). Each flow diagram
+contract's full anatomy (every exported circuit and pure circuit, every
+witness, every ledger field). Each flow diagram
 is a copy of that background with the contract members the flow does not
 interact with deleted, plus that one flow's coloured step layer appended. Kept
 cells stay byte-identical to the actor map's in id, value and style, with only
@@ -242,31 +244,48 @@ repo still derives the secret from `MIDNIGHT_USER1_WALLET_SEED` via
 **Frozen names.** The secret's future env var is `MIDNIGHT_USER1_VAULT_SECRET`
 (the `USER1` spelling matching `MIDNIGHT_USER1_WALLET_SEED` and
 `EVM_USER1_WALLET_SEED`, no underscore before the digit and no leading
-underscore), and the diagram node carries that exact name. Derivation notes
-spell each argument as the env var that supplies it in the integration
-tests, and name the SDK functions verbatim, one note per derived value:
+underscore), and the diagram node carries that exact name. Diagrams render
+key generation as the ABSTRACT call `keyDerivation(...)` (decision: the
+concrete SDK functions `deriveEvmAddress` and `deriveMidnightResponseKey`
+belong in prose docs where they can be explained, while the diagrams carry
+one uniform abstract shape). Each argument is spelled as the env var that
+supplies it in the integration tests, one note per derived value, arguments
+one per line:
 
-- User's deposit account: `deriveEvmAddress(MPC_ROOT_PUBLIC_KEY,
+- User's deposit account: `keyDerivation(v2.0.0, MPC_ROOT_PUBLIC_KEY,
   MIDNIGHT_VAULT_CONTRACT_ADDRESS,
   userCommitment(MIDNIGHT_USER1_VAULT_SECRET))`
 - Vault's own account (pinned into `vaultEvmAddress`):
-  `deriveEvmAddress(MPC_ROOT_PUBLIC_KEY,
+  `keyDerivation(v2.0.0, MPC_ROOT_PUBLIC_KEY,
   MIDNIGHT_VAULT_CONTRACT_ADDRESS, "vault")`
-- Response key (pinned into `mpcResponseKey`):
-  `deriveMidnightResponseKey(MPC_ROOT_PUBLIC_KEY,
-  MIDNIGHT_VAULT_CONTRACT_ADDRESS)` (the dedicated SDK function, always,
-  never a generic-function rendering: key derivation must read identically
-  in docs, diagrams and code)
+- Response key (pinned into `mpcResponseKey`): `keyDerivation(v2.0.0,
+  MPC_ROOT_PUBLIC_KEY, MIDNIGHT_VAULT_CONTRACT_ADDRESS,
+  "midnight response key")`
 
-Every token above greps today (`deriveEvmAddress` and
-`deriveMidnightResponseKey` in `@sig-net/midnight`'s
-`epsilon-derivation.d.ts`, the env vars in `packages/test-harness` and the
-integration tests, `"vault"` and `userCommitment` in the contract) EXCEPT
-`MIDNIGHT_USER1_VAULT_SECRET`, which is design-ahead by decision: the
-exemption clears, and the labels get re-verified, when the vault-secret
-env var and contract/test changes land.
+The version literal is `v2.0.0`, from the SDK's
+`EPSILON_DERIVATION_PREFIX = "sig.network v2.0.0 epsilon derivation"`, and
+the response-key path literal is `"midnight response key"`, the SDK's
+`MIDNIGHT_RESPOND_BIDIRECTIONAL_PATH`: never a paraphrase like
+"response-key". Bold exactly the tokens that grep (env vars,
+`userCommitment`, the path literals). `keyDerivation` and `v2.0.0` grep
+nowhere by design, the same exemption class as the generic diagram's
+placeholder circuits, and `MIDNIGHT_USER1_VAULT_SECRET` is design-ahead:
+that exemption clears, and the labels get re-verified, when the
+vault-secret env var and contract/test changes land.
 
-- [ ] Actor map upgraded with the derivation story
+Verifying a frozen note text is a comparison on the RENDERED text, and the
+recipe is exact: extract each cell's `value` attribute FIRST, then within
+that attribute decode entities (`&nbsp;` becomes a space), turn `<br>` into
+a newline, remove every other tag with no substitution, collapse whitespace
+runs, then match. Two proven traps: decoding the whole document before
+stripping tags makes the strip regex eat from the enclosing `<mxCell` tag
+through the first inner `<br>` and silently destroys the text under test,
+and replacing a stripped tag with a space breaks matches at token
+boundaries. The per-token bolding and the argument-boundary line wraps put
+tags inside the stored value, so a literal grep of the frozen string
+against the raw file finds nothing by design.
+
+- [x] Actor map upgraded with the derivation story
       (`examples/erc20-vault/docs/actor-map.drawio(.png)`), the background
       every flow diagram inherits, so this item runs FIRST:
       - New dotted-border node `MIDNIGHT_USER1_VAULT_SECRET` inside the
@@ -302,14 +321,60 @@ env var and contract/test changes land.
         embed (path unchanged). The zero-hit phase-stroke check over the
         background still holds (derivation cells are neutral, never
         phase-coloured).
+- [x] Actor map aligned to the follow-up derivation design and neatened
+      (the repo owner's editor draft on disk sketches the intent with
+      webapp-id cells and inline-styled values: replace those draft cells
+      with palette-clean, properly-id'd implementations):
+      - Pure-circuit rows removed (the draft already dropped
+        `userCommitment(...)`, the other three go too): pure circuits stay
+        off the diagrams by default.
+      - Contract members regrouped into vertically separated sections in
+        fixed order (ledger, witness, circuits) per the new sections rule
+        in docs/diagramming.md.
+      - Secret node's icon switched to the crossed-eye sample the repo
+        owner placed on the palette card (the palette's EXAMPLE_SECRET
+        group is the copy source and its icon is authored: never redesign
+        it). The palette PNG is stale against its edited source: re-render
+        the palette pair.
+      - The three derivation notes respelled to the frozen
+        `keyDerivation(v2.0.0, ...)` strings above, broad-dashed note
+        borders, arguments one per line (the draft's `v1.0` and
+        `reponse-key` are superseded by the frozen strings).
+      - Broad-dashed identity nodes added: `MIDNIGHT_VAULT_CONTRACT_ADDRESS`
+        in the vault contract lane's header band,
+        `MPC_ROOT_PUBLIC_KEY` in the MPC lane.
+      - Derivation edges all broad-dashed (`dashPattern=8 8`,
+        `strokeWidth=2`), the palette's derivation sample restyled to match:
+        inputs present on the diagram point INTO each note that names them
+        (the contract-address node, the root-key node, the secret into the
+        deposit-account note), each note points at what it derives, and the
+        secret keeps its edge into `witness callerSecretKey(...)`. Where
+        full input fan-in defeats the edge-routing rules, consolidate on
+        shared trunks or ask the orchestrator.
+      - The whole map neatened per the layered-composition rule: aligned
+        columns, consistent gaps, no dead bands.
+      - Lint --strict both pairs, phase-stroke zero-hit, frozen-string
+        rendered-text checks against .drawio and PNG model, render both
+        pairs, eyeball downscaled plus crops.
+- [ ] Palette follow-up: the EXAMPLE_SECRET icon cell still carries the
+      bare webapp id `2` (kept during the icon swap to preserve the
+      authored cell). Rename it to a descriptive id
+      (`secret-node-icon`) in a quiet change: the palette is a copy
+      source, so copies made before the rename are unaffected.
 - [ ] Deposit pair and docs inherit the derivation story, after the actor
       map item is reviewed:
-      - `docs/deposit/deposit.drawio(.png)`: copy the new background cells
-        byte-identically (id, value, style) from the upgraded actor map.
-        Membership grows by `witness callerSecretKey(...)` and
-        `circuit userCommitment(...)` (the flows call
-        `pureCircuits.userCommitment` directly in `vault-identity.ts`, and
-        the derivation note names it). The response-key note is the
+      - `docs/deposit/deposit.drawio(.png)`: sync the background to the
+        upgraded actor map, byte-identically (id, value, style). The sync is
+        NOT additive-only: the actor map deleted `d1`, `d3` and the three
+        `path = ...` riding labels (`d1-l`, `d2-l`, `d3-l`) and re-routed
+        `d2`, and it bolded every member name in the 17 pre-existing
+        circuit-row texts, so the deposit copies of all those cells change
+        or die too. Copy the new background cells the deposit flow needs
+        from the actor map.
+        Membership grows by `witness callerSecretKey(...)` only: pure
+        circuits stay off the diagrams by default, so no
+        `userCommitment(...)` row even though the deposit-account note
+        names it. The response-key note is the
         natural occupant of the vault-to-singleton horizontal band, which
         may settle the gap item above: decide them together. Re-run lint,
         membership proof, render, eyeball, and the correspondence grep
@@ -580,12 +645,34 @@ on they are byte-frozen.
       the render border. Labels never extend the export bounds, so a slid
       label clips silently: `e4b-l`'s clearance inside the right bound was
       hand-checked against the border arithmetic.
+- [ ] `measure` (or `render`) prints the model-to-pixel affine on request
+      (scale and offset per axis), so a `sips -c` crop of a model region is
+      one computation instead of three. Every crop in the actor-map upgrade
+      needed the calibration line transcribed and applied by hand.
 - [ ] Skill: concurrent-editor guard: hash the target `.drawio` before and
       after every edit batch and re-check before finishing. Mid-task an open
       draw.io editor re-serialised `deposit.drawio` under the executing
       agent (cell order rewritten to webapp order, `d2`'s waypoints
       collapsed 4 to 2), detected only via `git diff --stat`, and an editor
       holding a stale buffer can save over finished work after the fact.
+- [ ] Lint: error on any `image=` style referencing a remote host
+      (`http://`/`https://`). A palette cell shipped
+      `image=https://images.icon-icons.com/...`, which renders BLANK in the
+      offline renderer and violates the icons rule, and nothing caught it:
+      the failure is invisible in the XML and only an eyeball of the render
+      shows the empty box.
+- [ ] `measure --fit <cell>`: print the box implied by the uniform-padding
+      rule (8 side, 6 vertical) for the cell's measured text ink, so sizing
+      a box takes one pass. Character-width estimates are off by about 10%
+      (8.1 predicted against roughly 7.4 actual for bold Helvetica caps),
+      which cost a render-measure-adjust loop per box across five boxes in
+      the keyDerivation alignment.
+- [ ] Lint: the floating-connection warning fires on palette sample edges
+      whose endpoints are zero-area point shapes, where exit and entry
+      sides are geometrically meaningless. The samples were pinned to
+      silence it, which adds noise to satisfy a check: either exempt edges
+      between zero-area shapes or accept pins as the convention and say so
+      in the skill.
 
 ## Workflow (edit, verify, report)
 

@@ -281,9 +281,11 @@ apply to all of them:
   by design. Every real name in it (events, singleton circuits, ledger fields) still
   must grep.
 - **An example's actor map is the ONLY diagram carrying the contract's full
-  anatomy** (every exported circuit, every ledger field). A flow diagram's
-  contract box shows only the ledger fields and circuits that flow interacts
-  with, membership read from the contract source and the flow's
+  anatomy** (every exported circuit, every witness, every ledger field,
+  exported pure circuits omitted by default). A flow diagram's
+  contract box shows only the members (ledger fields, circuits, witnesses)
+  that flow interacts with, membership read from the
+  contract source and the flow's
   `integration-tests/src/flows/` files. Kept cells are the actor map's own,
   value and style byte-identical, only geometry free to adapt: the full rule is
   the "Flow diagram membership" section of [docs/diagramming.md](docs/diagramming.md).
