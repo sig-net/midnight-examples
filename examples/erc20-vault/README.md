@@ -118,6 +118,14 @@ exactly three derivations:
 | The vault's own account (EVM) | The contract-fixed literal `"vault"` (`pad(32, "vault")`) | Holds the vault's ERC20 balance and signs every withdraw `transfer(destination, amount)`. It also pays the withdraw gas, which is why the whole fee envelope is contract-fixed. |
 | The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id and execution output (the event carries the id it answers plus the signature, nothing else). It never signs transactions: it is per-client-contract yet independent of any request's own path, and `claim`/`completeWithdraw` verify responses against it in-circuit. |
 
+The identity secret behind the first row is the user's OWN random value, held
+by the application itself and never by a wallet: a Lace wallet cannot expose
+its seed, so the `callerSecretKey()` witness needs a value the app holds
+independently. The diagrams and these docs name it
+`MIDNIGHT_USER1_VAULT_SECRET`, the environment variable that supplies it to the
+integration tests. The variable lands together with the contract and test
+changes that split the secret from the Midnight wallet seed.
+
 Deposits and withdrawals therefore move between two MPC-derived accounts on
 the EVM chain, and neither key ever exists anywhere: the MPC network signs
 for them on the vault's request, and only through the vault's circuits.
@@ -126,6 +134,12 @@ Derivation happens off-chain with the `@sig-net/midnight` helpers:
 `deriveEvmAddress(mpcPublicKey, vaultContractAddress, path)` for the two EVM
 accounts and `deriveMidnightResponseKey(mpcPublicKey, vaultContractAddress)`
 for the response key (the setup pipeline derives all three and prints them).
+The diagrams render both helpers as one abstract `keyDerivation(...)` note per
+derived value: a note reading `keyDerivation(v2.0.0, MPC_ROOT_PUBLIC_KEY,
+MIDNIGHT_VAULT_CONTRACT_ADDRESS, <path>)` is `deriveEvmAddress` for the two EVM
+accounts and `deriveMidnightResponseKey` for the response key, with `v2.0.0`
+the SDK's epsilon derivation version.
+
 The vault's own address and the response key both take the contract address
 as INPUT, so they cannot exist at construction time: the deployer-gated
 one-shot `initialize` circuit pins them right after deploy, when the address

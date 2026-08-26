@@ -1,40 +1,36 @@
 # Midnight Contracts Calling Foreign Chains with Sig Network
 
-This monorepo holds experimental example projects. Midnight contracts that
-execute arbitrary transactions on foreign blockchains through the Sig Network
-[Distributed MPC](https://github.com/sig-net/mpc). Every example integrates the
-Sig Network [Sign Bidirectional Flow](#sign-bidirectional-flow), and is built on
-[`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight),
-the Sig Network protocol library.
+This monorepo holds experimental example projects. Midnight contracts that execute arbitrary transactions on foreign blockchains through the Sig Network [Distributed MPC](https://github.com/sig-net/mpc). Every example integrates the Sig Network [Sign Bidirectional Flow](#sign-bidirectional-flow), and is built on [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight), the Sig Network protocol library.
 
-Start with the [Sign Bidirectional Flow](#sign-bidirectional-flow) for what the
-protocol does, the [Examples](#examples) for a worked application of it, or the
-[Integration guide](#integration-guide) to wire it into your own contract.
+### Reading Guide:
+- Start by reading the [Sign Bidirectional Flow](#sign-bidirectional-flow) to understand the fundamentals of the cross chain protocol.
+- Then through the [Integration guide](#integration-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
+- Or jump straight into complete [examples](#examples) to see applications of the protocol.
+
+In case you landed in the wrong place or are looking for the parts of the Sig Network stack that these examples are built upon:
+- [Midnight Integration Protocol and SDK Repository](https://github.com/sig-net/midnight-integration)
+- [Sig Network Distributed MPC Repository](https://github.com/sig-net/mpc)
+
+## Examples
+
+Each example is a directory under [`examples/`](examples/) holding a `contract` package and an `integration-tests` package.
 
 > ## ⚠️ CAUTION ⚠️
 >
 > These are example applications for educational and experimental purposes.
 > Use at your own risk and expect rapid iteration.
 
-## Examples
-
-Each example is a directory under [`examples/`](examples/) holding a `contract` package and an `integration-tests` package.
+Following is a list of available examples:
 
 | Example | What it demonstrates | Flow walkthroughs |
 |---|---|---|
 | [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding ERC20 tokens on an EVM chain: private deposits into MPC-derived accounts, withdrawals, Uniswap swaps and Aave supply/redeem, all driven through the sign bidirectional flow. | [deposit](examples/erc20-vault/docs/deposit/deposit.md), [withdraw](examples/erc20-vault/docs/withdraw/withdraw.md), [swap](examples/erc20-vault/docs/swap/swap.md), [supply](examples/erc20-vault/docs/supply/supply.md), [redeem](examples/erc20-vault/docs/redeem/redeem.md) |
 
-## Sign Bidirectional Flow
+## Sign Bidirectional Protocol Flow
 
-The flow brings foreign blockchain assets and functionality to a contract on
-Midnight: the contract records a signature request, the MPC network signs it,
-the dApp relays the signed transaction to the foreign chain, and the MPC attests
-the execution outcome back to Midnight, where the contract verifies that
-attestation in-circuit.
+This Sig Network Protocol Flow brings foreign blockchain assets and functionality to a contracts on Midnight. Contracts record signature requests that the Sig Network MPC network signs. dApps relay signed transactions to foreign chains and the MPC attests their execution outcomes back to Midnight. Then contracts complete cross chain interactions with in-circuit attestation. As illustrated below, this Protocol is best understood in 5 steps.
 
 ![Sign bidirectional flow](docs/sign-bidirectional-flow.drawio.png)
-
-The diagram numbers the five steps:
 
 1. **The contract records a request.** A user interacts with the integrating
    dApp, which calls a circuit on the integrating client contract
