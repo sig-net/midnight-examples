@@ -254,24 +254,61 @@ migrates first: no new flow work starts until these land.
 **Per-diagram conformance rework.** Everything each committed diagram owes
 to the new rules (edge-label golden rules, verb table, witness iconography)
 plus its pending syncs, packaged ONE TASK PER DIAGRAM so the reworks
-parallelise across agents. Ordering constraint: the actor-map task runs
-FIRST, then deposit, withdraw and the generic pair (Generic diagram section)
-run in parallel, as the flow diagrams byte-copy the map's cells. Splitting
+parallelise across agents. Ordering constraint: the two actor-map tasks run
+FIRST, in order (the conformance rework, then the derivation-edge and
+note-column item), then deposit, withdraw and the generic pair (Generic
+diagram section) run in parallel, as the flow diagrams byte-copy the map's
+cells. Splitting
 the witness-icon swap per diagram is sanctioned: the icons rule's
 same-change clause guards the embeds of a CHANGED bank file, while this
 swap changes no bank file (the cog is a built-in reference), so a
 not-yet-reworked diagram simply still shows the cog until its task lands.
 
-- [ ] Actor-map conformance rework (FIRST): the witness member row's icon
+- [x] Actor-map conformance rework (FIRST): the witness member row's icon
       swaps from the cog to the open eye copied from the palette's
       iconography entry, plus a golden-rules pass over its notes and any
       edge labels. Lint --strict, phase-stroke zero-hit, frozen-string
       checks, render, eyeball crops. The vault README embed path is
       unchanged.
-- [ ] Deposit conformance rework (after the actor-map rework), in ONE
+      DONE: the map carries zero edge labels, so the golden-rules pass
+      landed on the notes. The scaffold keywords in `n-read`, `n-sign`
+      and `n-attest` bolded per the note scaffold rule (values changed,
+      boxes re-hugged and re-centred on the lane midpoint), the witness
+      icon style byte-copied from the palette's `icono-witness-icon`,
+      the three keyDerivation notes untouched. The changed note VALUES
+      propagate: every diagram carrying copies of those cells inherits
+      them byte-identically (the widened deposit and withdraw items
+      below).
+- [ ] Actor-map derivation edges completed and the MPC note column
+      aligned (after the conformance rework, BEFORE deposit and
+      withdraw): the derivation rule says inputs present on the diagram
+      point INTO each note that names them, and two gaps stand: the
+      `id-vault-addr` identity node has no derivation edges though all
+      three keyDerivation notes name `MIDNIGHT_VAULT_CONTRACT_ADDRESS`,
+      and `MPC_ROOT_PUBLIC_KEY` points into `n-vault` and `n-respkey`
+      but not `n-acct`, which also names it. Add the missing
+      broad-dashed edges, consolidating on shared trunks or asking the
+      orchestrator where full fan-in defeats the edge-routing rules. In
+      the same change, left-align the three MPC notes (`n-read`,
+      `n-sign`, `n-attest`) on one shared x so the scaffold verbs form
+      a column: the "verbs aligned across siblings" rule read visually,
+      matching the layered-composition rule's siblings-on-shared-
+      coordinates shape, and sharpen that rule's wording in
+      docs/diagramming.md in the same change so the structural-only
+      reading (same scaffold shape, verb opens line 1, boxes centred at
+      differing widths) is closed off. Propagation notes: the alignment
+      is geometry-only and the membership proof excludes geometry, so
+      it propagates nowhere, and new edges are new background cells, so
+      the subset direction of the membership proof keeps existing flow
+      diagrams green. Lint --strict, phase-stroke zero-hit,
+      frozen-string checks, render, eyeball crops.
+- [ ] Deposit conformance rework (after both actor-map tasks), in ONE
       change, byte-copying every background cell it touches from the
       reworked actor map:
-      - witness row icon swap (byte-copy of the map's new row),
+      - byte-copy of the four cells the conformance rework changed
+        (`code-witness-icon` plus the re-bolded `n-read`, `n-sign` and
+        `n-attest` note values): the membership proof reports exactly
+        those four mismatches until they land,
       - `d2` re-sync: the ledger-anatomy item re-routed the map's `d2`
         (anchor onto `acct-vault`'s top) after the deposit inherit built
         from the previous HEAD, so deposit's copy differs in style by
@@ -289,12 +326,13 @@ not-yet-reworked diagram simply still shows the cog until its task lands.
         transaction execution`), alignment per crossing axis,
         run-through-centre seating.
       Full verification cycle, membership proof back to zero mismatches.
-- [ ] Withdraw conformance rework (after the actor-map rework, parallel
-      with deposit): witness row icon swap (byte-copy of the map's new
-      row) and the label audit under the edge-label golden rules over its
-      riding labels (acting-party format, verb table, alignment,
-      run-through-centre, direction). Full verification cycle, membership
-      proof zero mismatches.
+- [ ] Withdraw conformance rework (after both actor-map tasks, parallel
+      with deposit): byte-copy of the four cells the conformance rework
+      changed (`code-witness-icon` plus the re-bolded `n-read`, `n-sign`
+      and `n-attest` note values), and the label audit under the
+      edge-label golden rules over its riding labels (acting-party
+      format, verb table, alignment, run-through-centre, direction).
+      Full verification cycle, membership proof zero mismatches.
 - [ ] Actor map working size settled: the completed anatomy measures
       1695x1260 model units against the style guide's roughly 1300x800
       budget, and the guide says outgrowing diagrams split rather than
