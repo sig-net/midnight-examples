@@ -991,6 +991,7 @@ export circuit completeSwap(
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
   mintNonce: Bytes<32>,
+  changeNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
 
@@ -1035,13 +1036,17 @@ export circuit completeSwap(
   // Return the unspent tokenIn as change: amountInMaximum (word 5) - amountIn spent (the
   // attested result, native-deserialized). tokenIn is word 0. amountInMaximum was bounded to
   // Uint<64>, so change (<= amountInMaximum) fits the mint API. Change is 0 on an exact spend,
-  // which mints a 0-value coin, harmless. A distinct nonce keeps the two coins unlinkable.
+  // which mints a 0-value coin, harmless.
+  //
+  // changeNonce is a SECOND caller-supplied random nonce, never derived from mintNonce. The two
+  // coins need distinct nonces or they link, and deriving one from the other gives the change
+  // coin no entropy of its own: one leaked or reused mintNonce would expose both at once. Same
+  // rule as mintNonce itself (see claim).
   const amountIn = disclose(deserialize<ExactOutputSingleReturnValue, 8>(serializedOutput).amountIn);
   const amountInMaximum = abiWordToUint128(signatureRequest.txParams.calldata.value.words[5]);
   const change = amountInMaximum - (amountIn as Uint<128>);
   const tokenIn = slice<20>(signatureRequest.txParams.calldata.value.words[0], 12);
-  const changeNonce = persistentHash<Vector<2, Bytes<32>>>([disclose(mintNonce), pad(32, "change")]);
-  mintShieldedToken(vaultTokenDomainSeparator(tokenIn), change as Uint<64>, changeNonce, recipient);
+  mintShieldedToken(vaultTokenDomainSeparator(tokenIn), change as Uint<64>, disclose(changeNonce), recipient);
 }
 
 // ---- Aave: approveStata -------------------------------------------------------------
