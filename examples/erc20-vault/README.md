@@ -193,9 +193,9 @@ Two vault-specific points:
 
 - The contract package exports the event map's resolved ledger-tree path as
   `VAULT_REQUESTS_PATH` so off-chain readers cannot drift from it. The vault
-  has 15 or fewer ledger fields, so the map at field 0 has the depth-1 path
-  `[0]`, and the request circuits pack it into their notifications as
-  `requestsPathDepth` 1 + `requestsPath` [0, 0, 0, 0]. The compiler records
+  has 19 ledger fields, past the 15-field flat limit, so the map at field 0 has
+  the depth-2 path `[0, 0]`, and the request circuits pack it into their
+  notifications as `requestsPathDepth` 2 + `requestsPath` [0, 0, 0, 0]. The compiler records
   the same path as the field's "index" in the compiled
   `contract-info.json`.
 - The deploy tooling ([`contract/deploy.ts`](contract/deploy.ts)) computes
@@ -245,6 +245,46 @@ point at their own address, chain or key. Flow function:
 pipeline derives and prints all three derived values as `EVM_VAULT_ADDRESS`,
 `EVM_USER_ADDRESS` and `MPC_RESPONSE_KEY`.
 
+## Deploying
+
+The contract has 14 circuits and their verifier keys do not fit in one block, so
+a deploy is two phases:
+
+1. The base transaction registers the whole ledger state and ONE small circuit.
+2. Every remaining circuit is added afterwards, one maintenance update each.
+
+The order matters and is not symmetric. Ledger state cannot be added after
+deploy, so the base transaction must carry the final ledger declarations even
+for circuits it does not register yet. Circuits can be added at any time.
+
+[`contract/deploy.ts`](contract/deploy.ts) performs both phases and is the only
+implementation. The e2e setup runs it as a subprocess, and so does the stagenet
+script, so local and remote deploys take the same path:
+
+```sh
+# local, against the docker stack
+yarn workspace @midnight-examples/erc20-vault-contract deploy
+
+# stagenet: deploy, then run the deployer-gated initialize
+yarn workspace @midnight-examples/erc20-vault-integration-tests exec \
+  tsx deploy-init-stagenet.ts
+```
+
+`BASE_DEPLOY_CIRCUITS` names the circuit that goes in the base transaction.
+`buildDeployTransactionDeferring` returns the contract address plus the deferred
+list, and each deferred circuit is then added at the next maintenance-authority
+counter, waiting for the counter to advance between updates.
+
+### MAINTENANCE_SIGNING_KEY
+
+The base deploy retains a maintenance authority, and this variable is its
+signing key. Every circuit added after the base transaction is signed by it.
+
+Set it to a 32-byte hex key you keep. Unset, the deploy generates an ephemeral
+one and says so, which is fine for a throwaway deploy and wrong anywhere else:
+it is the only way to add or replace a circuit later, and an ephemeral key is
+gone when the process exits.
+
 ## Runtime: the deposit round trip
 
 A deposit moves ERC20 value from the user's deposit account into the vault's
@@ -293,7 +333,7 @@ const reader = new SignetRequestResponseReader({
   // The deployed vault contract.
   requesterContractAddress: vaultContractAddress,
 
-  // signBidirectionalEventMap sits at ledger field 0, path [0] (Setup step 3).
+  // signBidirectionalEventMap sits at ledger field 0, path [0, 0] (Setup step 3).
   requesterRequestsPath: VAULT_REQUESTS_PATH,
 
   // The Signet singleton contract.
@@ -376,7 +416,7 @@ export circuit deposit(
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
-  // ...and notify it, carrying the map's ledger-tree path ([0] at depth 1,
+  // ...and notify it, carrying the map's ledger-tree path ([0,0] at depth 2,
   // Setup step 3).
   signetSigner.signBidirectional(
     requestId,

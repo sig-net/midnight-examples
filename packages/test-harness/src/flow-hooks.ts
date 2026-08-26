@@ -10,6 +10,7 @@ import "./provided-context.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { afterAll, beforeAll, beforeEach, inject } from "vitest";
 
 import { testHeader } from "./output.ts";
@@ -83,12 +84,18 @@ async function waitForProofServer(url: string, timeoutMs: number): Promise<void>
  * The local proof server URL, or null when the recycle does not apply: `SKIP_PROOF_SERVER_RESTART`
  * is set, or the configured server is not local (a user's own, or a remote one).
  *
+ * Reads the URL through {@link getMidnightNodeConfig}, the same resolution the rest of the suite
+ * uses. Reading `MIDNIGHT_PROOF_SERVER_URL` directly is wrong: that variable is how the FAKENET
+ * container finds the proof server, and docker-compose sets it to `http://proof-server:6300`, a
+ * name that resolves only inside the compose network. The test process wants
+ * `MIDNIGHT_NODE_PROOF_SERVER_URL`, which this resolves.
+ *
  * @returns The local proof server URL, or null when the recycle does not apply.
  */
 function localProofServerUrl(): string | null {
   if (process.env.SKIP_PROOF_SERVER_RESTART) return null;
-  const url = process.env.MIDNIGHT_PROOF_SERVER_URL ?? "http://127.0.0.1:6300";
-  return /127\.0\.0\.1|localhost/.test(url) ? url : null;
+  const { proofServerUrl } = getMidnightNodeConfig();
+  return /127\.0\.0\.1|localhost/.test(proofServerUrl) ? proofServerUrl : null;
 }
 
 /**
