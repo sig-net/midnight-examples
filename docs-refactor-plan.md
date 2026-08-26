@@ -387,7 +387,7 @@ not-yet-reworked diagram simply still shows the cog until its task lands.
       lists for marginal visual gain. The map's calibration warning is
       now live (`bottom=dvaddr-acct`, explained): see the bound-setting
       edge harvest item.
-- [ ] Deposit conformance rework (after both actor-map tasks), in ONE
+- [x] Deposit conformance rework (after both actor-map tasks), in ONE
       change, byte-copying every background cell it touches from the
       reworked actor map:
       - byte-copy of the four cells the conformance rework changed
@@ -412,13 +412,139 @@ not-yet-reworked diagram simply still shows the cog until its task lands.
         golden rules, knockout gaps hugging the text per the
         owner-feedback rule.
       Full verification cycle, membership proof back to zero mismatches.
-- [ ] Withdraw conformance rework (after both actor-map tasks, parallel
+      DONE: the pre-change proof reported exactly the five predicted
+      mismatches and nothing else (`code-witness-icon` style, the three
+      re-bolded note values, `d2`'s entry pin), all byte-copied from the
+      map, and the proof is back to zero over 109 background cells with
+      the id set still a subset. The four ledger rows were copied whole
+      (group plus box, icon and text children) from the map, so their
+      ids, values and styles are the map's. Membership was re-read from
+      `contract/src/erc20-vault.compact` and `flows/deposit.ts`, which
+      names `before.signetRequestNonce`, `before.initialized`,
+      `before.evmChainId` and `before.caip2Id`: exactly the four rows
+      the item predicted, no more. Geometry: the four rows land ABOVE
+      `mpcResponseKey` and the vault lane grows UPWARD, which is the
+      only direction that leaves `ledger-resp` and `ledger-vaultevm`
+      where they are, so `dnote3`, `dnote2` and every cell below the
+      insertion stay put and the derivation notes need no jog. The
+      Midnight and MPC lanes therefore both move to y=-108 (their tops
+      stay level) and the vault lane keeps the even 62/62 seating in
+      its parent's interior band, which the arithmetic forces: the
+      singleton lane is pinned level with `code-deposit` by `e1b`, so
+      the parent's bottom cannot rise above 675 and the even split
+      fixes the top. Consequence recorded rather than hidden: the
+      Midnight lane's right-hand column gains 168 units of empty space
+      above the first keyDerivation note, the same character as the
+      actor map's own gaps beside its tall vault lane, and the `e2b`
+      run and its label sit in it. `d2` takes the map's
+      `entryX=0.5;entryY=0` pin and re-routes to `acct-vault`'s top,
+      arriving on the same x as `e3b`'s arrowhead into the bottom.
+      Label audit: `e2b` reversed to `n-read` -> `ledger-evtmap` (a
+      read points at the thing read), every riding label given the
+      strict acting-party format (`User's EVM wallet:` over a Funds
+      body for `f1-l`, `dApp/relayer:`, `MPC:`), `Watches for` becomes
+      `Picks up` per the verb table, `align=left` on the four
+      horizontally crossed runs and `align=center` on `e4b-l`'s
+      vertical one, and every seat re-measured from the render: an
+      `align=left` edge label anchors its LEFT edge at the point (not
+      its centre), so each anchor is the run's start plus half the
+      slack, which is what puts visible line on both sides of every
+      knockout. The run band below the Midnight lane opened from 30 to
+      40/50-unit spacing (and the EVM lane with everything under it
+      dropped 80) because a three-line `f1-l` and a two-line `g3-l`
+      cannot clear their neighbouring runs at 30: the golden
+      precedence, the diagram grows. The MPC note column was
+      left-aligned on the shared x=24 after the withdraw item landed
+      that precedent, `e2c` taking the same off-centre SOURCE exit
+      (`exitX=0;exitDx=90`) so its run into `n-sign`'s centred entry
+      stays vertical, with `e4a` and `e4b` following `n-attest`'s 0.25
+      and 0.75 bottom anchors to x=1252.5 and x=1329.5. `e2a`'s trunk
+      stays at x=1170 and the `id-mpc-root` derivation trunk moved to
+      x=1130, 40 clear of it, since the two would otherwise have run
+      collinear for 98 units. Verified: lint --strict clean (three
+      notes left standing, each anchor-caused on both ends: `dsecret`
+      vs `d2` at 24, `d2` vs `o4` at 12 where both x are 0.5 entry
+      centres 90 units apart in y, `dmpc-respkey` vs `e2a` at 22 where
+      both y are note midpoints), phase-stroke zero-hit over the
+      background, the six canonical captions each once in the diagram
+      and twice on the page (no caption verb changed, `Watches for
+      transaction execution` being a riding label that greps nowhere
+      in deposit.md), membership zero mismatches, PNG re-rendered from
+      the CLI with no overrides and round-tripped, crops read clean.
+      The membership guard was planted with all four violation kinds
+      (value, style, background phase stroke, extra id) and failed on
+      every one.
+- [x] Withdraw conformance rework (after both actor-map tasks, parallel
       with deposit): byte-copy of the four cells the conformance rework
       changed (`code-witness-icon` plus the re-bolded `n-read`, `n-sign`
       and `n-attest` note values), and the label audit under the
       edge-label golden rules over its riding labels (acting-party
       format, verb table, alignment, run-through-centre, direction).
       Full verification cycle, membership proof zero mismatches.
+      DONE: the pre-change proof reported exactly the four predicted
+      mismatches and nothing else, so the four cells were byte-copied
+      from the map and the proof went to zero. The re-bolded values are
+      wider text, so the three MPC notes were re-hugged, and the map's
+      note column copied wholesale: relative geometry x=24 with widths
+      208/180/154 in an identically sized lane, which lands the
+      sibling-note rule's shared left x on withdraw too. Four
+      consequent re-routes, each forced by a moved anchor: `e2c` takes
+      an off-centre exit on its SOURCE note (`exitX=0;exitDx=90`) so
+      the run into `n-sign`'s centred entry stays vertical (the 30-unit
+      gap between the two notes cannot hold a legal jog, and the
+      arrowhead's own anchor stays centred), `e2a`'s trunk moves
+      1260 to 1250 to keep a 40-unit tail out of the widened
+      `n-sign`, and `e4a`/`e4b` follow `n-attest`'s 0.25 and 0.75
+      bottom anchors to x=1332.5 and x=1409.5. Label audit: withdraw
+      carries ONE riding label, `e3b-l`, a whole-text call expression
+      and so a code label exempt from the acting-party format, with
+      direction correct (the vault's account is the initiator) and the
+      run through its vertical midpoint. Its one defect was
+      `align=center` on a horizontally crossing run, now `align=left`,
+      which lint had been flagging. One finding left untouched and
+      reported instead of guessed: `e3b-l` bolds `destEvmAddress` but
+      not `amount` though both are `WithdrawRequest` fields that grep,
+      and bolding every greppable token inside a whole-text code label
+      would leave almost the whole label bold. Verified: lint --strict
+      clean (its one remaining note, `dmpc-respkey` and `e2a` stacked
+      14 units out of column, is anchor-caused on both ends and the
+      anchor rules win), phase-stroke zero-hit, each of the six
+      canonical captions exactly once and no withdraw flow page exists
+      so the page-side half of the frozen-string check does not apply,
+      membership zero mismatches, render and crops read clean. The
+      membership guard was planted with all four violation kinds: the
+      phase-stroke check proved VACUOUS on the first plant (a
+      background vertex given a phase stroke was re-classified as step
+      layer instead of flagged), so the step layer is now identified by
+      construction (phase-stroked EDGES, phase-stroked ellipses,
+      "Step" captions and their children) and all four plants fail it.
+      Pre-existing and out of scope: the orange `e4a` run at y=865
+      clips the bottom arc of step circle `c2`, byte-identical before
+      and after this change.
+      FOLLOW-UP (orchestrator ruling on the `e2b` divergence): withdraw
+      takes deposit's direction fix, so `e2b` now runs `n-read` to
+      `ledger-evtmap`, out of the note's left face and into the event
+      map's right face, both anchors centred and the flip
+      direction-only (withdraw's `e2b` carries no riding label). The
+      route is two corners, not a mirror of the old three-corner
+      detour: straight left at y=361 (55 units clear above `n-respkey`,
+      74 below the `id-mpc-root` trunk's horizontal, so withdraw needs
+      no jog where deposit did), down the x=771 gutter collinear with
+      `d2`'s column and disjoint from it in y, then a 50-unit lead into
+      the arrowhead, with arc jumps over the derivation trunk and
+      `dnote3` and no same-colour crossing. In the same change the
+      vault box's ledger rows take the map's and deposit's order (nonce,
+      initialized, chainid, caip2): a pure y swap among equal-height
+      groups whose children are group-relative, with no edge anchored
+      to any of the three moved rows. Re-verified end to end: lint
+      --strict clean with the same single anchor-caused note,
+      phase-stroke zero-hit, membership still zero, six captions still
+      once each, re-rendered and eyeballed. Tooling note for the
+      harvest: the PNG-embedded model comes back with router-recomputed
+      waypoints for EVERY edge (`e5a`/`e5b` absent entirely), so a
+      round-trip check can confirm values and styles but NOT routes.
+      The rendered pixels were probed instead at both candidate y
+      values, and they carry the authored route.
 - [ ] Actor map working size settled: the completed anatomy measures
       1695x1260 model units against the style guide's roughly 1300x800
       budget, and the guide says outgrowing diagrams split rather than
