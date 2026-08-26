@@ -60,6 +60,11 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   step, the sequence is drawn as edges threading through its boxes in the step's
   colour, entering the first box and leaving the last toward its destination. Boxes
   with only sideways edges hide their order.
+- **Broad dashes mark derivation machinery.** Key-derivation notes and identity
+  nodes carry a broad-dashed border (`dashed=1;dashPattern=12 12`), and every
+  derivation edge is a broad-dashed line (`dashPattern=8 8`, `strokeWidth=2`).
+  Nothing else uses broad dashes: the actor cluster's plain dashed rectangle
+  and the dotted node borders stay visually distinct from it.
 
 ## Labels
 
@@ -79,7 +84,9 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
 
 - Swimlane per chain or system, nested swimlanes for contracts. Every lane header
   shows ONE centred unit: the lane's icon, a small gap, then the bold title, centred
-  horizontally and vertically in the header band, no exceptions. The lane cell's own
+  horizontally and vertically in the header band. The single exception: a contract
+  lane whose address participates in key derivation carries its broad-dashed
+  identity node horizontally centred directly below the header unit. The lane cell's own
   value stays empty; the unit is a group (icon + title text) copied from the palette
   card and centred at the lane's midpoint. A lane whose logo includes its wordmark
   (Midnight) uses the logo alone as the unit. A lane for a Signet-controlled contract
@@ -116,19 +123,41 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   dotted-border box, a text-height icon inside it at the left, and the member's
   code text beside the icon, grouped so they move as one. The icon is 16 units
   tall: the database cylinder (`shape=mxgraph.flowchart.database`) for ledger
-  state, the cog (`shape=mxgraph.ios7.icons.settings`) for circuits. The icon
+  state, the cog (`shape=mxgraph.ios7.icons.settings`) for circuits, pure
+  circuits and witnesses. The icon
   sits 8 in from the border with a 6-unit gap before the text. The code text
-  opens with the compact keyword (`ledger`, `circuit`) in the code style's
+  opens with the compact keyword (`ledger`, `circuit`, `pure circuit`,
+  `witness`) in the code style's
   keyword colour, ALWAYS at normal weight: keywords are never bold. Bold is
   reserved for the greppable name, the thing that greps in the contract
   source, and a keyword is syntax, not a name. A record or map type is a record block: bold type name with
   its opening brace, fields indented beneath, closing brace. A scalar field is
   its single line.
+- Contract members stack in vertically separated SECTIONS, in fixed order:
+  ledger, witness, circuits, pure circuits (present only case by case). The
+  gap between sections is visibly larger than the row gap inside a section,
+  one consistent section gap per diagram, so the grouping reads without
+  labels.
+- An identity secret renders as the palette's secret-node sample: a
+  dotted-border box, the crossed-eye icon, and the value's env-var name in
+  Menlo bold.
+- **Key derivation renders as a keyDerivation note plus broad-dashed edges.**
+  The note is a broad-dashed box carrying the abstract call
+  `keyDerivation(<version>, <inputs...>, <path>)`, one argument per line.
+  `keyDerivation` greps nowhere by design (it stands in for the SDK's
+  derivation functions, which the docs name). Every argument token that greps
+  in source (env-var names, circuit names, path literals) is bold, the rest
+  is not. A root key or contract address that participates in derivation
+  renders as a broad-dashed identity node carrying its env-var name in bold.
+  Derivation edges are broad-dashed and every arrow points at the thing
+  generated or used: input nodes point INTO the note, and the note points at
+  what its call derives.
 - A circuit's behaviour is a bullet list inside that circuit's dotted box, never a
   separate floating note.
 - Dashed no-fill rectangle for an actor cluster: it draws a visible dashed outline
   around the shapes that act as one party (the User composite with its wallets).
-- Dashed edge for key derivations.
+- Broad-dashed edge (`dashPattern=8 8`) for key derivations, copied from the
+  palette's derivation sample.
 - Circle (`strokeWidth=2`, font size 20) for step numbers, in the step's colour.
 
 ## Layered composition (NEVER BREAK)
@@ -154,9 +183,13 @@ A diagram is composed in layers, and each layer must stand on its own:
 ## Flow diagram membership (NEVER BREAK)
 
 An example's actor map is the ONLY diagram showing the contract's full anatomy:
-every exported circuit and every ledger field. A flow diagram's contract box
-carries ONLY the ledger fields and circuits that flow interacts with, so a new
-circuit or field dirties one diagram, not one per flow. Membership is read from
+every exported circuit, every witness and every ledger field. Exported PURE
+circuits stay off the diagrams by default (they are helpers, not protocol
+surface): a specific document may reintroduce one deliberately, case by case.
+A flow diagram's contract box
+carries ONLY the members (ledger fields, circuits, witnesses)
+that flow interacts with, so a new member dirties one diagram, not one per
+flow. Membership is read from
 the contract source and the flow's executable flow files
 (`integration-tests/src/flows/`), never from prose.
 
