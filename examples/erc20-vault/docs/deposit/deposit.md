@@ -356,9 +356,13 @@ how to mint to a different wallet's coin public key.
 ## The shared vault and reader setup
 
 Every circuit call goes through the deployed vault, joined once with the
-caller's secret key as private state: the `vault` object in the snippets
+caller's identity secret as private state: the `vault` object in the snippets
 above comes from the `findDeployedContract` joining snippet in the
 [README's integration walkthrough](../../README.md#integration-walkthrough).
+That secret is the user's own random value, named
+`MIDNIGHT_USER1_VAULT_SECRET` in the diagram and supplied to the integration
+tests by the environment variable of that name, which lands with the contract
+and test changes that split it from the Midnight wallet seed.
 
 The off-chain steps (3 to 5) share one `SignetRequestResponseReader` over the
 vault / singleton pair, and the expected signer of the deposit sweep is the
@@ -402,7 +406,9 @@ const reader = new SignetRequestResponseReader({
 // path is the caller's identity commitment, computed with the vault's
 // compiled circuit (never a TypeScript re-implementation) and rendered as
 // its full-width lowercase hex, the MPC's rendering of every record's 32
-// opaque path bytes (see the README's Derived keys and accounts).
+// opaque path bytes. deriveEvmAddress is the concrete function behind the
+// diagram's abstract keyDerivation(...) note: see the README's Derived keys
+// and accounts.
 const userCommitment = pureCircuits.userCommitment(callerSecretKey);
 const evmUserAddress = deriveEvmAddress(
   mpcRootPublicKey,

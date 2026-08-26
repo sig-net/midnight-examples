@@ -219,7 +219,7 @@ migrates first: no new flow work starts until these land.
       one-liner before the diagram, and the six `###` headings and six
       mermaid notes respell to the re-frozen `Step N:` strings, byte-equal
       across all three renderings.
-- [ ] Deposit diagram's horizontal vault-to-singleton gap settled: trimming
+- [x] Deposit diagram's horizontal vault-to-singleton gap settled: trimming
       took roughly 210 units off the vault box's width, growing the `vl` to
       `sl` gap from 70 (actor map) to roughly 280. Two binding texts point
       opposite ways: docs/diagramming.md says "every lane beside or below
@@ -231,6 +231,19 @@ migrates first: no new flow work starts until these land.
       record here why the wide gap stands (the step and derivation runs
       crossing it keep it from reading as empty). Every other flow diagram
       trims the same box and inherits the answer.
+      DECIDED: the singleton lane pulled in 100 units, leaving a 170-unit
+      band sized to the three vertical runs the deposit flow routes through
+      it. The inheritable rule (also in the context section): the singleton
+      lane sits one normal lane gap (60) from the vault lane, widening only
+      to hold the vertical runs that flow routes between them at the
+      standard 40/45 spacing, so a flow with fewer runs pulls in further.
+- [ ] Deposit `d2` re-synced: the ledger-anatomy item re-routed the actor
+      map's `d2` (anchor moved onto `acct-vault`'s top) AFTER the deposit
+      inherit item built from the map at the previous HEAD, so the deposit
+      copy of `d2` differs in style by exactly that pin. Once the completed
+      map lands, update deposit's `d2` to the map's style byte-identically
+      and re-route its polyline legally, then lint, membership proof (must
+      return to zero mismatches), re-render, eyeball.
 
 ### Derivation story upgrade (prerequisite before the remaining flows)
 
@@ -277,7 +290,11 @@ Verifying a frozen note text is a comparison on the RENDERED text, and the
 recipe is exact: extract each cell's `value` attribute FIRST, then within
 that attribute decode entities (`&nbsp;` becomes a space), turn `<br>` into
 a newline, remove every other tag with no substitution, collapse whitespace
-runs, then match. Two proven traps: decoding the whole document before
+runs, then match. Entity decoding must run to a FIXPOINT: stored values are
+double-encoded (`&amp;amp;nbsp;` in the file is the text `&amp;nbsp;` after
+one pass), so a single decode pass leaves literal `&amp;nbsp;` fragments and
+every frozen string scores zero against a correct file. Three proven traps
+(the fixpoint one above plus these two): decoding the whole document before
 stripping tags makes the strip regex eat from the enclosing `<mxCell` tag
 through the first inner `<br>` and silently destroys the text under test,
 and replacing a stripped tag with a space breaks matches at token
@@ -361,7 +378,37 @@ against the raw file finds nothing by design.
       authored cell). Rename it to a descriptive id
       (`secret-node-icon`) in a quiet change: the palette is a copy
       source, so copies made before the rename are unaffected.
-- [ ] Deposit pair and docs inherit the derivation story, after the actor
+- [ ] Iconography formalised: palette and rules only, no flow or actor
+      diagrams touched. The icons are a SEMANTIC layer, one concept one
+      icon, decoupled from any single cell type so later documentation work
+      can reuse them (e.g. a "ledger tip" callout box in prose docs
+      carrying the database cylinder, threading ledger topics through the
+      documentation by icon). In one change:
+      - `docs/diagram-assets/witness-icon.png` (the repo owner's open-eye
+        icon, verified genuine PNG, 512x512 RGBA) joins the bank: commit
+        it, it is untracked today. The open eye (witness observes) pairs
+        deliberately with the crossed eye (secret stays hidden).
+      - The palette card gains an "Iconography" section: a rendered
+        concept-to-icon table (ledger state: database cylinder, circuit:
+        cog, witness: open eye, secret: crossed eye, plus the actor/lane
+        icons already in the bank row), each entry the copy source for that
+        concept's icon cell. The witness entry embeds the new icon.
+      - docs/diagramming.md gains a matching iconography table as a named
+        subsection, and the member-row and node rules point at it instead
+        of hardcoding per-shape icon choices in prose, so a new icon lands
+        by extending one table.
+      - Verification: lint --strict on the palette pair, re-render it,
+        eyeball crops of every iconography entry at display size.
+- [ ] Witness icon swept through the diagrams, AFTER the iconography item
+      above lands and the in-flight withdraw diagram work is done: every
+      witness member row switches from the cog to the open-eye icon copied
+      from the palette's iconography entry, in the actor map, deposit and
+      withdraw pairs in ONE change (the icons rule's same-change sweep).
+      Lint --strict every touched pair, re-render all of them, eyeball
+      crops of every witness row at display size, and re-run each flow
+      diagram's membership proof (the witness row's style changes in the
+      actor map and every flow copy together, staying byte-identical).
+- [x] Deposit pair and docs inherit the derivation story, after the actor
       map item is reviewed:
       - `docs/deposit/deposit.drawio(.png)`: sync the background to the
         upgraded actor map, byte-identically (id, value, style). The sync is
@@ -382,7 +429,10 @@ against the raw file finds nothing by design.
       - `docs/deposit/deposit.md` and the vault README's "Derived keys and
         accounts" section respelled to the frozen vocabulary: the secret
         as `MIDNIGHT_USER1_VAULT_SECRET` (noting the env var lands with the
-        code change), derivation always via the two named SDK functions.
+        code change), derivation described via the SDK's `deriveEvmAddress`
+        and `deriveMidnightResponseKey` as the concrete functions behind
+        the diagrams' abstract `keyDerivation(...)` notes, naming that
+        correspondence once so a reader can map note to function.
       - Design update only: no contract, test, or env-var code changes in
         this item.
 
@@ -419,8 +469,17 @@ against the raw file finds nothing by design.
       flow section keeps the only generic-diagram embed, new Integration guide
       and Contributor guide sections, Prerequisites, repository layout
       radically simplified.
-- [ ] `docs/withdraw/withdraw.drawio(.png)`: derive withdraw's canonical step
-      strings and freeze them in the correspondence section, then build the
+- [ ] Actor map ledger anatomy completed: the contract exports 17 ledger
+      fields while the map carries 3 (`signBidirectionalEventMap`,
+      `mpcResponseKey`, `vaultEvmAddress`), so the missing 14 join the
+      ledger section, in two columns as the circuits section already does,
+      record types as record blocks and scalars as single lines, styled
+      from the existing ledger rows, and the map pair re-rendered (the
+      vault README's embed path is unchanged). Decision recorded: the
+      anatomy completes literally, the rule stands as written ("every
+      ledger field"), no grouping.
+- [ ] `docs/withdraw/withdraw.drawio(.png)`: canonical step strings frozen
+      in the correspondence section (done above), then build the
       diagram per the background + flow construction (actor-map copy, trimmed
       to withdraw's interacted members, step layer appended) for
       withdraw / completeWithdraw / refund, settle as an explicit branch.
@@ -527,6 +586,24 @@ the deposit wording verbatim ("poll for the MPC's signature", "poll for the
 MPC's attestation"), and the broadcast step names what is broadcast in README
 vocabulary. Once authored, add the flow's strings to this section: from then
 on they are byte-frozen.
+
+**Canonical step strings, withdraw** (frozen). Withdraw has no fund step, and
+its settle is a branch whose two arms share ordinal 5, exactly as the
+contract's own step comments number them (`Runtime step 5 (withdraw):
+completeWithdraw() / refund()`). Wording from the vault README's withdraw
+deep-dive (`git show beeb8f3:examples/erc20-vault/README.md`, section
+"Withdraw") under truth priority:
+
+1. `Step 1: withdraw(...) burns the surrendered coin and records the request`
+2. `Step 2: poll for the MPC's signature`
+3. `Step 3: broadcast the transfer to the EVM chain`
+4. `Step 4: poll for the MPC's attestation`
+5. `Step 5: completeWithdraw(...) settles on the attested output`
+6. `Step 5: refund(...) re-mints when the transfer never executed`
+
+A settle branch shares one ordinal with one canonical string per arm, and
+each arm's string still appears exactly once per diagram and twice per page
+(two `### Step 5:` headings each satisfy check 1's regex on their own).
 
 **The six checks** (C1 implements, per flow page):
 
@@ -649,6 +726,13 @@ on they are byte-frozen.
       (scale and offset per axis), so a `sips -c` crop of a model region is
       one computation instead of three. Every crop in the actor-map upgrade
       needed the calibration line transcribed and applied by hand.
+- [ ] Lint: check leads as well as tails (the tail check catches a first
+      segment under 40 units out of the source, but nothing checks the
+      final segment into the arrowhead), and flag a shape-to-edge clearance
+      under 20 units for edges passing close to unrelated shapes. Both were
+      eyeball-only on the deposit inherit rebuild, and the tail check's
+      three genuine catches there show the lead-side twin would pay for
+      itself.
 - [ ] Skill: concurrent-editor guard: hash the target `.drawio` before and
       after every edit batch and re-check before finishing. Mid-task an open
       draw.io editor re-serialised `deposit.drawio` under the executing
@@ -758,6 +842,12 @@ authoring conversation:
   explicit two-corner jog in the nearest gutter (the anchor rules beat
   straightness), and an off-centre anchor needed for a straight run goes on
   the tall source box, never on the note the arrowhead lands in.
+- **Vault-to-singleton band sizing (decided once on the deposit diagram,
+  every flow diagram inherits it):** the singleton lane sits one normal
+  lane gap (60 units) from the vault lane, widening only to hold the
+  vertical runs that flow routes between the two lanes, at the standard
+  40/45 run spacing with 40 units of clearance each side. A flow with
+  fewer runs pulls the singleton lane in further.
 - **Protocol semantics:** the five-step walkthrough in this repo's root README
   ("Sign Bidirectional Flow") and the per-flow evidence in
   `examples/erc20-vault/integration-tests/src/flows/` (the flow files document
