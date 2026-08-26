@@ -175,7 +175,7 @@ scratch.
 - [x] `docs/sign-bidirectional-flow.drawio(.png)`: rebuilt clean, all
       conventions applied through iterative agent rounds.
 - [x] Embedded in the root README's "Sign Bidirectional Flow" section.
-- [ ] Hand-tidied generic pair normalised to the edge-label golden rules:
+- [x] Hand-tidied generic pair normalised to the edge-label golden rules:
       the working-tree `docs/sign-bidirectional-flow.drawio` carries the
       repo owner's hand edit, whose INTENT is authoritative (actor-prefixed
       labels, initiator-directed edges, re-placed circles, the `Reads:/On:`
@@ -189,7 +189,73 @@ scratch.
       `docs/sign-bidirectional-flow-handtidied.png`. The reference PNG and
       `docs/handtidying-notes.scratch.md` are the owner's scratch, left
       for the owner to remove.
-- [ ] Replaces the integration repo's copy (C5 below).
+      DONE: 19 errors and 12 warnings to zero with zero golden-rules
+      label strikes, every route pinned and attached (`e-complete`,
+      `e-emit-resp`, `e-emit-respbi` gained real targets), the three
+      purple dApp stubs consolidated onto one anchor,
+      `e-watch-foreign-l`'s bolded verb fixed alongside the named
+      `e-watch-notif-l` (same defect, internal consistency), and the
+      editor `<font color>` residue wrapping line breaks in
+      `n-sign`/`n-attest` stripped with the rendered text proven
+      byte-identical. Reference-render parity eyeballed side by side
+      (the reference embeds a model byte-identical to the pre-edit
+      source, so the comparison is a true before/after). Judgement
+      recorded: `e-post-resp`'s 40-unit tail forces its gutter to 5u
+      from the ml lane border (the alternatives reshape layout, not
+      routes). The three surviving advisory notes are the `align=left`
+      estimated-box artefact recorded as a harvest item.
+- [x] Owner feedback round on the normalised pair: the seating and
+      alignment rules STAND (text over the line, centred on the run):
+      the defect is the oversized KNOCKOUT GAP. New golden rule: the
+      background knockout hugs the label's text ink: the break in the
+      run extends only over the actual text plus a small margin, never
+      over the label box's empty padding, and a run stays visibly a
+      line on both sides of its label: when the run is too short for
+      that, grow the gap between the shapes rather than accepting
+      orphaned stubs. Owner's named strikes: `e-start-map-l` (the
+      arrowhead touches the text top while a long blank sits between
+      the text bottom and the resuming stub) and `e-extract-sigs-l`
+      (the green run's break swallows far more than the text). Changes:
+      the rule added to docs/diagramming.md's golden-rules section,
+      every riding label in the generic pair swept for oversized
+      knockouts and fixed (tighten label geometry to hug text, or
+      lengthen a too-short run), and the fixed pair re-copied
+      byte-identically over the integration repo checkout's copy (C5's
+      prepared tree must not ship the orphaned stubs). A lint check for
+      knockout gaps is designed AFTER the diagram-side fix reveals the
+      mechanism: recorded as a harvest item.
+      DONE, and the measured mechanism differs from the diagnosis: the
+      knockout ALREADY hugs the text ink (1-2u margins on every label,
+      draw.io sizes the background to the text automatically), so the
+      real causes were the RUN, not the label: `e-start-map`'s 45u run
+      left a 9u top stub that was entirely arrowhead (fixed by growing
+      the run to 75u: `cl` grew upward into space from lifting the `ml`
+      lane top 30u, children re-based so every other absolute
+      coordinate held), and `e-extract-sigs-l`'s top stub was crowded
+      to ~5u of clean line by the step-3 circle (label slid 30u down
+      its run). A sweep found three more one-sided stubs (`e-submit-l`,
+      `e-watch-notif-l`, `e-extract-att-l`), all fixed by offset
+      slides. Every riding label now shows 21u or more of visible line
+      on both sides of a text-hugging break. The rule landed in
+      docs/diagramming.md as one golden-rules bullet (visible line both
+      sides, grow the shape gap for a too-short run, keep the run's
+      furniture clear of the break, a vertical-run label may slide
+      along its run). Lint --strict green, round-trip clean, both
+      named strikes crop-verified, and the fixed pair re-copied
+      byte-identically over the integration repo checkout (backup
+      untouched, md5-verified).
+- [x] Replaces the integration repo's copy (C5 below), AFTER the
+      hand-tidied normalisation above lands: C5 ships the normalised
+      pair, and the integration repo's existing diagram is KEPT as a
+      renamed backup (the original hand-drawn seed of this system's
+      rules), never deleted.
+      DONE in the integration repo's docs-branch checkout: the seed
+      renamed to `docs/sign-bidirectional-flow-hand-drawn-seed.drawio.png`
+      (bytes untouched, embedded model verified, nothing references
+      it), the normalised pair copied in byte-identically (the `.drawio`
+      source is new there: the repo carried the PNG alone), the README
+      embed resolves unchanged, lint --strict green in place. The PR
+      itself remains under C5 below.
 
 ### Step-pattern refactor (before the remaining flows)
 
@@ -279,7 +345,7 @@ not-yet-reworked diagram simply still shows the cog until its task lands.
       propagate: every diagram carrying copies of those cells inherits
       them byte-identically (the widened deposit and withdraw items
       below).
-- [ ] Actor-map derivation edges completed and the MPC note column
+- [x] Actor-map derivation edges completed and the MPC note column
       aligned (after the conformance rework, BEFORE deposit and
       withdraw): the derivation rule says inputs present on the diagram
       point INTO each note that names them, and two gaps stand: the
@@ -302,6 +368,25 @@ not-yet-reworked diagram simply still shows the cog until its task lands.
       the subset direction of the membership proof keeps existing flow
       diagrams green. Lint --strict, phase-stroke zero-hit,
       frozen-string checks, render, eyeball crops.
+      DONE: four edges added (`dvaddr-respkey`, `dvaddr-vault`,
+      `dvaddr-acct`, `dmpc-acct`) as a shared input bus: lint holds
+      same-colour crossings as errors, which forces the derivation
+      layer planar, so the vault-address feeder drops the x=981 gutter
+      (collinear with `d2`'s column, disjoint in y), joins the existing
+      x=1371 MPC trunk, and the bus T-drops into each note and runs on
+      to `n-acct`'s bottom face. Two visible strokes, tails and leads
+      legal, the model's bottom bound grew to 1360. The three MPC notes
+      left-aligned on x=1415 (lane unchanged, padding 24u each side),
+      and the sibling-note rule in docs/diagramming.md now says the
+      boxes left-align on one shared x so the verbs read as a column.
+      Propagation verified, not assumed: deposit's and withdraw's
+      membership deltas are byte-identical before and after (5 and 4
+      mismatches, all owned by their queued conformance items). The
+      orchestrator declined the direct-route alternative: it re-anchors
+      `dmpc-vault` (a style change) and widens both queued byte-copy
+      lists for marginal visual gain. The map's calibration warning is
+      now live (`bottom=dvaddr-acct`, explained): see the bound-setting
+      edge harvest item.
 - [ ] Deposit conformance rework (after both actor-map tasks), in ONE
       change, byte-copying every background cell it touches from the
       reworked actor map:
@@ -323,8 +408,9 @@ not-yet-reworked diagram simply still shows the cog until its task lands.
         the thing read), strict acting-party format on every riding label
         (`f1-l`'s cargo text respelled as a Funds action), verb table
         (`Watches for transaction execution` becomes `Picks up
-        transaction execution`), alignment per crossing axis,
-        run-through-centre seating.
+        transaction execution`), alignment and seating per the
+        golden rules, knockout gaps hugging the text per the
+        owner-feedback rule.
       Full verification cycle, membership proof back to zero mismatches.
 - [ ] Withdraw conformance rework (after both actor-map tasks, parallel
       with deposit): byte-copy of the four cells the conformance rework
@@ -635,7 +721,20 @@ starts only after its diagram item is reviewed.
       rule as timeless rules.
 - [x] C4 typo: `respondBidrectional` greps nowhere in this repo.
 - [ ] C5 integration repo PR: replace its diagram with the rebuilt generic pair
-      (separate PR, referenced from this repo's PR).
+      (separate PR, referenced from this repo's PR). The repo's existing
+      diagram is KEPT as a renamed backup (the original hand-drawn seed of
+      this system's rules), never deleted.
+      Working tree PREPARED (the Generic diagram section's replaces item
+      records the change and its verification) and the PR title and
+      description are drafted in the executing agent's report: what
+      remains is the owner's step, commit, push and PR open in
+      `midnight-integration-docs-diagrams`, linking the examples PR once
+      that exists. Two owner decisions ride with it: whether to note in
+      the integration repo that the examples repo is canonical for
+      future edits of this diagram, and whether that repo needs its own
+      `drawio.config.json` (today the CLI defaults coincide with the
+      examples repo's committed scale 3, border 10, so drift is
+      currently invisible).
 
 ## The correspondence contract (KEY)
 
@@ -897,7 +996,10 @@ each arm's string still appears exactly once per diagram and twice per page
 - [ ] Lint: narrow the stacked/parallel-run checks to runs whose x (or y)
       spans actually overlap. Runs 60 units apart horizontally are
       currently reported as stacked, and every such note costs a
-      read-and-justify round.
+      read-and-justify round. Nuance from the generic-pair
+      normalisation: 3 of its 4 baseline stacked notes named disjoint
+      runs and aligning them was still the right fix each time, so the
+      narrowing should demote such hits, not silence them.
 - [ ] Lint: flag text ink wider than its box (a long unbreakable token like
       `completeWithdraw(...)` overflows its caption and paints over
       neighbours, invisible in XML and to every current check): pairs with
@@ -933,6 +1035,93 @@ each arm's string still appears exactly once per diagram and twice per page
       says "nothing to fit" rather than a delta against an estimated box.
       The ink-wider-than-box LINT item below stays open and still pairs
       with the measured-ink edge-label rework.
+- [ ] `measure --fit` on a stroked shape counts the border as ink:
+      `--fit hex-resp` on the generic pair advises growing a hexagon
+      that already hugs its label. Restrict the fit verdict to text
+      ink, or subtract a detected border rectangle before applying the
+      8/6 padding.
+- [ ] measure and lint centre an `align=left` edge label's estimated
+      box on its anchor, but mxGraph places such a label with its LEFT
+      edge at the anchor: a half-width error that produced 5 of the 8
+      surviving advisory notes on the normalised generic pair (four of
+      them on `e-complete-l` alone), each costing a crop-and-disprove
+      round, and it makes the seating check's x verdict unreliable for
+      `align=left` labels crossed by a vertical run. Pairs with the
+      measured-ink edge-label item above. Confirmed by pixel
+      measurement on a synthetic fixture (103u single-line label,
+      anchor at model x=200, scale 3, ink scanned from the render and
+      mapped back through the render's own affine): `align=center` ink
+      spans 149.3..252.7u centred on the anchor, `align=left` ink
+      spans 201.7..305u with the text's LEFT edge on the anchor.
+      Incidental from the same fixture: a label with no
+      `verticalAlign` token renders its text about 12u below the
+      anchor, while `verticalAlign=middle` centres it (166.7..174.3u
+      for an anchor at y=170): the palette's edge-label style carries
+      the token, so committed diagrams are unaffected in practice.
+- [ ] `measure --affine` (and the calibration under it) reports a bogus
+      affine with a huge residual shift when the PNG was rendered at a
+      scale other than the config's (a scale-1 render produced a
+      nonsensical -1182,-837px shift with no hint of the cause): detect
+      the scale mismatch and warn loudly instead of publishing numbers.
+- [ ] Lint editor-junk check learns `<font color="...">` as a junk
+      token: the generic pair's `n-sign` and `n-attest` carried
+      `<font color="#000000"><br></font>` (editor residue wrapping an
+      invisible line break), which the inline-CSS token matching does
+      not see.
+- [ ] `measure` flag parsing after `--cell <id>`: `--fit` given in the
+      form `--cell <id> --fit` is silently swallowed as a valueless
+      flag (no fit line, no error: the working form is `--fit <id>`),
+      and `--quiet-calibration` after `--cell <id>` is consumed by the
+      variadic id list ("cell --quiet-calibration: not a vertex") while
+      the chatter prints anyway. Parse flags before variadic ids, or
+      fail loudly.
+- [ ] `measure --fit` double-counts a text cell's own spacing tokens:
+      `n-read` carries `spacingLeft=8;spacingRight=8`, its measured ink
+      already sits inside that inset, and the fit adds the 8u rule on
+      top ("delta +12x+2" on a correctly hugged box). Subtract declared
+      spacing from the implied box, or name the spacing in the verdict.
+- [ ] Calibration demotion covers only edge-LABEL overhangs, so a
+      bound-setting EDGE keeps the warning loud forever: the actor map
+      now warns on `bottom=dvaddr-acct` with a fully explained 30px
+      residual (the webapp pads an edge's bounds beyond its declared
+      polyline). Extend the demotion to an attributed bound-setting
+      edge whose residual sits within the border.
+- [ ] Guide-vs-tool gap on same-colour crossings, a DECISION before any
+      code: lint holds every crossing of two default-stroked edges as
+      an ERROR (which forces the derivation layer planar and drove the
+      actor map's bus design), while docs/diagramming.md scopes the
+      no-crossing rule to step colours and elsewhere invites
+      `jumpStyle=arc`. Either the guide states plainly that neutral
+      edges may not cross either and jumps are for step layers only, or
+      the check exempts crossings carrying an explicit jump. A design
+      round was burned on the gap.
+- [ ] Skill: note in the verify section that the model-to-pixel affine
+      changes whenever an edit moves the model bounds, so
+      `measure --affine` is re-read after every render, never cached
+      across edits (the actor-map bus grew the bottom bound and shifted
+      the y offset mid-task).
+- [ ] Lint: visible-run check (the knockout-gap check, re-aimed by the
+      measured mechanism): the knockout always hugs the text ink (1-2u
+      margins, draw.io sizes the background automatically), so checking
+      knockout padding would be vacuous. Check instead what actually
+      failed: a riding label leaving less than ~20u of visible run on
+      either side of its break (the orphaned-stub defect: an
+      arrowhead-only stub is the worst case), and step-circle or other
+      furniture crowding the stub below the same clearance. Depends on
+      measured text ink, so it pairs with the measured-ink edge-label
+      item. Implementation note from the fix: colour-profiling a run's
+      stroke needs a tight tolerance (about +-40/channel: at +-55,
+      antialiased black glyph edges match purple and fabricate phantom
+      breaks).
+- [ ] `measure --affine` bakes the calibration residual into its
+      offset: it printed `px = (mx-347)*3 + 54` for a render whose true
+      mapping is `+76` (a 22px error, enough to miss a 6px stroke),
+      because the residual shift it derives includes the attributed
+      label-overhang error its own calibration line warns about.
+      Subtract the attributed overhang before deriving the offset, or
+      refuse to print an affine while a live calibration WARNING
+      stands. Distinct from the scale-mismatch item above: this fires
+      at the correct scale.
 - [ ] Lint: the floating-connection warning fires on palette sample edges
       whose endpoints are zero-area point shapes, where exit and entry
       sides are geometrically meaningless. The samples were pinned to
