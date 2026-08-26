@@ -251,33 +251,50 @@ migrates first: no new flow work starts until these land.
       lane sits one normal lane gap (60) from the vault lane, widening only
       to hold the vertical runs that flow routes between them at the
       standard 40/45 spacing, so a flow with fewer runs pulls in further.
-- [ ] Deposit `d2` re-synced: the ledger-anatomy item re-routed the actor
-      map's `d2` (anchor moved onto `acct-vault`'s top) AFTER the deposit
-      inherit item built from the map at the previous HEAD, so the deposit
-      copy of `d2` differs in style by exactly that pin. Once the completed
-      map lands, update deposit's `d2` to the map's style byte-identically
-      and re-route its polyline legally, then lint, membership proof (must
-      return to zero mismatches), re-render, eyeball.
-- [ ] Deposit membership re-read under the withdraw precedent: the withdraw
-      diagram's membership reading counts a ledger field as interacted-with
-      when the flow's OWN flow files name it, which brought
-      `signetRequestNonce`, `initialized`, `evmChainId` and `caip2Id` into
-      the withdraw box. `flows/deposit.ts` names all four too, so the
-      deposit box is under-inclusive by that precedent: re-read deposit's
-      membership under the same rule, copy the missing field rows
-      byte-identically from the actor map, re-seat, and re-run the full
-      verification cycle. Runs naturally together with the `d2` re-sync
-      item above (same file, same proof).
-- [ ] Deposit and withdraw label audit under the edge-label golden rules:
-      direction (the initiator at the tail: deposit's `e2b` currently
-      arrows INTO the MPC's Reads note, and the read points at the thing
-      read), strict acting-party format on every riding label (`f1-l`'s
-      cargo text respelled as a Funds action), verb-table conformance
-      (`Watches for transaction execution` becomes `Picks up transaction
-      execution`), alignment tokens per crossing axis, and run-through-
-      centre seating. Full verification cycle on both pairs. Runs
-      naturally together with the deposit `d2` re-sync and membership
-      re-read items above (same files, same proofs).
+**Per-diagram conformance rework.** Everything each committed diagram owes
+to the new rules (edge-label golden rules, verb table, witness iconography)
+plus its pending syncs, packaged ONE TASK PER DIAGRAM so the reworks
+parallelise across agents. Ordering constraint: the actor-map task runs
+FIRST, then deposit, withdraw and the generic pair (Generic diagram section)
+run in parallel, as the flow diagrams byte-copy the map's cells. Splitting
+the witness-icon swap per diagram is sanctioned: the icons rule's
+same-change clause guards the embeds of a CHANGED bank file, while this
+swap changes no bank file (the cog is a built-in reference), so a
+not-yet-reworked diagram simply still shows the cog until its task lands.
+
+- [ ] Actor-map conformance rework (FIRST): the witness member row's icon
+      swaps from the cog to the open eye copied from the palette's
+      iconography entry, plus a golden-rules pass over its notes and any
+      edge labels. Lint --strict, phase-stroke zero-hit, frozen-string
+      checks, render, eyeball crops. The vault README embed path is
+      unchanged.
+- [ ] Deposit conformance rework (after the actor-map rework), in ONE
+      change, byte-copying every background cell it touches from the
+      reworked actor map:
+      - witness row icon swap (byte-copy of the map's new row),
+      - `d2` re-sync: the ledger-anatomy item re-routed the map's `d2`
+        (anchor onto `acct-vault`'s top) after the deposit inherit built
+        from the previous HEAD, so deposit's copy differs in style by
+        exactly that pin: take the map's style byte-identically and
+        re-route the polyline legally,
+      - membership re-read under the withdraw precedent (a ledger field
+        counts as interacted-with when the flow's own flow files name it):
+        `flows/deposit.ts` names `signetRequestNonce`, `initialized`,
+        `evmChainId` and `caip2Id`, so those rows join the box,
+      - label audit under the edge-label golden rules: direction (`e2b`
+        currently arrows INTO the MPC's Reads note, and a read points at
+        the thing read), strict acting-party format on every riding label
+        (`f1-l`'s cargo text respelled as a Funds action), verb table
+        (`Watches for transaction execution` becomes `Picks up
+        transaction execution`), alignment per crossing axis,
+        run-through-centre seating.
+      Full verification cycle, membership proof back to zero mismatches.
+- [ ] Withdraw conformance rework (after the actor-map rework, parallel
+      with deposit): witness row icon swap (byte-copy of the map's new
+      row) and the label audit under the edge-label golden rules over its
+      riding labels (acting-party format, verb table, alignment,
+      run-through-centre, direction). Full verification cycle, membership
+      proof zero mismatches.
 - [ ] Actor map working size settled: the completed anatomy measures
       1695x1260 model units against the style guide's roughly 1300x800
       budget, and the guide says outgrowing diagrams split rather than
@@ -415,11 +432,17 @@ against the raw file finds nothing by design.
       - Lint --strict both pairs, phase-stroke zero-hit, frozen-string
         rendered-text checks against .drawio and PNG model, render both
         pairs, eyeball downscaled plus crops.
-- [ ] Palette follow-up: the EXAMPLE_SECRET icon cell still carries the
-      bare webapp id `2` (kept during the icon swap to preserve the
-      authored cell). Rename it to a descriptive id
-      (`secret-node-icon`) in a quiet change: the palette is a copy
-      source, so copies made before the rename are unaffected.
+- [ ] Palette follow-up, one quiet change, parallel-safe with every
+      diagram rework: the EXAMPLE_SECRET icon cell still carries the bare
+      webapp id `2` (kept during the icon swap to preserve the authored
+      cell): rename it to `secret-node-icon` (the palette is a copy
+      source, so copies made before the rename are unaffected). And the
+      bank file `eye-icon.png` renames to `secret-icon.png`: the bank
+      names icons by concept (`witness-icon.png` set the precedent,
+      re-opening the sibling's name), embedded payloads are copies so
+      only path references move (the iconography table row in
+      docs/diagramming.md, any other grep hits for `eye-icon.png`: mover
+      pays, grep repo-wide and update every hit).
 - [x] Iconography formalised: palette and rules only, no flow or actor
       diagrams touched. The icons are a SEMANTIC layer, one concept one
       icon, decoupled from any single cell type so later documentation work
@@ -441,21 +464,11 @@ against the raw file finds nothing by design.
         by extending one table.
       - Verification: lint --strict on the palette pair, re-render it,
         eyeball crops of every iconography entry at display size.
-- [ ] Witness icon swept through the diagrams, AFTER the iconography item
-      above lands and the in-flight withdraw diagram work is done: every
-      witness member row switches from the cog to the open-eye icon copied
-      from the palette's iconography entry, in the actor map, deposit and
-      withdraw pairs in ONE change (the icons rule's same-change sweep).
-      Lint --strict every touched pair, re-render all of them, eyeball
-      crops of every witness row at display size, and re-run each flow
-      diagram's membership proof (the witness row's style changes in the
-      actor map and every flow copy together, staying byte-identical).
-      In the same change, the bank file `eye-icon.png` renames to
-      `secret-icon.png`: the bank now names icons by concept
-      (`witness-icon.png` set the precedent, re-opening the sibling's
-      name), embedded payloads are copies so only path references move
-      (the iconography table row, any other grep hits for `eye-icon.png`:
-      mover pays, grep repo-wide and update every hit).
+- [ ] Witness icon swept through the diagrams: SUPERSEDED by the
+      per-diagram conformance rework tasks in the Step-pattern refactor
+      section, which carry the swap one diagram at a time (the split is
+      sanctioned there). This entry stays only so the sweep's history has
+      a home: no work happens under it.
 - [x] Deposit pair and docs inherit the derivation story, after the actor
       map item is reviewed:
       - `docs/deposit/deposit.drawio(.png)`: sync the background to the
@@ -781,31 +794,44 @@ each arm's string still appears exactly once per diagram and twice per page
       eyeball-only on the deposit inherit rebuild, and the tail check's
       three genuine catches there show the lead-side twin would pay for
       itself.
-- [ ] Golden-rules lint suite, from the edge-label golden rules in
-      docs/diagramming.md (they supersede the own-edge advisory check,
-      which retires when the first of these lands):
-      - Run-through-centre: error when a riding label neither straddles
-        its run centred nor sits legally alongside (run on the label's
-        left, top or bottom, never its right).
-      - Alignment: the `align` token must match the crossing axis (left
-        for a horizontal crossing, center for a vertical run).
-      - Format: first line bold and colon-terminated, body starting with
-        a capital letter.
-      - Overlap: the label-over-label advisory promotes to an error once
-        label boxes come from measured ink instead of char estimates.
-      - Editor junk: flag inline CSS (`style="color:`, `scrollbar-color`,
-        `light-dark`) inside cell values.
-      - Initiator direction (advisory, later): the bold prefix should
-        name the edge's source-side lane or actor, via a small per-diagram
-        alias table.
+- [x] Golden-rules lint suite, four checks landed and smoke-proven, the
+      own-edge advisory check retired in the same change (superseded: a
+      vertical run crossing text is now the sanctioned default):
+      - Run-through-centre (note tier): straddle the run centred, or sit
+        legally alongside (run on the label's left, top or bottom, never
+        its right). Fires zero strikes on all committed diagrams: the
+        audit ahead is about align tokens and format, not seating.
+      - Alignment vs crossing axis (note tier): `align=left` for a
+        horizontal crossing, `align=center` for a vertical run, the
+        alongside case included.
+      - Format (note tier): first line bold and colon-terminated, body
+        starting with a capital. Whole-text call expressions exempt as
+        code labels.
+      - Editor junk (warning tier): `scrollbar-color`, `light-dark(`, and
+        `color:`/`background-color:` inside value markup, with the
+        palette's Menlo code scaffold sanctioned by shape.
+      - Specimen exemption: labels on edges whose both endpoints are
+        degenerate points (4u or smaller) are legend captions, exempt
+        from alignment and format, still seated by check 1, and exempted
+        labels are named in a per-check vacuity note so coverage loss is
+        visible.
+      - Every check guarded: planted violations seen firing, each check
+        blinded in turn with exactly its own assertion failing, vacuity
+        notes ending "(vacuous, not green)".
+- [ ] Lint: label-over-label overlap promotes from advisory to error once
+      label boxes come from measured ink instead of char estimates (the
+      measured-ink rework is the `measure` edge-label item above).
+- [ ] Lint (advisory, later): initiator direction: the bold prefix should
+      name the edge's source-side lane or actor, via a small per-diagram
+      alias table.
 - [ ] Golden-rules checks promoted from note to error tier. The
       run-through-centre, alignment and format checks land as ADVISORY
       NOTES only so `lint --strict` stays green on committed diagrams that
-      predate the label rules. That grace period ends when the two audit
+      predate the label rules. That grace period ends when the conformance
       items land: "Hand-tidied generic pair normalised to the edge-label
-      golden rules" (Generic diagram section) and "Deposit and withdraw
-      label audit under the edge-label golden rules" (Derivation story
-      upgrade section). The moment both are ticked, promote all three
+      golden rules" (Generic diagram section) and the three per-diagram
+      conformance rework tasks (Step-pattern refactor section: actor map,
+      deposit, withdraw). The moment all four are ticked, promote all three
       checks to errors in the CLI, re-run `lint --strict` over every
       committed pair in this repo, and fix anything that fires: a note
       tier left permanent is a rule nobody is held to.
