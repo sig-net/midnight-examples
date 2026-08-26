@@ -244,6 +244,24 @@ migrates first: no new flow work starts until these land.
       map lands, update deposit's `d2` to the map's style byte-identically
       and re-route its polyline legally, then lint, membership proof (must
       return to zero mismatches), re-render, eyeball.
+- [ ] Deposit membership re-read under the withdraw precedent: the withdraw
+      diagram's membership reading counts a ledger field as interacted-with
+      when the flow's OWN flow files name it, which brought
+      `signetRequestNonce`, `initialized`, `evmChainId` and `caip2Id` into
+      the withdraw box. `flows/deposit.ts` names all four too, so the
+      deposit box is under-inclusive by that precedent: re-read deposit's
+      membership under the same rule, copy the missing field rows
+      byte-identically from the actor map, re-seat, and re-run the full
+      verification cycle. Runs naturally together with the `d2` re-sync
+      item above (same file, same proof).
+- [ ] Actor map working size settled: the completed anatomy measures
+      1695x1260 model units against the style guide's roughly 1300x800
+      budget, and the guide says outgrowing diagrams split rather than
+      squeeze. The all-17 decision forces the overrun, so decide ONCE:
+      accept the actor map as the one sanctioned exception (record it in
+      docs/diagramming.md's working-size section), or split/regroup the
+      anatomy. Judge against the vault README's rendered embed legibility
+      at README column width before deciding.
 
 ### Derivation story upgrade (prerequisite before the remaining flows)
 
@@ -378,7 +396,7 @@ against the raw file finds nothing by design.
       authored cell). Rename it to a descriptive id
       (`secret-node-icon`) in a quiet change: the palette is a copy
       source, so copies made before the rename are unaffected.
-- [ ] Iconography formalised: palette and rules only, no flow or actor
+- [x] Iconography formalised: palette and rules only, no flow or actor
       diagrams touched. The icons are a SEMANTIC layer, one concept one
       icon, decoupled from any single cell type so later documentation work
       can reuse them (e.g. a "ledger tip" callout box in prose docs
@@ -408,6 +426,12 @@ against the raw file finds nothing by design.
       crops of every witness row at display size, and re-run each flow
       diagram's membership proof (the witness row's style changes in the
       actor map and every flow copy together, staying byte-identical).
+      In the same change, the bank file `eye-icon.png` renames to
+      `secret-icon.png`: the bank now names icons by concept
+      (`witness-icon.png` set the precedent, re-opening the sibling's
+      name), embedded payloads are copies so only path references move
+      (the iconography table row, any other grep hits for `eye-icon.png`:
+      mover pays, grep repo-wide and update every hit).
 - [x] Deposit pair and docs inherit the derivation story, after the actor
       map item is reviewed:
       - `docs/deposit/deposit.drawio(.png)`: sync the background to the
@@ -469,7 +493,7 @@ against the raw file finds nothing by design.
       flow section keeps the only generic-diagram embed, new Integration guide
       and Contributor guide sections, Prerequisites, repository layout
       radically simplified.
-- [ ] Actor map ledger anatomy completed: the contract exports 17 ledger
+- [x] Actor map ledger anatomy completed: the contract exports 17 ledger
       fields while the map carries 3 (`signBidirectionalEventMap`,
       `mpcResponseKey`, `vaultEvmAddress`), so the missing 14 join the
       ledger section, in two columns as the circuits section already does,
@@ -478,7 +502,7 @@ against the raw file finds nothing by design.
       vault README's embed path is unchanged). Decision recorded: the
       anatomy completes literally, the rule stands as written ("every
       ledger field"), no grouping.
-- [ ] `docs/withdraw/withdraw.drawio(.png)`: canonical step strings frozen
+- [x] `docs/withdraw/withdraw.drawio(.png)`: canonical step strings frozen
       in the correspondence section (done above), then build the
       diagram per the background + flow construction (actor-map copy, trimmed
       to withdraw's interacted members, step layer appended) for
@@ -733,6 +757,28 @@ each arm's string still appears exactly once per diagram and twice per page
       eyeball-only on the deposit inherit rebuild, and the tail check's
       three genuine catches there show the lead-side twin would pay for
       itself.
+- [ ] Lint or membership tooling: flag a re-anchored background edge by
+      name. `exitX`/`entryY` live in style, so re-routing an inherited edge
+      silently breaks the flow-membership byte-identity, and only the
+      membership script's generic "style differs" catches it. A check that
+      says "background edge re-anchored: <id>" turns a puzzling diff into a
+      named defect.
+- [ ] Lint: narrow the stacked/parallel-run checks to runs whose x (or y)
+      spans actually overlap. Runs 60 units apart horizontally are
+      currently reported as stacked, and every such note costs a
+      read-and-justify round.
+- [ ] Lint: flag text ink wider than its box (a long unbreakable token like
+      `completeWithdraw(...)` overflows its caption and paints over
+      neighbours, invisible in XML and to every current check): pairs with
+      the open `measure --fit` item.
+- [ ] Render and lint: fail loudly when the parsed cell count is far below
+      the source's `<mxCell` count. A malformed geometry splice (broken
+      `<Array as="points">` handling) rendered "loaded 2 of 145 cells" as
+      an easily missed log line while producing a blank-looking PNG.
+- [ ] Palette: add a ledger record-block sample and a step-caption sample
+      carrying a realistically long circuit token: both shapes exist in
+      committed diagrams but have no copy source on the card, so agents
+      reverse-engineer them from diagrams instead of copying.
 - [ ] Skill: concurrent-editor guard: hash the target `.drawio` before and
       after every edit batch and re-check before finishing. Mid-task an open
       draw.io editor re-serialised `deposit.drawio` under the executing

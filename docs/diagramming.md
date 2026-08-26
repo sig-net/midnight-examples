@@ -87,13 +87,13 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   horizontally and vertically in the header band. The single exception: a contract
   lane whose address participates in key derivation carries its broad-dashed
   identity node horizontally centred directly below the header unit. The lane cell's own
-  value stays empty; the unit is a group (icon + title text) copied from the palette
+  value stays empty: the unit is a group (icon + title text) copied from the palette
   card and centred at the lane's midpoint. A lane whose logo includes its wordmark
-  (Midnight) uses the logo alone as the unit. A lane for a Signet-controlled contract
-  uses the Sig Network logo as its icon.
+  (Midnight) uses the logo alone as the unit. Each lane's icon comes from the
+  [iconography table](#iconography).
 - The MPC lane draws its servers as the palette's server-cluster group, three server
   towers around the Sig Network roundel. The cluster sits horizontally CENTRED in the
-  lane when nothing shares its vertical band; when other content overlaps that band
+  lane when nothing shares its vertical band. When other content overlaps that band
   on one side within the minimum padding, the cluster moves to the top corner AWAY
   from it (content on the left pushes it top-right, content on the right pushes it
   top-left). The lane's width is minimised: just wide enough that reasonable padding
@@ -122,12 +122,10 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
 - Contract-member nodes (ledger state, circuits) are grouped cells: a
   dotted-border box, a text-height icon inside it at the left, and the member's
   code text beside the icon, grouped so they move as one. The icon is 16 units
-  tall: the database cylinder (`shape=mxgraph.flowchart.database`) for ledger
-  state, the cog (`shape=mxgraph.ios7.icons.settings`) for circuits, pure
-  circuits and witnesses. The icon
-  sits 8 in from the border with a 6-unit gap before the text. The code text
-  opens with the compact keyword (`ledger`, `circuit`, `pure circuit`,
-  `witness`) in the code style's
+  tall and is the one the [iconography table](#iconography) gives that member
+  kind. The icon sits 8 in from the border with a 6-unit gap before the text.
+  The code text opens with the compact keyword (`ledger`, `circuit`,
+  `pure circuit`, `witness`) in the code style's
   keyword colour, ALWAYS at normal weight: keywords are never bold. Bold is
   reserved for the greppable name, the thing that greps in the contract
   source, and a keyword is syntax, not a name. A record or map type is a record block: bold type name with
@@ -139,8 +137,8 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   one consistent section gap per diagram, so the grouping reads without
   labels.
 - An identity secret renders as the palette's secret-node sample: a
-  dotted-border box, the crossed-eye icon, and the value's env-var name in
-  Menlo bold.
+  dotted-border box, the secret icon the [iconography table](#iconography)
+  names, and the value's env-var name in Menlo bold.
 - **Key derivation renders as a keyDerivation note plus broad-dashed edges.**
   The note is a broad-dashed box carrying the abstract call
   `keyDerivation(<version>, <inputs...>, <path>)`, one argument per line.
@@ -300,19 +298,43 @@ box gets split into more diagrams (or its sequencing moves to a mermaid diagram 
 README), never squeezed: smaller fonts and higher resolution both fail, since the
 displayed width is fixed and only the model size decides legibility.
 
-## Icons
+## Iconography
+
+Icons are a semantic layer: one concept, one icon, wherever that concept appears. The
+mapping belongs to the concept and not to any one cell type, so the icon that marks a
+ledger member in a diagram is the icon that marks a ledger topic in prose. This table
+is the whole mapping, and nothing else in this guide restates which icon a shape
+carries.
+
+### The icon table
+
+| Concept | Icon | Meaning |
+|---------|------|---------|
+| Ledger state | database cylinder, `shape=mxgraph.flowchart.database` | on-ledger state the contract reads and writes |
+| Circuit | cog, `shape=mxgraph.ios7.icons.settings` | a circuit a caller invokes, pure circuits included |
+| Witness | open eye, `diagram-assets/witness-icon.png` | a witness, the private input the proof observes |
+| Secret | crossed eye, `diagram-assets/eye-icon.png` | a value that stays with its holder and never leaves it |
+| Midnight lane | Midnight logo, `diagram-assets/midnight-logo.png` | the Midnight chain's swimlane |
+| Signet lane | Sig Network logo, `diagram-assets/sig-network-logo.png` | a Signet-controlled contract's swimlane |
+| Contract / dApp | `diagram-assets/contract-app.png` | a contract or dApp actor box |
+| Wallet | `diagram-assets/wallet.png` | a wallet holding a party's keys |
+| MPC server | `img/lib/allied_telesis/computer_and_terminals/Server_Desktop.svg` | one MPC server, and the cluster group built from three of them |
+| Foreign chain | `img/lib/azure2/blockchain/Consortium.svg` | a non-Midnight chain's swimlane |
+
+The open eye and the crossed eye are a deliberate pair: the witness observes, the
+secret stays hidden.
+
+The table is the extension point. A new icon lands as one row here plus one entry in
+the palette card's Iconography section, and both land in the same change.
+
+### The icon bank
 
 Icons come from the bank, never from ad hoc downloads:
-
-- [diagram-assets/](diagram-assets/) holds the custom icons, pre-sized for embedding:
-  `midnight-logo.png`, `sig-network-logo.png`, `contract-app.png`, `wallet.png`.
-- Generic icons are draw.io built-in library references
-  (`img/lib/allied_telesis/computer_and_terminals/Server_Desktop.svg` for MPC servers,
-  `img/lib/azure2/blockchain/Consortium.svg` for a foreign chain).
-
-Custom icons are embedded into each diagram as base64 copies of the bank files, which
-keeps every diagram self-contained and portable. Copy the icon cells from the palette
-card rather than re-encoding the files. When an icon changes, update the bank file,
+[diagram-assets/](diagram-assets/) holds the custom icons, pre-sized for embedding, and
+the generic ones are draw.io built-in library references. Custom icons are embedded into
+each diagram as base64 copies of the bank files, which keeps every diagram
+self-contained and portable. Copy the icon cells from the palette card's Iconography
+section rather than re-encoding the files. When an icon changes, update the bank file,
 the palette card, and every diagram embedding it in the same change.
 
 ## Editing workflow
