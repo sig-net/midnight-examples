@@ -175,6 +175,20 @@ scratch.
 - [x] `docs/sign-bidirectional-flow.drawio(.png)`: rebuilt clean, all
       conventions applied through iterative agent rounds.
 - [x] Embedded in the root README's "Sign Bidirectional Flow" section.
+- [ ] Hand-tidied generic pair normalised to the edge-label golden rules:
+      the working-tree `docs/sign-bidirectional-flow.drawio` carries the
+      repo owner's hand edit, whose INTENT is authoritative (actor-prefixed
+      labels, initiator-directed edges, re-placed circles, the `Reads:/On:`
+      note pair), plus hand-editing noise to clean by scripted surgery:
+      editor inline CSS inside values (`scrollbar-color`, `light-dark`),
+      unpinned and off-axis routes, the bolded verb in `e-watch-notif-l`,
+      and `Submits the MPC signed transaction` respelled to `Broadcasts
+      the MPC-signed transaction` per the verb table. Then lint --strict,
+      re-render the pair (the committed PNG is stale), and eyeball against
+      the owner's reference render
+      `docs/sign-bidirectional-flow-handtidied.png`. The reference PNG and
+      `docs/handtidying-notes.scratch.md` are the owner's scratch, left
+      for the owner to remove.
 - [ ] Replaces the integration repo's copy (C5 below).
 
 ### Step-pattern refactor (before the remaining flows)
@@ -254,6 +268,16 @@ migrates first: no new flow work starts until these land.
       byte-identically from the actor map, re-seat, and re-run the full
       verification cycle. Runs naturally together with the `d2` re-sync
       item above (same file, same proof).
+- [ ] Deposit and withdraw label audit under the edge-label golden rules:
+      direction (the initiator at the tail: deposit's `e2b` currently
+      arrows INTO the MPC's Reads note, and the read points at the thing
+      read), strict acting-party format on every riding label (`f1-l`'s
+      cargo text respelled as a Funds action), verb-table conformance
+      (`Watches for transaction execution` becomes `Picks up transaction
+      execution`), alignment tokens per crossing axis, and run-through-
+      centre seating. Full verification cycle on both pairs. Runs
+      naturally together with the deposit `d2` re-sync and membership
+      re-read items above (same files, same proofs).
 - [ ] Actor map working size settled: the completed anatomy measures
       1695x1260 model units against the style guide's roughly 1300x800
       budget, and the guide says outgrowing diagrams split rather than
@@ -757,6 +781,34 @@ each arm's string still appears exactly once per diagram and twice per page
       eyeball-only on the deposit inherit rebuild, and the tail check's
       three genuine catches there show the lead-side twin would pay for
       itself.
+- [ ] Golden-rules lint suite, from the edge-label golden rules in
+      docs/diagramming.md (they supersede the own-edge advisory check,
+      which retires when the first of these lands):
+      - Run-through-centre: error when a riding label neither straddles
+        its run centred nor sits legally alongside (run on the label's
+        left, top or bottom, never its right).
+      - Alignment: the `align` token must match the crossing axis (left
+        for a horizontal crossing, center for a vertical run).
+      - Format: first line bold and colon-terminated, body starting with
+        a capital letter.
+      - Overlap: the label-over-label advisory promotes to an error once
+        label boxes come from measured ink instead of char estimates.
+      - Editor junk: flag inline CSS (`style="color:`, `scrollbar-color`,
+        `light-dark`) inside cell values.
+      - Initiator direction (advisory, later): the bold prefix should
+        name the edge's source-side lane or actor, via a small per-diagram
+        alias table.
+- [ ] Golden-rules checks promoted from note to error tier. The
+      run-through-centre, alignment and format checks land as ADVISORY
+      NOTES only so `lint --strict` stays green on committed diagrams that
+      predate the label rules. That grace period ends when the two audit
+      items land: "Hand-tidied generic pair normalised to the edge-label
+      golden rules" (Generic diagram section) and "Deposit and withdraw
+      label audit under the edge-label golden rules" (Derivation story
+      upgrade section). The moment both are ticked, promote all three
+      checks to errors in the CLI, re-run `lint --strict` over every
+      committed pair in this repo, and fix anything that fires: a note
+      tier left permanent is a rule nobody is held to.
 - [ ] Lint or membership tooling: flag a re-anchored background edge by
       name. `exitX`/`entryY` live in style, so re-routing an inherited edge
       silently breaks the flow-membership byte-identity, and only the
