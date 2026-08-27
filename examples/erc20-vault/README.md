@@ -176,7 +176,7 @@ and injective rendering that accepts any bytes the contract chooses. Client
 code deriving an account off-chain must feed `deriveEvmAddress` the same
 rendering: `bytesToHex` of the stored path bytes, so the vault's own account
 derives from the hex of `pad(32, "vault")` and the user's account from the
-hex of the identity commitment (see the reader setup snippet in the
+hex of the identity commitment (see the shared setup section of the
 [deposit walkthrough](docs/deposit/deposit.md)).
 
 ## Integration walkthrough
