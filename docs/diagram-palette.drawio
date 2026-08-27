@@ -19,7 +19,7 @@
                 <mxCell id="etgt1" value="" style="point;html=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
                     <mxGeometry x="330" y="135" width="1" height="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="edge1" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#E73F74;rounded=0;strokeWidth=2;" parent="1" source="esrc1" target="etgt1" edge="1">
+                <mxCell id="edge1" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#E73F74;rounded=1;arcSize=20;strokeWidth=2;" parent="1" source="esrc1" target="etgt1" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="edge1l" value="request phase" style="edgeLabel;html=1;align=center;verticalAlign=middle;labelBackgroundColor=default;" parent="edge1" vertex="1" connectable="0">
@@ -34,7 +34,7 @@
                 <mxCell id="etgt2" value="" style="point;html=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
                     <mxGeometry x="330" y="185" width="1" height="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="edge2" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#3969AC;rounded=0;strokeWidth=2;" parent="1" source="esrc2" target="etgt2" edge="1">
+                <mxCell id="edge2" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#3969AC;rounded=1;arcSize=20;strokeWidth=2;" parent="1" source="esrc2" target="etgt2" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="edge2l" value="signature phase" style="edgeLabel;html=1;align=center;verticalAlign=middle;labelBackgroundColor=default;" parent="edge2" vertex="1" connectable="0">
@@ -49,7 +49,7 @@
                 <mxCell id="etgt3" value="" style="point;html=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
                     <mxGeometry x="330" y="235" width="1" height="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="edge3" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#11A579;rounded=0;strokeWidth=2;" parent="1" source="esrc3" target="etgt3" edge="1">
+                <mxCell id="edge3" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#11A579;rounded=1;arcSize=20;strokeWidth=2;" parent="1" source="esrc3" target="etgt3" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="edge3l" value="broadcast phase" style="edgeLabel;html=1;align=center;verticalAlign=middle;labelBackgroundColor=default;" parent="edge3" vertex="1" connectable="0">
@@ -64,7 +64,7 @@
                 <mxCell id="etgt4" value="" style="point;html=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
                     <mxGeometry x="330" y="285" width="1" height="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="edge4" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#FDAE61;rounded=0;strokeWidth=2;" parent="1" source="esrc4" target="etgt4" edge="1">
+                <mxCell id="edge4" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#FDAE61;rounded=1;arcSize=20;strokeWidth=2;" parent="1" source="esrc4" target="etgt4" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="edge4l" value="attestation phase" style="edgeLabel;html=1;align=center;verticalAlign=middle;labelBackgroundColor=default;" parent="edge4" vertex="1" connectable="0">
@@ -79,7 +79,7 @@
                 <mxCell id="etgt5" value="" style="point;html=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
                     <mxGeometry x="330" y="335" width="1" height="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="edge5" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#7F3C8D;rounded=0;strokeWidth=2;" parent="1" source="esrc5" target="etgt5" edge="1">
+                <mxCell id="edge5" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#7F3C8D;rounded=1;arcSize=20;strokeWidth=2;" parent="1" source="esrc5" target="etgt5" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="edge5l" value="settle phase" style="edgeLabel;html=1;align=center;verticalAlign=middle;labelBackgroundColor=default;" parent="edge5" vertex="1" connectable="0">
@@ -91,7 +91,7 @@
                 <mxCell id="etgt6" value="" style="point;html=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
                     <mxGeometry x="330" y="85" width="1" height="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="edge6" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#008695;rounded=0;strokeWidth=2;" parent="1" source="esrc6" target="etgt6" edge="1">
+                <mxCell id="edge6" style="exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;html=1;strokeColor=#008695;rounded=1;arcSize=20;strokeWidth=2;" parent="1" source="esrc6" target="etgt6" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="edge6l" value="fund phase" style="edgeLabel;html=1;align=center;verticalAlign=middle;labelBackgroundColor=default;" parent="edge6" vertex="1" connectable="0">

@@ -295,7 +295,8 @@ apply to all of them:
   `.drawio` source beside it, leave an edge without `source` and `target` attachments,
   or embed a draw.io SVG export in docs (it renders theme-mangled in dark-mode viewers).
   Never draw a diagonal or almost-straight edge segment (edges are strict horizontal and
-  vertical runs with 90 degree corners, `strokeWidth=2`), never let an edge cut
+  vertical runs, `strokeWidth=2`, coloured step edges turning their corners as arcs and
+  derivation edges keeping sharp right angles), never let an edge cut
   through a shape when a route around exists, never let two edges of the same step
   colour cross each other, and never scatter one step's edges across distant anchors
   when they can share a base: the full routing rules are the "Edge routing" section of

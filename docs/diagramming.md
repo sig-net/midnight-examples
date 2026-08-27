@@ -331,7 +331,14 @@ the deleted cells used to be. A band of empty space whose only explanation is
 ## Edge routing (NEVER BREAK)
 
 - **NO diagonal segments, ever.** Every edge is built from strictly horizontal and
-  strictly vertical runs joined by clean 90 degree corners.
+  strictly vertical runs joined by clean corners.
+- **Corners: step edges curve, everything else stays sharp.** Every coloured step
+  edge turns its corners as arcs (`rounded=1;arcSize=20`, carried by the palette's
+  phase swatches: copy the style, never re-author the tokens), so the step lines pop
+  from the rectangular structure and the eye follows them immediately. Derivation
+  edges (the broad-dashed black lines) keep sharp right-angle corners (`rounded=0`),
+  as do lane borders and every shape. The runs themselves stay strictly horizontal
+  and vertical in both cases: only the corner turns.
 - **No almost-straight segments, ever.** A run is either perfectly straight or a
   deliberate 90 degree jog. An edge that is off-vertical or off-horizontal by a few
   pixels is a defect, not a route.
