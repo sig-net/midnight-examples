@@ -1327,11 +1327,30 @@ starts only after its diagram item is reviewed.
       "Running it": Running against Sepolia, `STEP_THROUGH=1`, the roughly
       20–25 minute first run and what a green run prints. Source text:
       `git show beeb8f3:README.md`.
-- [ ] Contract comment markers in `erc20-vault.compact` still carry the old
+- [x] Contract comment markers in `erc20-vault.compact` still carry the old
       five-step numbering (`Runtime step 1 (deposit)`, `Runtime step 5
       (deposit)`). Respell to the `Step N (deposit)` vocabulary and renumber
       to the six-step deposit ordinals so the greppable marker correspondence
       can return to the docs.
+      DONE, widened to all five flows: every circuit header now carries
+      `Step N (<flow>)` matching its flow's frozen ordinal (the swap and
+      Aave headers, which carried no marker, gained theirs), the shared
+      refund header names all four of its ordinals
+      (`Step 5 (withdraw), Step 5 (redeem), Step 6 (swap),
+      Step 6 (supply): refund`), the top-of-file overview widened to
+      fifteen entries naming the flow pages as the numbering's source,
+      and the off-chain-legs sentence states the invariant true for all
+      five flows (the three middle steps run between the request and
+      settle circuits) since no single ordinal range holds across them.
+      One deletion beyond the respell: the orphan
+      "shared refund block" header left behind when `7dde623` removed
+      the circuit it introduced. Comment-only proven mechanically (every
+      changed line starts with `//`), full gate green (compile, format,
+      lint, build, test: 73+24+11+14 passed), marker-correspondence
+      table agrees with every frozen ordinal, and `Runtime step` greps
+      zero across examples/, docs/ and the README. The living
+      correspondence blocks above now cite the new marker spellings, and
+      the historical DONE notes keep their as-derived quotes.
 
 ### Enforcement and machinery
 
@@ -1414,8 +1433,9 @@ on they are byte-frozen.
 
 **Canonical step strings, withdraw** (frozen). Withdraw has no fund step, and
 its settle is a branch whose two arms share ordinal 5, exactly as the
-contract's own step comments number them (`Runtime step 5 (withdraw):
-completeWithdraw() / refund()`). Wording from the vault README's withdraw
+contract's own step markers number them (`Step 5 (withdraw):
+completeWithdraw()` plus `Step 5 (withdraw)` in the shared refund
+header). Wording from the vault README's withdraw
 deep-dive (`git show beeb8f3:examples/erc20-vault/README.md`, section
 "Withdraw") under truth priority:
 
@@ -1437,9 +1457,9 @@ Step 1 is the `approveRouter` precursor, the sign-only allowance leg
 `runSwapRoundTrip` runs first through `ensureRouterApproved`, numbered exactly
 as deposit numbers its own precondition leg (funding), so the swap round trip
 runs steps 2 to 6. The settle is a branch whose two arms share ordinal 6, the
-sharing the contract itself records (`Runtime step 5
-(withdraw/swap/supply/redeem): refund`), at 6 rather than 5 as the precursor
-takes step 1. Wording from the vault README's swap deep-dive (`git show
+sharing the contract itself records (its shared refund header names
+`Step 6 (swap)` among its four ordinals). Wording from the vault README's
+swap deep-dive (`git show
 beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
 
 1. `Step 1: approveRouter(...) records the sign-only allowance request`
@@ -1456,7 +1476,8 @@ supplier surrenders a shielded coin of the underlying. Step 1 is the
 runs first through `ensureStataApproved`), numbered exactly as swap numbers
 `approveRouter`, so the supply round trip runs steps 2 to 6 and the settle
 branch's arms share ordinal 6 (the sharing the contract records in its
-`Runtime step 5 (withdraw/swap/supply/redeem): refund` header). No README
+shared refund header, which names `Step 6 (supply)` among its four
+ordinals). No README
 deep-dive covers supply, so wording comes from the contract source's own
 circuit headers under truth priority (code first), with the two poll steps
 reusing the deposit wording verbatim and step 2 keeping the
@@ -1474,8 +1495,8 @@ withdraw-and-swap burn-and-record shape:
 approve precursor: the vault redeems its OWN shares (owner = vault, per
 `flows/redeem.ts`), so no allowance leg exists and the flow follows
 withdraw's skeleton, request through settle numbered 1 to 5 with the settle
-branch's arms sharing ordinal 5, matching the contract's
-`Runtime step 5 (withdraw/swap/supply/redeem): refund` header directly. No
+branch's arms sharing ordinal 5, matching the `Step 5 (redeem)` the
+contract's shared refund header names directly. No
 README deep-dive covers redeem, so wording comes from the contract source's
 own circuit headers under truth priority (code first), the two poll steps
 verbatim from deposit and step 1 keeping the burn-and-record shape:
