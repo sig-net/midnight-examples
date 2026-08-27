@@ -1390,7 +1390,7 @@ fail before trusting it. The agent skill at
 touch it only if an item genuinely changes what the skill describes. Do not
 commit or push unless the session's user says to.
 
-- [ ] Dependency upgrade, `pngjs`: replace the hand-rolled PNG decoder in
+- [x] Dependency upgrade, `pngjs`: replace the hand-rolled PNG decoder in
       `src/png.js` (about 70 lines supporting only 8-bit RGB and RGBA,
       non-interlaced: a palette, 16-bit or interlaced PNG from any other
       exporter throws today) with the `pngjs` package. Preserve the
@@ -1403,7 +1403,17 @@ commit or push unless the session's user says to.
       tEXt chunks cleanly and those bytes are the tool's core input path.
       Prove the swap with `measure` runs on a committed flow PNG before and
       after (identical output), then the full verification sweep.
-- [ ] Dependency upgrade, `commander` (or `yargs` if commander cannot
+      DONE. `pngjs@7.0.0` pinned exact, not deprecated, zero transitive
+      deps. `src/png.js` went 68 lines to 21 wrapping `PNG.sync.read`, the
+      exported contract intact (`channels` from `png.alpha`, `at` still
+      yields `a=255` for RGB). `measure` before/after over all six
+      committed pairs (598 output lines): byte-identical. The widened
+      format support was executed, not inferred: a hand-built palette
+      (colour type 3) PNG the old decoder rejected with "unsupported PNG
+      colour type 3" decodes correctly now. Full sweep green (`npm test`,
+      `test/lint-violations.mjs`, `lint --strict` at 0/0 on all six
+      pairs). `mxfileFromPng` in `src/extract.js` untouched as specified.
+- [x] Dependency upgrade, `commander` (or `yargs` if commander cannot
       express a behaviour below): replace the hand-rolled argument parsing
       in `src/cli.js` (the per-verb `runExtract`/`runRender`/`runCells`/
       `runMeasure`/`runSetGeometry`/`runSetWaypoints`/`runSetLabelOffset`/
@@ -1421,7 +1431,24 @@ commit or push unless the session's user says to.
       silently swallowed `--fit` given as `--cell <id> --fit`, and flags
       consumed as variadic ids), so encode those two exact invocation
       forms as must-fail tests.
-- [ ] Dependency upgrade, `he` (HTML entity codec): the repo decodes XML
+      DONE. `commander@14.0.3` pinned exact, not deprecated: 15.0.0
+      requires Node >= 22.12 against the repo's `engines.node >= 20`, so
+      14.0.3 is the newest release the engine floor admits. No yargs
+      fallback was needed. All eleven verbs ported, `render --force`
+      declared hidden so its teaching message fires unadvertised, and a
+      `DrawioCommand` subclass keeps the exact stderr strings and exit
+      codes. New `test/args.mjs` (74 checks) wired into `npm test`, both
+      historical defect invocations encoded as must-fail tests, and each
+      guard proven by planting its removal and watching the suite fail. A
+      60-invocation before/after battery differed only where intended:
+      USAGE dumps became generated help, and `--help` now exits 0 with
+      help on stdout. Full sweep green, all six pairs at 0/0. Two
+      premises corrected in passing: the `config:` note actually prints
+      when a config file exists and a flag was omitted (it never checks
+      whether the file sets that key, and tests now pin all three cases),
+      and `measure --scale abc` yields `scale=NaN` garbage where `render`
+      rejects it (preserved verbatim, worth a separate item).
+- [x] Dependency upgrade, `he` (HTML entity codec): the repo decodes XML
       entities in THREE separate hand-rolled implementations that have
       already drifted in coverage: `decodeEntities` in `src/extract.js`
       (named plus numeric), a five-entity `decodeEntities` in
@@ -1435,7 +1462,25 @@ commit or push unless the session's user says to.
       and lint's fixpoint loop wraps the decoder rather than being
       replaced by it. The three call sites keep their exact observable
       behaviour: the existing suites pin it.
-- [ ] Dependency upgrade, `fast-xml-parser`, scoped to the MODEL VIEW
+      DONE. `he@1.2.0` pinned exact, not deprecated, zero transitive
+      deps (CJS, so imported as default and called as `he.decode`). All
+      three cores now call `he.decode` with `isAttributeValue: true`,
+      since every site decodes an XML attribute value and that option
+      stops he reading legacy semicolon-less references the hand tables
+      never decoded. The domain logic stayed: extract's structural gate
+      (codes 34, 38, 60, 62 remain encoded) and lint's 8-pass fixpoint.
+      One genuine contract difference found and preserved: lint's hand
+      table mapped `nbsp` to an ASCII space where he yields U+00A0, and
+      label width estimates charge those differently, so the fixpoint
+      body keeps an explicit NBSP-to-space `replaceAll`. Equivalence
+      probe of old vs new decoders over the corpus: 81 files, 2879
+      attribute values, 0 mismatches. `selectPage` proven on a synthetic
+      multi-page file (apostrophe and hex refs now match, an
+      improvement unreachable in the committed single-page corpus). Full
+      sweep green, 65 before/after capture artefacts identical, all six
+      pairs at 0/0. Noted for later: `label()` in `src/cells.js` holds a
+      fourth, display-side entity handler, out of this item's scope.
+- [x] Dependency upgrade, `fast-xml-parser`, scoped to the MODEL VIEW
       only: `parseCells` in `src/lint.js` parses the mxfile by splitting
       on `<mxCell` with regexes, which is fragile against comments, CDATA,
       exotic attribute quoting and nested same-name elements. Port
@@ -1458,6 +1503,28 @@ commit or push unless the session's user says to.
       parse-and-re-serialise there defeats the tool's design. Follow with
       the full verification sweep, and diff `cells --full` output on a
       committed flow diagram before and after: byte-identical.
+      DONE. `fast-xml-parser@5.11.1` pinned exact, not deprecated.
+      Parser configured for raw fidelity, each switch chosen against an
+      observed default: `processEntities` off (consumers and `diffCells`
+      compare raw strings, lint decodes to a fixpoint downstream),
+      `parseAttributeValue` off (the default coerces `vertex="1"` to a
+      number and `"0080"` to `80`), `trimValues` off (the default trims
+      attribute values too), boolean attributes off, `preserveOrder` on
+      (Map insertion order is load-bearing). Map-level old-vs-new
+      comparison over all six pairs: identical in ids, order, keys,
+      value types and values (100/99/203/142/150/165 cells). Both
+      encoded behaviours planted and watched fail: with the id-skip
+      guard removed the id-less cell entered under `undefined` and
+      shifted a root cell's absolute origin, and the count guard fired
+      on comment and CDATA plants (parsed 3 of 142) while not-well-formed
+      input now throws one clean line and exit 1. `cells --full`
+      byte-identical, `src/cells.js` and `src/edit.js` untouched, full
+      sweep green, all six pairs at 0/0 with byte-identical notes. One
+      premise corrected: `parseCells` always walked the whole document,
+      not the first diagram, and its JSDoc now says what the code does.
+      Flagged: 5.x carries six transitive deps where the `legacy` 4.5.7
+      line carries one (`strnum`), a one-line downgrade if leanness
+      outranks the 5.x line.
 
 - [x] `extract` on a `.drawio.png` races through a shared temp path under
       concurrent renders: with several agents rendering at once it twice
