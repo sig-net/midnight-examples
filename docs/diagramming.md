@@ -356,11 +356,16 @@ the deleted cells used to be. A band of empty space whose only explanation is
   separate with one or two explicit 90 degree jogs. Never scatter a step's edges across
   different sides or distant anchors of a shape when a shared base is possible: prefer
   crossing another step's line over splitting your own step's lines apart.
-- **A step never crosses itself.** Two edges of the same colour must not cross each
-  other. When two edges share a source shape, order their anchors to match their targets
-  so they fan out without crossing. A T-junction off a shared trunk is the sanctioned
-  form of fan-out. Where different steps must cross, put `jumpStyle=arc` on the crossing
-  edge so the crossing reads as a jump, never as a junction.
+- **A step never crosses itself, and neither does the neutral layer.** Two edges of
+  the same stroke colour must not cross each other, the default black derivation
+  edges included: same colour reads as one system, and a crossing inside one system
+  reads as a junction. The derivation layer therefore stays planar, consolidating on
+  shared trunks and buses where fan-in would force a crossing. When two edges share
+  a source shape, order their anchors to match their targets so they fan out without
+  crossing. A T-junction off a shared trunk is the sanctioned form of fan-out. Where
+  DIFFERENT colours must cross, put `jumpStyle=arc` on the crossing edge so the
+  crossing reads as a jump, never as a junction: jumps exist for cross-colour
+  crossings only, never to excuse a same-colour one.
 - **Tails and leads run at least 40 units.** On any edge with a corner, the first segment
   out of the source and the final segment into the arrowhead each run at least 40 units
   before bending. A bend hard against a shape reads cramped.

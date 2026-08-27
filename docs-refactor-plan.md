@@ -1359,7 +1359,7 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
 
 ## Tool harvest checklist (draw-io-cli)
 
-- [ ] `extract` on a `.drawio.png` races through a shared temp path under
+- [x] `extract` on a `.drawio.png` races through a shared temp path under
       concurrent renders: with several agents rendering at once it twice
       returned a SIBLING diagram's model for a different PNG (observed
       returning withdraw's then deposit's model when asked for swap's).
@@ -1367,6 +1367,15 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       directly. Fix: derive the temp path from the input file (hash or
       per-invocation tmpdir), and add a guard asserting the extracted
       `<diagram>` name matches the requested file.
+      DONE, with the premise corrected: extract uses NO temp path at all
+      (it reads the PNG's own tEXt chunk directly), and nine concurrent
+      extracts across the three flow PNGs each returned their correct
+      model. The observed cross-talk was the agents' SHARED SCRATCHPAD
+      (sibling agents overwrote each other's scratch copies, which a
+      second agent independently reported the same day). The guard half
+      landed: extract prints the extracted diagram name(s) on stderr and
+      notes a single-page name that differs from the file's basename, so
+      a wrong input is visible immediately.
 
 - [x] `measure` verb: stdlib PNG decoder, model-to-pixel calibration from the
       model bounds plus the render config (residual reported as an error bar),
@@ -1442,20 +1451,35 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       sliced whole), unknown and duplicate ids fail loudly. Smoke-proven
       with planted violations, byte-verbatim re-verified on the actor
       map's `code-witness-icon`.
-- [ ] Editing verbs that write the raw file in place preserving its
+- [x] Editing verbs that write the raw file in place preserving its
       serialisation: `set-geometry <id> --x/--y/--width/--height`,
       `set-waypoints <id> "x1,y1 x2,y2 ..."`, `set-label-offset <id> <dx>
       <dy>`. Every geometry change today is hand-computed model arithmetic
       (lane interiors, box centres, polyline lengths for label `pos`) turned
       into regex surgery, which carries both arithmetic and serialisation
       risk.
-- [ ] `measure` on an edge label: report the label's own text-ink bbox
+      DONE: all three verbs land, built on the byte-exact cell locator
+      `cells --xml` uses, splicing the smallest span inside the element
+      and leaving the rest of the file byte-identical (proven by a
+      set-then-restore round trip whose only surviving diff was the
+      canonical spelling of the new content itself). Each edit verifies
+      the parsed result before writing (write-then-rename), and refuses
+      rendered inputs, duplicate ids and unknown ids loudly. Geometry
+      values are parent-relative, which the skill now states.
+- [x] `measure` on an edge label: report the label's own text-ink bbox
       separately from foreign ink inside the estimated box, and tighten the
       char-width estimate toward measured Helvetica ink (about 6 u/char
       against the roughly 7.08 used). `g3-l` reported all-zero padding,
       which reads as "a line touches this text on all four sides", when the
       cause was the over-wide estimated box clipping an unrelated edge that
       the crop shows 27 units clear of the text.
+      DONE: the estimate is now a probe-calibrated char-class model
+      (uppercase and digits 7.9u, spaces 3.4, thin glyphs 3.8, other
+      lowercase 6.2, Menlo 7.1 flat, bold lines +5%), within about 4% on
+      the probe strings. An edge label measures its TEXT box (align and
+      verticalAlign aware) and scans a 4-unit halo separately, naming
+      foreign ink (the edge's own stroke included) instead of reporting
+      it as zero padding. Verified live on deposit's e2b-l.
 - [x] `measure` calibration warning: suppress it below a threshold or behind
       a `--quiet-calibration` flag once the residual is fully attributed. On
       the deposit diagram it fires twice per invocation, always naming the
@@ -1467,14 +1491,25 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       pairs now demote), and `--quiet-calibration` drops the calibration
       lines but NEVER a live WARNING (the generic pair's unexplained
       residual stays loud). Smoke-proven both directions.
-- [ ] `measure --gaps <container>`: report each child's clearance to the
+- [x] `measure --gaps <container>`: report each child's clearance to the
       container's four sides and the largest empty rectangle inside it. The
       underhang item, a pure dead-space question, was answered by
       transcribing lane geometry out of `cells` and subtracting by hand.
-- [ ] Lint: flag an edge-label box overhanging the model bounds by more than
+      DONE: per-child four-side clearances plus the largest empty
+      rectangle (candidate edges from the child boxes), verified against
+      the deposit vault lane's twelve children.
+- [x] Lint: flag an edge-label box overhanging the model bounds by more than
       the render border. Labels never extend the export bounds, so a slid
       label clips silently: `e4b-l`'s clearance inside the right bound was
       hand-checked against the border arithmetic.
+      RESOLVED as a corrected premise, no check: the exporter DOES extend
+      its bounds to include edge labels. Proof by residual arithmetic:
+      folding deposit's estimated label boxes into the predicted bounds
+      lands within 3,6px of the actual PNG, while ignoring them would
+      predict roughly 21px the other way, and the generic pair's
+      furthest-slid label renders with the full border intact beside it.
+      A slid label does not clip, so the warning would flag a non-defect.
+      measure's calibration line names label extensions instead.
 - [x] `measure` (or `render`) prints the model-to-pixel affine on request
       (scale and offset per axis), so a `sips -c` crop of a model region is
       one computation instead of three. Every crop in the actor-map upgrade
@@ -1483,13 +1518,19 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       substituted formulas, px from mx and back per axis, printed from
       the same calibration the verb measures with. Hand-applying them to
       `n-read`'s box reproduced measure's own ink numbers exactly.
-- [ ] Lint: check leads as well as tails (the tail check catches a first
+- [x] Lint: check leads as well as tails (the tail check catches a first
       segment under 40 units out of the source, but nothing checks the
       final segment into the arrowhead), and flag a shape-to-edge clearance
       under 20 units for edges passing close to unrelated shapes. Both were
       eyeball-only on the deposit inherit rebuild, and the tail check's
       three genuine catches there show the lead-side twin would pay for
       itself.
+      DONE: the lead check already existed at error tier (verified in
+      source and behaviour), and the clearance half landed as a note:
+      a run passing alongside an unrelated shape under 20 units, with
+      same-stroke-colour furniture exempt (a step circle deliberately
+      hugs its own step's edge). On the committed pairs it fires one to
+      four genuine crowding notes per flow diagram.
 - [x] Golden-rules lint suite, four checks landed and smoke-proven, the
       own-edge advisory check retired in the same change (superseded: a
       vertical run crossing text is now the sanctioned default):
@@ -1514,13 +1555,16 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       - Every check guarded: planted violations seen firing, each check
         blinded in turn with exactly its own assertion failing, vacuity
         notes ending "(vacuous, not green)".
-- [ ] Lint: label-over-label overlap promotes from advisory to error once
+- [x] Lint: label-over-label overlap promotes from advisory to error once
       label boxes come from measured ink instead of char estimates (the
       measured-ink rework is the `measure` edge-label item above).
+      DONE with the estimate kept honest: an overlap surviving both boxes
+      shrunk 20% per side is beyond the calibrated estimate's error and
+      is an ERROR, a marginal graze stays a note pointing at the render.
 - [ ] Lint (advisory, later): initiator direction: the bold prefix should
       name the edge's source-side lane or actor, via a small per-diagram
       alias table.
-- [ ] Golden-rules checks promoted from note to error tier. The
+- [x] Golden-rules checks promoted from note to error tier. The
       run-through-centre, alignment and format checks land as ADVISORY
       NOTES only so `lint --strict` stays green on committed diagrams that
       predate the label rules. That grace period ends when the conformance
@@ -1531,43 +1575,77 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       checks to errors in the CLI, re-run `lint --strict` over every
       committed pair in this repo, and fix anything that fires: a note
       tier left permanent is a rule nobody is held to.
-- [ ] Lint or membership tooling: flag a re-anchored background edge by
+      DONE: all three checks are error tier, made trustworthy first by
+      fixing the align=left half-width defect and calibrating the width
+      estimate (the sources of every prior false strike). Re-run over all
+      six committed pairs: zero errors, zero warnings, nothing to fix.
+      The tool repo's planted-violation suite proves each check fires and
+      each clean control passes.
+- [x] Lint or membership tooling: flag a re-anchored background edge by
       name. `exitX`/`entryY` live in style, so re-routing an inherited edge
       silently breaks the flow-membership byte-identity, and only the
       membership script's generic "style differs" catches it. A check that
       says "background edge re-anchored: <id>" turns a puzzling diff into a
       named defect.
-- [ ] Lint: narrow the stacked/parallel-run checks to runs whose x (or y)
+      DONE as the new `diff-cells <a> <b>` verb: cell-level id, value and
+      style comparison (geometry excluded on purpose), where a style
+      delta confined to exit and entry anchor tokens reports as "edge
+      re-anchored" with the exact token pairs named. Proven on a planted
+      anchor change, and the membership scripts can now build on it.
+- [x] Lint: narrow the stacked/parallel-run checks to runs whose x (or y)
       spans actually overlap. Runs 60 units apart horizontally are
       currently reported as stacked, and every such note costs a
       read-and-justify round. Nuance from the generic-pair
       normalisation: 3 of its 4 baseline stacked notes named disjoint
       runs and aligning them was still the right fix each time, so the
       narrowing should demote such hits, not silence them.
-- [ ] Lint: flag text ink wider than its box (a long unbreakable token like
+      DONE as demote-by-naming: a disjoint-span stacked note now carries
+      "(disjoint spans, Nu void between them)" so the reader has the
+      weaker-signal context inline, and nothing is silenced (the
+      overlapping-span case was already the separate NEAR error).
+- [x] Lint: flag text ink wider than its box (a long unbreakable token like
       `completeWithdraw(...)` overflows its caption and paints over
       neighbours, invisible in XML and to every current check): pairs with
       the open `measure --fit` item.
-- [ ] Render and lint: fail loudly when the parsed cell count is far below
+      DONE as a note from the calibrated estimate: the longest
+      unbreakable token per line against the declared width (wrapping
+      cannot save a token), with icon cells exempt since their captions
+      render outside the box by design (`verticalLabelPosition`).
+- [x] Render and lint: fail loudly when the parsed cell count is far below
       the source's `<mxCell` count. A malformed geometry splice (broken
       `<Array as="points">` handling) rendered "loaded 2 of 145 cells" as
       an easily missed log line while producing a blank-looking PNG.
-- [ ] Palette: add a ledger record-block sample and a step-caption sample
+      DONE: render's guard already existed (verified failing loudly on
+      the id="map" landmine), and lint gained its twin: parsed cells
+      under half the raw `<mxCell` count is an error naming the malformed
+      model. Building its planted violation also surfaced and fixed a
+      latent hang: an id-less cell entered the cell map under the key
+      undefined and made the parent walk cyclic (parser now skips id-less
+      cells and every parent walk carries a cycle guard).
+- [x] Palette: add a ledger record-block sample and a step-caption sample
       carrying a realistically long circuit token: both shapes exist in
       committed diagrams but have no copy source on the card, so agents
       reverse-engineer them from diagrams instead of copying.
-- [ ] Skill: concurrent-editor guard: hash the target `.drawio` before and
+      RESOLVED without an edit: the committed palette already carries the
+      record-block copy source (`ledger-node`, value `ledger
+      ExampleLedgerMap { RequestId-style record }`, rendered on the
+      card), and the step-caption half is obsolete: step captions were
+      abolished by the every-arrow-describes-itself rule.
+- [x] Skill: concurrent-editor guard: hash the target `.drawio` before and
       after every edit batch and re-check before finishing. Mid-task an open
       draw.io editor re-serialised `deposit.drawio` under the executing
       agent (cell order rewritten to webapp order, `d2`'s waypoints
       collapsed 4 to 2), detected only via `git diff --stat`, and an editor
       holding a stale buffer can save over finished work after the fact.
-- [ ] Lint: error on any `image=` style referencing a remote host
+      DONE: the skill's editing section now mandates the hash-before,
+      hash-after, re-check-before-finishing discipline.
+- [x] Lint: error on any `image=` style referencing a remote host
       (`http://`/`https://`). A palette cell shipped
       `image=https://images.icon-icons.com/...`, which renders BLANK in the
       offline renderer and violates the icons rule, and nothing caught it:
       the failure is invisible in the XML and only an eyeball of the render
       shows the empty box.
+      DONE: error tier, planted and proven, embedded data: URIs pass.
 - [x] `measure --fit <cell>`: print the box implied by the uniform-padding
       rule (8 side, 6 vertical) for the cell's measured text ink, so sizing
       a box takes one pass. Character-width estimates are off by about 10%
@@ -1579,12 +1657,16 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       says "nothing to fit" rather than a delta against an estimated box.
       The ink-wider-than-box LINT item below stays open and still pairs
       with the measured-ink edge-label rework.
-- [ ] `measure --fit` on a stroked shape counts the border as ink:
+- [x] `measure --fit` on a stroked shape counts the border as ink:
       `--fit hex-resp` on the generic pair advises growing a hexagon
       that already hugs its label. Restrict the fit verdict to text
       ink, or subtract a detected border rectangle before applying the
       8/6 padding.
-- [ ] measure and lint centre an `align=left` edge label's estimated
+      DONE by peeling: the fit grows its scan inset until the measured
+      ink pulls clear of the scan window on every side (border strokes
+      touch the window, text does not), capped at 12 units and named in
+      the verdict when a peel was needed.
+- [x] measure and lint centre an `align=left` edge label's estimated
       box on its anchor, but mxGraph places such a label with its LEFT
       edge at the anchor: a half-width error that produced 5 of the 8
       surviving advisory notes on the normalised generic pair (four of
@@ -1602,35 +1684,51 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       anchor, while `verticalAlign=middle` centres it (166.7..174.3u
       for an anchor at y=170): the palette's edge-label style carries
       the token, so committed diagrams are unaffected in practice.
-- [ ] `measure --affine` (and the calibration under it) reports a bogus
+- [x] `measure --affine` (and the calibration under it) reports a bogus
       affine with a huge residual shift when the PNG was rendered at a
       scale other than the config's (a scale-1 render produced a
       nonsensical -1182,-837px shift with no hint of the cause): detect
       the scale mismatch and warn loudly instead of publishing numbers.
-- [ ] Lint editor-junk check learns `<font color="...">` as a junk
+      DONE as a hard failure naming the implied scale, and it promptly
+      caught the tool repo's own smoke test measuring a scale-3 render
+      against a planted scale-1 config.
+- [x] Lint editor-junk check learns `<font color="...">` as a junk
       token: the generic pair's `n-sign` and `n-attest` carried
       `<font color="#000000"><br></font>` (editor residue wrapping an
       invisible line break), which the inline-CSS token matching does
       not see.
-- [ ] `measure` flag parsing after `--cell <id>`: `--fit` given in the
+      DONE, warning tier with a planted violation proven.
+- [x] `measure` flag parsing after `--cell <id>`: `--fit` given in the
       form `--cell <id> --fit` is silently swallowed as a valueless
       flag (no fit line, no error: the working form is `--fit <id>`),
       and `--quiet-calibration` after `--cell <id>` is consumed by the
       variadic id list ("cell --quiet-calibration: not a vertex") while
       the chatter prints anyway. Parse flags before variadic ids, or
       fail loudly.
-- [ ] `measure --fit` double-counts a text cell's own spacing tokens:
+      DONE, largely by an earlier parser rework (both reported forms now
+      behave, reproduced before touching anything), plus the remaining
+      hole closed: an id argument beginning with a dash fails loudly
+      instead of being measured as a garbage id.
+- [x] `measure --fit` double-counts a text cell's own spacing tokens:
       `n-read` carries `spacingLeft=8;spacingRight=8`, its measured ink
       already sits inside that inset, and the fit adds the 8u rule on
       top ("delta +12x+2" on a correctly hugged box). Subtract declared
       spacing from the implied box, or name the spacing in the verdict.
-- [ ] Calibration demotion covers only edge-LABEL overhangs, so a
+      DONE by naming: the verdict appends the declared spacing tokens so
+      the reader sees what part of the delta they restate (subtracting
+      them would guess at the interplay with the padding rule).
+- [x] Calibration demotion covers only edge-LABEL overhangs, so a
       bound-setting EDGE keeps the warning loud forever: the actor map
       now warns on `bottom=dvaddr-acct` with a fully explained 30px
       residual (the webapp pads an edge's bounds beyond its declared
       polyline). Extend the demotion to an attributed bound-setting
       edge whose residual sits within the border.
-- [ ] Guide-vs-tool gap on same-colour crossings, a DECISION before any
+      DONE: label boxes now fold into the calibration's content bounds
+      (so label overhangs stop producing residuals at all), and a
+      residual whose bound-setters on the offending axes are edges
+      demotes to a note inside the border. Smoke-proven with a
+      deterministic edge-bound fixture.
+- [x] Guide-vs-tool gap on same-colour crossings, a DECISION before any
       code: lint holds every crossing of two default-stroked edges as
       an ERROR (which forces the derivation layer planar and drove the
       actor map's bus design), while docs/diagramming.md scopes the
@@ -1639,12 +1737,18 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       edges may not cross either and jumps are for step layers only, or
       the check exempts crossings carrying an explicit jump. A design
       round was burned on the gap.
-- [ ] Skill: note in the verify section that the model-to-pixel affine
+      DECIDED for the tool's behaviour, which the actor map's bus was
+      already built on: the guide now states that two edges of the same
+      stroke colour never cross, default black included (the derivation
+      layer stays planar), and jumps exist for cross-colour crossings
+      only.
+- [x] Skill: note in the verify section that the model-to-pixel affine
       changes whenever an edit moves the model bounds, so
       `measure --affine` is re-read after every render, never cached
       across edits (the actor-map bus grew the bottom bound and shifted
       the y offset mid-task).
-- [ ] Lint: visible-run check (the knockout-gap check, re-aimed by the
+      DONE in the skill's measure section.
+- [x] Lint: visible-run check (the knockout-gap check, re-aimed by the
       measured mechanism): the knockout always hugs the text ink (1-2u
       margins, draw.io sizes the background automatically), so checking
       knockout padding would be vacuous. Check instead what actually
@@ -1657,7 +1761,13 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       stroke needs a tight tolerance (about +-40/channel: at +-55,
       antialiased black glyph edges match purple and fabricate phantom
       breaks).
-- [ ] `measure --affine` bakes the calibration residual into its
+      DONE in measure, the pixel verb, at the prescribed +-40/channel
+      tolerance: every measured edge label appends a "visible run" line
+      with the units surviving each side of its knockout, under 20u
+      named as an orphaned stub. Furniture crowding stays with lint's
+      new clearance note, which covers it statically. Verified live on
+      deposit's e2b-l and on a deliberately stubbed fixture.
+- [x] `measure --affine` bakes the calibration residual into its
       offset: it printed `px = (mx-347)*3 + 54` for a render whose true
       mapping is `+76` (a 22px error, enough to miss a 6px stroke),
       because the residual shift it derives includes the attributed
@@ -1666,12 +1776,20 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
       refuse to print an affine while a live calibration WARNING
       stands. Distinct from the scale-mismatch item above: this fires
       at the correct scale.
-- [ ] Lint: the floating-connection warning fires on palette sample edges
+      DONE, both halves: the calibration folds label boxes into its
+      content bounds so the attributed overhang stops polluting the
+      offset (deposit's residual fell to 3,6px), and the affine REFUSES
+      to print while a live WARNING stands.
+- [x] Lint: the floating-connection warning fires on palette sample edges
       whose endpoints are zero-area point shapes, where exit and entry
       sides are geometrically meaningless. The samples were pinned to
       silence it, which adds noise to satisfy a check: either exempt edges
       between zero-area shapes or accept pins as the convention and say so
       in the skill.
+      DONE as the exemption: an unpinned edge between two degenerate
+      specimen points skips the warning (the specimen predicate the
+      label exemptions already use), a real unpinned edge still warns,
+      both proven by fixtures.
 
 ## Workflow (edit, verify, report)
 
