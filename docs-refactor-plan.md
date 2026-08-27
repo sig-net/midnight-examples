@@ -1359,6 +1359,106 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
 
 ## Tool harvest checklist (draw-io-cli)
 
+**Context for the dependency-upgrade items below** (each stands alone, and a
+fresh agent needs only this file). The tool is the `drawio-cli` Node CLI in
+the `BRBussy/draw-io-cli` repo, checked out at
+`/Users/bernard/Projects/github.com/BRBussy/draw-io-cli` (local checkouts
+mirror `github.com/<org>/<repo>`). Plain npm with a committed
+`package-lock.json`, `"type": "module"`, source under `src/` (`cli.js`,
+`lint.js`, `measure.js`, `cells.js`, `edit.js`, `diff.js`, `extract.js`,
+`render.js`, `png.js`, `webapp.js`, `config.js`, `doctor.js`). It carries
+exactly ONE runtime dependency today, `playwright` pinned to the exact
+version `1.62.1`: keep that leanness deliberate, add a dependency only when
+the item below names it, pin it EXACTLY
+(`npm install <pkg>@<version> --save-exact`, version resolved first via
+`npm view <pkg> version`, never a floating range, never a global install),
+and confirm the release is not deprecated. Verification for every item:
+`npm test` from the repo root (the smoke suite, which renders through the
+hediet.vscode-drawio extension's webapp under playwright Chromium: run
+`node src/cli.js doctor` first if unsure the render path is present) and
+`node test/lint-violations.mjs` (the planted-violation suite) must both
+pass, and `node src/cli.js lint <pair> --strict` must stay at 0 errors and
+0 warnings for every committed pair in THIS repo:
+`docs/sign-bidirectional-flow.drawio`, `docs/diagram-palette.drawio`,
+`examples/erc20-vault/docs/actor-map.drawio` and the three
+`examples/erc20-vault/docs/<flow>/<flow>.drawio` flow diagrams (deposit,
+withdraw, swap). Behaviour must not change: these are drop-in replacements
+of hand-rolled plumbing, and any output difference is a defect unless an
+item names it. After a change to any check, plant a violation and watch it
+fail before trusting it. The agent skill at
+`skills/drawio-diagrams/SKILL.md` in the tool repo documents behaviour, so
+touch it only if an item genuinely changes what the skill describes. Do not
+commit or push unless the session's user says to.
+
+- [ ] Dependency upgrade, `pngjs`: replace the hand-rolled PNG decoder in
+      `src/png.js` (about 70 lines supporting only 8-bit RGB and RGBA,
+      non-interlaced: a palette, 16-bit or interlaced PNG from any other
+      exporter throws today) with the `pngjs` package. Preserve the
+      exported contract exactly: `decodePng(buffer)` returns
+      `{width, height, channels, at(x, y)}` where `at` yields `[r, g, b, a]`
+      with `a=255` for RGB sources, so `src/measure.js`, the only consumer,
+      needs no edit. The separate 20-line tEXt-chunk walk in
+      `src/extract.js` (`mxfileFromPng`, which reads the model a
+      `.drawio.png` embeds) stays hand-rolled: `pngjs` does not surface
+      tEXt chunks cleanly and those bytes are the tool's core input path.
+      Prove the swap with `measure` runs on a committed flow PNG before and
+      after (identical output), then the full verification sweep.
+- [ ] Dependency upgrade, `commander` (or `yargs` if commander cannot
+      express a behaviour below): replace the hand-rolled argument parsing
+      in `src/cli.js` (the per-verb `runExtract`/`runRender`/`runCells`/
+      `runMeasure`/`runSetGeometry`/`runSetWaypoints`/`runSetLabelOffset`/
+      `runDiffCells` loops plus the `USAGE` string, which becomes generated
+      help). Behaviours to preserve exactly, each worth a test: repeatable
+      `--cell`/`--fit`/`--gaps` id options where an id may NEVER begin with
+      a dash (a flag mistaken for an id must fail loudly), `--png`/`--svg`
+      taking an OPTIONAL path value, `render --force` failing with its
+      teaching message ("render always overwrites its derived outputs, no
+      flag needed: drop --force"), scale and border defaulting from the
+      nearest `drawio.config.json` with the `config: <path>` stderr note
+      only when the config supplies a value, reports on stdout and
+      diagnostics on stderr, and nonzero exit on any failure. History that
+      motivates this: two real defects lived in the hand parser (a
+      silently swallowed `--fit` given as `--cell <id> --fit`, and flags
+      consumed as variadic ids), so encode those two exact invocation
+      forms as must-fail tests.
+- [ ] Dependency upgrade, `he` (HTML entity codec): the repo decodes XML
+      entities in THREE separate hand-rolled implementations that have
+      already drifted in coverage: `decodeEntities` in `src/extract.js`
+      (named plus numeric), a five-entity `decodeEntities` in
+      `src/render.js` (page-name matching in `selectPage`), and the
+      fixpoint `decodeEntities` in `src/lint.js` (loops up to 8 passes
+      since the webapp double-encodes values, with its own named-entity
+      table). Replace the decoding core of all three with `he.decode`,
+      keeping the domain logic that is NOT he's job: `src/extract.js`'s
+      `decodeNumericEntities` deliberately keeps structural characters
+      encoded (codes 34, 38, 60, 62) so round-trip greps stay well-formed,
+      and lint's fixpoint loop wraps the decoder rather than being
+      replaced by it. The three call sites keep their exact observable
+      behaviour: the existing suites pin it.
+- [ ] Dependency upgrade, `fast-xml-parser`, scoped to the MODEL VIEW
+      only: `parseCells` in `src/lint.js` parses the mxfile by splitting
+      on `<mxCell` with regexes, which is fragile against comments, CDATA,
+      exotic attribute quoting and nested same-name elements. Port
+      `parseCells` (and only it) to a real parser, preserving its contract
+      byte for byte: a Map keyed by cell id of
+      `{id, attrs, style, geo, points, offset}` where `attrs` is the raw
+      attribute map, `style` the parsed style-token map, `geo` the
+      mxGeometry attribute map or null, `points` the `<Array as="points">`
+      waypoints, `offset` the `as="offset"` mxPoint or null. Two encoded
+      behaviours must survive: cells WITHOUT an id are skipped (an id-less
+      cell once entered the map under the key undefined and made the
+      parent walks cyclic, which is also why every `absOrigin` twin
+      carries a cycle guard), and the malformed-model guard in `lint`
+      compares the parsed cell count against the raw `<mxCell` occurrence
+      count, which must stay meaningful. HARD CONSTRAINT: the byte-surgery
+      path stays hand-rolled and gains NO parser: `cellSlice`/`cellXml` in
+      `src/cells.js` and every editing verb in `src/edit.js` exist
+      precisely to slice and splice the file's OWN bytes (attribute order,
+      self-closing spellings and indentation preserved), and any
+      parse-and-re-serialise there defeats the tool's design. Follow with
+      the full verification sweep, and diff `cells --full` output on a
+      committed flow diagram before and after: byte-identical.
+
 - [x] `extract` on a `.drawio.png` races through a shared temp path under
       concurrent renders: with several agents rendering at once it twice
       returned a SIBLING diagram's model for a different PNG (observed
