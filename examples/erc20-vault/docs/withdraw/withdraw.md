@@ -210,7 +210,7 @@ MPC's attestation against it.
 sequenceDiagram
     title Withdraw round trip
     actor User
-    participant DApp as Vault dApp (Relayer)
+    participant DApp as Vault dApp/Relayer
     participant Vault as ERC20 Vault Contract
     participant Singleton as Sig Network Singleton Contract
     participant MPC as Sig Network Distributed MPC

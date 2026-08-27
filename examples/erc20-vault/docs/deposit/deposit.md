@@ -28,7 +28,7 @@ The round trip runs from the user funding their derived deposit account on the
 EVM chain to the vault minting their shielded balance on Midnight. The first
 step is the user's own EVM wallet acting alone, before any contract is
 involved. The user's wallet then drives the two Midnight transactions, the Vault
-dApp (Relayer) does the polling and the broadcast, and the MPC reads, signs and
+dApp/Relayer does the polling and the broadcast, and the MPC reads, signs and
 attests.
 
 ![Deposit flow](deposit.drawio.png)
@@ -193,7 +193,7 @@ re-implementation (see
 sequenceDiagram
     title Deposit round trip
     actor User
-    participant DApp as Vault dApp (Relayer)
+    participant DApp as Vault dApp/Relayer
     participant Vault as ERC20 Vault Contract
     participant Singleton as Sig Network Singleton Contract
     participant MPC as Sig Network Distributed MPC

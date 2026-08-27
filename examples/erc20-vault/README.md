@@ -52,7 +52,7 @@ and each flow's own walkthrough page draws its steps (see
   the ERC20 token contract being bridged, the Uniswap V3 router (`swap`) and
   the Aave stataToken wrapper (`supply` / `redeem`), plus the vault's own
   derived EVM account holding the pooled tokens.
-- **Vault dApp (Relayer)**: the off-chain client. It polls the singleton's
+- **Vault dApp/Relayer**: the off-chain client. It polls the singleton's
   emitted events for the MPC's signature, assembles and broadcasts the
   MPC-signed transaction to the EVM chain, then polls for the MPC's
   attestation and hands the attested output back for settling. The MPC only

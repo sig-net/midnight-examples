@@ -2230,7 +2230,7 @@ authoring conversation:
   ("Sign Bidirectional Flow") and the per-flow evidence in
   `examples/erc20-vault/integration-tests/src/flows/` (the flow files document
   who polls, who broadcasts, who settles). The relayer responsibilities belong
-  to the `Vault dApp (Relayer)` actor.
+  to the `Vault dApp/Relayer` actor.
 - **Verifying singleton circuit names:** `@sig-net/midnight-contract` ships no
   `.compact` source, so a singleton circuit name greps nowhere as
   `export circuit`. The authoritative listing is
