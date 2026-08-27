@@ -9,19 +9,31 @@
 //
 // READ THIS FILE TOGETHER WITH THE EXAMPLE README (../../README.md). The README's
 // integration walkthrough explains the protocol, the derived keys and accounts, and the
-// off-chain runtime legs. The "Setup step N" / "Runtime step N" markers below mirror its
-// numbering:
+// off-chain runtime legs. The "Setup step N" markers below mirror its numbering, and the
+// "Step N (<flow>)" markers carry the per-flow ordinals of the flow pages under
+// ../../docs/:
 //
-//   Setup step 2:               the Signet import.
-//   Setup step 3:               the ledger state and the constructor.
-//   Setup step 4:               initialize().
-//   Runtime step 1 (deposit):   deposit().
-//   Runtime step 5 (deposit):   claim().
-//   Runtime step 1 (withdraw):  withdraw().
-//   Runtime step 5 (withdraw):  completeWithdraw() / refund().
+//   Setup step 2:      the Signet import.
+//   Setup step 3:      the ledger state and the constructor.
+//   Setup step 4:      initialize().
+//   Step 2 (deposit):  deposit().
+//   Step 6 (deposit):  claim().
+//   Step 1 (withdraw): withdraw().
+//   Step 5 (withdraw): completeWithdraw().
+//   Step 1 (swap):     approveRouter().
+//   Step 2 (swap):     swap().
+//   Step 6 (swap):     completeSwap().
+//   Step 1 (supply):   approveStata().
+//   Step 2 (supply):   supply().
+//   Step 6 (supply):   completeSupply().
+//   Step 1 (redeem):   redeem().
+//   Step 5 (redeem):   completeRedeem().
+//   Step 5 (withdraw), Step 5 (redeem), Step 6 (swap), Step 6 (supply): refund().
 //
-// Runtime steps 2 to 4 (polling the MPC's responses, broadcasting to the EVM chain) are
-// off-chain client code: see the README walkthrough and ../../integration-tests/src/flows/.
+// Every flow's three middle steps (poll for the MPC's signature, broadcast to the EVM
+// chain, poll for the MPC's attestation) run between its request circuit and its settle
+// circuit as off-chain client code, as does deposit's opening fund leg, Step 1 (deposit):
+// see the README walkthrough and ../../integration-tests/src/flows/.
 
 pragma language_version >= 0.25;
 
@@ -323,7 +335,7 @@ export circuit initialize(
   mpcResponseKey = disclose(responseKey);
 }
 
-// ---- Runtime step 1 (deposit): deposit ----------------------------------------------
+// ---- Step 2 (deposit): deposit ------------------------------------------------------
 
 // The vault-specific arguments of a deposit. Everything else about the request is
 // composed by the contract, see deposit.
@@ -334,11 +346,12 @@ struct DepositRequest {
 
 // Records a SignBidirectionalEvent for `transfer(vaultEvmAddress, amount)` on the
 // ERC20, to be signed by the MPC with the CALLER's derived account and broadcast
-// off-chain (runtime steps 2 and 3). The contract composes the ENTIRE transaction and
-// routing itself. The caller supplies only what is genuinely theirs to choose: their
-// account's nonce, the gas envelope their account pays, and the MPC key version. The
-// derivation path is not an argument at all: it is the caller's identity commitment,
-// recomputed in-circuit, so the MPC signs with THIS caller's account and no one else's.
+// off-chain (Steps 3 and 4 of the deposit flow). The contract composes the ENTIRE
+// transaction and routing itself. The caller supplies only what is genuinely theirs to
+// choose: their account's nonce, the gas envelope their account pays, and the MPC key
+// version. The derivation path is not an argument at all: it is the caller's identity
+// commitment, recomputed in-circuit, so the MPC signs with THIS caller's account and no
+// one else's.
 export circuit deposit(
   evmNonce: Uint<64>,
   gasLimit: Uint<64>,
@@ -424,7 +437,7 @@ export circuit deposit(
   );
 }
 
-// ---- Runtime step 5 (deposit): claim ------------------------------------------------
+// ---- Step 6 (deposit): claim --------------------------------------------------------
 // The caller presents the MPC's signature-only RespondBidirectionalEvent together with
 // the full serialized output they recomputed off-chain (the event carries only the MPC's
 // signature, never the digest or the output), and the vault mints shielded vault tokens
@@ -487,7 +500,7 @@ export circuit claim(
   mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), claimRecipient);
 }
 
-// ---- Runtime step 1 (withdraw): withdraw --------------------------------------------
+// ---- Step 1 (withdraw): withdraw ----------------------------------------------------
 
 // The vault-specific arguments of a withdraw. The surrendered coin is a separate
 // (coin-typed) circuit parameter.
@@ -612,8 +625,7 @@ export circuit withdraw(
   );
 }
 
-// ---- Runtime step 5 (withdraw): the shared refund block -----------------------------
-// ---- Runtime step 5 (withdraw): completeWithdraw ------------------------------------
+// ---- Step 5 (withdraw): completeWithdraw --------------------------------------------
 // Settles an EXECUTED withdrawal in both branches, decided by the MPC-attested output,
 // never the caller. The transfer ran on the EVM, so its packed bool result is one byte:
 // 0x01 (success) or 0x00 (the ERC20 returned false). On success the withdrawal is
@@ -684,7 +696,7 @@ export circuit completeWithdraw(
   refundCommitment.remove(disclosedRequestId);
 }
 
-// ---- Runtime step 5 (withdraw/swap/supply/redeem): refund ---------------------------
+// ---- Step 5 (withdraw), Step 5 (redeem), Step 6 (swap), Step 6 (supply): refund -----
 // Settles a withdrawal, swap, supply or redeem whose transaction NEVER EXECUTED: it reverted
 // on-chain or its nonce was consumed by a replacement, so the MPC attested the protocol's fixed
 // failure output (the 4-byte 0xdeadbeef sentinel plus one 0x01 byte, schema-independent
@@ -795,7 +807,7 @@ export circuit refund(
   mintShieldedToken(domainSep, amount, disclose(mintNonce), recipient);
 }
 
-// ---- Swap: approveRouter ------------------------------------------------------------
+// ---- Step 1 (swap): approveRouter ---------------------------------------------------
 // Permissionless, one-time-per-token router allowance. Records approve(uniswapRouter,
 // ~unlimited) on the ERC20, signed by the MPC with the VAULT's account (the pooled funds
 // live there) and broadcast off-chain. Spender is the initialize-pinned router and amount
@@ -879,7 +891,7 @@ export circuit approveRouter(
   );
 }
 
-// ---- Swap: swap ---------------------------------------------------------------------
+// ---- Step 2 (swap): swap ------------------------------------------------------------
 // The vault-specific arguments of a swap. The surrendered coin (tokenIn value) is a
 // separate coin-typed parameter, as in withdraw.
 struct SwapRequest {
@@ -1009,7 +1021,7 @@ export circuit swap(
   );
 }
 
-// ---- Swap: completeSwap -------------------------------------------------------------
+// ---- Step 6 (swap): completeSwap ----------------------------------------------------
 // Settles a SUCCESSFUL swap: exactOutputSingle either returns amountIn (the input spent, the
 // router enforces amountIn <= amountInMaximum) or reverts, so an 8-byte attested output means
 // success and carries the uint64 amountIn. Mints the exact amountOut of tokenOut (a request
@@ -1069,7 +1081,7 @@ export circuit completeSwap(
   mintShieldedToken(vaultTokenDomainSeparator(view.tokenIn), change as Uint<64>, changeNonce, recipient);
 }
 
-// ---- Aave: approveStata -------------------------------------------------------------
+// ---- Step 1 (supply): approveStata --------------------------------------------------
 // One-time MPC-signed approve(stataToken, MAX) on the underlying USDC, so the wrapper can
 // pull it during supply. Mirrors approveRouter: bool result, the field-0 map, "vault" path.
 export circuit approveStata(
@@ -1119,7 +1131,7 @@ export circuit approveStata(
   );
 }
 
-// ---- Aave: supply -------------------------------------------------------------------
+// ---- Step 2 (supply): supply --------------------------------------------------------
 // Burns the surrendered USDC vault coin and records stataToken.deposit(amount, vault), signed
 // by the VAULT account (exact-input, so no change). completeSupply mints shielded(stataToken)
 // for the attested shares; on EVM failure refund re-mints the surrendered amount. The coin
@@ -1196,7 +1208,7 @@ export circuit supply(
   );
 }
 
-// ---- Aave: completeSupply -----------------------------------------------------------
+// ---- Step 6 (supply): completeSupply ------------------------------------------------
 // Settles a successful supply: mints shielded(stataToken) for the attested shares. Supplier-
 // gated (mints private coins), one settle per request. A supply whose EVM tx never executed
 // settles through refund instead.
@@ -1229,7 +1241,7 @@ export circuit completeSupply(
   mintShieldedToken(vaultTokenDomainSeparator(stataToken), shares, disclose(mintNonce), recipient);
 }
 
-// ---- Aave: redeem -------------------------------------------------------------------
+// ---- Step 1 (redeem): redeem --------------------------------------------------------
 // Burns the surrendered stataToken vault coin and records stataToken.redeem(shares, vault,
 // vault), signed by the VAULT account. completeRedeem mints shielded(stataUnderlying) for the
 // attested assets (principal + accrued interest); on EVM failure refund re-mints the shares.
@@ -1305,7 +1317,7 @@ export circuit redeem(
   );
 }
 
-// ---- Aave: completeRedeem -----------------------------------------------------------
+// ---- Step 5 (redeem): completeRedeem ------------------------------------------------
 // Settles a successful redeem: mints shielded(stataUnderlying) for the attested assets.
 export circuit completeRedeem(
   requestId: RequestId,
