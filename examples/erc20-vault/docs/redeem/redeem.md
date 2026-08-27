@@ -30,7 +30,7 @@ Midnight to the settle call that closes the request. There is no allowance leg:
 the vault redeems its OWN shares, so the redeem names the vault's account as
 both receiver and owner and the wrapper needs no approval from anyone. The EVM
 transaction is sent by the vault's own account, pinned at initialize as
-[`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L75). The user's
+[`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L91). The user's
 wallet drives the two Midnight transactions, the Vault dApp (Relayer) does the
 polling and the broadcast, and the MPC reads, signs and attests exactly as it
 does for a [deposit](../deposit/deposit.md). The settle is a branch: both arms
@@ -43,10 +43,10 @@ As illustrated, the flow comprises 5 steps:
 
 - **1.** redeem(...) burns the surrendered coin and records the request
   - The caller surrenders a shielded **vault coin** of exactly the shares being
-    redeemed. [`redeem`](../../contract/src/erc20-vault.compact#L1236) checks the
+    redeemed. [`redeem`](../../contract/src/erc20-vault.compact#L1264) checks the
     coin's colour is the wrapper's vault token
-    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L247)
-    over the pinned [`stataToken`](../../contract/src/erc20-vault.compact#L144))
+    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L271)
+    over the pinned [`stataToken`](../../contract/src/erc20-vault.compact#L159))
     and that its value equals the shares, then burns it: `receiveShielded`
     assigns the coin to the contract, then `sendImmediateShielded` sends its full
     value to the shielded burn address. Both calls are needed, as a contract can
@@ -60,16 +60,16 @@ As illustrated, the flow comprises 5 steps:
     transaction is the pinned wrapper, so a malicious client cannot point the
     pooled position at a contract of their own.
   - The request is recorded in
-    [`redeemEventMap`](../../contract/src/erc20-vault.compact#L163), a map of its
+    [`redeemEventMap`](../../contract/src/erc20-vault.compact#L178), a map of its
     own rather than the supply map: a wrapper redemption is 3 calldata words
     against a supply's 2, and the calldata width is part of the ledger type. Its
     schemas
-    ([`redeemOutputSchema`](../../contract/src/erc20-vault.compact#L231) and
-    [`redeemRespondSchema`](../../contract/src/erc20-vault.compact#L234), 36 and
+    ([`redeemOutputSchema`](../../contract/src/erc20-vault.compact#L246) and
+    [`redeemRespondSchema`](../../contract/src/erc20-vault.compact#L249), 36 and
     35 bytes) say the wrapper returns a `uint256 assets` the MPC repacks to
     `uint64`. It is ledger field 17, and the notification carries its resolved
     ledger-tree path `[1, 13]` at depth 2, mirrored off chain by
-    [`VAULT_REDEEM_REQUESTS_PATH`](../../contract/src/index.ts#L46).
+    [`VAULT_REDEEM_REQUESTS_PATH`](../../contract/src/index.ts#L45).
   - The derivation path is the contract-fixed literal `pad(32, "vault")`, so the
     MPC signs with the vault's own account and never with a caller's (see
     [Derived keys and accounts](../../README.md#derived-keys-and-accounts)). The
@@ -80,9 +80,9 @@ As illustrated, the flow comprises 5 steps:
     can only fund the coin from the caller's own balance, so anyone holding
     wrapper vault tokens may redeem.
   - The redeemer's settle view (commitment, shares) goes into
-    [`redeemRefundCommitment`](../../contract/src/erc20-vault.compact#L173),
+    [`redeemRefundCommitment`](../../contract/src/erc20-vault.compact#L188),
     whose commitment comes from
-    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L274)
+    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L298)
     over the caller's secret and the request id, the same identity-breaking
     commitment a [withdrawal](../withdraw/withdraw.md) pins. The shares are
     bounded to `Uint<64>` before the burn, so the refund arm can always re-mint
@@ -139,7 +139,7 @@ As illustrated, the flow comprises 5 steps:
     (`0xdeadbeef01`), which the MPC attests for a transaction that never executed
     at all, reverted on chain or was replaced on the same nonce.
   - Selection is by signature verification alone, against
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L62), the response
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L78), the response
     key the vault pinned at initialize and reads back from its own ledger. A
     decode failure on the fetched output drops the success candidate instead of
     crashing the poll, which leaves the failure candidate to match.
@@ -148,12 +148,12 @@ As illustrated, the flow comprises 5 steps:
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
   - The poll loop and its deadline live in
-    [`completeRedeem`](../../integration-tests/src/flows/redeem.ts#L213) itself,
+    [`completeRedeem`](../../integration-tests/src/flows/redeem.ts#L289) itself,
     which is also the single settle call site: it picks the settle circuit from
     the resolved outcome and passes a fresh random mint nonce either way.
 - **5.** completeRedeem(...) mints shielded(stataUnderlying) for the attested assets
   - An executed redemption settles through
-    [`completeRedeem`](../../contract/src/erc20-vault.compact#L1310), whose
+    [`completeRedeem`](../../contract/src/erc20-vault.compact#L1346), whose
     `Bytes<8>` output argument is the wrapper's packed `uint64` assets.
     `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
     against `mpcResponseKey` before anything else happens.
@@ -173,7 +173,7 @@ As illustrated, the flow comprises 5 steps:
     executed call knows that number, which is precisely why the settle takes the
     attested output rather than anything pinned at request time.
   - The coin's colour is the vault token of the pinned
-    [`stataUnderlying`](../../contract/src/erc20-vault.compact#L143), so a
+    [`stataUnderlying`](../../contract/src/erc20-vault.compact#L158), so a
     completed redeem lands the caller back in plain USDC vault tokens, spendable
     through [withdraw](../withdraw/withdraw.md) or
     [swap](../swap/swap.md) like any other. The mint nonce is caller-chosen
@@ -181,7 +181,7 @@ As illustrated, the flow comprises 5 steps:
     the redeem.
 - **5.** refund(...) re-mints when the redeem never executed
   - A wrapper redemption that never ran on the EVM chain settles through
-    [`refund`](../../contract/src/erc20-vault.compact#L696) instead, and the
+    [`refund`](../../contract/src/erc20-vault.compact#L720) instead, and the
     attested output's WIDTH is what routes the call: the fixed 5-byte failure
     output cannot type-fit `completeRedeem`'s `Bytes<8>`, and an executed result
     cannot type-fit `refund`'s `Bytes<5>`.
@@ -232,9 +232,9 @@ MPC's attestation against it.
 
 The flow needs the wrapper to exist on the chain the vault is pinned to, which
 means Sepolia or a fork of it.
-[`runRedeemRoundTrip`](../../integration-tests/src/flows/redeem.ts#L266) probes
+[`runRedeemRoundTrip`](../../integration-tests/src/flows/redeem.ts#L312) probes
 for the wrapper's code with
-[`stataAvailable`](../../integration-tests/src/evm-stata.ts#L54) and logs a skip
+[`stataAvailable`](../../integration-tests/src/evm-stata.ts#L55) and logs a skip
 where it is absent. It also needs the caller to already HOLD the shares it
 redeems, so a [supply](../supply/supply.md) round trip runs first and its minted
 wrapper vault coin is what this flow burns.

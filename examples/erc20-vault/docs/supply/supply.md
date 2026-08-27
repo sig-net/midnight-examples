@@ -29,7 +29,7 @@ The round trip opens with an allowance the vault grants once and reuses for
 every later supply, then runs from the caller surrendering their underlying
 vault tokens on Midnight to the settle call that closes the request. Both EVM
 transactions are sent by the vault's own account, pinned at initialize as
-[`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L75): the vault holds
+[`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L91): the vault holds
 the pooled funds, so it is the only account with anything to lend. The user's
 wallet drives the Midnight transactions, the Vault dApp (Relayer) does the
 polling and the broadcasts, and the MPC reads, signs and attests exactly as it
@@ -44,17 +44,17 @@ As illustrated, the flow comprises 6 steps:
 - **1.** approveStata(...) records the sign-only allowance request
   - The ERC-4626 wrapper pulls the underlying from the account that calls
     `deposit`, so the vault's account must have approved it first.
-    [`approveStata`](../../contract/src/erc20-vault.compact#L1075) builds
+    [`approveStata`](../../contract/src/erc20-vault.compact#L1103) builds
     contract-enforced calldata for `approve(stataToken, MAX)` called ON the
-    pinned [`stataUnderlying`](../../contract/src/erc20-vault.compact#L143),
-    with the pinned [`stataToken`](../../contract/src/erc20-vault.compact#L144)
+    pinned [`stataUnderlying`](../../contract/src/erc20-vault.compact#L158),
+    with the pinned [`stataToken`](../../contract/src/erc20-vault.compact#L159)
     as the only spender it can ever name. Both addresses arrive at initialize: a
     circuit cannot read the wrapper's `asset()` on chain, so the
     underlying-to-wrapper pairing is trusted configuration rather than something
     the contract derives.
   - The record is a plain 2-word request with the ERC20 `bool` schema, so it
     goes into the field-0
-    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L50)
+    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L66)
     alongside deposits and withdrawals, and the derivation path is the
     contract-fixed literal `pad(32, "vault")`. The gas envelope is
     contract-fixed too, as it is the vault's own ETH that pays it.
@@ -68,13 +68,13 @@ As illustrated, the flow comprises 6 steps:
     [`ensureStataApproved`](../../integration-tests/src/flows/approve-stata.ts#L115)
     reads the live `allowance(vault, stataToken)` off the underlying and runs
     the leg only when it is zero.
-    [`runSupplyRoundTrip`](../../integration-tests/src/flows/supply.ts#L272)
+    [`runSupplyRoundTrip`](../../integration-tests/src/flows/supply.ts#L318)
     calls it before every supply for exactly that reason.
 - **2.** supply(...) burns the surrendered coin and records the request
   - The caller surrenders a shielded **vault coin** of exactly the supply
-    amount. [`supply`](../../contract/src/erc20-vault.compact#L1127) checks the
+    amount. [`supply`](../../contract/src/erc20-vault.compact#L1155) checks the
     coin's colour is the underlying's vault token
-    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L247)
+    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L271)
     over `stataUnderlying`) and that its value equals the amount, then burns it:
     `receiveShielded` assigns the coin to the contract, then
     `sendImmediateShielded` sends its full value to the shielded burn address.
@@ -85,15 +85,15 @@ As illustrated, the flow comprises 6 steps:
     nowhere else. The `to` of the transaction is the pinned wrapper, so a
     malicious client cannot point the pooled funds at a contract of their own.
   - The request is recorded in
-    [`supplyEventMap`](../../contract/src/erc20-vault.compact#L149), a map of
+    [`supplyEventMap`](../../contract/src/erc20-vault.compact#L164), a map of
     its own rather than the field-0 one: a wrapper deposit returns
     a `uint256 shares` the MPC repacks to `uint64`, and those schema widths
-    ([`supplyOutputSchema`](../../contract/src/erc20-vault.compact#L219) and
-    [`supplyRespondSchema`](../../contract/src/erc20-vault.compact#L222), 36 and
+    ([`supplyOutputSchema`](../../contract/src/erc20-vault.compact#L234) and
+    [`supplyRespondSchema`](../../contract/src/erc20-vault.compact#L237), 36 and
     35 bytes) are part of the ledger type. It is ledger field 15, and the
     notification carries its resolved ledger-tree path `[1, 11]` at depth 2,
     mirrored off chain by
-    [`VAULT_SUPPLY_REQUESTS_PATH`](../../contract/src/index.ts#L43).
+    [`VAULT_SUPPLY_REQUESTS_PATH`](../../contract/src/index.ts#L42).
   - The derivation path is `pad(32, "vault")` again, so the MPC signs with the
     vault's own account and never with a caller's (see
     [Derived keys and accounts](../../README.md#derived-keys-and-accounts)). The
@@ -104,9 +104,9 @@ As illustrated, the flow comprises 6 steps:
     can only fund the coin from the caller's own balance, so anyone holding
     underlying vault tokens may supply.
   - The supplier's settle view (commitment, amount) goes into
-    [`supplyRefundCommitment`](../../contract/src/erc20-vault.compact#L159),
+    [`supplyRefundCommitment`](../../contract/src/erc20-vault.compact#L174),
     whose commitment comes from
-    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L274)
+    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L298)
     over the caller's secret and the request id, the same identity-breaking
     commitment a [withdrawal](../withdraw/withdraw.md) pins. The amount is
     bounded to `Uint<64>` before the burn, so the refund arm can always re-mint
@@ -164,7 +164,7 @@ As illustrated, the flow comprises 6 steps:
     (`0xdeadbeef01`), which the MPC attests for a transaction that never
     executed at all, reverted on chain or was replaced on the same nonce.
   - Selection is by signature verification alone, against
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L62), the response
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L78), the response
     key the vault pinned at initialize and reads back from its own ledger. A
     decode failure on the fetched output drops the success candidate instead of
     crashing the poll, which leaves the failure candidate to match.
@@ -173,12 +173,12 @@ As illustrated, the flow comprises 6 steps:
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
   - The poll loop and its deadline live in
-    [`completeSupply`](../../integration-tests/src/flows/supply.ts#L218) itself,
+    [`completeSupply`](../../integration-tests/src/flows/supply.ts#L294) itself,
     which is also the single settle call site: it picks the settle circuit from
     the resolved outcome and passes a fresh random mint nonce either way.
 - **6.** completeSupply(...) mints shielded(stataToken) for the attested shares
   - An executed deposit settles through
-    [`completeSupply`](../../contract/src/erc20-vault.compact#L1203), whose
+    [`completeSupply`](../../contract/src/erc20-vault.compact#L1231), whose
     `Bytes<8>` output argument is the wrapper's packed `uint64` shares.
     `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
     against `mpcResponseKey` before anything else happens.
@@ -203,7 +203,7 @@ As illustrated, the flow comprises 6 steps:
     minted.
 - **6.** refund(...) re-mints when the supply never executed
   - A wrapper deposit that never ran on the EVM chain settles through
-    [`refund`](../../contract/src/erc20-vault.compact#L696) instead, and the
+    [`refund`](../../contract/src/erc20-vault.compact#L720) instead, and the
     attested output's WIDTH is what routes the call: the fixed 5-byte failure
     output cannot type-fit `completeSupply`'s `Bytes<8>`, and an executed result
     cannot type-fit `refund`'s `Bytes<5>`.
@@ -254,9 +254,9 @@ MPC's attestation against it.
 The flow needs the wrapper to exist on the chain the vault is pinned to, which
 means Sepolia or a fork of it. Both
 [`ensureStataApproved`](../../integration-tests/src/flows/approve-stata.ts#L115)
-and [`runSupplyRoundTrip`](../../integration-tests/src/flows/supply.ts#L272)
+and [`runSupplyRoundTrip`](../../integration-tests/src/flows/supply.ts#L318)
 probe for the wrapper's code with
-[`stataAvailable`](../../integration-tests/src/evm-stata.ts#L54) and log a skip
+[`stataAvailable`](../../integration-tests/src/evm-stata.ts#L55) and log a skip
 where it is absent.
 
 ## Sequence

@@ -51,14 +51,18 @@ import "@sig-net/midnight/src/Signet";
 // for an ERC20 transfer(address,uint256): <2 calldata words, 0 access-list entries,
 // 0 storage keys>. Schema widths are 34 bytes, the exact length of
 // vaultResponseSchema() (schemas are exact-width by protocol convention, never padded).
-// This declaration is ledger FIELD 0, so its resolved ledger-tree path is [0] at
-// depth 1 (this contract has 15 or fewer fields, so each field sits directly in the
-// state tree's root array). The request circuits pack this path into their
-// notifications, and the MPC follows it to locate the map. The compiled path is
-// recorded as this field's "index" in managed/erc20-vault/compiler/contract-info.json.
-// The map must stay first and never move after the first deploy. General rule: any field a
-// notification names by position must hold that position. swapEventMap (field 11) is the
-// other such field, since the swap notification hardcodes its path [11, 0, 0, 0].
+// This declaration is ledger FIELD 0. The contract has 19 ledger fields, past the
+// 15-field flat limit, so the compiler chunks the state tree and every field resolves to
+// a depth-2 [chunk, slot] path. This one is [0, 0]. The request circuits pack that path
+// into their notifications, and the MPC follows it to locate the map. Read the compiled
+// path from this field's "index" in managed/erc20-vault/compiler/contract-info.json
+// rather than deriving it.
+// CAUTION: the compiler packs the trailing chunks to 15 and puts the remainder first, so
+// ANY change to the ledger field count re-indexes the tree. Appending a 20th field moves
+// swapEventMap from [1,7] to [1,6] and supplyEventMap from [1,11] to [1,10]. Four fields
+// are named by position in a notification and must keep their compiled path across a
+// deploy: signBidirectionalEventMap [0,0], swapEventMap [1,7], supplyEventMap [1,11],
+// redeemEventMap [1,13]. After any ledger change, re-read every path and redeploy.
 export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // The Signet singleton, pinned at deploy. The request circuits cross-contract call it
@@ -150,8 +154,7 @@ export ledger swapRefundCommitment: Map<RequestId, SwapSettleView>;
 // asset() on-chain, so the underlying-to-wrapper pairing is trusted config, not derivable.
 // stataUnderlying gives supply's burn colour and redeem's mint colour; stataToken is the
 // ONLY spender approveStata grants an allowance to and the ONLY `to` a supply/redeem call
-// sends to. Appended AFTER the swap state so existing field positions, and thus existing
-// circuits' verifier keys, never move.
+// sends to.
 export ledger stataUnderlying: Bytes<20>;
 export ledger stataToken: Bytes<20>;
 
@@ -185,10 +188,10 @@ struct RedeemSettleView {
 export ledger redeemRefundCommitment: Map<RequestId, RedeemSettleView>;
 
 // ---- Fixed MPC routing --------------------------------------------------------------
-// This vault does exactly one thing: have the MPC sign ERC20 `transfer` calls on an EVM
-// chain. The event fields that follow from that are contract CONSTANTS, never circuit
-// arguments: algo is always ecdsa, dest always unused, params always blank, and both
-// serialisation schemas are the schema below.
+// Every EVM call this vault has the MPC sign shares the same routing, so these event
+// fields are contract CONSTANTS, never circuit arguments: algo is always ecdsa, dest
+// always unused, params always blank. Only the serialisation schemas vary, one output and
+// one respond schema per call shape (transfer, exactOutputSingle, approve, deposit, redeem).
 
 // The ABI-style JSON schema of an ERC20 `transfer` result, used in both directions: it
 // tells the MPC how to deserialise the EVM execution output and how to serialise that
@@ -248,6 +251,15 @@ pure circuit redeemRespondSchema(): Bytes<35> {
 }
 struct RedeemReturnValue {
   assets: Uint<64>;
+}
+
+// ---- EVM calldata constants ----------------------------------------------------------
+// The allowance both approve circuits grant: 2^128-1, far above any token supply, so one
+// approve per spender suffices forever. Exported so off-chain code reads it from the
+// compiled circuit, never a TS re-declaration. Off-chain callers rebuild this calldata to
+// compare against what the MPC signed, so a divergent copy breaks the flow at runtime.
+export pure circuit unlimitedAllowance(): Uint<128> {
+  return 340282366920938463463374607431768211455;
 }
 
 // ---- Token model --------------------------------------------------------------------
@@ -425,8 +437,8 @@ export circuit deposit(
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
   // Notify the MPC via the Signet singleton's notification event. The path arguments
-  // carry the resolved ledger-tree path of signBidirectionalEventMap: depth 1, path
-  // [0], as the map is ledger field 0 (see its declaration).
+  // carry the resolved ledger-tree path of signBidirectionalEventMap: [0,0] at depth 2,
+  // chunked past 15 fields (see its declaration).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
@@ -613,8 +625,8 @@ export circuit withdraw(
     amount: disclose(withdrawRequest.amount as Uint<64>),
   });
 
-  // Notify the MPC (ledger-tree path [0] at depth 1 = signBidirectionalEventMap, see
-  // its declaration).
+  // Notify the MPC (ledger-tree path [0,0] at depth 2 = signBidirectionalEventMap,
+  // chunked past 15 fields, see its declaration).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
@@ -831,14 +843,13 @@ export circuit approveRouter(
   assert(initialized >= 1, "Not initialized");
   assert(erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
 
-  // approve(uniswapRouter, 2^128-1). The amount is effectively unlimited (far above any
-  // token supply), so one approve per token suffices forever.
+  // approve(uniswapRouter, unlimitedAllowance()).
   const calldata = EvmCalldata<2> {
     selector: Bytes [0x09, 0x5e, 0xa7, 0xb3], // approve(address,uint256)
     noWords: 2 as Uint<16>,
     words: [
       evmAddressAbiWord(uniswapRouter),
-      numericAbiWord(340282366920938463463374607431768211455 as Uint<128>),
+      numericAbiWord(unlimitedAllowance()),
     ]
   };
 
@@ -879,7 +890,8 @@ export circuit approveRouter(
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
-  // Notify the MPC (ledger-tree path [0] at depth 1 = signBidirectionalEventMap). The
+  // Notify the MPC (ledger-tree path [0,0] at depth 2 = signBidirectionalEventMap,
+  // chunked past 15 fields). The
   // client polls the SignatureRespondedEvent and broadcasts, and no attestation is consumed.
   signetSigner.signBidirectional(
     requestId,
@@ -1033,6 +1045,7 @@ export circuit completeSwap(
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
   mintNonce: Bytes<32>,
+  changeNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
 
@@ -1073,12 +1086,15 @@ export circuit completeSwap(
 
   // Return the unspent tokenIn as change: amountInMaximum - amountIn spent (the attested
   // result, native-deserialized). change <= amountInMaximum, so it fits the Uint<64> mint
-  // API. Change is 0 on an exact spend, which mints a 0-value coin, harmless. A distinct
-  // nonce keeps the two coins unlinkable.
+  // API. Change is 0 on an exact spend, which mints a 0-value coin, harmless.
+  //
+  // changeNonce is a SECOND caller-supplied random nonce, never derived from mintNonce. The two
+  // coins need distinct nonces or they link, and deriving one from the other gives the change
+  // coin no entropy of its own: one leaked or reused mintNonce would expose both at once. Same
+  // rule as mintNonce itself (see claim).
   const amountIn = disclose(deserialize<ExactOutputSingleReturnValue, 8>(serializedOutput).amountIn);
   const change = view.amountInMaximum - amountIn;
-  const changeNonce = persistentHash<Vector<2, Bytes<32>>>([disclose(mintNonce), pad(32, "change")]);
-  mintShieldedToken(vaultTokenDomainSeparator(view.tokenIn), change as Uint<64>, changeNonce, recipient);
+  mintShieldedToken(vaultTokenDomainSeparator(view.tokenIn), change as Uint<64>, disclose(changeNonce), recipient);
 }
 
 // ---- Step 1 (supply): approveStata --------------------------------------------------
@@ -1095,7 +1111,7 @@ export circuit approveStata(
     noWords: 2 as Uint<16>,
     words: [
       evmAddressAbiWord(stataToken),
-      numericAbiWord(340282366920938463463374607431768211455 as Uint<128>),
+      numericAbiWord(unlimitedAllowance()),
     ]
   };
   const txParams = EvmType2TxParams<2, 0, 0> {
@@ -1253,6 +1269,14 @@ export circuit redeem(
 ): [] {
   assert(initialized >= 1, "Not initialized");
   assert(shares > 0 as Uint<128>, "shares must be positive");
+  // CAUTION: this bounds `shares`, not the USDC that comes back. Aave sets that amount, and
+  // completeRedeem mints it as a single coin through the Uint<64> mint API. The coin is already
+  // burned by then, so there is nothing to check and nothing to undo. rate() on the wrapper is
+  // Aave's getReserveNormalizedIncome: it starts at 1 and only grows, so assets >= shares and
+  // bounding shares does not bound assets. completeSupply has the same shape and is safe for the
+  // opposite reason, since shares = amount / rate <= amount. Out of reach for USDC, which would
+  // need 18.4 trillion, about 460x the supply. The cap is on UNITS, so an 18-decimal underlying
+  // caps the whole vault near 18.4 tokens. See #43 before lending anything but USDC.
   assert(shares <= 18446744073709551615 as Uint<128>, "shares exceeds Uint<64> max");
 
   const color = tokenType(vaultTokenDomainSeparator(stataToken), kernel.self());

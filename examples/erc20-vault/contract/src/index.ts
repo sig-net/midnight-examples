@@ -9,9 +9,8 @@ export * from "./witnesses.ts";
 // THIS contract's signet ledger layout (declaration order in
 // erc20-vault.compact): the SignBidirectionalEventMap at field 0, then the
 // rest of the required signet trio (signetSigner, mpcResponseKey), then the
-// request counter at field 3. The contract has 15 or fewer ledger fields, so
-// each field sits directly in the state tree's root array and every path has
-// one entry. A client contract is free to place its event map at any field:
+// request counter at field 3. A client contract is free to place its event map
+// at any field:
 // every raw reader takes the resolved ledger-tree path explicitly, and the
 // path must match the `requestsPath` the contract packs into its
 // notifications. The compiler records each field's path as its "index" in

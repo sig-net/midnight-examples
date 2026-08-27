@@ -1,58 +1,109 @@
 // Fork-only EVM funding: deal ETH + real USDC to the derived accounts. Every suite runs against
-// a Sepolia fork where the ERC20 is the real, unmintable USDC. USDC is sourced by impersonating
-// a pool that holds a large balance (anvil cheatcodes), the same trick swap-e2e uses inline.
+// a Sepolia fork where the ERC20 is the real, unmintable USDC. Token balances are dealt by
+// writing the holder's slot in the token's balance mapping directly (anvil_setStorageAt, the
+// same mechanism as foundry's `deal`), so dealing needs no funded source account and repeated
+// redeploy campaigns can never exhaust one.
 import { type ContractWriteMethod, requireEnv } from "@midnight-examples/test-harness";
 import { ethers } from "ethers";
 
 /** Real Sepolia USDC (the swap suite's tokenIn), also present on a Sepolia fork. */
 export const SEPOLIA_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
-const USDC_WHALE = "0x68adf381b8f9e9e100bb6e13d50b14094e3b6a9d"; // USDC/EURC pool, holds USDC on the fork
 
 /** Aave v3 Sepolia USDC (the lending suite's underlying), the stataUSDC wrapper's `asset()`. */
 export const AAVE_USDC = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8";
-// Aave's aEthUSDC aToken custodies the reserve's underlying USDC (~tens of thousands on the fork),
-// so it is the whale for dealing Aave USDC — the lending counterpart of USDC_WHALE.
-const AAVE_USDC_WHALE = "0x16dA4541aD1807f4443d92D26044C1147406EB80";
 // Aave v3 Sepolia PoolConfigurator + a pool admin: the live USDC reserve is supplied ~2x over its
 // cap, so maxDeposit is 0 and stataUSDC deposits revert. The fork lifts the cap through these.
 const AAVE_POOL_CONFIGURATOR = "0x7Ee60D184C24Ef7AfC1Ec7Be59A0f448A0abd138";
 const AAVE_POOL_ADMIN = "0xfA0e305E0f46AB04f00ae6b5f4560d61a2183E00";
 const ONE_ETH = "0xDE0B6B3A7640000";
-// 100 USDC (6 decimals): far above every suite's small deposits combined, and safely under each
-// whale's live balance so the impersonated transfer never reverts.
+// 100 USDC (6 decimals): far above every suite's small deposits combined.
 const USER_USDC = 100_000_000n;
 
-const ERC20_ABI = [
-  "function transfer(address,uint256) returns (bool)",
-  "function balanceOf(address) view returns (uint256)",
-];
+const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
 
-/**
- * Transfer `amount` of `token` from an impersonated `whale` to `to` on the fork.
- *
- * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
- * @param token - The ERC20 token contract to transfer.
- * @param whale - The account to impersonate (holds `token` on the fork).
- * @param to - The recipient address.
- * @param amount - Base units to transfer.
- */
-async function whaleTransfer(
+const readBalance = (
   provider: ethers.JsonRpcProvider,
   token: string,
-  whale: string,
-  to: string,
-  amount: bigint,
-): Promise<void> {
-  await provider.send("anvil_setBalance", [whale, ONE_ETH]);
-  await provider.send("anvil_impersonateAccount", [whale]);
-  const contract = new ethers.Contract(token, ERC20_ABI, await provider.getSigner(whale));
-  await (await contract.getFunction<ContractWriteMethod>("transfer")(to, amount)).wait();
-  await provider.send("anvil_stopImpersonatingAccount", [whale]);
+  holder: string,
+): Promise<bigint> =>
+  new ethers.Contract(token, ERC20_ABI, provider).getFunction("balanceOf")(
+    holder,
+  ) as Promise<bigint>;
+
+/**
+ * Find the storage location of `holder`'s entry in `token`'s balance mapping by probing: for
+ * each candidate mapping slot, write a sentinel to the location that slot implies, check whether
+ * `balanceOf(holder)` reads it back, and restore the original word either way. Tries the
+ * Solidity mapping layout (`keccak256(holder ++ slot)`) and the Vyper layout
+ * (`keccak256(slot ++ holder)`) for each slot. Works through proxies, since the probe targets
+ * the address `balanceOf` is called on — where a proxy keeps its storage.
+ *
+ * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
+ * @param token - The ERC20 token contract.
+ * @param holder - The account whose balance location is sought.
+ * @returns The 32-byte storage location of the holder's balance.
+ * @throws {Error} If no slot in 0..63 maps to `balanceOf` (a non-standard balance layout).
+ */
+async function findBalanceLocation(
+  provider: ethers.JsonRpcProvider,
+  token: string,
+  holder: string,
+): Promise<string> {
+  const abi = ethers.AbiCoder.defaultAbiCoder();
+  const current = await readBalance(provider, token, holder);
+  const sentinel = current === 1_337_733_113_377_331n ? current + 1n : 1_337_733_113_377_331n;
+  const sentinelWord = ethers.toBeHex(sentinel, 32);
+
+  for (let slot = 0; slot < 64; slot++) {
+    const candidates = [
+      ethers.keccak256(abi.encode(["address", "uint256"], [holder, slot])),
+      ethers.keccak256(abi.encode(["uint256", "address"], [slot, holder])),
+    ];
+    for (const location of candidates) {
+      const original = await provider.getStorage(token, location);
+      await provider.send("anvil_setStorageAt", [token, location, sentinelWord]);
+      const observed = await readBalance(provider, token, holder);
+      await provider.send("anvil_setStorageAt", [token, location, original]);
+      if (observed === sentinel) return location;
+    }
+  }
+  throw new Error(
+    `no balance mapping slot found for ${token} in slots 0..63: the token has a non-standard ` +
+      `balance layout, so it cannot be dealt by storage write`,
+  );
 }
 
 /**
- * Deal ETH (+ optional USDC / Aave USDC) to `to` on the fork: anvil setBalance + impersonated
- * whale transfers.
+ * Set `to`'s balance of `token` to `amount` on the fork by writing the balance mapping slot
+ * directly. Total supply is left untouched, exactly like foundry's `deal` — irrelevant on a
+ * throwaway fork. Setting (rather than transferring) makes dealing idempotent across setup
+ * reruns and independent of any source account's balance.
+ *
+ * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
+ * @param token - The ERC20 token contract.
+ * @param to - The account whose balance is set.
+ * @param amount - The base-unit balance to set.
+ * @throws {Error} If the balance read back after the write does not equal `amount`.
+ */
+async function dealErc20(
+  provider: ethers.JsonRpcProvider,
+  token: string,
+  to: string,
+  amount: bigint,
+): Promise<void> {
+  const location = await findBalanceLocation(provider, token, to);
+  await provider.send("anvil_setStorageAt", [token, location, ethers.toBeHex(amount, 32)]);
+  const observed = await readBalance(provider, token, to);
+  if (observed !== amount) {
+    throw new Error(
+      `dealt ${String(amount)} of ${token} to ${to} but balanceOf reads ${String(observed)}`,
+    );
+  }
+}
+
+/**
+ * Deal ETH (+ optional USDC / Aave USDC) to `to` on the fork: anvil setBalance + balance-slot
+ * writes. Token amounts SET the balance (idempotent), never add to it.
  *
  * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
  * @param to - The recipient address.
@@ -66,8 +117,8 @@ export async function dealFork(
   aaveUsdc = 0n,
 ): Promise<void> {
   await provider.send("anvil_setBalance", [to, ONE_ETH]);
-  if (usdc > 0n) await whaleTransfer(provider, SEPOLIA_USDC, USDC_WHALE, to, usdc);
-  if (aaveUsdc > 0n) await whaleTransfer(provider, AAVE_USDC, AAVE_USDC_WHALE, to, aaveUsdc);
+  if (usdc > 0n) await dealErc20(provider, SEPOLIA_USDC, to, usdc);
+  if (aaveUsdc > 0n) await dealErc20(provider, AAVE_USDC, to, aaveUsdc);
 }
 
 /**
@@ -107,10 +158,9 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
   const vault = requireEnv(env, "EVM_VAULT_ACCOUNT_ADDRESS");
   const userWallet = requireEnv(env, "EVM_USER1_WALLET_ADDRESS");
 
-  // Fail loudly BEFORE dealing: a tx to a code-less address does not revert, so on a bare
-  // (non-forking) anvil dealFork's USDC transfer silently no-ops and the failure surfaces
-  // 15 minutes later as an opaque decimals() error. If USDC has no code, the EVM is not
-  // forking Sepolia, almost always a missing/empty SEPOLIA_FORK_RPC_URL.
+  // Fail loudly BEFORE dealing: if USDC has no code, the EVM is not forking Sepolia (almost
+  // always a missing/empty SEPOLIA_FORK_RPC_URL), and the balance-slot probe would fail with an
+  // opaque decode error instead of this pointed one.
   if ((await provider.getCode(SEPOLIA_USDC)) === "0x") {
     throw new Error(
       `${SEPOLIA_USDC} has no code on ${rpcUrl}: the EVM is not forking Sepolia. Set ` +

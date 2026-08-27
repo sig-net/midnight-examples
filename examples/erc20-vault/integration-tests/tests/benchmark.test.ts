@@ -1,6 +1,6 @@
 // The benchmark e2e flow: every vault circuit proved at least once, so the
 // merged report (yarn benchmark:report:erc20-vault) carries a prove row for
-// each of the 9 circuits. The sequences, in order:
+// each of the 14 circuits. The sequences, in order:
 //
 //   initialize     — timed when THIS run initializes the vault (fresh
 //                    deploy); the circuit is one-shot per contract, so a
@@ -13,6 +13,14 @@
 //                    ending in completeSwap. Needs Uniswap on the EVM chain
 //                    (Sepolia or the pinned fork); logs a skip elsewhere,
 //                    leaving the swap/completeSwap prove rows absent.
+//   approveStata   — approveStata request + MPC signature + broadcast, the
+//                    aave twin of the approve sequence. Needs the stataUSDC
+//                    wrapper on the EVM chain; logs a skip elsewhere, as do
+//                    the two sequences below.
+//   supply         — arrange deposit of the Aave underlying (untimed), then
+//                    the supply round trip ending in completeSupply.
+//   redeem         — redeems the shares the supply sequence minted, ending
+//                    in completeRedeem.
 //   refund         — arrange deposit (untimed) + vault ERC20 drain
 //                    (fakenet-only), then a withdraw whose transfer mines
 //                    and REVERTS, so the MPC attests the fixed failure
@@ -41,12 +49,16 @@
 // happy-day before this one in a full-suite run). Recovery from a run that
 // died mid-flow (proof-server OOM): rerun this file with the
 // BENCHMARK_*_REQUEST_ID env var the failed run printed
-// (deposit/withdraw/swap/refund-deposit/refund-withdraw).
+// (deposit/withdraw/swap/supply/redeem/refund-deposit/refund-withdraw).
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
 
-import { VAULT_SWAP_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
+import {
+  VAULT_REDEEM_REQUESTS_PATH,
+  VAULT_SUPPLY_REQUESTS_PATH,
+  VAULT_SWAP_REQUESTS_PATH,
+} from "@midnight-examples/erc20-vault-contract";
 import {
   banner,
   getErc20Balance,
@@ -63,10 +75,12 @@ import { afterAll, describe, expect, it } from "vitest";
 import { PROOF_RECORDS_FILE } from "../src/benchmark/paths.ts";
 import { Recorder } from "../src/benchmark/recorder.ts";
 import { BenchmarkLeg } from "../src/benchmark/records.ts";
+import { AAVE_USDC, STATA_USDC, stataAvailable } from "../src/evm-stata.ts";
 import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { approveRouter } from "../src/flows/approve.ts";
+import { approveStata } from "../src/flows/approve-stata.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { claim } from "../src/flows/claim.ts";
 import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
@@ -74,10 +88,23 @@ import { deposit, runDepositRoundTrip } from "../src/flows/deposit.ts";
 import { initialize } from "../src/flows/initialize.ts";
 import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
+import {
+  pollRedeemOutcome,
+  redeem,
+  type RedeemOutcome,
+  settleRedeem,
+} from "../src/flows/redeem.ts";
+import {
+  pollSupplyOutcome,
+  settleSupply,
+  supply,
+  type SupplyOutcome,
+} from "../src/flows/supply.ts";
 import { pollSwapOutcome, settleSwap, swap, type SwapOutcome } from "../src/flows/swap.ts";
 import { withdraw } from "../src/flows/withdraw.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
+import { vaultTokenType } from "../src/vault-token.ts";
 
 const MINUTE = 60_000;
 
@@ -126,6 +153,11 @@ const DEPOSIT_AMOUNT = parseUnits("0.1", 6);
 const WITHDRAW_AMOUNT = DEPOSIT_AMOUNT;
 const REFUND_AMOUNT = parseUnits("0.1", 6);
 
+// The Aave underlying deposited (untimed arrange) and then supplied into the
+// stataUSDC wrapper, mirroring tests/supply-redeem-e2e.test.ts: 1 USDC. The
+// redeem sequence redeems whatever shares the supply mints.
+const SUPPLY_AMOUNT = parseUnits("1", 6);
+
 // Swap parameters, mirroring tests/swap-e2e.test.ts: receive exactly
 // AMOUNT_OUT of EURC, capping the input at a live quote plus headroom (the
 // fork pool price is arbitrary, so the cap is never hardcoded).
@@ -154,8 +186,21 @@ const timings: {
   readonly deposit: Record<string, number>;
   readonly withdraw: Record<string, number>;
   readonly swap: Record<string, number>;
+  readonly approveStata: Record<string, number>;
+  readonly supply: Record<string, number>;
+  readonly redeem: Record<string, number>;
   readonly refund: Record<string, number>;
-} = { initialize: {}, approve: {}, deposit: {}, withdraw: {}, swap: {}, refund: {} };
+} = {
+  initialize: {},
+  approve: {},
+  deposit: {},
+  withdraw: {},
+  swap: {},
+  approveStata: {},
+  supply: {},
+  redeem: {},
+  refund: {},
+};
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
   "erc20-vault benchmark e2e: per-leg wall-clock covering every vault circuit",
@@ -868,6 +913,513 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       15 * MINUTE,
     );
 
+    // ── Aave sequences, one timed leg per test ─────────────────────────────
+    // approveStata (sign-only), then a supply round trip ending in
+    // completeSupply, then a redeem of the freshly minted shares ending in
+    // completeRedeem — mirroring tests/supply-redeem-e2e.test.ts. Need the
+    // stataUSDC wrapper on the EVM chain (Sepolia or the pinned fork): the
+    // arrange test resolves availability once and the rest skip with it,
+    // leaving the aave prove rows absent on a bare-anvil stack.
+
+    let stataOk = false;
+
+    it(
+      "aave arrange: deposit the Aave underlying the supply will surrender (untimed)",
+      async () => {
+        const context = await session.vaultContext();
+        stataOk = await stataAvailable(context.evmRpcUrl);
+        if (!stataOk) {
+          logSkip(
+            "aave",
+            "stataUSDC wrapper not deployed on this EVM chain (need Sepolia or a Sepolia fork)",
+          );
+          return;
+        }
+        if (env.BENCHMARK_SUPPLY_REQUEST_ID) {
+          logSkip("aave arrange", "BENCHMARK_SUPPLY_REQUEST_ID present, resuming past the arrange");
+          return;
+        }
+
+        // The supplied coin is the AAVE underlying's own vault colour, so the
+        // arrange deposits THAT token (the wrapper pulls it from the vault's
+        // EVM account during the supply). Setup deals it to the user on the
+        // fork; the deposit flow fails with a pointed sweep error otherwise.
+        // Arrange-stage plumbing, deliberately untimed: its deposit/claim
+        // proves still land in the recorder as extra warm samples.
+        const { requestId } = await runDepositRoundTrip(session, {
+          amount: SUPPLY_AMOUNT,
+          erc20Address: AAVE_USDC,
+        });
+        expect(requestId).toMatch(/^[0-9a-f]{64}$/);
+      },
+      30 * MINUTE,
+    );
+
+    // Populated by the request leg below for the sign + broadcast legs.
+    let approveStataRequestId: RequestIdHex;
+
+    it(
+      "time approveStata: record the wrapper-allowance request on the vault ledger",
+      async () => {
+        if (!stataOk) {
+          logSkip("approveStata", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        const context = await session.vaultContext();
+        // The approve tx is sent FROM the vault's derived account; like
+        // approveRouter it is repeatable (a repeat re-sets the same
+        // allowance), so it always runs and always records a prove.
+        const evmNonce = await getTransactionNonce(
+          requireEnv("EVM_RPC_URL"),
+          requireEnv("EVM_VAULT_ADDRESS"),
+        );
+
+        recorder.setLeg(BenchmarkLeg.ApproveStataRequest);
+        const stop = startTimer();
+        approveStataRequestId = await approveStata(context, evmNonce);
+        const ms = stop();
+        recorder.clearLeg();
+        timings.approveStata.approveStata = ms;
+        recorder.recordLeg(BenchmarkLeg.ApproveStataRequest, ms);
+
+        expect(approveStataRequestId).toMatch(/^[0-9a-f]{64}$/);
+      },
+      5 * MINUTE,
+    );
+
+    // Populated by the poll leg below for the broadcast leg.
+    let signedApproveStataTransaction: Transaction;
+
+    it(
+      "time pollSignatureResponse (approveStata): the MPC signs the approve",
+      async () => {
+        if (!stataOk) {
+          logSkip("approveStata", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(approveStataRequestId).toBeDefined();
+        const context = await session.vaultContext();
+
+        recorder.setLeg(BenchmarkLeg.ApproveStataPollSignatureResponse);
+        const stop = startTimer();
+        signedApproveStataTransaction = await pollSignatureResponse(context, {
+          requestId: approveStataRequestId,
+          intervalMs: 1000,
+          timeoutMs: 2 * MINUTE,
+          expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+        });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.approveStata.pollSignatureResponse = ms;
+        recorder.recordLeg(BenchmarkLeg.ApproveStataPollSignatureResponse, ms);
+      },
+      5 * MINUTE,
+    );
+
+    it(
+      "time broadcastEvm (approveStata): the approve mines on the EVM",
+      async () => {
+        if (!stataOk) {
+          logSkip("approveStata", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(signedApproveStataTransaction).toBeDefined();
+        const context = await session.vaultContext();
+
+        recorder.setLeg(BenchmarkLeg.ApproveStataBroadcastEvm);
+        const stop = startTimer();
+        await broadcastEvm(context, { transaction: signedApproveStataTransaction });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.approveStata.broadcastEvm = ms;
+        recorder.recordLeg(BenchmarkLeg.ApproveStataBroadcastEvm, ms);
+      },
+      3 * MINUTE,
+    );
+
+    // Populated by the request leg (or BENCHMARK_SUPPLY_REQUEST_ID) for the
+    // subsequent supply stages.
+    let supplyRequestId: RequestIdHex;
+
+    it(
+      "time supply: record the supply request on the vault ledger",
+      async () => {
+        if (!stataOk) {
+          logSkip("supply", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        if (env.BENCHMARK_SUPPLY_REQUEST_ID) {
+          supplyRequestId = env.BENCHMARK_SUPPLY_REQUEST_ID as RequestIdHex;
+          logSkip(
+            "supply",
+            `BENCHMARK_SUPPLY_REQUEST_ID present, resuming supply '${supplyRequestId}'`,
+          );
+          return;
+        }
+
+        const context = await session.vaultContext();
+        // The deposit tx is sent FROM the vault's derived account (it holds
+        // the pooled underlying); the nonce fetch stays outside the timed span.
+        const evmNonce = await getTransactionNonce(
+          requireEnv("EVM_RPC_URL"),
+          requireEnv("EVM_VAULT_ADDRESS"),
+        );
+
+        recorder.setLeg(BenchmarkLeg.SupplyRequest);
+        const stop = startTimer();
+        supplyRequestId = await supply(context, { amount: SUPPLY_AMOUNT, evmNonce });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.supply.supply = ms;
+        recorder.recordLeg(BenchmarkLeg.SupplyRequest, ms);
+
+        expect(supplyRequestId).toMatch(/^[0-9a-f]{64}$/);
+
+        banner([
+          `Benchmark supply request recorded on the vault ledger:`,
+          "",
+          `  request id: ${supplyRequestId}`,
+          "",
+          "If a later step dies (e.g. proof-server OOM), resume with",
+          `  BENCHMARK_SUPPLY_REQUEST_ID=${supplyRequestId}`,
+        ]);
+      },
+      5 * MINUTE,
+    );
+
+    // Populated by the poll leg below for the broadcast leg.
+    let signedSupplyTransaction: Transaction;
+
+    it(
+      "time pollSignatureResponse (supply): the MPC signs the wrapper deposit",
+      async () => {
+        if (!stataOk) {
+          logSkip("supply", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(supplyRequestId).toBeDefined();
+        const context = await session.vaultContext();
+
+        // Supplies are signed by the VAULT's derived account, read from the
+        // vault's SUPPLY ledger map.
+        recorder.setLeg(BenchmarkLeg.SupplyPollSignatureResponse);
+        const stop = startTimer();
+        signedSupplyTransaction = await pollSignatureResponse(context, {
+          requestId: supplyRequestId,
+          intervalMs: 1000,
+          timeoutMs: 3 * MINUTE,
+          expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+          requestsPath: VAULT_SUPPLY_REQUESTS_PATH,
+        });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.supply.pollSignatureResponse = ms;
+        recorder.recordLeg(BenchmarkLeg.SupplyPollSignatureResponse, ms);
+      },
+      5 * MINUTE,
+    );
+
+    it(
+      "time broadcastEvm (supply): the wrapper deposit mines on the EVM",
+      async () => {
+        if (!stataOk) {
+          logSkip("supply", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(signedSupplyTransaction).toBeDefined();
+        const context = await session.vaultContext();
+
+        // tolerateRevert: an on-chain revert is a valid outcome the MPC
+        // attests as a failure — the settle would then route to refund, which
+        // the settle leg below rejects as an unexpected benchmark outcome.
+        recorder.setLeg(BenchmarkLeg.SupplyBroadcastEvm);
+        const stop = startTimer();
+        await broadcastEvm(context, { transaction: signedSupplyTransaction, tolerateRevert: true });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.supply.broadcastEvm = ms;
+        recorder.recordLeg(BenchmarkLeg.SupplyBroadcastEvm, ms);
+      },
+      3 * MINUTE,
+    );
+
+    // Populated by the poll leg below for the settle leg.
+    let supplyOutcome: SupplyOutcome;
+    // Populated by the settle leg for the redeem request leg's sizing.
+    let supplyShares: bigint | undefined;
+
+    it(
+      "time pollSupplyOutcome: the MPC attests the shares minted",
+      async () => {
+        if (!stataOk) {
+          logSkip("supply", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(supplyRequestId).toBeDefined();
+        const context = await session.vaultContext();
+
+        recorder.setLeg(BenchmarkLeg.SupplyPollOutcome);
+        const stop = startTimer();
+        supplyOutcome = await pollSupplyOutcome(context, {
+          requestId: supplyRequestId,
+          intervalMs: 1000,
+          timeoutMs: 3 * MINUTE,
+        });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.supply.pollSupplyOutcome = ms;
+        recorder.recordLeg(BenchmarkLeg.SupplyPollOutcome, ms);
+
+        // The settle below must prove completeSupply, not refund: the supply
+        // round trip is the happy path (the refund sequence owns the refund
+        // circuit's benchmark).
+        expect(
+          supplyOutcome.matchedFailureOutput,
+          "the MPC must attest the supply as executed (shares), not the failure output",
+        ).toBe(false);
+      },
+      5 * MINUTE,
+    );
+
+    it(
+      "time completeSupply: settle the supply and consume the request + supply marker",
+      async () => {
+        if (!stataOk) {
+          logSkip("supply", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(supplyRequestId).toBeDefined();
+        expect(supplyOutcome).toBeDefined();
+        const context = await session.vaultContext();
+        const requestKey = requestIdBytes(supplyRequestId);
+        const readLedger = () =>
+          readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+
+        // Rerun against a kept contract address: if a prior run already
+        // settled this supply the pending-supply marker is gone — skip cleanly.
+        const before = await readLedger();
+        if (!before.supplyRefundCommitment.member(requestKey)) {
+          logSkip(
+            "completeSupply",
+            `supply ${supplyRequestId} already settled (no pending marker)`,
+          );
+          return;
+        }
+
+        recorder.setLeg(BenchmarkLeg.SupplySettle);
+        const stop = startTimer();
+        const settled = await settleSupply(context, supplyRequestId, supplyOutcome);
+        const ms = stop();
+        recorder.clearLeg();
+        timings.supply.completeSupply = ms;
+        recorder.recordLeg(BenchmarkLeg.SupplySettle, ms);
+
+        expect(settled.refunded, "the happy-path supply must settle through completeSupply").toBe(
+          false,
+        );
+        supplyShares = settled.shares;
+        const after = await readLedger();
+        expect(
+          after.supplyEventMap.member(requestKey),
+          "completeSupply must consume the request from the supply ledger map",
+        ).toBe(false);
+      },
+      15 * MINUTE,
+    );
+
+    // Populated by the request leg (or BENCHMARK_REDEEM_REQUEST_ID) for the
+    // subsequent redeem stages.
+    let redeemRequestId: RequestIdHex;
+
+    it(
+      "time redeem: record the redeem request on the vault ledger",
+      async () => {
+        if (!stataOk) {
+          logSkip("redeem", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        if (env.BENCHMARK_REDEEM_REQUEST_ID) {
+          redeemRequestId = env.BENCHMARK_REDEEM_REQUEST_ID as RequestIdHex;
+          logSkip(
+            "redeem",
+            `BENCHMARK_REDEEM_REQUEST_ID present, resuming redeem '${redeemRequestId}'`,
+          );
+          return;
+        }
+
+        const context = await session.vaultContext();
+        // The redeemed shares come from the supply settle; when a resumed run
+        // skipped that leg, the wallet's stataUSDC vault-coin balance holds
+        // the minted shares instead.
+        const shares =
+          supplyShares ??
+          (await (await session.wallet()).facade.waitForSyncedState()).shielded.balances[
+            vaultTokenType(STATA_USDC, context.vaultContractAddress)
+          ] ??
+          0n;
+        expect(shares, "no stataUSDC shares to redeem (run the supply sequence)").toBeGreaterThan(
+          0n,
+        );
+        // The redeem tx is sent FROM the vault's derived account; the nonce
+        // fetch stays outside the timed span.
+        const evmNonce = await getTransactionNonce(
+          requireEnv("EVM_RPC_URL"),
+          requireEnv("EVM_VAULT_ADDRESS"),
+        );
+
+        recorder.setLeg(BenchmarkLeg.RedeemRequest);
+        const stop = startTimer();
+        redeemRequestId = await redeem(context, { shares, evmNonce });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.redeem.redeem = ms;
+        recorder.recordLeg(BenchmarkLeg.RedeemRequest, ms);
+
+        expect(redeemRequestId).toMatch(/^[0-9a-f]{64}$/);
+
+        banner([
+          `Benchmark redeem request recorded on the vault ledger:`,
+          "",
+          `  request id: ${redeemRequestId}`,
+          "",
+          "If a later step dies (e.g. proof-server OOM), resume with",
+          `  BENCHMARK_REDEEM_REQUEST_ID=${redeemRequestId}`,
+        ]);
+      },
+      5 * MINUTE,
+    );
+
+    // Populated by the poll leg below for the broadcast leg.
+    let signedRedeemTransaction: Transaction;
+
+    it(
+      "time pollSignatureResponse (redeem): the MPC signs the wrapper redeem",
+      async () => {
+        if (!stataOk) {
+          logSkip("redeem", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(redeemRequestId).toBeDefined();
+        const context = await session.vaultContext();
+
+        // Redeems are signed by the VAULT's derived account, read from the
+        // vault's REDEEM ledger map.
+        recorder.setLeg(BenchmarkLeg.RedeemPollSignatureResponse);
+        const stop = startTimer();
+        signedRedeemTransaction = await pollSignatureResponse(context, {
+          requestId: redeemRequestId,
+          intervalMs: 1000,
+          timeoutMs: 3 * MINUTE,
+          expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+          requestsPath: VAULT_REDEEM_REQUESTS_PATH,
+        });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.redeem.pollSignatureResponse = ms;
+        recorder.recordLeg(BenchmarkLeg.RedeemPollSignatureResponse, ms);
+      },
+      5 * MINUTE,
+    );
+
+    it(
+      "time broadcastEvm (redeem): the wrapper redeem mines on the EVM",
+      async () => {
+        if (!stataOk) {
+          logSkip("redeem", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(signedRedeemTransaction).toBeDefined();
+        const context = await session.vaultContext();
+
+        recorder.setLeg(BenchmarkLeg.RedeemBroadcastEvm);
+        const stop = startTimer();
+        await broadcastEvm(context, { transaction: signedRedeemTransaction, tolerateRevert: true });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.redeem.broadcastEvm = ms;
+        recorder.recordLeg(BenchmarkLeg.RedeemBroadcastEvm, ms);
+      },
+      3 * MINUTE,
+    );
+
+    // Populated by the poll leg below for the settle leg.
+    let redeemOutcome: RedeemOutcome;
+
+    it(
+      "time pollRedeemOutcome: the MPC attests the assets minted",
+      async () => {
+        if (!stataOk) {
+          logSkip("redeem", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(redeemRequestId).toBeDefined();
+        const context = await session.vaultContext();
+
+        recorder.setLeg(BenchmarkLeg.RedeemPollOutcome);
+        const stop = startTimer();
+        redeemOutcome = await pollRedeemOutcome(context, {
+          requestId: redeemRequestId,
+          intervalMs: 1000,
+          timeoutMs: 3 * MINUTE,
+        });
+        const ms = stop();
+        recorder.clearLeg();
+        timings.redeem.pollRedeemOutcome = ms;
+        recorder.recordLeg(BenchmarkLeg.RedeemPollOutcome, ms);
+
+        expect(
+          redeemOutcome.matchedFailureOutput,
+          "the MPC must attest the redeem as executed (assets), not the failure output",
+        ).toBe(false);
+      },
+      5 * MINUTE,
+    );
+
+    it(
+      "time completeRedeem: settle the redeem and consume the request + redeem marker",
+      async () => {
+        if (!stataOk) {
+          logSkip("redeem", "stataUSDC wrapper not available (see the arrange leg)");
+          return;
+        }
+        expect(redeemRequestId).toBeDefined();
+        expect(redeemOutcome).toBeDefined();
+        const context = await session.vaultContext();
+        const requestKey = requestIdBytes(redeemRequestId);
+        const readLedger = () =>
+          readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+
+        // Rerun against a kept contract address: if a prior run already
+        // settled this redeem the pending-redeem marker is gone — skip cleanly.
+        const before = await readLedger();
+        if (!before.redeemRefundCommitment.member(requestKey)) {
+          logSkip(
+            "completeRedeem",
+            `redeem ${redeemRequestId} already settled (no pending marker)`,
+          );
+          return;
+        }
+
+        recorder.setLeg(BenchmarkLeg.RedeemSettle);
+        const stop = startTimer();
+        const settled = await settleRedeem(context, redeemRequestId, redeemOutcome);
+        const ms = stop();
+        recorder.clearLeg();
+        timings.redeem.completeRedeem = ms;
+        recorder.recordLeg(BenchmarkLeg.RedeemSettle, ms);
+
+        expect(settled.refunded, "the happy-path redeem must settle through completeRedeem").toBe(
+          false,
+        );
+        const after = await readLedger();
+        expect(
+          after.redeemEventMap.member(requestKey),
+          "completeRedeem must consume the request from the redeem ledger map",
+        ).toBe(false);
+      },
+      15 * MINUTE,
+    );
+
     // ── Refund sequence, one timed leg per test ────────────────────────────
     // The deposit-withdrawal-failure recipe (see
     // tests/deposit-withdrawal-failure-refund.test.ts): drain the vault's
@@ -1117,6 +1669,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           ...section("deposit", timings.deposit),
           ...section("withdraw", timings.withdraw),
           ...section("swap", timings.swap),
+          ...section("approveStata", timings.approveStata),
+          ...section("supply", timings.supply),
+          ...section("redeem", timings.redeem),
           ...section("refund", timings.refund),
         ]);
 
@@ -1131,6 +1686,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "deposit",
           "withdraw",
           "swap",
+          "approveStata",
+          "supply",
+          "redeem",
           "refund",
         ]);
       },

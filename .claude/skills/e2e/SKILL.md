@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-eight-spec suite (62 tests). The pipeline itself (globalSetup steps + flow test
+ten-spec suite (78 tests). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest
 globalSetup before ANY flow file (including single-file runs), and flow files
@@ -64,7 +64,7 @@ environment is a hard error, not an overwrite. On the Sepolia-forked anvil
 are dealt ETH + real USDC via anvil cheatcodes, and the setup starts the fakenet
 responder itself mid-run. The FLOW files are another matter: on a
 16 GB Docker VM expect the proof-server OOM (see "Reading failures") to
-interrupt the suite at some proving leg partway through the eight files:
+interrupt the suite at some proving leg partway through the ten files:
 that is routine, not a defect. Recover per the playbook and the suite
 completes across two or three invocations.
 
@@ -92,7 +92,7 @@ kept contracts.
 
 ## Ground rules (violating these wastes 10+ minutes per mistake)
 
-- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all eight
+- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all ten
   specs) or `yarn test:erc20-vault:e2e tests/<spec-file>` for one spec (the
   setup pipeline still runs first, and extra args pass through to vitest).
 - **Background any run that may zk-compile or deploy** (fresh clone,
@@ -104,9 +104,10 @@ kept contracts.
   order: it stops at the first failure.
 - Expected per-spec test counts, in run order: `happy-day-e2e` **15**,
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
-  **6**, `benchmark` **13**, `false-claimer` **6**, `bearer-transfer` **11**,
-  `swap-e2e` **1**, `swap-refund-e2e` **1**. 62 total (the two swap specs
-  self-skip if Uniswap is absent, e.g. an un-forked anvil).
+  **6**, `benchmark` **27**, `false-claimer` **6**, `bearer-transfer` **11**,
+  `swap-e2e` **1**, `supply-redeem-e2e` **1**, `supply-refund-e2e` **1**,
+  `swap-refund-e2e` **1**. 78 total (the swap and aave specs self-skip if
+  Uniswap / the stataUSDC wrapper is absent, e.g. an un-forked anvil).
 - **The Midnight wallets are funded from ROOT at setup.** The setup's
   wallet steps resolve/generate `MIDNIGHT_ROOT_WALLET_SEED` plus the other seeds
   (`MIDNIGHT_DEPLOYER_WALLET_SEED`, `MIDNIGHT_USER1_WALLET_SEED`,
@@ -191,7 +192,10 @@ raw traced EVM output from it, so a poll that times out with
     `FAILURE_REFUND_DEPOSIT_REQUEST_ID` / `FAILURE_REFUND_WITHDRAW_REQUEST_ID`
   - `deposit-claimant-not-caller`:
     `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID`
-  - `benchmark`: `BENCHMARK_DEPOSIT_REQUEST_ID` / `BENCHMARK_WITHDRAW_REQUEST_ID`
+  - `benchmark`: `BENCHMARK_DEPOSIT_REQUEST_ID` / `BENCHMARK_WITHDRAW_REQUEST_ID` /
+    `BENCHMARK_SWAP_REQUEST_ID` / `BENCHMARK_SUPPLY_REQUEST_ID` /
+    `BENCHMARK_REDEEM_REQUEST_ID` /
+    `BENCHMARK_REFUND_DEPOSIT_REQUEST_ID` / `BENCHMARK_REFUND_WITHDRAW_REQUEST_ID`
   - `false-claimer`: `FALSE_CLAIMER_DEPOSIT_REQUEST_ID`
   - `bearer-transfer`: `BEARER_TRANSFER_DEPOSIT_REQUEST_ID` /
     `BEARER_TRANSFER_WITHDRAW_REQUEST_ID`

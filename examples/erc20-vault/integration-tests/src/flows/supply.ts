@@ -138,7 +138,7 @@ export async function supply(context: VaultContext, options: SupplyOptions): Pro
 }
 
 /** The resolved attested outcome of a supply (uint64 shares minted, or the failure output). */
-interface SupplyOutcome {
+export interface SupplyOutcome {
   readonly event: Awaited<ReturnType<SignetReader["getRespondBidirectionalEvents"]>>[number];
   readonly serializedOutput: Uint8Array;
   readonly shares: bigint;
@@ -208,27 +208,57 @@ async function fetchSupplyOutcome(
   return undefined;
 }
 
+/** Options for {@link pollSupplyOutcome}. */
+export interface PollSupplyOutcomeOptions {
+  /** The supply request id to resolve. */
+  readonly requestId: RequestIdHex;
+  /** Poll interval; 1s when omitted. */
+  readonly intervalMs?: number;
+  /** Give-up horizon; 6 minutes when omitted. */
+  readonly timeoutMs?: number;
+}
+
 /**
- * Poll until the supply outcome resolves, then settle via completeSupply / refund.
+ * Poll until the MPC posts a signature-verified attestation for the supply
+ * (see {@link fetchSupplyOutcome} for candidate resolution).
  *
  * @param context - The flow context.
- * @param requestId - The supply request id to settle.
- * @returns The attested shares minted (0 on refund) and whether the supply was refunded.
+ * @param options - The request id and poll cadence.
+ * @returns The resolved outcome (attested shares minted, or the failure output).
+ * @throws {Error} If no matching attestation posts within the timeout.
  */
-export async function completeSupply(
+export async function pollSupplyOutcome(
   context: VaultContext,
-  requestId: RequestIdHex,
-): Promise<{ shares: bigint; refunded: boolean }> {
-  const end = Date.now() + 6 * MINUTE;
+  options: PollSupplyOutcomeOptions,
+): Promise<SupplyOutcome> {
+  const end = Date.now() + (options.timeoutMs ?? 6 * MINUTE);
   let outcome: SupplyOutcome | undefined;
   while (
     Date.now() < end &&
-    (outcome = await fetchSupplyOutcome(context, requestId)) === undefined
+    (outcome = await fetchSupplyOutcome(context, options.requestId)) === undefined
   ) {
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, options.intervalMs ?? 1000));
   }
-  if (!outcome) throw new Error(`timed out waiting for a supply attestation for ${requestId}`);
+  if (!outcome)
+    throw new Error(`timed out waiting for a supply attestation for ${options.requestId}`);
+  return outcome;
+}
 
+/**
+ * Settle a resolved supply outcome through the circuit its content selects:
+ * `completeSupply` for attested shares (mints the stataUSDC), `refund` for
+ * the fixed MPC failure output (re-mints the surrendered underlying).
+ *
+ * @param context - The flow context.
+ * @param requestId - The supply request id being settled.
+ * @param outcome - The attested outcome from {@link pollSupplyOutcome}.
+ * @returns The attested shares minted (0 on refund) and whether the supply was refunded.
+ */
+export async function settleSupply(
+  context: VaultContext,
+  requestId: RequestIdHex,
+  outcome: SupplyOutcome,
+): Promise<{ shares: bigint; refunded: boolean }> {
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
   if (outcome.matchedFailureOutput) {
     console.log("supply tx never executed: refunding the underlying to this wallet");
@@ -251,6 +281,22 @@ export async function completeSupply(
     `completeSupply settled in tx ${r.public.txId} (minted ${String(outcome.shares)} stataUSDC)`,
   );
   return { shares: outcome.shares, refunded: false };
+}
+
+/**
+ * Poll until the supply outcome resolves, then settle: {@link pollSupplyOutcome}
+ * followed by {@link settleSupply}.
+ *
+ * @param context - The flow context.
+ * @param requestId - The supply request id to settle.
+ * @returns The attested shares minted (0 on refund) and whether the supply was refunded.
+ */
+export async function completeSupply(
+  context: VaultContext,
+  requestId: RequestIdHex,
+): Promise<{ shares: bigint; refunded: boolean }> {
+  const outcome = await pollSupplyOutcome(context, { requestId });
+  return settleSupply(context, requestId, outcome);
 }
 
 /** Options for {@link runSupplyRoundTrip}. */

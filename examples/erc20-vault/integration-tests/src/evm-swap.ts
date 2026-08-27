@@ -1,6 +1,7 @@
 // Uniswap V3 constants for the swap flow: the pinned SwapRouter02 + QuoterV2 (Sepolia
 // canonical, present on the pinned fork), the exactOutputSingle/approve ABI shapes, and a
 // read-only QuoterV2 quote. Mirrors evm-transfer.ts for the swap leg.
+import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
 import type { ContractReadMethod } from "@midnight-examples/test-harness";
 import {
   asciiPadded,
@@ -22,8 +23,8 @@ export const EXACT_OUTPUT_SINGLE_SELECTOR = new Uint8Array([0x50, 0x23, 0xb4, 0x
 /** approve(address,uint256) selector. */
 export const APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
 
-/** Effectively-unlimited allowance (matches the contract's approveRouter, 2^128-1). */
-export const MAX_APPROVE = 340282366920938463463374607431768211455n;
+/** The allowance approveRouter grants, read from the compiled circuit so it cannot drift. */
+export const MAX_APPROVE = pureCircuits.unlimitedAllowance();
 
 /** Gas ceiling of a V3 single-hop swap (~120-200k gas); the contract fixes this (vault pays). */
 export const SWAP_GAS_LIMIT = 700_000n;

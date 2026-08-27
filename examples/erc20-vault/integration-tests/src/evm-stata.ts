@@ -1,6 +1,7 @@
 // Aave ERC-4626 (stataToken) constants for the supply/redeem flows: the pinned Aave USDC
 // pair on Sepolia, the deposit/redeem/approve ABI shapes, the supply/redeem schemas, and the
 // contract-fixed routing. Mirrors evm-swap.ts for the lending leg.
+import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
 import {
   asciiPadded,
   MPC_PARAMS_BYTES,
@@ -24,8 +25,8 @@ export const STATA_REDEEM_SELECTOR = new Uint8Array([0xba, 0x08, 0x76, 0x52]);
 /** approve(address,uint256) selector (approveStata grants the wrapper an allowance on USDC). */
 export const APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
 
-/** Effectively-unlimited allowance (matches the contract's approveStata, 2^128-1). */
-export const MAX_APPROVE = 340282366920938463463374607431768211455n;
+/** The allowance approveStata grants, read from the compiled circuit so it cannot drift. */
+export const MAX_APPROVE = pureCircuits.unlimitedAllowance();
 
 /** Gas ceiling of a supply/redeem through the ERC-4626 wrapper; the contract fixes it (vault pays). */
 export const STATA_GAS_LIMIT = 500_000n;

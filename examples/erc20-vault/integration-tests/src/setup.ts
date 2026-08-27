@@ -261,7 +261,7 @@ function defaultEvmRpcUrl(env: NodeJS.ProcessEnv): void {
 /**
  * Default `EVM_ERC20_CONTRACT_ADDRESS` to real Sepolia USDC — the suites run against a Sepolia fork, so the
  * token is the real (unmintable) USDC rather than a locally deployed test token. Any other
- * ERC20 (that a fork whale can source) can be pinned explicitly.
+ * ERC20 with a standard balance mapping (dealable by storage write) can be pinned explicitly.
  *
  * @param env - The suite's env accumulator.
  */

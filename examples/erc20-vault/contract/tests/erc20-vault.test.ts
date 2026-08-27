@@ -895,6 +895,8 @@ const IMPOSTER_SECRET = bytes(32, 0x43);
 // unlinkability guarantee); the circuit only threads it through, so a fixed
 // value is fine for these deterministic simulator tests.
 const MINT_NONCE = bytes(32, 0x2e);
+// completeSwap mints two coins, each under its own caller-supplied random nonce.
+const CHANGE_NONCE = bytes(32, 0x3f);
 
 // The vault's respond schema, read from the COMPILED circuit (the contract's
 // own declaration), so the fixtures below run through the same ABI-to-compact
@@ -1452,7 +1454,7 @@ describe("claim settle", () => {
 
 const EXACT_OUTPUT_SINGLE_SELECTOR = new Uint8Array([0x50, 0x23, 0xb4, 0xdf]);
 const APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
-const MAX_APPROVE = 340282366920938463463374607431768211455n; // 2^128-1
+const MAX_APPROVE = pureCircuits.unlimitedAllowance();
 // exactOutputSingle returns amountIn: the MPC decodes it as uint256, re-packs it as uint64.
 const SWAP_OUTPUT_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint256"}]', 38);
 const SWAP_RESPOND_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint64"}]', 37);
@@ -1670,6 +1672,7 @@ describe("completeSwap settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
         OUTPUT_SWAP,
         MINT_NONCE,
+        CHANGE_NONCE,
       )
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
@@ -1686,6 +1689,7 @@ describe("completeSwap settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
         OUTPUT_SWAP,
         MINT_NONCE,
+        CHANGE_NONCE,
       ),
     ).rejects.toThrow(/Not the swapper/);
   });
@@ -1699,6 +1703,7 @@ describe("completeSwap settle", () => {
         respond(IMPOSTER_SECRET, requestId, OUTPUT_SWAP),
         OUTPUT_SWAP,
         MINT_NONCE,
+        CHANGE_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
     await expect(
@@ -1708,6 +1713,7 @@ describe("completeSwap settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
         swapOutput(1n),
         MINT_NONCE,
+        CHANGE_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });

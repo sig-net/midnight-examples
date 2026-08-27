@@ -1,22 +1,22 @@
-// One-shot deploy + initialize of the swap-capable vault to a REMOTE network (stagenet),
-// reusing the vault's midnight-js providers. Deploys the vault referencing the given signet
-// contract, then runs the deployer-gated initialize (vault EVM address + router + chain +
-// MPC response key derived from MPC_ROOT_PUBLIC_KEY + the new contract address). Prints the
-// address to set as NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS in the frontend.
+// One-shot deploy + initialize of the vault on a REMOTE network (stagenet). The deploy itself
+// runs the contract package's own `deploy` entrypoint as a subprocess, the same way the e2e
+// setup does, so the split base-deploy plus maintenance-adds has exactly ONE implementation.
+// This script then joins the new address and runs the deployer-gated initialize (vault EVM
+// address + router + Aave pair + chain + MPC response key derived from MPC_ROOT_PUBLIC_KEY and
+// the new contract address). Prints the address to set as
+// NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS in the frontend.
 //
 // Env: MIDNIGHT_NETWORK_ID, MIDNIGHT_NODE_URL, MIDNIGHT_INDEXER_URL, MIDNIGHT_INDEXER_WS_URL,
 //      MIDNIGHT_PROOF_SERVER_URL, MIDNIGHT_DEPLOYER_WALLET_SEED (funded),
 //      MIDNIGHT_SIGNET_CONTRACT_ADDRESS, MPC_ROOT_PUBLIC_KEY, EVM_CHAIN_ID, ROUTER (optional).
-import { createVaultPrivateState, pureCircuits } from "@midnight-examples/erc20-vault-contract";
+import { createVaultPrivateState } from "@midnight-examples/erc20-vault-contract";
 import {
-  assertDeployerFunded,
-  buildDeployTransaction,
   deriveAccountKeys,
   getMidnightNodeConfig,
   identitySecretFromSeed,
-  submitUnprovenTransaction,
   withSyncedWalletFacade,
 } from "@midnight-examples/lib";
+import { runCommand } from "@midnight-examples/test-harness";
 import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import {
@@ -41,7 +41,6 @@ const UNISWAP_SWAP_ROUTER_02 = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E";
 const AAVE_USDC = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8";
 const STATA_USDC = "0x8A88124522dbBF1E56352ba3DE1d9F78C143751e";
 const evmAddressBytes = (hex: string) => hexToBytes(stripHexPrefix(hex));
-const contractRef = (addr: string) => ({ bytes: hexToBytes(stripHexPrefix(addr)) });
 
 const env = process.env;
 const req = (k: string): string => {
@@ -64,33 +63,27 @@ async function main(): Promise<void> {
   const stataToken = env.STATA_TOKEN?.trim() ?? STATA_USDC;
 
   const secretKey = identitySecretFromSeed(deployerSeed);
-  const deployerCommitment = pureCircuits.userCommitment(secretKey);
   const accountKeys = deriveAccountKeys(deployerSeed, networkId);
 
   console.log(`deploying swap-capable erc20-vault to ${networkId} (${nodeConfig.nodeUrl})`);
   console.log(`signet: ${signetAddr}`);
 
-  await withSyncedWalletFacade(accountKeys, nodeConfig, async (facade, state) => {
-    assertDeployerFunded(state);
+  // The 14-circuit contract does not fit one block, so the deploy is a split base deploy plus
+  // one maintenance update per remaining circuit. That lives in the contract package's deploy
+  // entrypoint; run it rather than reimplementing it.
+  const deployStdout = await runCommand(
+    "yarn",
+    ["workspace", "@midnight-examples/erc20-vault-contract", "deploy"],
+    env,
+    30 * 60_000,
+  );
+  const contractAddress = /deployed erc20-vault at (\S+)/.exec(deployStdout)?.[1];
+  if (contractAddress === undefined) {
+    throw new Error("vault deploy printed no `deployed erc20-vault at <address>` line");
+  }
+  console.log(`deployed erc20-vault at ${contractAddress}`);
 
-    const deployTransaction = await buildDeployTransaction(
-      vaultCompiledContract,
-      networkId,
-      accountKeys.shieldedSecretKeys.coinPublicKey,
-      createVaultPrivateState(secretKey),
-      deployerCommitment,
-      contractRef(signetAddr),
-    );
-    const contractAddress = deployTransaction.contractAddress;
-    console.log(`contract address (pre-submit): ${contractAddress}`);
-
-    const deployTxId = await submitUnprovenTransaction(
-      facade,
-      accountKeys,
-      deployTransaction.serializedTransaction,
-    );
-    console.log(`submitted deploy tx ${deployTxId}`);
-
+  await withSyncedWalletFacade(accountKeys, nodeConfig, async (facade) => {
     // Join the freshly-deployed contract and run the deployer-gated initialize.
     const providers = buildVaultProviders(facade, accountKeys, nodeConfig);
     const vault = await findDeployedContract(providers, {

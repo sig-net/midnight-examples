@@ -45,28 +45,28 @@ As illustrated, the flow comprises 6 steps:
   - Every later step assumes the deposit account already holds the tokens to
     sweep and the ETH to pay its own gas. On the local fork the setup pipeline
     deals both to it
-    ([`dealForkEvmAccounts`](../../integration-tests/src/fork-funding.ts#L103)),
+    ([`dealForkEvmAccounts`](../../integration-tests/src/fork-funding.ts#L154)),
     and on a real chain the user funds the printed
     `EVM_USER1_DEPOSIT_ADDRESS`.
 - **2.** deposit(...) records the request
   - The user calls
-    [`deposit(...)`](../../contract/src/erc20-vault.compact#L342) with the ERC20
+    [`deposit(...)`](../../contract/src/erc20-vault.compact#L367) with the ERC20
     address and a private amount. The circuit composes the ENTIRE EVM sweep
     transaction itself: the calldata is `transfer(vaultEvmAddress, amount)`
     built in-circuit around the initialize-pinned
-    [`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L75), which is
+    [`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L91), which is
     what stops a malicious client having the MPC sign a transfer to themselves.
   - The request's **derivation path** is not an argument either: the circuit
     recomputes the caller's commitment from the
-    [`callerSecretKey()`](../../contract/src/erc20-vault.compact#L260) witness
-    with [`userCommitment`](../../contract/src/erc20-vault.compact#L264), so the
+    [`callerSecretKey()`](../../contract/src/erc20-vault.compact#L284) witness
+    with [`userCommitment`](../../contract/src/erc20-vault.compact#L288), so the
     MPC signs with THIS caller's deposit account and no one else's. The caller
     supplies only what is genuinely theirs to choose: their account's nonce, the
     gas envelope their account pays, and the MPC key version.
   - The assembled **SignBidirectionalEvent**
     ([`constructSignBidirectionalEvent`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L135))
     is stored in the ledger's
-    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L50)
+    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L66)
     under its **request id**, the hash of the record itself, and the circuit
     then calls the singleton's
     [`signBidirectional`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-contract/src/signet-contract.compact#L31)
@@ -128,7 +128,7 @@ As illustrated, the flow comprises 6 steps:
     [`MPC_FAILURE_OUTPUT`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/constants.ts#L29)
     (`0xdeadbeef01`), which the MPC attests when the transaction reverted or was
     replaced. Whichever candidate a posted signature verifies over, against the
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L62) read from the
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L78) read from the
     vault's own ledger, is the attested outcome. The success candidate is
     skipped when no output was cached, and a decode failure drops it with a
     warning instead of crashing the poll.
@@ -138,11 +138,11 @@ As illustrated, the flow comprises 6 steps:
     unauthenticated, and the authoritative check is the in-circuit verification
     step 6 runs.
 - **6.** claim(...) verifies and mints
-  - The user calls [`claim(...)`](../../contract/src/erc20-vault.compact#L435)
+  - The user calls [`claim(...)`](../../contract/src/erc20-vault.compact#L460)
     with the request id, the attested event and the recomputed output bytes. The
     circuit re-hashes those bytes into the attestation digest and verifies the
     event's ECDSA signature over it against the initialize-pinned
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L62) with
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L78) with
     [`verifyRespondBidirectionalEvent`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L327).
     The singleton emits MPC posts unverified, so this is the only authentication
     gate.
@@ -152,7 +152,7 @@ As illustrated, the flow comprises 6 steps:
     [`claim.ts`](../../integration-tests/src/flows/claim.ts#L69) refuses to call
     the circuit for one.
   - The stored request is looked up and removed from
-    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L50),
+    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L66),
     which is the double-claim protection, and the caller's recomputed commitment
     must equal that request's path, which makes claims depositor-only.
   - The mint's amount and token colour come from the stored request itself,

@@ -254,9 +254,9 @@ Two vault-specific points:
 
 - The contract package exports the event map's resolved ledger-tree path as
   `VAULT_REQUESTS_PATH` so off-chain readers cannot drift from it. The vault
-  has 15 or fewer ledger fields, so the map at field 0 has the depth-1 path
-  `[0]`, and the request circuits pack it into their notifications as
-  `requestsPathDepth` 1 + `requestsPath` [0, 0, 0, 0]. The compiler records
+  has 19 ledger fields, past the 15-field flat limit, so the map at field 0 has
+  the depth-2 path `[0, 0]`, and the request circuits pack it into their
+  notifications as `requestsPathDepth` 2 + `requestsPath` [0, 0, 0, 0]. The compiler records
   the same path as the field's "index" in the compiled
   `contract-info.json`.
 - The deploy tooling ([`contract/deploy.ts`](contract/deploy.ts)) computes
@@ -384,17 +384,51 @@ a deploy regenerates `src/managed` WITHOUT proving keys, deleting the zk keys
 directory the e2e suite proves with, so `yarn compile:erc20-vault:zk` is
 required again before the next e2e run.
 
-Deploy a fresh vault by hand (the e2e setup does this automatically when the
-`.env` has no vault address):
-
-```sh
-yarn deploy:erc20-vault
-```
-
 **TIP:** If you are using Claude Code you can ask it to run these tests for
 you using this [skill](../../.claude/skills/e2e/SKILL.md). It knows the whole
 operational runbook (rerun vs redeploy modes, the fakenet responder hand-off,
 failure recovery) and will drive it for you.
+
+## Deploying
+
+The contract has 14 circuits and their verifier keys do not fit in one block, so
+a deploy is two phases:
+
+1. The base transaction registers the whole ledger state and ONE small circuit.
+2. Every remaining circuit is added afterwards, one maintenance update each.
+
+The order matters and is not symmetric. Ledger state cannot be added after
+deploy, so the base transaction must carry the final ledger declarations even
+for circuits it does not register yet. Circuits can be added at any time.
+
+[`contract/deploy.ts`](contract/deploy.ts) performs both phases and is the only
+implementation. The e2e setup runs it as a subprocess when the `.env` has no
+vault address, and so does the stagenet script, so local and remote deploys take
+the same path:
+
+```sh
+# local, against the docker stack
+yarn deploy:erc20-vault
+
+# stagenet: deploy, then run the deployer-gated initialize
+yarn workspace @midnight-examples/erc20-vault-integration-tests exec \
+  tsx deploy-init-stagenet.ts
+```
+
+`BASE_DEPLOY_CIRCUITS` names the circuit that goes in the base transaction.
+`buildDeployTransactionDeferring` returns the contract address plus the deferred
+list, and each deferred circuit is then added at the next maintenance-authority
+counter, waiting for the counter to advance between updates.
+
+### MAINTENANCE_SIGNING_KEY
+
+The base deploy retains a maintenance authority, and this variable is its
+signing key. Every circuit added after the base transaction is signed by it.
+
+Set it to a 32-byte hex key you keep. Unset, the deploy generates an ephemeral
+one and says so, which is fine for a throwaway deploy and wrong anywhere else:
+it is the only way to add or replace a circuit later, and an ephemeral key is
+gone when the process exits.
 
 ## The e2e suite
 
