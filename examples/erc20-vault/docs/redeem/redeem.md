@@ -31,7 +31,7 @@ the vault redeems its OWN shares, so the redeem names the vault's account as
 both receiver and owner and the wrapper needs no approval from anyone. The EVM
 transaction is sent by the vault's own account, pinned at initialize as
 [`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L91). The user's
-wallet drives the two Midnight transactions, the Vault dApp (Relayer) does the
+wallet drives the two Midnight transactions, the Vault dApp/Relayer does the
 polling and the broadcast, and the MPC reads, signs and attests exactly as it
 does for a [deposit](../deposit/deposit.md). The settle is a branch: both arms
 are step 5, and which one runs is decided by the MPC's attested output, never by
@@ -248,7 +248,7 @@ wrapper vault coin is what this flow burns.
 sequenceDiagram
     title Redeem round trip
     actor User
-    participant DApp as Vault dApp (Relayer)
+    participant DApp as Vault dApp/Relayer
     participant Vault as ERC20 Vault Contract
     participant Singleton as Sig Network Singleton Contract
     participant MPC as Sig Network Distributed MPC

@@ -35,7 +35,7 @@ seven-word `exactOutputSingle` call. Step 1 sits ahead of the trade proper: a
 one-time allowance per token that any caller may run, and that
 [`runSwapRoundTrip`](../../integration-tests/src/flows/swap.ts#L348) runs first
 through [`ensureRouterApproved`](../../integration-tests/src/flows/approve.ts#L125).
-The user's wallet drives the Midnight transactions, the Vault dApp (Relayer)
+The user's wallet drives the Midnight transactions, the Vault dApp/Relayer
 does the polling and the broadcasts, and the MPC reads, signs and attests
 exactly as it does for a [deposit](../deposit/deposit.md). The settle is a
 branch: both arms are step 6, and which one runs is decided by the MPC's
@@ -274,7 +274,7 @@ MPC's attestation against it.
 sequenceDiagram
     title Swap round trip
     actor User
-    participant DApp as Vault dApp (Relayer)
+    participant DApp as Vault dApp/Relayer
     participant Vault as ERC20 Vault Contract
     participant Singleton as Sig Network Singleton Contract
     participant MPC as Sig Network Distributed MPC

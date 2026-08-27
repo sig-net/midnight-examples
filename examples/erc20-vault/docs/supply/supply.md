@@ -31,7 +31,7 @@ vault tokens on Midnight to the settle call that closes the request. Both EVM
 transactions are sent by the vault's own account, pinned at initialize as
 [`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L91): the vault holds
 the pooled funds, so it is the only account with anything to lend. The user's
-wallet drives the Midnight transactions, the Vault dApp (Relayer) does the
+wallet drives the Midnight transactions, the Vault dApp/Relayer does the
 polling and the broadcasts, and the MPC reads, signs and attests exactly as it
 does for a [deposit](../deposit/deposit.md). The settle is a branch: both arms
 are step 6, and which one runs is decided by the MPC's attested output, never by
@@ -268,7 +268,7 @@ where it is absent.
 sequenceDiagram
     title Supply round trip
     actor User
-    participant DApp as Vault dApp (Relayer)
+    participant DApp as Vault dApp/Relayer
     participant Vault as ERC20 Vault Contract
     participant Singleton as Sig Network Singleton Contract
     participant MPC as Sig Network Distributed MPC

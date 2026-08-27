@@ -183,9 +183,24 @@ its first label, keeping one verb one meaning.
   the note column below it matches the note-to-note gap, so the lane keeps one
   rhythm.
 - Plain rectangle (`rounded=0`, bold) for actors and apps, with the app's icon
-  embedded INSIDE the box, left of the text and vertically centred, so the box reads
-  as a component. The box hugs its icon and text with 12 units of padding: an actor
-  box is no taller or wider than that. The caption-above rule applies to standalone
+  embedded INSIDE the box, so the box reads as a component. The icon's placement
+  follows the box's height, and the height follows what the box has to serve:
+  - **Beside the text** where the box hugs its label. The icon sits 12 units in
+    from the left and is vertically centred, `spacingLeft` clears the text past it
+    (34 units for a 26-unit icon), and 12 units of padding surround the pair: an
+    actor box is no taller or wider than that. This is the default.
+  - **Above the text** where edges anchor to the box at fractions of its height and
+    force it taller than its label needs. Filling that height beside the text
+    strands the remainder as dead space, so the icon goes on the horizontal centre
+    line with `spacingTop` dropping the text clear beneath it.
+
+  Either way the icon and text read as ONE unit centred on both axes, and the unit
+  is what gets centred, never the icon and the text apart. Two cautions when
+  placing it: centre the icon on its rendered INK, not on its cell box, since an
+  embedded PNG usually carries uneven transparent padding (the contract/dApp icon
+  runs about 5 units light on the right, so its cell sits 1 unit right of centre);
+  and `spacingTop` does not move the text one-for-one, so set it by measuring the
+  render rather than by arithmetic. The caption-above rule applies to standalone
   icons only.
 - The User actor is the composite group from the palette card: bold caption above,
   the blue person shape behind, the wallet icon in front.
