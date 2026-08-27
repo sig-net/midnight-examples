@@ -353,28 +353,28 @@
                 <mxCell id="dnote1" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;dashed=1;dashPattern=8 8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n-acct" target="acct-user" edge="1">
                     <mxGeometry relative="1" as="geometry" />
                 </mxCell>
-                    <mxCell id="f1" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#008695;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="evm-wallet" target="acct-user" edge="1"><mxGeometry relative="1" as="geometry">
+                    <mxCell id="f1" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#008695;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="evm-wallet" target="acct-user" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="10" y="378" />
                             <mxPoint x="10" y="845" />
                             <mxPoint x="439" y="845" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="e1a" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#E73F74;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="mid-wallet" target="code-deposit" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="e1a" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#E73F74;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="mid-wallet" target="code-deposit" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="272" y="288" />
                             <mxPoint x="272" y="537" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="e1b" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#E73F74;jumpStyle=arc;jumpSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="code-deposit" target="code-signbi" edge="1"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="b2" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#3969AC;jumpStyle=arc;jumpSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="dapp" target="code-respond" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="e1b" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#E73F74;jumpStyle=arc;jumpSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="code-deposit" target="code-signbi" edge="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="b2" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#3969AC;jumpStyle=arc;jumpSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="dapp" target="code-respond" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="-288" y="715" />
                             <mxPoint x="851" y="715" />
                             <mxPoint x="851" y="579" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="e2b" style="jumpStyle=arc;jumpSize=10;edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#3969AC;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n-read" target="ledger-evtmap" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="e2b" style="jumpStyle=arc;jumpSize=10;edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#3969AC;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n-read" target="ledger-evtmap" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="1090" y="193" />
                             <mxPoint x="1090" y="160" />
@@ -382,45 +382,45 @@
                             <mxPoint x="681" y="321" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="e2c" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#3969AC;exitX=0;exitY=1;exitDx=90;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="n-read" target="n-sign" edge="1"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e2a" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#3969AC;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n-sign" target="code-respond" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="e2c" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#3969AC;exitX=0;exitY=1;exitDx=90;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="n-read" target="n-sign" edge="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2a" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#3969AC;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n-sign" target="code-respond" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="1290" y="283" />
                             <mxPoint x="1290" y="579" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="g3" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#11A579;jumpStyle=arc;jumpSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=12;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="dapp" target="erc20-token" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="g3" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#11A579;jumpStyle=arc;jumpSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=12;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="dapp" target="erc20-token" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="-30" y="515" />
                             <mxPoint x="-30" y="795" />
                             <mxPoint x="627" y="795" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="e3b" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#11A579;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" parent="1" source="acct-user" target="acct-vault" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="e3b" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#11A579;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" parent="1" source="acct-user" target="acct-vault" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="439" y="1040" />
                             <mxPoint x="981" y="1040" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="o4" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#FDAE61;jumpStyle=arc;jumpSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=-12;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" parent="1" source="dapp" target="code-respondbi" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="o4" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#FDAE61;jumpStyle=arc;jumpSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=-12;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" parent="1" source="dapp" target="code-respondbi" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="-70" y="491" />
                             <mxPoint x="-70" y="755" />
                             <mxPoint x="1049" y="755" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="e4a" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#FDAE61;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n-attest" target="code-respondbi" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="e4a" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#FDAE61;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n-attest" target="code-respondbi" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="1392.5" y="621" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="e4b" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#FDAE61;exitX=0;exitY=0;exitDx=860;exitDy=0;entryX=0.75;entryY=1;entryDx=0;entryDy=0;" parent="1" source="evm-lane" target="n-attest" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="e4b" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#FDAE61;exitX=0;exitY=0;exitDx=860;exitDy=0;entryX=0.75;entryY=1;entryDx=0;entryDy=0;" parent="1" source="evm-lane" target="n-attest" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="1200" y="845" />
                             <mxPoint x="1469.5" y="845" />
                         </Array>
                     </mxGeometry></mxCell>
-        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;strokeColor=#7F3C8D;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="mid-wallet" target="code-claim" edge="1"><mxGeometry relative="1" as="geometry">
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;arcSize=20;strokeWidth=2;strokeColor=#7F3C8D;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="mid-wallet" target="code-claim" edge="1"><mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="-180" y="344" />
                             <mxPoint x="50" y="344" />

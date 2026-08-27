@@ -1016,6 +1016,62 @@ against the raw file finds nothing by design.
       identical to pre-change, membership proofs unchanged at zero (the
       respelled ids are all step layer), round-trips byte-identical,
       renders eyeballed per label. No verb-table change was needed.
+- [x] Curved step corners ruled (owner decision, seeded by the hand-drawn
+      generic): every coloured step edge turns its corners as arcs,
+      `rounded=1;arcSize=20`, so the step lines pop from the rectangular
+      structure. Derivation edges, lane borders and shapes keep sharp
+      right angles, and runs stay strictly orthogonal in both cases. The
+      six palette phase swatches carry the tokens as the copy source
+      (flipped, re-rendered, lint 0/0), the edge-routing rules in
+      docs/diagramming.md and the AGENTS.md corner wording amended.
+- [x] Curved-corner sweep, generic pair: flip every phase-stroked step
+      edge in `docs/sign-bidirectional-flow.drawio(.png)` to the palette's
+      corner tokens, re-render, verify, then mirror the finished pair
+      byte-identically into the integration repo checkout's docs/ (the
+      two sources are byte-identical today and stay in lockstep,
+      uncommitted there).
+      DONE: all 18 edges flipped (the generic carries no derivation
+      edges: its broad-dashed cells are note text shapes), proven
+      token-only by reverting the tokens and recovering the pre-change
+      bytes byte-for-byte. Lint --strict output identical to baseline,
+      render eyeballed with corner crops: coloured corners arc, all
+      structure sharp, the one 38-unit orange S-bend reads as a smooth
+      deliberate S and stands. Mirror landed after an md5 pre-check
+      (both sources were byte-identical), both files verified identical
+      in the integration checkout and left uncommitted there.
+- [x] Curved-corner sweep, deposit diagram (parallel).
+      DONE: 13 step edges flipped, jump hops preserved, the whole-file
+      diff proving 13 token-only line changes. Two-way completeness
+      clean (the six phase-coloured step circles and all 8 derivation
+      edges correctly untouched), lint byte-identical to baseline,
+      membership zero before and after with a planted violation caught,
+      no label slides needed (every knockout keeps ample straight
+      lead-in), render eyeballed: arcs clean, the tightest 33-unit
+      S-curve intact, the dense relayer corner cluster legible.
+- [x] Curved-corner sweep, withdraw diagram (parallel).
+      DONE: 13 step edges flipped, 8 derivation edges sharp, cell-level
+      diff showing exactly 13 style-only changes. Lint byte-identical
+      (the one stacked-run note re-confirmed anchor-caused), membership
+      zero before and after with two planted violations caught including
+      the exact risk of this task (a shared derivation edge flipped
+      curved). Measure-diff of all 12 labels proved no seat moved, and
+      the analytic bound holds (shortest segment 42 units against the
+      20-unit arc radius). Render eyeballed: the purple fan-out renders
+      as parallel arcs, dashed corners sharp against the curving colour.
+- [x] Curved-corner sweep, swap diagram (parallel). The actor map is
+      exempt: it carries only derivation edges, which stay sharp.
+      DONE: 14 step edges flipped with the byte-level proof (reverting
+      the tokens recovers the pre-change file exactly, delta 14 x 11
+      chars), the 7 phase-coloured step circles and every derivation
+      edge untouched, jump hops surviving. Lint byte-identical (its two
+      label-box notes re-read and confirmed as the sanctioned T-junction
+      fan-outs), membership zero before and after with three planted
+      violations caught and values compared entity-decoded (the actor
+      map spells apostrophes as entities where swap is literal, a
+      serialiser artefact). No label slides needed. Render eyeballed:
+      the tight green turn into the router clamps to a clean small arc,
+      the U under the EVM lane keeps its code label centred between two
+      arcs.
 - [x] Step-caption sweep, deposit diagram: the caption abolition (the
       correspondence contract above and the style guide's every-text-on-an-
       arrow-is-an-edge-label rule) applied to
@@ -1302,6 +1358,15 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
    against the diagram's map rows rather than the actor map's value.
 
 ## Tool harvest checklist (draw-io-cli)
+
+- [ ] `extract` on a `.drawio.png` races through a shared temp path under
+      concurrent renders: with several agents rendering at once it twice
+      returned a SIBLING diagram's model for a different PNG (observed
+      returning withdraw's then deposit's model when asked for swap's).
+      The workaround that held: decode the PNG's own `mxfile` tEXt chunk
+      directly. Fix: derive the temp path from the input file (hash or
+      per-invocation tmpdir), and add a guard asserting the extracted
+      `<diagram>` name matches the requested file.
 
 - [x] `measure` verb: stdlib PNG decoder, model-to-pixel calibration from the
       model bounds plus the render config (residual reported as an error bar),
