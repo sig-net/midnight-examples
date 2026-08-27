@@ -1258,12 +1258,55 @@ against the raw file finds nothing by design.
       distinction explicitly. Follow-up flagged for a separate change:
       `broadcast-evm.ts`'s `tolerateRevert` JSDoc names only swap while
       supply and redeem pass it too.
-- [ ] `docs/redeem/redeem.drawio(.png)`: canonical strings frozen first, then
+- [x] `docs/redeem/redeem.drawio(.png)`: canonical strings frozen first, then
       the diagram (redeem / completeRedeem), built caption-free under the
       amended rules.
-- [ ] `docs/redeem/redeem.md`: flow page over the frozen strings, per the
+      DONE: six strings frozen in the correspondence section (redeem has
+      no fund step AND no approve precursor, the vault redeems its own
+      shares, so the flow takes withdraw's skeleton and its settle
+      ordinal 5 agrees literally with the contract's shared refund
+      header), then the pair built from supply's copy, chosen since
+      supply already carries the Aave background byte-frozen. Membership:
+      ten ledger rows (supply's minus `signBidirectionalEventMap`,
+      proven OUT by a whole-contract use census showing zero hits inside
+      the redeem/completeRedeem block, with `redeemEventMap` and
+      `redeemRefundCommitment` in), `callerSecretKey`, three circuits.
+      `refund`'s unconditional routing probes of the three foreign
+      marker maps stay out on supply's precedent. `n-read`'s sanctioned
+      delta is the single-map form naming `redeemEventMap`, the box
+      re-hugged 170x90 to 154x60 matching `n-attest`. Geometry: all 120
+      vacated units left the diagram (bounds 1944x1447 to 1944x1327),
+      `redeemEventMap` seated between `mpcResponseKey` and
+      `vaultEvmAddress` so the pinned keyDerivation notes keep their
+      spacing, and the singleton lane rose so its three circuits pair
+      row-aligned with the vault's three. Verified: lint --strict 0/0
+      with the one o4 clearance note anchor-caused as in supply,
+      membership proof PASS over 127 background cells with six planted
+      violation kinds caught, phase-stroke zero after scoping to
+      stroke/font, circles exactly {1,2,3,4,5,5}, PNG round trip 158
+      cells identical, 0 same-colour crossings and all 16 cross-colour
+      crossings jumped, render eyeballed by builder and orchestrator.
+      Judgement call recorded: `e1a` keeps the siblings' generic
+      "surrendering a vault coin" wording rather than naming the
+      stataToken colour.
+- [x] `docs/redeem/redeem.md`: flow page over the frozen strings, per the
       flow-pages style guide (golden step list, zero snippets). Written
       fresh, as for supply.
+      DONE: written fresh from the circuit headers and `flows/redeem.ts`,
+      withdraw's five-section shape with the shared-ordinal branch
+      phrased its way. Correspondence verified both directions against
+      the frozen strings, ordinals {1,2,3,4,5,5} matching the diagram's
+      circles, all three circuit names grep as `export circuit`, every
+      relative link and all 23 #L anchors land on the intended
+      declarations, zero snippets. Substance: the shares-vs-assets
+      distinction carries the page's key point (the wrapper's exchange
+      rate accrues Aave interest, so only the executed call knows the
+      payout, which is why settle takes the attested output), the
+      refund bullet uses `RedeemSettleView`'s real field name `shares`
+      where supply's view says `amount`, and the flow-function vs
+      circuit name collision on `completeRedeem` is kept apart by
+      linking each occurrence to its own file. Footer nav closes the
+      chain with Previous: Supply.
 
 Per flow, the diagram item runs FIRST: its captions force the canonical
 strings to be concrete, and the page then writes against a frozen vocabulary
@@ -1426,6 +1469,23 @@ withdraw-and-swap burn-and-record shape:
 5. `Step 5: poll for the MPC's attestation`
 6. `Step 6: completeSupply(...) mints shielded(stataToken) for the attested shares`
 7. `Step 6: refund(...) re-mints when the supply never executed`
+
+**Canonical step strings, redeem** (frozen). Redeem has no fund step and no
+approve precursor: the vault redeems its OWN shares (owner = vault, per
+`flows/redeem.ts`), so no allowance leg exists and the flow follows
+withdraw's skeleton, request through settle numbered 1 to 5 with the settle
+branch's arms sharing ordinal 5, matching the contract's
+`Runtime step 5 (withdraw/swap/supply/redeem): refund` header directly. No
+README deep-dive covers redeem, so wording comes from the contract source's
+own circuit headers under truth priority (code first), the two poll steps
+verbatim from deposit and step 1 keeping the burn-and-record shape:
+
+1. `Step 1: redeem(...) burns the surrendered coin and records the request`
+2. `Step 2: poll for the MPC's signature`
+3. `Step 3: broadcast the redeem to the EVM chain`
+4. `Step 4: poll for the MPC's attestation`
+5. `Step 5: completeRedeem(...) mints shielded(stataUnderlying) for the attested assets`
+6. `Step 5: refund(...) re-mints when the redeem never executed`
 
 **The six checks** (C1 implements, per flow page):
 
