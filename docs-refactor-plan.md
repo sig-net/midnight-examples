@@ -1193,16 +1193,71 @@ against the raw file finds nothing by design.
       while step 3's read edge lands on `swapEventMap`, which is where a
       swap request lives. The note is background and byte-frozen, so the
       diagram inherits the mismatch. Supply and redeem hit the same thing.
-- [ ] `docs/swap/swap.md`: flow page over the frozen strings, per the
+- [x] `docs/swap/swap.md`: flow page over the frozen strings, per the
       flow-pages style guide (golden step list, zero snippets). The same
       `beeb8f3` section carries the swap prose to start from.
-- [ ] `docs/supply/supply.drawio(.png)`: canonical strings frozen first, then
+      DONE: 312 lines, the withdraw page's five-section shape with the
+      shared-ordinal settle branch handled its way. Correspondence
+      verified both directions (bullets reconstruct the seven frozen
+      strings byte-equal, Note over lines carry them verbatim), ordinal
+      multiset {1,2,3,4,5,6,6} matching the diagram's circles, all four
+      circuit names grep as `export circuit`, 46 relative links resolve
+      with every #L anchor checked against its declaration, zero
+      snippets, prettier clean. Where beeb8f3 and code disagreed, code
+      won: swap's attestation poll is `swap.ts`'s own
+      `fetchSwapOutcome`/`pollSwapOutcome` (the shared
+      poll-respond-bidirectional helper is deposit/withdraw-only), the
+      separate-map rationale names the schema widths too, and the page
+      names `VAULT_SWAP_REQUESTS_PATH` instead of quoting the numeric
+      ledger-tree path, since `vault-context.ts`'s docstring (`[11]`)
+      and `contract/src/index.ts` (`[1, 7]`) disagree. Bonus finding:
+      swap's inherited `n-read` two-map pairing is genuinely correct for
+      this flow (the approve leg records in the field-0 map), and the
+      page says the same in prose.
+- [x] `docs/supply/supply.drawio(.png)`: canonical strings frozen first, then
       the diagram (approveStata precursor, supply / completeSupply), built
       caption-free under the amended rules.
-- [ ] `docs/supply/supply.md`: flow page over the frozen strings, per the
+      DONE: seven strings frozen in the correspondence section (wording
+      from the contract's own circuit headers, no README covers supply),
+      then the pair built from swap's proven copy. Membership: eleven
+      ledger rows (swap's shared nine minus the router and swap maps,
+      plus `stataUnderlying`, `stataToken`, `supplyEventMap`,
+      `supplyRefundCommitment`), `callerSecretKey`, four circuits
+      (`approveStata`, `supply`, `completeSupply`, `refund`), evidence
+      per member from the circuit bodies and `flows/supply.ts` /
+      `flows/approve-stata.ts`. `n-read`'s sanctioned delta names
+      `supplyEventMap` then `signBidirectionalEventMap`. Geometry: the
+      16-row column grows the vault lane 42 units over swap with the
+      band rhythm preserved, and the one reviewable deviation is
+      geometry-only: `stata-token` and `uniswap-router` swap x slots so
+      the broadcast target sits left of `acct-vault`, sparing the
+      byte-frozen `d2` a crossing. `g3`, `o4` and `e1b` carry arc jumps
+      so all 16 cross-colour crossings hop (swap leaves two as plain
+      junctions). Verified: lint --strict 0/0 with the one o4/c4
+      clearance note anchor-caused as in swap, membership proof PASS
+      over 135 background cells with five planted violation kinds
+      caught (the colour-defined strip scoped to stroke/font after
+      `user-person`'s fill matched a phase hex), phase-stroke grep
+      zero, circles exactly {1,2,3,4,5,6,6}, PNG round trip 169 cells
+      identical, zero same-colour crossings, every label with visible
+      run both sides (minimum 27.7u), render eyeballed by the builder
+      and the orchestrator. Known artefact carried: the actor map
+      spells apostrophes as entities where the copies are literal,
+      compared entity-decoded as in swap.
+- [x] `docs/supply/supply.md`: flow page over the frozen strings, per the
       flow-pages style guide (golden step list, zero snippets). No README
       coverage exists for supply: written fresh from the contract and
       `integration-tests/src/flows/`.
+      DONE: written fresh from the circuit headers and flow files, same
+      five-section shape, correspondence verified both directions
+      against the frozen strings, ordinals {1,2,3,4,5,6,6}, all 34
+      links resolving with anchors checked (the sibling PNG landed
+      after the page and now resolves), zero snippets. Supply owns its
+      poll loop as swap does (`fetchSupplyOutcome` inside `supply.ts`),
+      and the page states the field-15 vs ledger-tree-path `[1, 11]`
+      distinction explicitly. Follow-up flagged for a separate change:
+      `broadcast-evm.ts`'s `tolerateRevert` JSDoc names only swap while
+      supply and redeem pass it too.
 - [ ] `docs/redeem/redeem.drawio(.png)`: canonical strings frozen first, then
       the diagram (redeem / completeRedeem), built caption-free under the
       amended rules.
@@ -1351,6 +1406,26 @@ beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
 5. `Step 5: poll for the MPC's attestation`
 6. `Step 6: completeSwap(...) mints amountOut of tokenOut plus the unspent tokenIn`
 7. `Step 6: refund(...) re-mints when the swap never executed`
+
+**Canonical step strings, supply** (frozen). Supply has no fund step: the
+supplier surrenders a shielded coin of the underlying. Step 1 is the
+`approveStata` precursor (the sign-only allowance leg `runSupplyRoundTrip`
+runs first through `ensureStataApproved`), numbered exactly as swap numbers
+`approveRouter`, so the supply round trip runs steps 2 to 6 and the settle
+branch's arms share ordinal 6 (the sharing the contract records in its
+`Runtime step 5 (withdraw/swap/supply/redeem): refund` header). No README
+deep-dive covers supply, so wording comes from the contract source's own
+circuit headers under truth priority (code first), with the two poll steps
+reusing the deposit wording verbatim and step 2 keeping the
+withdraw-and-swap burn-and-record shape:
+
+1. `Step 1: approveStata(...) records the sign-only allowance request`
+2. `Step 2: supply(...) burns the surrendered coin and records the request`
+3. `Step 3: poll for the MPC's signature`
+4. `Step 4: broadcast the supply to the EVM chain`
+5. `Step 5: poll for the MPC's attestation`
+6. `Step 6: completeSupply(...) mints shielded(stataToken) for the attested shares`
+7. `Step 6: refund(...) re-mints when the supply never executed`
 
 **The six checks** (C1 implements, per flow page):
 
