@@ -17,7 +17,7 @@
 // changes B's identity with it (identity = seed bytes; see the
 // false-claimer flow header for why a distinct seed, not a distinct secret
 // under the same seed). The arrange deposit's 0.1 USDC leaves the vault's
-// EVM account again through B's withdraw to EVM_USER1_DEPOSIT_ADDRESS, so
+// EVM account again through B's withdraw to EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS, so
 // the suite's EVM funds keep cycling; the vault tokens left on B beyond the
 // withdrawn amount strand on its seed, like the claimant-not-caller
 // recipient's.
@@ -130,7 +130,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the withdraw gas budget",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
         const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
         const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
@@ -338,7 +338,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         await expect(
           withdraw(context, {
             amount: WITHDRAW_AMOUNT,
-            destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+            destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
             evmNonce,
           }),
         ).rejects.toThrow(/[Ii]nsufficient funds/);
@@ -386,7 +386,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         withdrawRequestId = await withdraw(context, {
           amount: WITHDRAW_AMOUNT,
-          destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+          destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
           evmNonce,
         });
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
@@ -444,7 +444,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Withdraw transaction mined on EVM: ${receipt.hash}`,
           "",
           `The vault's derived account transferred ${String(WITHDRAW_AMOUNT)} base units`,
-          `back to ${requireEnv("EVM_USER1_DEPOSIT_ADDRESS")}.`,
+          `back to ${requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS")}.`,
         ]);
       },
       3 * MINUTE,

@@ -14,7 +14,7 @@
 //
 // The claimed tokens strand on the recipient wallet (this flow does not
 // withdraw them), so the deposited ERC20 would strand on the vault's EVM
-// account run after run — the final step drains it back to EVM_USER1_DEPOSIT_ADDRESS
+// account run after run — the final step drains it back to EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS
 // with the fakenet-only vault key (see src/fakenet-vault-account.ts), the
 // same fund-cycling move the failure-refund flow uses. Run AFTER
 // tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives there. Recovery
@@ -123,7 +123,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the drain gas",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
         const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
         const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
@@ -284,7 +284,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // deposited ERC20 (plus any prior-run leftovers) back to the user's
         // derived account — the suite's EVM funds keep cycling. A zero balance
         // means a prior aborted run already drained it.
-        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
+        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"));
         if (drained === 0n) {
           logSkip("drain", "the vault's derived account already holds no ERC20");
         }

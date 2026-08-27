@@ -167,7 +167,7 @@ export async function buildDeployTransaction<C extends Contract.Contract<PS>, PS
 ): Promise<DeployTransaction> {
   // initialize() needs the deployer's coin public key (constructor context)
   // and the contract maintenance authority's signing key. A set
-  // MAINTENANCE_SIGNING_KEY becomes that authority, so the contract can later
+  // MIDNIGHT_MAINTENANCE_PRIVATE_KEY becomes that authority, so the contract can later
   // gain circuits via a maintenance update. Unset samples a throwaway
   // authority, leaving the contract unmaintainable.
   const keysLayer = Layer.succeed(Configuration.Keys, {
@@ -235,7 +235,7 @@ const operationIdToString = (id: string | Uint8Array): string =>
  * is enough) so the base tx is well under the block limit; every other circuit is
  * deferred. The constructor runs once over the full assets (every key must be present);
  * the split is purely which operations land in the deployed state. Requires
- * `MAINTENANCE_SIGNING_KEY` so the contract has an authority to sign the follow-up adds.
+ * `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` so the contract has an authority to sign the follow-up adds.
  *
  * @param compiledContract - The bound contract, from {@link makeCompiledContract}.
  * @param networkId - The network the transaction targets.
@@ -309,7 +309,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
 
 /**
  * Build an unproven maintenance-update transaction that inserts `verifierKey` under `circuitId`
- * on the deployed contract at `contractAddress`, signed by the `MAINTENANCE_SIGNING_KEY` authority.
+ * on the deployed contract at `contractAddress`, signed by the `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` authority.
  * Ledger-level operation-version `'v4'` (which accepts the v7 verifier keys the compiler emits),
  * the path proven to be accepted on-chain. Binds to the authority counter read from
  * `currentContractStateBytes`, so re-query the live state before each add.
@@ -320,7 +320,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
  * @param verifierKey - The new circuit's verifier key bytes.
  * @param currentContractStateBytes - Serialized live contract state (from queryContractState).
  * @returns The serialized unproven maintenance transaction.
- * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is unset or malformed.
+ * @throws {Error} If `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` is unset or malformed.
  */
 export function buildMaintenanceInsertTransaction(
   networkId: NetworkId,
@@ -329,16 +329,16 @@ export function buildMaintenanceInsertTransaction(
   verifierKey: Uint8Array,
   currentContractStateBytes: Uint8Array,
 ): { serializedTransaction: Uint8Array } {
-  const raw = envOrUndefined(process.env, "MAINTENANCE_SIGNING_KEY");
+  const raw = envOrUndefined(process.env, "MIDNIGHT_MAINTENANCE_PRIVATE_KEY");
   if (!raw) {
     throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be set to sign a maintenance update for the contract's authority.",
+      "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be set to sign a maintenance update for the contract's authority.",
     );
   }
   const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(hex)) {
     throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 key.",
+      "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be 32 bytes of hex (0x optional): a BIP-340 key.",
     );
   }
 
@@ -382,21 +382,21 @@ export function assertDeployerFunded(state: FacadeState): void {
 
 /**
  * The contract maintenance authority signing key, read from
- * `MAINTENANCE_SIGNING_KEY` (32-byte BIP-340 key as hex, `0x` optional).
+ * `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` (32-byte BIP-340 key as hex, `0x` optional).
  * Present makes the deployed contract's authority this key, so it can gain
  * circuits via a maintenance update later; the same secret must sign those
  * updates. Absent yields `Option.none()`, leaving the contract unmaintainable.
  *
  * @returns The maintenance authority key, or none when the env var is unset.
- * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is set but not 32 bytes of hex.
+ * @throws {Error} If `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` is set but not 32 bytes of hex.
  */
 export function resolveMaintenanceSigningKey(): Option.Option<SigningKey.SigningKey> {
-  const raw = envOrUndefined(process.env, "MAINTENANCE_SIGNING_KEY");
+  const raw = envOrUndefined(process.env, "MIDNIGHT_MAINTENANCE_PRIVATE_KEY");
   if (!raw) return Option.none();
   const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(hex)) {
     throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
+      "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
     );
   }
   return Option.some(SigningKey.make(hex));
@@ -405,7 +405,7 @@ export function resolveMaintenanceSigningKey(): Option.Option<SigningKey.Signing
 /**
  * Build an unproven maintenance-update transaction that installs `verifierKey`
  * under `circuitId` on the already-deployed contract at `contractAddressHex`,
- * signed by the authority from `MAINTENANCE_SIGNING_KEY`. This routes through
+ * signed by the authority from `MIDNIGHT_MAINTENANCE_PRIVATE_KEY`. This routes through
  * the same compact-js path as {@link buildDeployTransaction}, so it accepts the
  * v7 verifier keys the compiler emits. `currentContractStateBytes` is the live
  * on-chain contract state, whose authority counter the update binds to. Submit
@@ -419,7 +419,7 @@ export function resolveMaintenanceSigningKey(): Option.Option<SigningKey.Signing
  * @param verifierKey - The new circuit's verifier key bytes (managed keys dir).
  * @param currentContractStateBytes - Serialized live contract state (from queryContractState).
  * @returns The contract address and the serialized unproven maintenance transaction.
- * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is unset, so no authority can sign.
+ * @throws {Error} If `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` is unset, so no authority can sign.
  */
 export async function buildInsertVerifierKeyTransaction<C extends Contract.Contract<PS>, PS>(
   compiledContract: CompiledContract.CompiledContract<C, PS>,
@@ -432,7 +432,7 @@ export async function buildInsertVerifierKeyTransaction<C extends Contract.Contr
 ): Promise<DeployTransaction> {
   if (Option.isNone(resolveMaintenanceSigningKey())) {
     throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be set to sign a maintenance update for the contract's authority.",
+      "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be set to sign a maintenance update for the contract's authority.",
     );
   }
   const keysLayer = Layer.succeed(Configuration.Keys, {

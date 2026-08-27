@@ -79,14 +79,14 @@ kept contracts.
 - **`/e2e redeploy`**: a circuit changed (any `.compact` edit that alters a
   circuit, struct layout, or the request-id hash domain): comment out
   `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
-  `EVM_VAULT_ACCOUNT_ADDRESS`, `EVM_USER1_DEPOSIT_ADDRESS` (and `EVM_ERC20_CONTRACT_ADDRESS` if the anvil
+  `EVM_VAULT_ACCOUNT_ADDRESS`, `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` (and `EVM_ERC20_CONTRACT_ADDRESS` if the anvil
   container restarted, its chain is in-memory) in `.env`, then rerun. The
   whole redeploy completes in ONE run: setup re-compiles (zk keygen, ~10 min,
   background the run), redeploys, re-derives, re-funds, and
   `--force-recreate`s the responder automatically. Afterwards, update `.env`
   with the freshly printed values and delete the commented-out lines.
   (The derived EVM accounts move on a redeploy: `EVM_VAULT_ACCOUNT_ADDRESS` and
-  `EVM_USER1_DEPOSIT_ADDRESS` are epsilon-derived from the vault contract address,
+  `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` are epsilon-derived from the vault contract address,
   but on the local chain the new accounts are simply funded by setup,
   nothing needs sweeping.)
 
@@ -265,8 +265,8 @@ raw traced EVM output from it, so a poll that times out with
   account is unfunded. On the local stack that means the anvil container
   restarted (its chain is in-memory) while `.env` still holds addresses from
   the previous chain. Comment out the derived EVM address vars
-  (`EVM_VAULT_ACCOUNT_ADDRESS`, `EVM_USER1_DEPOSIT_ADDRESS`,
-  `EVM_USER1_WALLET_ADDRESS`) and rerun so setup re-derives and re-deals
+  (`EVM_VAULT_ACCOUNT_ADDRESS`, `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS`,
+  `EVM_USER1_WALLET_ACCOUNT_ADDRESS`) and rerun so setup re-derives and re-deals
   ETH + real USDC to the accounts on the fork.
 - **`vault is already initialized`** on a kept address is informational: the
   test still asserts state and passes.

@@ -139,7 +139,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     "deposit funding preflight: check user EVM account for minimum ETH and USDC balances.",
     async () => {
       const rpcUrl = requireEnv("EVM_RPC_URL");
-      const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+      const userAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
       const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
       const ethBalance = await getEthBalance(rpcUrl, userAddress);
@@ -184,7 +184,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // comes from the chain, exactly as a wallet would fetch it.
       const evmNonce = await getTransactionNonce(
         requireEnv("EVM_RPC_URL"),
-        requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+        requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
       );
       const amount = parseUnits("0.1", 6); // 0.1 USDC — the funding preflight's minimum
 
@@ -272,7 +272,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         requestId: depositTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: 1 * MINUTE,
-        expectedSigner: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+        expectedSigner: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
       });
 
       banner([
@@ -500,7 +500,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         requireEnv("EVM_RPC_URL"),
         requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
       );
-      const destEvmAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+      const destEvmAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
 
       withdrawTransactionSignatureRequestId = await withdraw(context, {
         amount: WITHDRAW_AMOUNT,
@@ -599,7 +599,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(signedWithdrawTransaction).toBeDefined();
       const rpcUrl = requireEnv("EVM_RPC_URL");
       const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
-      const destination = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+      const destination = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
       const context = await session.vaultContext();
 
       // Rerun tolerance: if this signed tx already mined on a previous run,

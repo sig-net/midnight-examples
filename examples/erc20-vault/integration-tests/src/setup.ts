@@ -54,8 +54,8 @@ const PIPELINE_KEYS = [
   "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
   "MPC_VAULT_RESPONSE_PUBLIC_KEY",
   "EVM_VAULT_ACCOUNT_ADDRESS",
-  "EVM_USER1_DEPOSIT_ADDRESS",
-  "EVM_USER1_WALLET_ADDRESS",
+  "EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS",
+  "EVM_USER1_WALLET_ACCOUNT_ADDRESS",
 ] as const;
 
 /**
@@ -143,12 +143,12 @@ function ensureVaultEvmAccountAddress(env: NodeJS.ProcessEnv): void {
 }
 
 /**
- * Ensure `EVM_USER1_DEPOSIT_ADDRESS` matches user 1's derived EVM deposit
+ * Ensure `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` matches user 1's derived EVM deposit
  * account (`MPC_ROOT_PUBLIC_KEY` + vault contract address, path = the hex
  * rendering of the user's identity commitment), deriving it when absent.
  *
  * @param env - The suite's env accumulator.
- * @throws {Error} If a preset `EVM_USER1_DEPOSIT_ADDRESS` mismatches the derivation.
+ * @throws {Error} If a preset `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` mismatches the derivation.
  */
 function ensureUser1EvmDepositAddress(env: NodeJS.ProcessEnv): void {
   const identity = resolveUserIdentity(env);
@@ -157,29 +157,29 @@ function ensureUser1EvmDepositAddress(env: NodeJS.ProcessEnv): void {
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
     identity.commitmentHex,
   );
-  if (env.EVM_USER1_DEPOSIT_ADDRESS) {
+  if (env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS) {
     console.log(
-      `Found EVM_USER1_DEPOSIT_ADDRESS in the environment as ${env.EVM_USER1_DEPOSIT_ADDRESS}`,
+      `Found EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS in the environment as ${env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS}`,
     );
-    if (env.EVM_USER1_DEPOSIT_ADDRESS !== expectedAddress) {
+    if (env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS !== expectedAddress) {
       throw new Error(
-        `EVM_USER1_DEPOSIT_ADDRESS should be derived from MPC_ROOT_PUBLIC_KEY + vault contract + user identity: expected ${expectedAddress}, found ${env.EVM_USER1_DEPOSIT_ADDRESS}`,
+        `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS should be derived from MPC_ROOT_PUBLIC_KEY + vault contract + user identity: expected ${expectedAddress}, found ${env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS}`,
       );
     }
     logSkip(
       "check/derive user 1 EVM deposit address",
-      `EVM_USER1_DEPOSIT_ADDRESS is set correctly`,
+      `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS is set correctly`,
     );
     return;
   }
-  env.EVM_USER1_DEPOSIT_ADDRESS = expectedAddress;
-  console.log(`derived a fresh EVM_USER1_DEPOSIT_ADDRESS=${expectedAddress}`);
+  env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS = expectedAddress;
+  console.log(`derived a fresh EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS=${expectedAddress}`);
   console.log(` ➜ user 1's derived EVM deposit account (path = identity commitment)`);
   console.log(
     ` ➜ FUND IT ON EVM before the deposit test: >= 0.01 ETH (gas) and >= 0.1 USDC (deposit) — automatic on the local dev chain`,
   );
   console.log(
-    ` ➜ 💡 Set as EVM_USER1_DEPOSIT_ADDRESS in the environment to skip this step on the next run`,
+    ` ➜ 💡 Set as EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS in the environment to skip this step on the next run`,
   );
 }
 
@@ -210,33 +210,36 @@ function ensureUser1EvmWalletSeed(env: NodeJS.ProcessEnv): void {
 const WALLET_DERIVATION_PATH = "m/44'/60'/0'/0/0";
 
 /**
- * Ensure `EVM_USER1_WALLET_ADDRESS` matches the EVM account user 1's wallet
+ * Ensure `EVM_USER1_WALLET_ACCOUNT_ADDRESS` matches the EVM account user 1's wallet
  * derives from `EVM_USER1_WALLET_SEED` (BIP-44,
  * {@link WALLET_DERIVATION_PATH}), deriving it when absent. Funding this
  * account is what makes the seed a spendable wallet on the EVM side.
  *
  * @param env - The suite's env accumulator.
- * @throws {Error} If a preset `EVM_USER1_WALLET_ADDRESS` mismatches the derivation.
+ * @throws {Error} If a preset `EVM_USER1_WALLET_ACCOUNT_ADDRESS` mismatches the derivation.
  */
 function ensureUser1EvmWalletAddress(env: NodeJS.ProcessEnv): void {
   const { seed } = parseSeed(requireEnv(env, "EVM_USER1_WALLET_SEED"));
   const expectedAddress = HDNodeWallet.fromSeed(seed).derivePath(
     WALLET_DERIVATION_PATH.replace(/^m\//, ""),
   ).address;
-  if (env.EVM_USER1_WALLET_ADDRESS) {
+  if (env.EVM_USER1_WALLET_ACCOUNT_ADDRESS) {
     console.log(
-      `Found EVM_USER1_WALLET_ADDRESS in the environment as ${env.EVM_USER1_WALLET_ADDRESS}`,
+      `Found EVM_USER1_WALLET_ACCOUNT_ADDRESS in the environment as ${env.EVM_USER1_WALLET_ACCOUNT_ADDRESS}`,
     );
-    if (env.EVM_USER1_WALLET_ADDRESS !== expectedAddress) {
+    if (env.EVM_USER1_WALLET_ACCOUNT_ADDRESS !== expectedAddress) {
       throw new Error(
-        `EVM_USER1_WALLET_ADDRESS should be the ${WALLET_DERIVATION_PATH} derivation of EVM_USER1_WALLET_SEED: expected ${expectedAddress}, found ${env.EVM_USER1_WALLET_ADDRESS}`,
+        `EVM_USER1_WALLET_ACCOUNT_ADDRESS should be the ${WALLET_DERIVATION_PATH} derivation of EVM_USER1_WALLET_SEED: expected ${expectedAddress}, found ${env.EVM_USER1_WALLET_ACCOUNT_ADDRESS}`,
       );
     }
-    logSkip("check/derive user 1 EVM wallet address", `EVM_USER1_WALLET_ADDRESS is set correctly`);
+    logSkip(
+      "check/derive user 1 EVM wallet address",
+      `EVM_USER1_WALLET_ACCOUNT_ADDRESS is set correctly`,
+    );
     return;
   }
-  env.EVM_USER1_WALLET_ADDRESS = expectedAddress;
-  console.log(`derived a fresh EVM_USER1_WALLET_ADDRESS=${expectedAddress}`);
+  env.EVM_USER1_WALLET_ACCOUNT_ADDRESS = expectedAddress;
+  console.log(`derived a fresh EVM_USER1_WALLET_ACCOUNT_ADDRESS=${expectedAddress}`);
   console.log(
     ` ➜ the EVM account user 1's wallet derives from EVM_USER1_WALLET_SEED (${WALLET_DERIVATION_PATH})`,
   );

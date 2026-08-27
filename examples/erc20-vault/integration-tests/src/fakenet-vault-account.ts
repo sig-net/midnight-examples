@@ -35,7 +35,7 @@ const ERC20_TRANSFER_ABI = [
  *   `EVM_RPC_URL`, `EVM_ERC20_CONTRACT_ADDRESS`, `MIDNIGHT_VAULT_CONTRACT_ADDRESS`,
  *   `EVM_VAULT_ACCOUNT_ADDRESS`).
  * @param to - Recipient of the drained ERC20 (the suite sends it back to
- *   `EVM_USER1_DEPOSIT_ADDRESS` so the funds keep cycling).
+ *   `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` so the funds keep cycling).
  * @param tokenAddress - The token to drain; defaults to `EVM_ERC20_CONTRACT_ADDRESS` (the
  *   lending refund passes Aave USDC).
  * @returns The drained amount in ERC20 base units — `0n` when the account

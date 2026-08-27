@@ -130,7 +130,7 @@ export async function createVaultContext(
     caip2Id: `eip155:${String(evmChainId)}`,
     erc20Address,
     evmVaultAddress: requireEnv(env, "EVM_VAULT_ACCOUNT_ADDRESS"),
-    evmUserAddress: requireEnv(env, "EVM_USER1_DEPOSIT_ADDRESS"),
+    evmUserAddress: requireEnv(env, "EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
     identity,
     providers,
     vault,

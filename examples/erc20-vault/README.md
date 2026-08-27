@@ -314,7 +314,7 @@ The gate prevents front-running: nobody else can initialise the vault to
 point at their own address, chain or key. Flow function:
 [`initialize.ts`](integration-tests/src/flows/initialize.ts). The setup
 pipeline derives and prints all three derived values as `EVM_VAULT_ACCOUNT_ADDRESS`,
-`EVM_USER1_DEPOSIT_ADDRESS` and `MPC_VAULT_RESPONSE_PUBLIC_KEY`.
+`EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` and `MPC_VAULT_RESPONSE_PUBLIC_KEY`.
 
 ### Runtime: joining the deployed vault
 
@@ -420,7 +420,7 @@ yarn workspace @midnight-examples/erc20-vault-integration-tests exec \
 list, and each deferred circuit is then added at the next maintenance-authority
 counter, waiting for the counter to advance between updates.
 
-### MAINTENANCE_SIGNING_KEY
+### MIDNIGHT_MAINTENANCE_PRIVATE_KEY
 
 The base deploy retains a maintenance authority, and this variable is its
 signing key. Every circuit added after the base transaction is signed by it.

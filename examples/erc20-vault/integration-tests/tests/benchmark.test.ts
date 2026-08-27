@@ -216,7 +216,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the withdraw gas budget",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
         const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
         const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
@@ -387,7 +387,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // brackets only the flow call under measurement.
         const evmNonce = await getTransactionNonce(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+          requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
         );
 
         recorder.setLeg(BenchmarkLeg.DepositRequest);
@@ -428,7 +428,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requestId: depositRequestId,
           intervalMs: 1000,
           timeoutMs: 2 * MINUTE,
-          expectedSigner: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+          expectedSigner: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
         });
         const ms = stop();
         recorder.clearLeg();
@@ -544,7 +544,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requireEnv("EVM_RPC_URL"),
           requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
-        const destEvmAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const destEvmAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
 
         recorder.setLeg(BenchmarkLeg.WithdrawRequest);
         const stop = startTimer();
@@ -971,7 +971,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // allowance), so it always runs and always records a prove.
         const evmNonce = await getTransactionNonce(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
+          requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
 
         recorder.setLeg(BenchmarkLeg.ApproveStataRequest);
@@ -1006,7 +1006,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requestId: approveStataRequestId,
           intervalMs: 1000,
           timeoutMs: 2 * MINUTE,
-          expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+          expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         });
         const ms = stop();
         recorder.clearLeg();
@@ -1062,7 +1062,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // the pooled underlying); the nonce fetch stays outside the timed span.
         const evmNonce = await getTransactionNonce(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
+          requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
 
         recorder.setLeg(BenchmarkLeg.SupplyRequest);
@@ -1108,7 +1108,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requestId: supplyRequestId,
           intervalMs: 1000,
           timeoutMs: 3 * MINUTE,
-          expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+          expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
           requestsPath: VAULT_SUPPLY_REQUESTS_PATH,
         });
         const ms = stop();
@@ -1264,7 +1264,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // fetch stays outside the timed span.
         const evmNonce = await getTransactionNonce(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
+          requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
 
         recorder.setLeg(BenchmarkLeg.RedeemRequest);
@@ -1310,7 +1310,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requestId: redeemRequestId,
           intervalMs: 1000,
           timeoutMs: 3 * MINUTE,
-          expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+          expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
           requestsPath: VAULT_REDEEM_REQUESTS_PATH,
         });
         const ms = stop();
@@ -1463,7 +1463,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           logSkip("drain", "BENCHMARK_REFUND_WITHDRAW_REQUEST_ID present, resuming past the drain");
           return;
         }
-        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
+        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"));
         if (drained === 0n) {
           logSkip("drain", "the vault's derived account already holds no ERC20");
         }
@@ -1508,7 +1508,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const stop = startTimer();
         refundWithdrawRequestId = await withdraw(context, {
           amount: REFUND_AMOUNT,
-          destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+          destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
           evmNonce,
         });
         const ms = stop();

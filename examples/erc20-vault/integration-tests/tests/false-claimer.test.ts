@@ -18,7 +18,7 @@
 // Assert: the claim rejects with the circuit's identity-assert message and
 // the request STAYS on the ledger. Then identity A claims it for real (no
 // stranded deposit), and the fakenet-only drain returns the deposited ERC20
-// to EVM_USER1_DEPOSIT_ADDRESS, so the suite's EVM funds keep cycling.
+// to EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS, so the suite's EVM funds keep cycling.
 //
 // Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives
 // there. Recovery from a run that died mid-flow (proof-server OOM): rerun
@@ -99,7 +99,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the drain gas",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
         const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
         const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
@@ -272,7 +272,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // ERC20 (plus any prior-run leftovers) back to the user's derived
         // account — the suite's EVM funds keep cycling. A zero balance means a
         // prior aborted run already drained it.
-        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
+        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"));
         if (drained === 0n) {
           logSkip("drain", "the vault's derived account already holds no ERC20");
         }

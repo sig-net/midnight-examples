@@ -70,7 +70,7 @@ async function readContractState(
 /**
  * Install the circuits deferred from the base deploy via one maintenance update each, waiting for
  * the authority counter to advance between them so every update binds to the current counter. Each
- * update re-syncs the wallet (fresh fee coins) and is signed by the retained MAINTENANCE_SIGNING_KEY.
+ * update re-syncs the wallet (fresh fee coins) and is signed by the retained MIDNIGHT_MAINTENANCE_PRIVATE_KEY.
  *
  * @param nodeConfig - The Midnight stack config (node/indexer endpoints + network id).
  * @param accountKeys - The deployer's derived account keys (pays the update fees).
@@ -183,11 +183,11 @@ async function deployVault(
 ): Promise<VaultDeployment> {
   // The split deploy adds the deferred circuits via maintenance updates, which need a maintenance
   // authority to sign. Generate an ephemeral one when unset (the deploy and the adds run in this
-  // one process, so it need not persist). A real deploy sets MAINTENANCE_SIGNING_KEY to keep the
+  // one process, so it need not persist). A real deploy sets MIDNIGHT_MAINTENANCE_PRIVATE_KEY to keep the
   // contract maintainable afterwards; the deploy uses whatever is set as the sealed authority.
-  if (!process.env.MAINTENANCE_SIGNING_KEY?.trim()) {
-    process.env.MAINTENANCE_SIGNING_KEY = randomBytes(32).toString("hex");
-    console.log("generated an ephemeral MAINTENANCE_SIGNING_KEY for the split deploy");
+  if (!process.env.MIDNIGHT_MAINTENANCE_PRIVATE_KEY?.trim()) {
+    process.env.MIDNIGHT_MAINTENANCE_PRIVATE_KEY = randomBytes(32).toString("hex");
+    console.log("generated an ephemeral MIDNIGHT_MAINTENANCE_PRIVATE_KEY for the split deploy");
   }
 
   const deployConfig = getDeployConfig(env);
@@ -219,7 +219,7 @@ async function deployVault(
   console.log(`deploying erc20-vault to ${networkId} (${deployConfig.midnightNodeConfig.nodeUrl})`);
 
   // The full 14-circuit deploy overflows a block, so register one small circuit in the base deploy
-  // and add every other circuit via maintenance updates (needs MAINTENANCE_SIGNING_KEY).
+  // and add every other circuit via maintenance updates (needs MIDNIGHT_MAINTENANCE_PRIVATE_KEY).
   const deployTransaction = await buildDeployTransactionDeferring(
     compiledContract,
     networkId,

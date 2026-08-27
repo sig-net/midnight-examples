@@ -11,7 +11,7 @@
 // failure attestation (the 0xdeadbeef error sentinel) is for. The drain
 // signs with the vault account's fakenet-derived key (test-support only, see
 // src/fakenet-vault-account.ts) and sends the balance back to
-// EVM_USER1_DEPOSIT_ADDRESS, so the suite's EVM funds keep cycling. Amounts are
+// EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS, so the suite's EVM funds keep cycling. Amounts are
 // computed from live balances, never assumed.
 //
 // The arrange stage runs a full deposit round trip first (the caller must
@@ -98,7 +98,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the withdraw gas budget",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ADDRESS");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
         const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
         const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
@@ -182,7 +182,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // Send the vault's FULL live balance (the arrange sweep plus any
         // prior-run leftovers) back to the user's derived account. A zero
         // balance means a prior aborted run already drained it.
-        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ADDRESS"));
+        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"));
         if (drained === 0n) {
           logSkip("drain", "the vault's derived account already holds no ERC20");
         }
@@ -223,7 +223,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         withdrawRequestId = await withdraw(context, {
           amount: WITHDRAW_AMOUNT,
-          destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ADDRESS"),
+          destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
           evmNonce,
         });
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);

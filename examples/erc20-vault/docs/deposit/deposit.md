@@ -47,7 +47,7 @@ As illustrated, the flow comprises 6 steps:
     deals both to it
     ([`dealForkEvmAccounts`](../../integration-tests/src/fork-funding.ts#L154)),
     and on a real chain the user funds the printed
-    `EVM_USER1_DEPOSIT_ADDRESS`.
+    `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS`.
 - **2.** deposit(...) records the request
   - The user calls
     [`deposit(...)`](../../contract/src/erc20-vault.compact#L367) with the ERC20

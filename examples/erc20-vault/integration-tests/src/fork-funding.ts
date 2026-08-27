@@ -147,16 +147,16 @@ async function liftAaveUsdcSupplyCap(provider: ethers.JsonRpcProvider): Promise<
  * deposits fund its USDC), and user 1's own wallet account gets ETH + USDC (a spendable wallet
  * on the EVM side). Requires EVM_RPC_URL to point at a Sepolia fork exposing anvil_* cheatcodes.
  *
- * @param env - The suite's env accumulator (reads EVM_RPC_URL, EVM_USER1_DEPOSIT_ADDRESS,
- *   EVM_VAULT_ACCOUNT_ADDRESS, EVM_USER1_WALLET_ADDRESS).
+ * @param env - The suite's env accumulator (reads EVM_RPC_URL, EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS,
+ *   EVM_VAULT_ACCOUNT_ADDRESS, EVM_USER1_WALLET_ACCOUNT_ADDRESS).
  * @throws {Error} If the anvil cheatcalls fail (the EVM is not a cheatcode-capable fork).
  */
 export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void> {
   const rpcUrl = requireEnv(env, "EVM_RPC_URL");
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const user = requireEnv(env, "EVM_USER1_DEPOSIT_ADDRESS");
+  const user = requireEnv(env, "EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
   const vault = requireEnv(env, "EVM_VAULT_ACCOUNT_ADDRESS");
-  const userWallet = requireEnv(env, "EVM_USER1_WALLET_ADDRESS");
+  const userWallet = requireEnv(env, "EVM_USER1_WALLET_ACCOUNT_ADDRESS");
 
   // Fail loudly BEFORE dealing: if USDC has no code, the EVM is not forking Sepolia (almost
   // always a missing/empty SEPOLIA_FORK_RPC_URL), and the balance-slot probe would fail with an
