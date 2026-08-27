@@ -77,10 +77,21 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   place, a label takes it from the leftmost source that has it: circuit, event and
   ledger-field spellings come from the contract source, step phrasing comes from the
   README, and a diagram invents wording only where neither has any.
-- **Step captions.** Each numbered circle pairs with a step-caption cell (the dashed
-  behaviour-note style) carrying its canonical step string verbatim, circle and caption
-  together at touching distance from the step's salient edge. An edge may additionally
-  carry a short human-friendly riding label, which never replaces the canonical string.
+- **Every bit of text directly associated with an edge IS an edge label.** Whether it
+  rides the edge or would sit beside it, arrow-associated text is authored as a label
+  riding that edge and follows the edge-label golden rules below, the strict format
+  included. Free-standing text shapes beside an arrow are forbidden: a diagram
+  identifies its steps by the phase colours and the numbered circles alone, and the
+  canonical step strings render only on the flow page (its step-list bullets and
+  mermaid notes). The diagram-to-page link is the ordinal set: the circles' numbers
+  are exactly the frozen strings' ordinals, a branch's arms sharing one ordinal with
+  one circle per arm. Every step arrow DESCRIBES itself: each logical arrow of a
+  step carries an acting-party label saying what happens along it (a run drawn as
+  one edge carries one label, and a bundle segment that merely continues an
+  already-labelled arrow of the same step adds nothing). A code label (whole text a
+  call expression) satisfies this on its own where the call IS the action. An
+  unlabelled step arrow is a defect: the reader must never have to infer an arrow's
+  action from its endpoints alone.
 
 ### Edge-label golden rules (NEVER BREAK)
 
@@ -112,7 +123,8 @@ working-size section).
   colon-terminated (`MPC:`, `dApp/relayer:`, `startCrossChain circuit:`: an actor, a
   lane, or a circuit), and the body starts with a capitalised verb from the verb table.
   Verbs stay normal weight: bold remains reserved for the acting-party prefix and the
-  greppable names.
+  greppable names. The label cell's copy source is the palette card's Edge labels
+  section, which seats the format on a horizontal run and on a vertical one.
 - **Label texts never overlap one another.**
 
 Two narrow exemptions, and only these: a label whose WHOLE text is a call
@@ -131,22 +143,22 @@ One verb, one meaning, everywhere an edge label or note describes an action:
 |------|-------------|---------------|
 | Interacts with | User | drives a dApp's UI, no chain involved yet |
 | Funds | User's own wallet | moves value on the foreign chain before any contract is involved (the fund phase) |
-| Starts | dApp/relayer | kicks the flow off by calling the entry circuit |
+| Starts | dApp/relayer, User | kicks the flow off by calling the entry circuit |
 | Calls | a circuit | one circuit invoking another |
 | Constructs | a circuit | builds and stores a request on the ledger |
 | Reads | MPC | pulls stored state off the ledger |
-| Picks up | MPC | notices an on-chain occurrence it polls or watches for |
+| Picks up | MPC, dApp/relayer | notices an on-chain occurrence it polls or watches for |
 | Posts | MPC | writes a response event back on-chain |
 | Signs | MPC | produces the signature (note scaffold) |
 | Attests | MPC | produces the execution attestation (note scaffold) |
 | Extracts | dApp/relayer | pulls a field out of an event or receipt it already has |
 | Broadcasts | dApp/relayer | sends a signed transaction to a chain |
-| Submits | dApp/relayer | hands data into a circuit call to settle or complete |
+| Submits | dApp/relayer, User | hands data into a circuit call to settle or complete |
 
 Sending a signed transaction to a CHAIN is always Broadcasts, and handing data into a
-CIRCUIT call is always Submits. Step-caption verbs live in the frozen canonical strings
-under the correspondence contract, not here. A new verb lands as one row here, in the
-same change as its first label.
+CIRCUIT call is always Submits. When no row fits an action, the table extends: a new
+verb lands as one row here (verb, who says it, exact meaning), in the same change as
+its first label, keeping one verb one meaning.
 
 ## Shapes
 
@@ -237,8 +249,8 @@ A diagram is composed in layers, and each layer must stand on its own:
 
 1. **Layer 1: shapes and their labels.** Boxes, hexagons, icons, notes. Composed FIRST,
    as a deliberate arrangement: siblings align on shared coordinates (the circuits inside
-   a contract stack at one x with even vertical spacing), gaps are consistent, captions
-   sit where the caption rule says. The test: delete every line from the diagram and what
+   a contract stack at one x with even vertical spacing), gaps are consistent, icon
+   captions sit above their icons. The test: delete every line from the diagram and what
    remains still looks intentionally placed. A layer-1 item never sits somewhere that only
    makes sense once the lines are drawn (an indented circuit "making room" for an edge is
    a defect: the edge routes around, the circuit stays in its column).
@@ -269,13 +281,23 @@ renamed, the non-interacted contract members deleted, and the flow's step layer
 appended. Every kept cell, contract members and the rest of the background
 alike, keeps its id, value and style byte-identical to the actor map's cell of
 the same id: copy, never re-author. Only geometry may adapt, as the contract
-box tightens around the surviving members. The check is cell-level, never a
-whole-file diff: strip the step layer, then each remaining cell's id, value
-and style must match the actor map's.
+box tightens around the surviving members. ONE value exemption exists: the MPC
+lane's `n-read` note names in its `From:` section the request event map(s)
+actually present in that diagram's contract box, each name bold. With one map
+the name shares the `From:` line (`From: signBidirectionalEventMap`), and
+with more than one the `From:` keyword takes its own line and each name
+follows on its own line.
+The actor map lists every request event map, and a flow's copy lists exactly
+the ones its box carries, so the note always names the true ledger state the
+MPC reads. The rest of that note, and every other kept cell, stays
+byte-identical. The check is cell-level, never a whole-file diff: strip the
+step layer, then each remaining cell's id, value and style must match the
+actor map's, the `n-read` `From:` line checked against the diagram's own map
+rows instead.
 
 **Trimming reclaims the space it frees.** Deleting members shrinks the
 containers, and every lane beside or below the shrunk containers moves in to
-restore the normal inter-lane gaps, re-placing the step circles, captions and
+restore the normal inter-lane gaps, re-placing the step circles, edge labels and
 edge runs that lived in the affected band. Tightening one box while the page
 keeps its old extents is half the job: the freed area must leave the diagram,
 pulling it back toward the working-size budget. The eyeball test: a reader
@@ -389,7 +411,7 @@ carries.
 | Ledger state | database cylinder, `shape=mxgraph.flowchart.database` | on-ledger state the contract reads and writes |
 | Circuit | cog, `shape=mxgraph.ios7.icons.settings` | a circuit a caller invokes, pure circuits included |
 | Witness | open eye, `diagram-assets/witness-icon.png` | a witness, the private input the proof observes |
-| Secret | crossed eye, `diagram-assets/eye-icon.png` | a value that stays with its holder and never leaves it |
+| Secret | crossed eye, `diagram-assets/secret-icon.png` | a value that stays with its holder and never leaves it |
 | Midnight lane | Midnight logo, `diagram-assets/midnight-logo.png` | the Midnight chain's swimlane |
 | Signet lane | Sig Network logo, `diagram-assets/sig-network-logo.png` | a Signet-controlled contract's swimlane |
 | Contract / dApp | `diagram-assets/contract-app.png` | a contract or dApp actor box |

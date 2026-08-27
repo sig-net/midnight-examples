@@ -682,7 +682,7 @@ against the raw file finds nothing by design.
       - Lint --strict both pairs, phase-stroke zero-hit, frozen-string
         rendered-text checks against .drawio and PNG model, render both
         pairs, eyeball downscaled plus crops.
-- [ ] Palette follow-up, one quiet change, parallel-safe with every
+- [x] Palette follow-up, one quiet change, parallel-safe with every
       diagram rework: the EXAMPLE_SECRET icon cell still carries the bare
       webapp id `2` (kept during the icon swap to preserve the authored
       cell): rename it to `secret-node-icon` (the palette is a copy
@@ -693,7 +693,48 @@ against the raw file finds nothing by design.
       only path references move (the iconography table row in
       docs/diagramming.md, any other grep hits for `eye-icon.png`: mover
       pays, grep repo-wide and update every hit).
-- [x] Iconography formalised: palette and rules only, no flow or actor
+      DONE: id `2` was referenced nowhere else in the palette (zero
+      `parent`, `source`, `target` or any other `="2"` attribute in the
+      file), so the rename to `secret-node-icon` closed with the cell
+      itself, and the sibling text cell `secret-node-text` already set
+      that naming. The repo-wide grep for `eye-icon` returned four hits:
+      the iconography table row in docs/diagramming.md (moved to
+      `diagram-assets/secret-icon.png`), the palette cell whose id
+      encoded the bank filename, `icon-eye-icon.png` (renamed to
+      `icono-secret-icon`, matching its row siblings
+      `icono-ledger-icon`, `icono-circuit-icon`, `icono-witness-icon`
+      rather than re-encoding a filename in an id), and two lines of
+      this task's own description, which stay as written. No .drawio
+      references the bank path: every icon is an embedded payload, as
+      predicted. The bank file moved with `git mv`. The palette diff
+      against HEAD is exactly two changed lines, id attribute only,
+      with both `style` strings (34069 chars each) byte-identical, so
+      no payload moved. Lint --strict output is byte-identical to
+      linting the pre-change file from HEAD (0 errors, 0 warnings, the
+      same stacked-run and vacuous-check notes, and no
+      floating-connection advisory fires on this version at all), the
+      cell table is unchanged at 86 rows with identical geometry and
+      parents, and the PNG round-trip carries both new ids and zero
+      occurrences of the old names. Rendered from source through the
+      root config, eyeballed downscaled plus full-resolution crops of
+      the EXAMPLE_SECRET card and the contract-members icon row: both
+      crossed-eye icons render intact.
+- [x] Palette gains an "Edge labels" card: byte-copy sources for the
+      strict label format, requested by the repo owner alongside the
+      caption abolition. The six phase-legend swatches stay as the colour
+      legend (their captions name the styles, the specimen exemption
+      covering them is correct), and two new specimens carry the format
+      itself: a horizontal-run swatch with the riding label "MPC: Reads
+      the recorded request" (`align=left`, offset seating the left-
+      anchored label so the run crosses its text centre) and a vertical-
+      run swatch with "dApp/relayer: Broadcasts the MPC-signed
+      transaction" (`align=center`), ids `edge-label-*`, degenerate
+      endpoints matching the swatch construction. The strict-label-format
+      bullet in docs/diagramming.md now names the card as the label
+      cell's copy source. Lint --strict 0/0 with the specimen exemption
+      absorbing both labels (legend caption count 7 to 9, notes otherwise
+      identical to pre-change), palette diff purely additive, render
+      eyeballed with a crop of the new card.
       diagrams touched. The icons are a SEMANTIC layer, one concept one
       icon, decoupled from any single cell type so later documentation work
       can reuse them (e.g. a "ledger tip" callout box in prose docs
@@ -794,22 +835,303 @@ against the raw file finds nothing by design.
       diagram per the background + flow construction (actor-map copy, trimmed
       to withdraw's interacted members, step layer appended) for
       withdraw / completeWithdraw / refund, settle as an explicit branch.
-- [ ] `docs/withdraw/withdraw.md`: flow page over the frozen strings. Start
+- [x] `docs/withdraw/withdraw.md`: flow page over the frozen strings. Start
       the prose from the withdraw deep-dive at
       `git show beeb8f3:examples/erc20-vault/README.md` (section "Runtime:
       the other circuits"), not from scratch.
-- [ ] `docs/swap/swap.drawio(.png)`: canonical strings frozen first, then the
-      diagram (approveRouter precursor, swap / completeSwap).
-- [ ] `docs/swap/swap.md`: flow page over the frozen strings. The same
+      DONE: page written to deposit.md's shape (protocol / integration
+      pointer sections, PNG embed, actor paragraph, section per step,
+      shared vault and reader setup, mermaid, footer). Seeded from the
+      `beeb8f3` "Withdraw (`withdraw` / `completeWithdraw` / `refund`)"
+      subsection: its deposit-versus-withdraw comparison table is dissolved
+      into the step prose (the page stands alone rather than as a diff
+      against deposit), and its two pattern bullets (coin-spend as
+      authorisation, settle branches on the attested output width) become
+      the step 1 and step 5 narratives. All six canonical strings carried
+      byte-equal, each once as an `^### Step \d+:` heading and once on a
+      `Note over` line, the two step 5 arms sitting in a mermaid
+      `alt`/`else`. Correspondence verified: 1 heading + 1 mermaid note per
+      string on the page, 1 hit per string in `withdraw.drawio`, and
+      `withdraw` / `completeWithdraw` / `refund` each grep as
+      `export circuit` in the compact source. README's three
+      `docs/withdraw/withdraw.md` circuit-table links (plus the flows list
+      and its intro) carry no fragments and resolve to the new file.
+      `yarn format:check` green from the root.
+      Corrected against the code while reworking the seed: the seed's
+      `deriveEvmAddress(mpcRootPublicKey, vaultContractAddress, "vault")`
+      is the bare literal, while `integration-tests/src/setup.ts` and the
+      vault README both derive from `VAULT_PATH_HEX`, the full-width
+      lowercase hex of `pad(32, "vault")`, so the setup snippet shows the
+      hex rendering. Dropped from the seed: the swap subsection (its own
+      task), and the notification's `requestsPathDepth`, which the withdraw
+      circuit passes as `2` with the e2e suite asserting `[0, 0]` while its
+      neighbouring comment says depth 1, so the page says only that the
+      circuit notifies the MPC through the singleton.
+- [x] Flow-page style ruled: pages are DESCRIPTIONS, not code walkthroughs.
+      The golden specimen is the five-step list under the diagram in the
+      integration repo README's Sign Bidirectional Flow section: one flat
+      `- **N.**` dash-bullet list (bold manual ordinals so renderers keep
+      the two-space nesting), detail bullets laying out the mechanism with
+      links replacing quotation, snippets defaulting to ZERO with the
+      specific-point exception. Recorded as docs/flow-pages.md, bound from
+      AGENTS.md's Flow pages section (root-bound on purpose: a docs/-scoped
+      agents file would not load for pages under examples/*/docs). The
+      correspondence contract's page renderings are amended above to the
+      bullet + mermaid pair.
+- [x] `docs/deposit/deposit.md` restyled to the golden step list: the six
+      `### Step N:` sections and all seven snippets dissolved into the flat
+      bullet list, load-bearing facts carried as linked detail bullets,
+      three stale claims dropped against the source (`requestsPathDepth`
+      shown as 1 where the circuit passes 2, an outdated claim-gate shape,
+      ledger path `[0]` where `VAULT_REQUESTS_PATH` is `[0, 0]`).
+      Correspondence green under the amended contract (6 bullets, 6 mermaid
+      notes, 0 step headings), links and line anchors verified, root
+      format:check green. Inbound `deposit.md#` fragments are gone
+      repo-wide, and the vault README's two stale wordings promising
+      snippets and full code respelled by the orchestrator, who also fixed
+      the three dead `#sign-bidirectional-flow` fragments (the root README
+      heading renders as `#sign-bidirectional-protocol-flow`).
+- [x] `docs/withdraw/withdraw.md` restyled the same way in the same round:
+      six-bullet list (two `- **5.**` arms), zero snippets, mermaid block
+      byte-identical, fragment links into deposit.md rewritten fragment-free
+      ahead of that page's heading removal, all 30 links resolving, root
+      format:check green.
+- [x] Actor map `n-read` truth fix (owner decision: the diagrams exist to
+      name the specific state, so the note must name the true ledger map):
+      the membership rule's new `n-read` exemption applied to
+      `docs/actor-map.drawio(.png)`: the note's `From:` line lists every
+      request event map in the anatomy (`signBidirectionalEventMap`,
+      `swapEventMap`, `supplyEventMap`, `redeemEventMap`), each bold, one
+      per line, box re-hugged, lint, render, eyeball. Flow copies narrow
+      to their own maps under the exemption, so no flow re-sync follows.
+      DONE: value changed to the four-map From block (`From:` on its own
+      line, the shape the membership rule now spells out for the
+      multi-map case, single-map copies keeping the name on the From
+      line), box re-hugged 208x60 to 170x117, `n-sign` and `n-attest`
+      pushed down on the 30-unit rhythm and the MPC lane grown to keep
+      its bottom padding, no edges anchored to the moved notes so
+      nothing re-routed. All four names grep as the map's own ledger
+      rows, and the settle-view commitment maps are correctly absent.
+      Lint byte-identical to HEAD, phase-stroke zero-hit, render
+      eyeballed on the note-column crop. The MPC lane keeps its width
+      although the narrowed note leaves 51 units of right padding: the
+      flow copies carry wider single-name notes, and a shared lane width
+      keeps the family reading as one, within the lane-width rule's
+      minimum-padding bound.
+- [x] Full arrow-description pass, deposit diagram: the every-step-arrow-
+      describes-itself rule applied to `docs/deposit/deposit.drawio(.png)`:
+      every logical step arrow gains an acting-party label (the wallet's
+      circuit calls, the circuit-to-circuit call, the MPC's post edges),
+      existing labels kept, verb table extended as needed, full
+      verification cycle with the `n-read` exemption.
+      DONE: five labels added, so all thirteen logical step arrows carry
+      a description or a recorded exemption (the `e3b` code label, and
+      `e2c`, the intra-lane continuation of the MPC's read-sign-post
+      thread). New values: "User's Midnight wallet: Submits the ERC20
+      address and amount to deposit(...)" (respelling to Starts queued in
+      the harmonisation pass below), "deposit circuit: Calls the
+      singleton to notify the MPC", "MPC: Posts the signature", "MPC:
+      Posts the attestation", "User's Midnight wallet: Submits the
+      attested event and output to claim(...)". Seating grew the model
+      1594 to 1934 wide under the golden precedence (left corridor
+      unpacked, vault-to-singleton and Midnight-to-MPC gaps widened),
+      existing labels keeping their anchors. Verified: lint --strict 0/0
+      with three notes read and explained (two pre-existing anchor-caused
+      stacks, one estimate false-positive disproven by pixel crop, one
+      pre-existing note gone), membership zero over 109 cells under the
+      n-read exemption with three planted violations failing the guard,
+      ordinals 1 to 6, phase-stroke zero-hit, round-trip carrying all
+      five values, renders eyeballed per label.
+- [x] Full arrow-description pass, withdraw diagram (parallel): same rule
+      over withdraw's arrows, same verification.
+      DONE: ten new labels land, so all thirteen logical step arrows now
+      carry a description or a recorded exemption (the `e3b` code label,
+      and `e2c`, the 30-unit intra-lane thread between two
+      self-describing MPC notes). Deposit's wordings reused verbatim for
+      the shared constructs (Reads, both Picks up labels, transaction
+      execution), withdraw-specific ones composed from the verb table
+      ("User: Starts withdraw(...) surrendering a vault coin", "withdraw
+      circuit: Calls signBidirectional(...)", "MPC: Posts the signature"
+      and "Posts the attestation", "dApp/relayer: Broadcasts the
+      MPC-signed transfer", "User: Submits completeWithdraw(...)"). The
+      Starts verb row widened to "dApp/relayer, User" by the
+      orchestrator. Seating the labels legally grew the model 1674 to
+      1968 wide under the golden precedence (the vault-to-singleton gap
+      to 264 for the Calls label, the Midnight/MPC corridor to 120), and
+      the re-seat fixed the long-standing e4a/c2 clip (c2 clear by 54
+      units), retiring that follow-up. Verified: lint --strict clean
+      with the one pre-existing anchor-caused note, membership zero over
+      119 cells under the n-read exemption (the note names exactly
+      signBidirectionalEventMap, withdraw's only request event map),
+      eight planted violation kinds each failed the guard including the
+      blind-input case, ordinals 1 2 3 4 5 5, phase-stroke zero-hit,
+      render eyeballed with crops of every new label, PNG round-trip
+      carrying all ten strings. The width growth deepens the
+      working-size overrun already queued as its own decision task.
+- [x] Full arrow-description pass, swap diagram (parallel): same rule over
+      swap's arrows, plus its `n-read` note narrowed to the two maps its
+      box carries (`signBidirectionalEventMap` for the approve leg,
+      `swapEventMap` for the swap request), same verification.
+      DONE: nine labels added, thirteen of fourteen step arrows labelled
+      and the fourteenth the recorded intra-lane continuation, wordings
+      matching the siblings for shared constructs. The `n-read` note
+      narrowed to its box's two maps in the box's own row order
+      (`swapEventMap` then `signBidirectionalEventMap`: the exemption
+      binds the names to the box, and box order is the honest listing),
+      box re-hugged and the note column re-seated on the 30-unit rhythm.
+      The gutter re-columned and the left column moved out so every
+      label rides a run that reads, the model growing to 1944x1397.
+      Verified: lint --strict 0/0 with two label-box notes disproven by
+      pixel scan (the tool centres an align=left box the renderer
+      left-anchors: already queued in the tool harvest), membership zero
+      over 129 cells under the exemption with five planted violations
+      failing the guard, phase-stroke zero-hit proven non-vacuous,
+      ordinals {1,2,3,4,5,6,6}, every bold name grepping in source,
+      round-trip carrying all fourteen strings. Its proposal to widen
+      the Submits meaning is declined: entry calls take Starts in the
+      harmonisation pass below, and Submits keeps its settle/complete
+      qualifier. Cosmetic residue flagged: two labels knock a short gap
+      into a lane border they cross, accepted over cascading the right
+      half.
+- [x] Label harmonisation micro-pass across the three flow diagrams
+      (after all three arrow passes land): the parallel passes diverged
+      on two spellings, and one verb one meaning settles both. Entry-
+      circuit calls use `Starts` (deposit's `e1a-l` respells from its
+      Submits form, keeping its cargo: the settle calls keep `Submits`,
+      whose meaning stays "to settle or complete"), and wallet-driven
+      edges name the acting wallet, `User's Midnight wallet:` (matching
+      `User's EVM wallet:` on the fund edge), so withdraw's `e1a-l`,
+      `e5a-l` and `e5b-l` respell their bare `User:` prefix, plus swap's
+      equivalents once its pass lands. Re-seat any label whose width
+      changes, re-render all touched pairs, lint, membership, eyeball.
+      DONE: eight labels respelled across the three diagrams, each
+      edge's `mid-wallet` source confirmed before its prefix changed.
+      Zero seats moved: a pixel diff of pre- against post-change renders
+      proved every label's footprint unchanged or narrower (the bold
+      wallet prefix renders no wider than each label's longest body
+      line, and Starts is shorter than Submits), so no gap grew and no
+      geometry was touched. Cross-family grep: zero bare User: prefixes
+      remain, Starts sits on exactly the four entry calls, Submits only
+      on the settle calls. Lint --strict 0/0 on all three with note sets
+      identical to pre-change, membership proofs unchanged at zero (the
+      respelled ids are all step layer), round-trips byte-identical,
+      renders eyeballed per label. No verb-table change was needed.
+- [x] Step-caption sweep, deposit diagram: the caption abolition (the
+      correspondence contract above and the style guide's every-text-on-an-
+      arrow-is-an-edge-label rule) applied to
+      `docs/deposit/deposit.drawio(.png)`: the six `stepN-label` cells
+      deleted with their space reclaimed, each step's salient edge carrying
+      an acting-party riding label where the step's action deserves text
+      (verb table extended one row per new verb as needed), circles'
+      ordinal set verified against the frozen strings, full verification
+      cycle with membership proof at zero.
+      DONE: six captions deleted, and the only two labels added sit on
+      the arrows whose bare endpoints actively misled (a dApp-to-circuit
+      arrow reads as a call when the dApp is watching emitted events):
+      `b2-l` "dApp/relayer: Picks up SignatureRespondedEvent" and `o4-l`
+      "dApp/relayer: Picks up RespondBidirectionalEvent". The Picks up
+      verb row widened to "MPC, dApp/relayer" by the orchestrator. The
+      restraint cases (wallet-to-circuit call arrows, the
+      circuit-to-circuit call) gained nothing: circuit behaviour lives in
+      the circuit's own box. Five circles re-seated onto their own step's
+      edge at touching distance, `c2` already there. Verified: no cell
+      text matches "Step N:", ordinals exactly 1 to 6, lint --strict
+      clean with the same three anchor-caused notes as the pre-edit
+      baseline, membership zero over 109 background cells with the guard
+      proven failing on four planted violation kinds, phase-stroke
+      zero-hit, render eyeballed with crops of every vacated region. The
+      whitespace pocket right of circle 5 is structural routing corridor,
+      present before the sweep.
+- [x] Step-caption sweep, withdraw diagram (parallel with deposit): the
+      six `stepN-label` cells deleted the same way, one numbered circle
+      per settle arm retained, same label, ordinal and verification
+      requirements.
+      DONE: six captions deleted and the vacated settle band re-used
+      rather than left dead: the refund arm split off the shared settle
+      vertical onto its own x=240 run through the band, `c5b` re-seated
+      to hug it, and the one place a caption held unrecoverable meaning
+      (the refund arm's branch condition) became the diagram's sole new
+      riding label, "User: Submits refund(...) when the transfer never
+      executed". The Submits verb row widened to "dApp/relayer, User" by
+      the orchestrator (the settle circuits are caller-driven). Circles
+      carry the ordinal multiset 1 2 3 4 5 5, no cell text matches
+      "Step N:", lint --strict clean with the same single anchor-caused
+      note, membership zero over 117 background cells with the guard
+      rebuilt id-based after its colour-based strip proved vacuous on a
+      plant, phase-stroke zero-hit, render eyeballed with crops of every
+      vacated spot. The pre-existing e4a/c2 clip is untouched.
+- [x] `docs/swap/swap.drawio(.png)`: canonical strings frozen first, then the
+      diagram (approveRouter precursor, swap / completeSwap), built caption-
+      free under the amended rules (numbered circles and edge labels only).
+      DONE: six strings frozen in the correspondence section, then the pair
+      built and rendered. Derivation of the strings: the phase skeleton with
+      no fund step (the swapper surrenders a shielded coin), the
+      `approveRouter` precursor numbered step 1 as deposit numbers its own
+      precondition leg, and the settle branch sharing ordinal 6 the way the
+      contract's `Runtime step 5 (withdraw/swap/supply/redeem): refund`
+      header shares withdraw's. Verb phrases came from the `beeb8f3` swap
+      deep-dive, the two poll steps reuse deposit's wording verbatim, and
+      the broadcast step names the swap.
+      Decision recorded, the reviewable one: the precursor takes step 1 and
+      the round trip runs 2 to 6, so swap's settle ordinal is 6 while the
+      contract's shared refund header still says 5. The alternative (leaving
+      the precursor outside the ordinals) has no caption-free way to mark
+      the leg, since every step-layer marker is a numbered circle. The
+      contract-marker renumber item below now covers swap as well as
+      deposit.
+      Membership, read from `erc20-vault.compact` plus `flows/swap.ts` and
+      `flows/approve.ts`: ten ledger rows (`signetRequestNonce`,
+      `initialized`, `evmChainId`, `caip2Id`, `uniswapRouter`,
+      `swapRefundCommitment`, `swapEventMap`, `mpcResponseKey`,
+      `signBidirectionalEventMap`, `vaultEvmAddress`), `callerSecretKey`,
+      and four circuits (`approveRouter`, `swap`, `completeSwap`, `refund`).
+      `signBidirectionalEventMap` is in for the approve leg, which records
+      there, and `swapEventMap` for the swap leg. `swapRefundCommitment`
+      joins on the withdraw precedent, where `refundCommitment` counts as
+      interacted-with through the circuits rather than the flow files.
+      Construction: copied from `withdraw.drawio` (itself a proven copy of
+      the map) and the six added members byte-copied from the actor map,
+      which the proof then re-checks cell by cell against the map. The four
+      derivation-bus edges the map gained (`dvaddr-respkey`, `dvaddr-vault`,
+      `dvaddr-acct`, `dmpc-acct`) stay off, exactly as deposit's and
+      withdraw's diagrams leave them off, and the subset direction allows
+      it.
+      Geometry: one column of sixteen rows, ledger / witness / circuits with
+      the 70 section gap and 14 row gap, the vault lane grown to 945 and
+      seated evenly (20/20) in its parent's interior band, the singleton
+      lane dropped 162 so `signBidirectional` stays level with `swap`, and
+      the EVM lane plus `n-acct` moved 162 down so the run band under the
+      Midnight lane keeps its 30-unit rhythm. Steps 1 and 2 share one red
+      trunk out of the Midnight wallet with a T at each circuit, the settle
+      pair shares the purple trunk as in withdraw, and no two edges of one
+      colour cross.
+      Verification: `lint --strict` 0 errors (two notes, both confirmed
+      anchor-caused: `g3`'s column is fixed by the 40-unit lead into the
+      router's left face, which cannot align with `d2`'s or `b2`'s without
+      cutting `erc20-token`), membership proof PASS over 129 background
+      cells with the colour-defined and id-defined step layers coinciding,
+      phase-stroke grep zero over the written-out stripped background,
+      circles carrying exactly {1,2,3,4,5,6,6}, PNG round-trip 154 cells
+      identical, and crops read for every label and circle.
+      Open question for review: `n-read` says `From: signBidirectionalEventMap`
+      while step 3's read edge lands on `swapEventMap`, which is where a
+      swap request lives. The note is background and byte-frozen, so the
+      diagram inherits the mismatch. Supply and redeem hit the same thing.
+- [ ] `docs/swap/swap.md`: flow page over the frozen strings, per the
+      flow-pages style guide (golden step list, zero snippets). The same
       `beeb8f3` section carries the swap prose to start from.
 - [ ] `docs/supply/supply.drawio(.png)`: canonical strings frozen first, then
-      the diagram (approveStata precursor, supply / completeSupply).
-- [ ] `docs/supply/supply.md`: flow page over the frozen strings. No README
+      the diagram (approveStata precursor, supply / completeSupply), built
+      caption-free under the amended rules.
+- [ ] `docs/supply/supply.md`: flow page over the frozen strings, per the
+      flow-pages style guide (golden step list, zero snippets). No README
       coverage exists for supply: written fresh from the contract and
       `integration-tests/src/flows/`.
 - [ ] `docs/redeem/redeem.drawio(.png)`: canonical strings frozen first, then
-      the diagram (redeem / completeRedeem).
-- [ ] `docs/redeem/redeem.md`: flow page over the frozen strings. Written
+      the diagram (redeem / completeRedeem), built caption-free under the
+      amended rules.
+- [ ] `docs/redeem/redeem.md`: flow page over the frozen strings, per the
+      flow-pages style guide (golden step list, zero snippets). Written
       fresh, as for supply.
 
 Per flow, the diagram item runs FIRST: its captions force the canonical
@@ -864,9 +1186,14 @@ starts only after its diagram item is reviewed.
 
 ## The correspondence contract (KEY)
 
-Every numbered step label appears IDENTICALLY, name and number, in three places
-per flow: the flow diagram's step captions, the flow page's mermaid notes, and
-the flow page's `###` headings. One vocabulary, three renderings, per flow page.
+Every canonical step string renders exactly twice, both on the flow page: as
+its step-list bullet (`- **N.** <tail>`, the tail being the string after
+`Step N: `) and on a mermaid `Note over` line carrying the full string. The
+flow diagram carries NO step text: its numbered circles are exactly the frozen
+strings' ordinals (a branch's arms share one ordinal, one circle per arm), and
+every bit of text on or beside an arrow is an edge label under the style
+guide's golden rules (bold acting party, colon, verb-led body), never a
+free-standing caption. One vocabulary, two renderings, per flow page.
 
 **Numbering scheme.** `Step N`, ordinals per flow, 1..N in that flow's
 execution order. The label carries no runtime qualifier: a flow page holds
@@ -926,18 +1253,41 @@ deep-dive (`git show beeb8f3:examples/erc20-vault/README.md`, section
 6. `Step 5: refund(...) re-mints when the transfer never executed`
 
 A settle branch shares one ordinal with one canonical string per arm, and
-each arm's string still appears exactly once per diagram and twice per page
-(two `### Step 5:` headings each satisfy check 1's regex on their own).
+each arm's string still renders twice on the page (two `- **5.**` bullets
+each satisfy check 1 on their own), with one numbered circle per arm on the
+diagram.
+
+**Canonical step strings, swap** (frozen). Swap has no fund step: the swapper
+surrenders a shielded coin instead of moving EVM value out of their own wallet.
+Step 1 is the `approveRouter` precursor, the sign-only allowance leg
+`runSwapRoundTrip` runs first through `ensureRouterApproved`, numbered exactly
+as deposit numbers its own precondition leg (funding), so the swap round trip
+runs steps 2 to 6. The settle is a branch whose two arms share ordinal 6, the
+sharing the contract itself records (`Runtime step 5
+(withdraw/swap/supply/redeem): refund`), at 6 rather than 5 as the precursor
+takes step 1. Wording from the vault README's swap deep-dive (`git show
+beeb8f3:examples/erc20-vault/README.md`, section "Swap") under truth priority:
+
+1. `Step 1: approveRouter(...) records the sign-only allowance request`
+2. `Step 2: swap(...) burns the surrendered coin and records the request`
+3. `Step 3: poll for the MPC's signature`
+4. `Step 4: broadcast the swap to the EVM chain`
+5. `Step 5: poll for the MPC's attestation`
+6. `Step 6: completeSwap(...) mints amountOut of tokenOut plus the unspent tokenIn`
+7. `Step 6: refund(...) re-mints when the swap never executed`
 
 **The six checks** (C1 implements, per flow page):
 
-1. Collect every heading matching `^### Step \d+:` in each
-   `examples/*/docs/*/*.md` flow page. Assert the set is non-empty per page (a
-   structurally blinded guard must fail loudly).
-2. Each collected heading string appears verbatim inside a ` ```mermaid ` block
-   on the same page.
-3. Each heading string appears in the sibling `<flow>.drawio` source in the
-   page's folder.
+1. Collect every step-list bullet matching `^- \*\*\d+\.\*\* ` in each
+   `examples/*/docs/*/*.md` flow page, reading each as ordinal + tail. Assert
+   the set is non-empty per page (a structurally blinded guard must fail
+   loudly).
+2. For each collected bullet, the full string `Step <ordinal>: <tail>` appears
+   verbatim on a `Note over` line inside a ` ```mermaid ` block on the same
+   page.
+3. The sibling `<flow>.drawio` source in the page's folder contains no cell
+   text matching `Step \d+:`, and its numbered step circles carry exactly the
+   bullets' ordinal multiset (one circle per branch arm).
 4. Every circuit name in a step string exists as `export circuit <name>` in the
    example's `.compact` source.
 5. `extract` each committed `.drawio.png` and assert the embedded cells match
@@ -946,7 +1296,10 @@ each arm's string still appears exactly once per diagram and twice per page
 6. Strip each flow diagram's step layer and assert every remaining cell
    matches the actor map's cell of the same id on id, value and style
    (geometry excluded), and that the remaining id set is a subset of the
-   actor map's.
+   actor map's. One sanctioned value delta: the `n-read` note's `From:`
+   line names the request event map(s) present in that diagram's own
+   contract box (the membership rule in docs/diagramming.md), checked
+   against the diagram's map rows rather than the actor map's value.
 
 ## Tool harvest checklist (draw-io-cli)
 
@@ -1270,12 +1623,15 @@ each arm's string still appears exactly once per diagram and twice per page
    deleted or moved cell explains) are visible at a glance and invisible in
    the XML. Ask of every render: does any region read as "something used to
    be here"? The `measure` verb answers padding questions in numbers.
-5. Grep the correspondence: each canonical string exactly once in its flow
-   diagram, exactly twice on its flow page (one heading, one mermaid note).
-   Grep the FULL `Step N: ...` string, never a fragment (circuit tokens like
-   `deposit(...)` recur legitimately in prose and code): the heading
-   occurrence matches `^### Step \d+:`, the note occurrence sits on a
-   `Note over` line inside the mermaid fence.
+5. Grep the correspondence: each canonical string exactly twice on its flow
+   page (one step-list bullet, one mermaid note), and NONE of it in the flow
+   diagram. The bullet occurrence matches `^- \*\*N\.\*\* <tail>` (the
+   string's tail after `Step N: `, never a fragment: circuit tokens like
+   `deposit(...)` recur legitimately in prose and code), the note occurrence
+   carries the FULL string on a `Note over` line inside the mermaid fence.
+   Diagram side: no cell text contains `Step N:`, and the numbered circles
+   carry exactly the frozen strings' ordinal multiset (one circle per branch
+   arm).
    Round-trip checks against a rendered PNG's embedded model are cell-level,
    never byte-level (`extract --decode-entities` makes apostrophes
    greppable).
@@ -1309,8 +1665,7 @@ authoring conversation:
   `~/.claude/skills`), which loads for any task that touches draw.io files.
 - **Identifying a step layer:** every step-layer cell is an edge stroked in a
   phase colour (the style guide's colour table), a numbered circle in one, or
-  a caption cell whose value starts "Step"; labels riding step edges
-  die with their edge. The background contains NO phase-stroked cells: the
+  a label riding a step edge, dying with its edge. The background contains NO phase-stroked cells: the
   zero-hit check over the actor map greps `strokeColor=<phase colour>`,
   anchored to `strokeColor=` on purpose. The palette's User composite FILLS
   the person shape with #3969AC, byte-identical to the signature phase

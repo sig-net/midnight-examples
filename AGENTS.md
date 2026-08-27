@@ -308,3 +308,26 @@ apply to all of them:
   Broken edge labels, escaped containment, missing icons and dead bands of empty space
   (area only a deleted or moved cell explains) are visible at a glance and invisible in
   the XML. Ask of every render: does any region read as "something used to be here"?
+
+# Flow pages
+
+- **The style guide in [docs/flow-pages.md](docs/flow-pages.md) is binding** for every
+  flow page (`examples/*/docs/<flow>/<flow>.md`): the page DESCRIBES the flow as one
+  flat golden step list — `- **N.**` dash bullets carrying bold manual ordinals, with
+  detail bullets indented two spaces beneath each headline — and links into the
+  contract source and flow files instead of quoting them. The bullet shape is
+  deliberate (renderers indent nested dash bullets reliably where ordered lists do
+  not), so never "fix" the bold numbers into an ordered list.
+- **Code snippets on a flow page default to ZERO.** A reader who wants the code reads
+  the code and its comments through the page's links. A snippet earns its place only
+  where prose cannot carry a specific point (argument order in a hash, a byte
+  layout), cut to the lines that make that point.
+- **One vocabulary, two renderings per flow, both on the page**: the step-list
+  bullets (ordinal + the canonical string's tail) and the mermaid `Note over` lines
+  (the full canonical string). The strings are frozen per flow in the correspondence
+  contract, and a change to one rendering is a change to both in the same commit.
+  The flow diagram carries NO step text: its numbered circles are exactly the frozen
+  strings' ordinals (a branch's arms share one ordinal, one circle per arm), and
+  every bit of text on or beside an arrow is an edge label under the diagramming
+  style guide's golden rules — bold acting party, colon, verb-led body — never a
+  free-standing caption.

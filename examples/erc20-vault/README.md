@@ -68,7 +68,7 @@ Every flow here is one pass through the sign bidirectional flow: the vault
 records a signature request on Midnight, the MPC signs the EVM transaction, the
 relayer broadcasts it, the MPC attests the outcome, and the vault settles by
 verifying that attestation in-circuit. Read
-[Sign Bidirectional Flow](../../README.md#sign-bidirectional-flow) in the repo
+[Sign Bidirectional Flow](../../README.md#sign-bidirectional-protocol-flow) in the repo
 README for the protocol diagram and its step walkthrough, which points on to
 the integration repository for the full detail.
 
@@ -151,7 +151,7 @@ and injective rendering that accepts any bytes the contract chooses. Client
 code deriving an account off-chain must feed `deriveEvmAddress` the same
 rendering: `bytesToHex` of the stored path bytes, so the vault's own account
 derives from the hex of `pad(32, "vault")` and the user's account from the
-hex of the identity commitment (see the reader setup snippet in the
+hex of the identity commitment (see the shared setup section of the
 [deposit walkthrough](docs/deposit/deposit.md)).
 
 ## Integration walkthrough
@@ -336,7 +336,7 @@ const vault = await findDeployedContract(providers, {
 
 From here, each flow's per-request steps live on its own walkthrough page:
 the deposit round trip, from funding the deposit account through `claim()`,
-is documented step by step with full code in [docs/deposit/deposit.md](docs/deposit/deposit.md).
+is described step by step in [docs/deposit/deposit.md](docs/deposit/deposit.md).
 
 ## Package layout
 

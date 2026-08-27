@@ -1,9 +1,9 @@
 # Midnight Contracts Calling Foreign Chains with Sig Network
 
-This monorepo holds experimental example projects. Midnight contracts that execute arbitrary transactions on foreign blockchains through the Sig Network [Distributed MPC](https://github.com/sig-net/mpc). Every example integrates the Sig Network [Sign Bidirectional Flow](#sign-bidirectional-flow), and is built on [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight), the Sig Network protocol library.
+This monorepo holds experimental example projects. Midnight contracts that execute arbitrary transactions on foreign blockchains through the Sig Network [Distributed MPC](https://github.com/sig-net/mpc). Every example integrates the Sig Network [Sign Bidirectional Flow](#sign-bidirectional-protocol-flow), and is built on [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight), the Sig Network protocol library.
 
 ### Reading Guide:
-- Start by reading the [Sign Bidirectional Flow](#sign-bidirectional-flow) to understand the fundamentals of the cross chain protocol.
+- Start by reading the [Sign Bidirectional Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
 - Then through the [Integration guide](#integration-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
 - Or jump straight into complete [examples](#examples) to see applications of the protocol.
 
