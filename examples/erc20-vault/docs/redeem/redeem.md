@@ -148,9 +148,12 @@ As illustrated, the flow comprises 5 steps:
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
   - The poll loop and its deadline live in
-    [`completeRedeem`](../../integration-tests/src/flows/redeem.ts#L289) itself,
-    which is also the single settle call site: it picks the settle circuit from
-    the resolved outcome and passes a fresh random mint nonce either way.
+    [`pollRedeemOutcome`](../../integration-tests/src/flows/redeem.ts#L225), and
+    [`settleRedeem`](../../integration-tests/src/flows/redeem.ts#L252) is the
+    single settle call site: it picks the settle circuit from the resolved
+    outcome and passes a fresh random mint nonce either way.
+    [`completeRedeem`](../../integration-tests/src/flows/redeem.ts#L289)
+    composes the two.
 - **5.** completeRedeem(...) mints shielded(stataUnderlying) for the attested assets
   - An executed redemption settles through
     [`completeRedeem`](../../contract/src/erc20-vault.compact#L1346), whose

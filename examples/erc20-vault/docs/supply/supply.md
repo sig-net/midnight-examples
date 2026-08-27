@@ -173,9 +173,12 @@ As illustrated, the flow comprises 6 steps:
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
   - The poll loop and its deadline live in
-    [`completeSupply`](../../integration-tests/src/flows/supply.ts#L294) itself,
-    which is also the single settle call site: it picks the settle circuit from
-    the resolved outcome and passes a fresh random mint nonce either way.
+    [`pollSupplyOutcome`](../../integration-tests/src/flows/supply.ts#L230), and
+    [`settleSupply`](../../integration-tests/src/flows/supply.ts#L257) is the
+    single settle call site: it picks the settle circuit from the resolved
+    outcome and passes a fresh random mint nonce either way.
+    [`completeSupply`](../../integration-tests/src/flows/supply.ts#L294)
+    composes the two.
 - **6.** completeSupply(...) mints shielded(stataToken) for the attested shares
   - An executed deposit settles through
     [`completeSupply`](../../contract/src/erc20-vault.compact#L1231), whose
