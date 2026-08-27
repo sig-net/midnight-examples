@@ -545,7 +545,7 @@ not-yet-reworked diagram simply still shows the cog until its task lands.
       round-trip check can confirm values and styles but NOT routes.
       The rendered pixels were probed instead at both candidate y
       values, and they carry the authored route.
-- [ ] Actor map working size settled: the completed anatomy measures
+- [x] Actor map working size settled: the completed anatomy measures
       1695x1260 model units against the style guide's roughly 1300x800
       budget, and the guide says outgrowing diagrams split rather than
       squeeze. The all-17 decision forces the overrun, so decide ONCE:
@@ -553,6 +553,16 @@ not-yet-reworked diagram simply still shows the cog until its task lands.
       docs/diagramming.md's working-size section), or split/regroup the
       anatomy. Judge against the vault README's rendered embed legibility
       at README column width before deciding.
+      DONE, settled by the user and recorded in docs/diagramming.md's
+      working-size section, with the premise reframed: the budget is
+      ADVISORY, not a rule that a diagram may exception itself out of.
+      An overrun the binding rules force is accepted as it stands, and
+      the actor map's full-anatomy mandate forcing 1695x1260 is named
+      there as the case in point. An overrun nothing forces is slack
+      with three exits (tighten, split, or move sequencing to mermaid).
+      The ban on squeezing (fonts, resolution) stays binding, as does
+      the golden precedence that clarity rules outrank the budget. The
+      lint tool enforces no size budget, so no tooling change followed.
 
 ### Derivation story upgrade (prerequisite before the remaining flows)
 
@@ -755,11 +765,21 @@ against the raw file finds nothing by design.
         by extending one table.
       - Verification: lint --strict on the palette pair, re-render it,
         eyeball crops of every iconography entry at display size.
-- [ ] Witness icon swept through the diagrams: SUPERSEDED by the
+- [x] Witness icon swept through the diagrams: SUPERSEDED by the
       per-diagram conformance rework tasks in the Step-pattern refactor
       section, which carry the swap one diagram at a time (the split is
       sanctioned there). This entry stays only so the sweep's history has
       a home: no work happens under it.
+      DONE, supersession confirmed by execution, not by the tick marks
+      alone: every committed diagram carrying a witness member row
+      (actor map, deposit, withdraw, swap) holds a `code-witness-icon`
+      whose style attribute hashes byte-identical to the palette's
+      `icono-witness-icon` copy source, the embedded payload sha256-
+      matches `docs/diagram-assets/witness-icon.png`, and the decoded
+      image reads as the open eye. The generic pair carries zero
+      witness cells, so it owes no swap. No cog remains anywhere a
+      witness is drawn: the sweep this entry once described has no
+      remaining work.
 - [x] Deposit pair and docs inherit the derivation story, after the actor
       map item is reviewed:
       - `docs/deposit/deposit.drawio(.png)`: sync the background to the

@@ -395,18 +395,24 @@ the deleted cells used to be. A band of empty space whose only explanation is
 
 ## Working size
 
-A diagram's content stays inside roughly 1300 x 800 model units, the size at which
-default-font text is still legible at README column width. A diagram that outgrows the
-box gets split into more diagrams (or its sequencing moves to a mermaid diagram in the
-README), never squeezed: smaller fonts and higher resolution both fail, since the
-displayed width is fixed and only the model size decides legibility.
+A diagram's content aims to stay inside roughly 1300 x 800 model units, the size at
+which default-font text is still legible at README column width. The budget is
+ADVISORY: a nudge toward compactness, never a rule that outranks any other on this
+page. What stays binding is the ban on squeezing: smaller fonts and higher resolution
+both fail, since the displayed width is fixed and only the model size decides
+legibility.
 
-The golden precedence: the clarity rules on this page outrank the budget. When labels,
+The golden precedence: the binding rules on this page outrank the budget. When labels,
 padding or routing cannot satisfy their rules in the space available, the diagram GROWS
-until they can, and only then does the budget decide between accepting the size and
-splitting. Shrinking anything below rule compliance is never the fix: follow the rules
-no matter what, make things bigger until they hold, and the diagram comes out with
-enough space and clarity on its own.
+until they can. Shrinking anything below rule compliance is never the fix: follow the
+rules no matter what, make things bigger until they hold, and the diagram comes out
+with enough space and clarity on its own.
+
+An overrun the binding rules force is accepted as it stands: the actor map's
+full-anatomy mandate (every circuit, witness and ledger field on one diagram) pushes
+the erc20-vault actor map to 1695 x 1260, and that size is sanctioned. An overrun
+nothing forces is slack, and slack has three exits: tighten the layout, split the
+content into more diagrams, or move sequencing to a mermaid diagram in the README.
 
 ## Iconography
 
