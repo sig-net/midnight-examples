@@ -1,5 +1,5 @@
 // The worker-side half of the setup/flow split: what every flow test FILE
-// imports (via `@midnight-examples/test-harness/flow-hooks`) to join the
+// imports (via `@sig-net/midnight-examples-test-harness/flow-hooks`) to join the
 // pipeline. Counterpart of setup-pipeline.ts, and the only src module that
 // imports `vitest` test APIs — it is deliberately NOT re-exported from
 // index.ts, so nothing globalSetup loads can pull it in (vitest's
@@ -10,7 +10,7 @@ import "./provided-context.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { getMidnightNodeConfig } from "@midnight-examples/lib";
+import { getMidnightNodeConfig } from "@sig-net/midnight-examples-lib";
 import { afterAll, beforeAll, beforeEach, inject } from "vitest";
 
 import { testHeader } from "./output.ts";
@@ -88,7 +88,7 @@ async function waitForProofServer(url: string, timeoutMs: number): Promise<void>
  * uses. Reading `MIDNIGHT_PROOF_SERVER_URL` directly is wrong: that variable is how the FAKENET
  * container finds the proof server, and docker-compose sets it to `http://proof-server:6300`, a
  * name that resolves only inside the compose network. The test process wants
- * `MIDNIGHT_NODE_PROOF_SERVER_URL`, which this resolves.
+ * `MIDNIGHT_PROOF_SERVER_URL`, which this resolves.
  *
  * @returns The local proof server URL, or null when the recycle does not apply.
  */

@@ -30,7 +30,9 @@
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
 
-import { submitTransferTransaction, waitForFacadeState } from "@midnight-examples/lib";
+import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { submitTransferTransaction, waitForFacadeState } from "@sig-net/midnight-examples-lib";
 import {
   banner,
   getErc20Balance,
@@ -38,9 +40,8 @@ import {
   getTransactionNonce,
   logSkip,
   requireEnv as requireEnvOf,
-} from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+} from "@sig-net/midnight-examples-test-harness";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -54,7 +55,6 @@ import {
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { withdraw } from "../src/flows/withdraw.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 

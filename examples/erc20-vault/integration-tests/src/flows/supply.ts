@@ -4,17 +4,13 @@
 // stataUSDC shares; on EVM failure refund re-mints the surrendered amount. Mirrors the swap flow
 // with a supply-schema (uint64 shares) attestation. Exact-input, so there is no change. Runs
 // only where the stataToken is deployed (Sepolia / a Sepolia fork); logSkip elsewhere.
-import { VAULT_SUPPLY_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
 import {
-  asciiPadded,
   calculateRequestId,
   deserializeEvmOutput,
   evmAddressAbiWord,
   hexToBytes,
   MPC_FAILURE_OUTPUT,
   numericAbiWord,
-  PATH_BYTES,
   requestIdBytes,
   type RequestIdHex,
   requestIdHex,
@@ -27,23 +23,30 @@ import {
   TxParamType,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
-
+import {
+  VAULT_PATH_BYTES,
+  VAULT_SUPPLY_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   AAVE_USDC,
+  evmAddressBytes,
+  readVaultLedger,
+  STATA_USDC,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
+
+import {
   STATA_DEPOSIT_SELECTOR,
   STATA_GAS_LIMIT,
   STATA_MAX_FEE_PER_GAS,
   STATA_MAX_PRIORITY_FEE_PER_GAS,
-  STATA_USDC,
   stataAvailable,
   SUPPLY_MPC_ROUTING,
   SUPPLY_OUTPUT_SCHEMA,
   SUPPLY_RESPOND_SCHEMA,
 } from "../evm-stata.ts";
-import { evmAddressBytes } from "../evm-transfer.ts";
 import { fetchFakenetResponse } from "../fakenet-responses.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { vaultTokenType } from "../vault-token.ts";
 import { ensureStataApproved } from "./approve-stata.ts";
@@ -51,7 +54,6 @@ import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
 
 const MINUTE = 60_000;
-const VAULT_PATH = asciiPadded("vault", PATH_BYTES);
 
 /** Options for {@link supply}. */
 export interface SupplyOptions {
@@ -87,7 +89,7 @@ export async function supply(context: VaultContext, options: SupplyOptions): Pro
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce: before.signetRequestNonce,
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
-    path: VAULT_PATH,
+    path: VAULT_PATH_BYTES,
     ...SUPPLY_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
     caip2Id: before.caip2Id,

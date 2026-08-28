@@ -5,14 +5,14 @@
 // keeps the offline path (RUN_INTEGRATION_TESTS unset) from ever touching
 // the network.
 
-import { VAULT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import type { ProofServerObserver } from "@midnight-examples/lib";
+import type { SignetRequestResponseReader } from "@sig-net/midnight";
+import { VAULT_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
+import type { ProofServerObserver } from "@sig-net/midnight-examples-lib";
 import {
   createE2eSession,
   type E2eSession,
   type SessionWallet,
-} from "@midnight-examples/test-harness";
-import type { SignetRequestResponseReader } from "@sig-net/midnight";
+} from "@sig-net/midnight-examples-test-harness";
 
 import { createVaultContext, type VaultContext } from "./vault-context.ts";
 

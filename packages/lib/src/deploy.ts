@@ -1,16 +1,17 @@
-// Contract-deploy plumbing shared by every contract package's deploy script:
-// the deploy config, the compiled-contract binding, and building the unproven
-// deploy transaction. Everything contract-SPECIFIC — constructor args, witness
-// implementations, initial private state — stays in the contract package's own
-// deploy.ts and arrives here through the type parameters.
+// Contract-deploy plumbing shared by every example's deploy package: the
+// deploy config, the compiled-contract binding, and building the unproven
+// deploy and maintenance-update transactions. Everything contract-SPECIFIC
+// (constructor args, witness implementations, initial private state) stays in
+// the example's own deploy package and arrives here through the type
+// parameters. Configuration is read from the `env` map passed in, never from
+// `process.env`, so one caller can deploy under an environment it composed.
 
 import { NodeContext } from "@effect/platform-node";
-import { CompiledContract, Contract, ContractExecutable } from "@midnight-ntwrk/compact-js/effect";
+import type { Contract } from "@midnight-ntwrk/compact-js/effect";
+import { CompiledContract, ContractExecutable } from "@midnight-ntwrk/compact-js/effect";
 import { ZKFileConfiguration } from "@midnight-ntwrk/compact-js-node/effect";
-import { ContractState as RuntimeContractState } from "@midnight-ntwrk/compact-runtime";
 import * as CoinPublicKey from "@midnight-ntwrk/platform-js/effect/CoinPublicKey";
 import * as Configuration from "@midnight-ntwrk/platform-js/effect/Configuration";
-import * as ContractAddress from "@midnight-ntwrk/platform-js/effect/ContractAddress";
 import * as SigningKey from "@midnight-ntwrk/platform-js/effect/SigningKey";
 import * as ledger from "@midnightntwrk/ledger-v9";
 import type { FacadeState } from "@midnightntwrk/wallet-sdk-facade";
@@ -152,6 +153,7 @@ const DEPLOY_TTL_MS = 30 * 60 * 1000;
  * @param compiledContract - The bound contract, from {@link makeCompiledContract}.
  * @param networkId - The network the transaction targets.
  * @param coinPublicKeyHex - The deploying wallet's Zswap coin public key (hex).
+ * @param env - The environment carrying `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` (see {@link resolveMaintenanceSigningKey}).
  * @param initialPrivateState - The private state the constructor (and its witnesses, if any) runs against.
  * @param constructorArgs - The contract's constructor arguments, statically typed per contract.
  * @returns The deterministic contract address plus the serialized unproven transaction.
@@ -162,6 +164,7 @@ export async function buildDeployTransaction<C extends Contract.Contract<PS>, PS
   compiledContract: CompiledContract.CompiledContract<C, PS>,
   networkId: NetworkId,
   coinPublicKeyHex: string,
+  env: Record<string, string | undefined>,
   initialPrivateState: PS,
   ...constructorArgs: Contract.Contract.InitializeParameters<C>
 ): Promise<DeployTransaction> {
@@ -172,7 +175,7 @@ export async function buildDeployTransaction<C extends Contract.Contract<PS>, PS
   // authority, leaving the contract unmaintainable.
   const keysLayer = Layer.succeed(Configuration.Keys, {
     coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
-    getSigningKey: () => resolveMaintenanceSigningKey(),
+    getSigningKey: () => resolveMaintenanceSigningKey(env),
   });
 
   // Run the contract constructor and attach verifier keys → initial ContractState.
@@ -240,6 +243,7 @@ const operationIdToString = (id: string | Uint8Array): string =>
  * @param compiledContract - The bound contract, from {@link makeCompiledContract}.
  * @param networkId - The network the transaction targets.
  * @param coinPublicKeyHex - The deploying wallet's Zswap coin public key (hex).
+ * @param env - The environment carrying `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` (see {@link resolveMaintenanceSigningKey}).
  * @param initialPrivateState - The private state the constructor runs against.
  * @param baseCircuitIds - Circuit ids to register in the base deploy; all others are deferred.
  * @param constructorArgs - The contract's constructor arguments.
@@ -250,13 +254,14 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   compiledContract: CompiledContract.CompiledContract<C, PS>,
   networkId: NetworkId,
   coinPublicKeyHex: string,
+  env: Record<string, string | undefined>,
   initialPrivateState: PS,
   baseCircuitIds: readonly string[],
   ...constructorArgs: Contract.Contract.InitializeParameters<C>
 ): Promise<SplitDeployTransaction> {
   const keysLayer = Layer.succeed(Configuration.Keys, {
     coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
-    getSigningKey: () => resolveMaintenanceSigningKey(),
+    getSigningKey: () => resolveMaintenanceSigningKey(env),
   });
 
   const deployResult = await Effect.runPromise(
@@ -315,6 +320,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
  * `currentContractStateBytes`, so re-query the live state before each add.
  *
  * @param networkId - The network the transaction targets.
+ * @param env - The environment carrying `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` (the authority that signs the update).
  * @param contractAddress - The deployed contract's address (hex).
  * @param circuitId - The circuit id to install `verifierKey` under.
  * @param verifierKey - The new circuit's verifier key bytes.
@@ -324,21 +330,16 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
  */
 export function buildMaintenanceInsertTransaction(
   networkId: NetworkId,
+  env: Record<string, string | undefined>,
   contractAddress: string,
   circuitId: string,
   verifierKey: Uint8Array,
   currentContractStateBytes: Uint8Array,
 ): { serializedTransaction: Uint8Array } {
-  const raw = envOrUndefined(process.env, "MIDNIGHT_MAINTENANCE_PRIVATE_KEY");
-  if (!raw) {
+  const hex = maintenanceSigningKeyHex(env);
+  if (!hex) {
     throw new Error(
       "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be set to sign a maintenance update for the contract's authority.",
-    );
-  }
-  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(hex)) {
-    throw new Error(
-      "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be 32 bytes of hex (0x optional): a BIP-340 key.",
     );
   }
 
@@ -380,6 +381,20 @@ export function assertDeployerFunded(state: FacadeState): void {
   );
 }
 
+// `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` normalized to bare lowercase hex, or undefined when
+// unset. Shared by every reader so the accepted spellings cannot drift apart.
+function maintenanceSigningKeyHex(env: Record<string, string | undefined>): string | undefined {
+  const raw = envOrUndefined(env, "MIDNIGHT_MAINTENANCE_PRIVATE_KEY");
+  if (!raw) return undefined;
+  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hex)) {
+    throw new Error(
+      "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
+    );
+  }
+  return hex;
+}
+
 /**
  * The contract maintenance authority signing key, read from
  * `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` (32-byte BIP-340 key as hex, `0x` optional).
@@ -387,88 +402,13 @@ export function assertDeployerFunded(state: FacadeState): void {
  * circuits via a maintenance update later; the same secret must sign those
  * updates. Absent yields `Option.none()`, leaving the contract unmaintainable.
  *
+ * @param env - The environment to read `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` from.
  * @returns The maintenance authority key, or none when the env var is unset.
  * @throws {Error} If `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` is set but not 32 bytes of hex.
  */
-export function resolveMaintenanceSigningKey(): Option.Option<SigningKey.SigningKey> {
-  const raw = envOrUndefined(process.env, "MIDNIGHT_MAINTENANCE_PRIVATE_KEY");
-  if (!raw) return Option.none();
-  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(hex)) {
-    throw new Error(
-      "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
-    );
-  }
-  return Option.some(SigningKey.make(hex));
-}
-
-/**
- * Build an unproven maintenance-update transaction that installs `verifierKey`
- * under `circuitId` on the already-deployed contract at `contractAddressHex`,
- * signed by the authority from `MIDNIGHT_MAINTENANCE_PRIVATE_KEY`. This routes through
- * the same compact-js path as {@link buildDeployTransaction}, so it accepts the
- * v7 verifier keys the compiler emits. `currentContractStateBytes` is the live
- * on-chain contract state, whose authority counter the update binds to. Submit
- * the result like a deploy (balance/sign/prove/submit via a wallet).
- *
- * @param compiledContract - The compiled contract whose circuit is being installed.
- * @param networkId - The target network id the transaction is built for.
- * @param coinPublicKeyHex - The fee-payer's coin public key (hex).
- * @param contractAddressHex - The deployed contract's address (hex).
- * @param circuitId - The circuit id to install `verifierKey` under.
- * @param verifierKey - The new circuit's verifier key bytes (managed keys dir).
- * @param currentContractStateBytes - Serialized live contract state (from queryContractState).
- * @returns The contract address and the serialized unproven maintenance transaction.
- * @throws {Error} If `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` is unset, so no authority can sign.
- */
-export async function buildInsertVerifierKeyTransaction<C extends Contract.Contract<PS>, PS>(
-  compiledContract: CompiledContract.CompiledContract<C, PS>,
-  networkId: NetworkId,
-  coinPublicKeyHex: string,
-  contractAddressHex: string,
-  circuitId: string,
-  verifierKey: Uint8Array,
-  currentContractStateBytes: Uint8Array,
-): Promise<DeployTransaction> {
-  if (Option.isNone(resolveMaintenanceSigningKey())) {
-    throw new Error(
-      "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be set to sign a maintenance update for the contract's authority.",
-    );
-  }
-  const keysLayer = Layer.succeed(Configuration.Keys, {
-    coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
-    getSigningKey: () => resolveMaintenanceSigningKey(),
-  });
-
-  const contractState = RuntimeContractState.deserialize(currentContractStateBytes);
-
-  const result = await Effect.runPromise(
-    ContractExecutable.make(compiledContract)
-      .addOrReplaceContractOperation(
-        Contract.ProvableCircuitId(circuitId as never),
-        Contract.VerifierKey(verifierKey),
-        {
-          address: ContractAddress.ContractAddress(contractAddressHex),
-          contractState,
-        },
-      )
-      .pipe(
-        Effect.provide(
-          ZKFileConfiguration.layer(CompiledContract.getCompiledAssetsPath(compiledContract)),
-        ),
-        Effect.provide(NodeContext.layer),
-        Effect.provide(keysLayer),
-      ),
-  );
-
-  const intent = ledger.Intent.new(new Date(Date.now() + DEPLOY_TTL_MS)).addMaintenanceUpdate(
-    result.public.maintenanceUpdate,
-  );
-  const transaction = ledger.Transaction.fromPartsRandomized(
-    networkId,
-    undefined,
-    undefined,
-    intent,
-  );
-  return { contractAddress: contractAddressHex, serializedTransaction: transaction.serialize() };
+export function resolveMaintenanceSigningKey(
+  env: Record<string, string | undefined>,
+): Option.Option<SigningKey.SigningKey> {
+  const hex = maintenanceSigningKeyHex(env);
+  return hex ? Option.some(SigningKey.make(hex)) : Option.none();
 }

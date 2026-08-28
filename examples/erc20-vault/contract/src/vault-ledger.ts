@@ -1,11 +1,12 @@
-// Shared vault ledger reads: raw contract state from a public data provider,
-// decoded with the generated `ledger()`. Takes the provider + address rather
-// than a full VaultContext so the read-state script can drive it without a
-// wallet.
+// Vault ledger reads: raw contract state from a public data provider, decoded
+// with the generated `ledger()`. Takes the provider and address rather than any
+// session or context object, so a browser client, the deploy tooling and a
+// read-only script all drive it the same way.
 
-import { ledger } from "@midnight-examples/erc20-vault-contract";
-import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js-types";
+import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import { bytesToHex, hexToBytes, toSignBidirectionalEventIndex } from "@sig-net/midnight";
+
+import { ledger } from "./managed/erc20-vault/contract/index.js";
 
 /** The decoded vault public ledger state, as the generated `ledger()` returns it. */
 export type VaultLedgerState = ReturnType<typeof ledger>;

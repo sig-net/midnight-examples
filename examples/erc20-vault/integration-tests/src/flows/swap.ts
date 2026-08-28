@@ -5,17 +5,13 @@
 // amountInMaximum. Mirrors the withdraw flow, with a swap-schema (uint64 amountIn spent)
 // attestation. Runs only where Uniswap is deployed (Sepolia / the pinned Sepolia fork);
 // logSkip elsewhere.
-import { VAULT_SWAP_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
 import {
-  asciiPadded,
   calculateRequestId,
   deserializeEvmOutput,
   evmAddressAbiWord,
   hexToBytes,
   MPC_FAILURE_OUTPUT,
   numericAbiWord,
-  PATH_BYTES,
   requestIdBytes,
   type RequestIdHex,
   requestIdHex,
@@ -28,6 +24,16 @@ import {
   TxParamType,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
+import {
+  VAULT_PATH_BYTES,
+  VAULT_SWAP_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  evmAddressBytes,
+  readVaultLedger,
+  UNISWAP_SWAP_ROUTER_02,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import {
   EXACT_OUTPUT_SINGLE_SELECTOR,
@@ -38,13 +44,10 @@ import {
   SWAP_MPC_ROUTING,
   SWAP_OUTPUT_SCHEMA,
   SWAP_RESPOND_SCHEMA,
-  UNISWAP_SWAP_ROUTER_02,
   uniswapAvailable,
 } from "../evm-swap.ts";
-import { evmAddressBytes } from "../evm-transfer.ts";
 import { fetchFakenetResponse } from "../fakenet-responses.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { vaultTokenType } from "../vault-token.ts";
 import { ensureRouterApproved } from "./approve.ts";
@@ -52,7 +55,6 @@ import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
 
 const MINUTE = 60_000;
-const VAULT_PATH = asciiPadded("vault", PATH_BYTES);
 
 /** Options for {@link swap}. */
 export interface SwapOptions {
@@ -94,7 +96,7 @@ export async function swap(context: VaultContext, options: SwapOptions): Promise
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce: before.signetRequestNonce,
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
-    path: VAULT_PATH,
+    path: VAULT_PATH_BYTES,
     ...SWAP_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
     caip2Id: before.caip2Id,

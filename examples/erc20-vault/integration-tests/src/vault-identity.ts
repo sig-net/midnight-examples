@@ -1,12 +1,12 @@
 // The user's vault identity: secret key -> commitment -> MPC derivation path.
 // Derivation calls the compiled circuits, never a TS re-implementation. The
-// secret is the session's wallet seed bytes (lib's `identitySecretFromSeed`),
-// so one seed is both the wallet that spends and the identity that gates.
+// secret itself is parsed by lib's `parseIdentitySecret`
+// (`VAULT_USER_SECRET`, defaulting to the `MIDNIGHT_USER1_WALLET_SEED` bytes).
 
-import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
-import { identitySecretFromSeed } from "@midnight-examples/lib";
-import { resolveUserSeed } from "@midnight-examples/test-harness";
 import { bytesToHex } from "@sig-net/midnight";
+import { pureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { parseIdentitySecret } from "@sig-net/midnight-examples-lib";
+import { resolveUserSeed } from "@sig-net/midnight-examples-test-harness";
 
 /** The caller identity every vault interaction is bound to. */
 export interface UserIdentity {
@@ -31,16 +31,16 @@ export interface UserIdentity {
 }
 
 /**
- * Derive the user's vault identity from the environment: the secret is the
- * session's wallet seed bytes (`MIDNIGHT_USER1_WALLET_SEED`) and the
- * commitment comes from the vault's compiled `userCommitment` circuit.
+ * Derive the user's vault identity from the environment: the secret from
+ * `VAULT_USER_SECRET` (falling back to the `MIDNIGHT_USER1_WALLET_SEED` bytes) and the
+ * commitment via the vault's compiled `userCommitment` circuit.
  *
- * @param env - The environment holding the session's wallet seed.
+ * @param env - The environment holding the identity secret (or seed).
  * @returns The derived identity.
- * @throws {ParseError} If the seed is malformed or not exactly 32 bytes of hex.
+ * @throws {ParseError} If the identity secret/seed is malformed.
  */
 export function resolveUserIdentity(env: NodeJS.ProcessEnv): UserIdentity {
-  const secretKey = identitySecretFromSeed(resolveUserSeed(env));
+  const secretKey = parseIdentitySecret("VAULT_USER_SECRET", env, resolveUserSeed(env));
   const commitment = pureCircuits.userCommitment(secretKey);
   return {
     secretKey,

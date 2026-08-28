@@ -3,15 +3,14 @@
 // MPC never exposes its root key, so this can never be a flow capability —
 // it stays in test-support code.
 
+import { deriveEpsilon, SECP256K1_ORDER, stripHexPrefix } from "@sig-net/midnight";
+import { VAULT_PATH_HEX } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   type ContractReadMethod,
   type ContractWriteMethod,
   requireEnv,
-} from "@midnight-examples/test-harness";
-import { deriveEpsilon, SECP256K1_ORDER, stripHexPrefix } from "@sig-net/midnight";
+} from "@sig-net/midnight-examples-test-harness";
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
-
-import { VAULT_PATH_HEX } from "./mpc-routing.ts";
 
 const ERC20_TRANSFER_ABI = [
   "function balanceOf(address) view returns (uint256)",

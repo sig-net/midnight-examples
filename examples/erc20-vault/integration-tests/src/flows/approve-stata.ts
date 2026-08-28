@@ -4,11 +4,6 @@
 // approve is called ON the pinned underlying (USDC), spender = the pinned stataToken wrapper,
 // so the wrapper can pull USDC during supply.
 import {
-  type ContractReadMethod,
-  getTransactionNonce,
-  logSkip,
-} from "@midnight-examples/test-harness";
-import {
   asciiPadded,
   calculateRequestId,
   evmAddressAbiWord,
@@ -23,23 +18,26 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
-
 import {
   AAVE_USDC,
-  APPROVE_SELECTOR,
-  MAX_APPROVE,
+  evmAddressBytes,
+  readVaultLedger,
   STATA_USDC,
-  stataAvailable,
-} from "../evm-stata.ts";
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  type ContractReadMethod,
+  getTransactionNonce,
+  logSkip,
+} from "@sig-net/midnight-examples-test-harness";
+
+import { APPROVE_SELECTOR, MAX_APPROVE, stataAvailable } from "../evm-stata.ts";
 import {
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
   ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
-  evmAddressBytes,
 } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";

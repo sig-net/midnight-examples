@@ -1,0 +1,32 @@
+{
+  "name": "@sig-net/midnight-examples-erc20-vault-deploy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deploy + initialize flows for the ERC20 vault contract: the split base deploy plus per-circuit maintenance adds, and the deployer-gated initialize. Typed functions taking an env map, so the CLI entrypoints and the e2e setup run exactly the same code.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "tsx scripts/deploy.ts",
+    "deploy-initialize": "tsx scripts/deploy-initialize.ts",
+    "initialize": "tsx scripts/initialize.ts"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.6",
+    "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
+    "@sig-net/midnight": "0.21.0-rc.1",
+    "@sig-net/midnight-examples-erc20-vault-client": "*",
+    "@sig-net/midnight-examples-erc20-vault-contract": "*",
+    "@sig-net/midnight-examples-lib": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

@@ -24,7 +24,7 @@ If you are looking for the parts of the Sig Network stack that these examples ar
 
 ## Examples
 
-Each example is a directory under [`examples/`](examples/) holding a `contract` package and an `integration-tests` package.
+Each example is a directory under [`examples/`](examples/) holding up to four packages, split by what the code is: `contract` (required), plus `client`, `deploy` and `integration-tests` as warranted.
 
 > ## ⚠️ CAUTION ⚠️
 >
@@ -96,7 +96,11 @@ yarn lint            # eslint, type-aware. `yarn lint:fix` applies the autofixes
 
 Scripts targeting one example carry that example's directory name:
 `yarn compile:erc20-vault`, `yarn compile:erc20-vault:zk`,
-`yarn test:erc20-vault` and `yarn build:erc20-vault`. ESLint and Prettier are
+`yarn test:erc20-vault` and `yarn build:erc20-vault`. Deploying a vault is
+`yarn deploy:erc20-vault` (needing `yarn compile:erc20-vault:zk` first), with
+`yarn deploy-initialize:erc20-vault` for the one-shot remote bring-up and
+`yarn initialize:erc20-vault` to recover a run whose deploy landed but whose
+initialize did not. ESLint and Prettier are
 configured once at the repo root and cover every member, and each example's CI
 workflow runs `yarn format:check` and `yarn lint` before its tests, so
 formatting drift or a lint finding fails the build.

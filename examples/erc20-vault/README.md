@@ -259,7 +259,7 @@ Two vault-specific points:
   notifications as `requestsPathDepth` 2 + `requestsPath` [0, 0, 0, 0]. The compiler records
   the same path as the field's "index" in the compiled
   `contract-info.json`.
-- The deploy tooling ([`contract/deploy.ts`](contract/deploy.ts)) computes
+- The deploy tooling ([`deploy/src/deploy-vault.ts`](deploy/src/deploy-vault.ts)) computes
   `deployerCommitment` off-chain by calling the compiled `userCommitment`
   circuit over the deployer's secret, never a TypeScript re-implementation.
 
@@ -324,7 +324,7 @@ contract's `callerSecretKey()` from it during proving):
 
 ```ts
 import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
-import { createVaultPrivateState } from "@midnight-examples/erc20-vault-contract";
+import { createVaultPrivateState } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 const vault = await findDeployedContract(providers, {
   contractAddress: vaultContractAddress,
@@ -342,7 +342,9 @@ is described step by step in [docs/deposit/deposit.md](docs/deposit/deposit.md).
 
 | Package | What it is |
 |---|---|
-| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, a curated environment-agnostic export surface, simulator unit tests, and a deploy entrypoint. Its dependency list (`@sig-net/midnight`, `@sig-net/midnight-contract` and the compact tooling) is the minimal integration surface. |
+| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads and the EVM constants, all browser-safe. Plus simulator unit tests. Its dependency list (`@sig-net/midnight`, `@sig-net/midnight-contract` and the compact tooling) is the minimal integration surface. |
+| [`client/`](client/) | The Node half of the vault's client surface: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. Everything here needs Node, which is why it is not in the contract package; the deploy tooling and the integration tests both build on it. |
+| [`deploy/`](deploy/) | ONLY deploying and post-deploy initialisation: the split base-deploy-plus-maintenance-adds, the deployer-gated `initialize`, and the configuration those resolve. Typed functions taking an environment map, plus thin CLI entrypoints over them, so a hand-run deploy and the e2e setup execute identical code. |
 | [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and eight e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
 
 ## Running it
@@ -401,19 +403,30 @@ The order matters and is not symmetric. Ledger state cannot be added after
 deploy, so the base transaction must carry the final ledger declarations even
 for circuits it does not register yet. Circuits can be added at any time.
 
-[`contract/deploy.ts`](contract/deploy.ts) performs both phases and is the only
-implementation. The e2e setup runs it as a subprocess when the `.env` has no
-vault address, and so does the stagenet script, so local and remote deploys take
-the same path:
+[`deploy/src/deploy-vault.ts`](deploy/src/deploy-vault.ts) performs both phases
+and is the only implementation. It is a typed function taking an environment
+map, so the commands below, the e2e setup pipeline and the flow tests all run
+that same function in-process: the multistage deploy a remote network needs is
+exercised on every local e2e run.
 
 ```sh
 # local, against the docker stack
 yarn deploy:erc20-vault
 
-# stagenet: deploy, then run the deployer-gated initialize
-yarn workspace @midnight-examples/erc20-vault-integration-tests exec \
-  tsx deploy-init-stagenet.ts
+# a remote network (stagenet): deploy, then run the deployer-gated initialize
+yarn deploy-initialize:erc20-vault
+
+# initialize a vault that already exists (recovers a run whose deploy landed
+# but whose initialize did not: initialize is one-shot and idempotent)
+yarn initialize:erc20-vault
 ```
+
+All three read the repo-root `.env` overlaid with the real environment, the same
+way the e2e setup does, so one set of variables drives every path. They refuse to
+run when that `.env` names a different `MIDNIGHT_NETWORK_ID` than the run targets and
+still supplies a network-scoped value (a signet address, an MPC key): those are
+sealed into the contract permanently, and a local-chain value on a remote network
+produces a vault that can never work.
 
 `BASE_DEPLOY_CIRCUITS` names the circuit that goes in the base transaction.
 `buildDeployTransactionDeferring` returns the contract address plus the deferred
@@ -425,10 +438,10 @@ counter, waiting for the counter to advance between updates.
 The base deploy retains a maintenance authority, and this variable is its
 signing key. Every circuit added after the base transaction is signed by it.
 
-Set it to a 32-byte hex key you keep. Unset, the deploy generates an ephemeral
-one and says so, which is fine for a throwaway deploy and wrong anywhere else:
-it is the only way to add or replace a circuit later, and an ephemeral key is
-gone when the process exits.
+Set it to a 32-byte hex key you keep: it is the only way to add or replace a
+circuit later, so a deploy to any network other than the local standalone chain
+REQUIRES it and fails fast when it is unset. On the local chain, which is
+throwaway, an unset key makes the deploy generate an ephemeral one and say so.
 
 ## The e2e suite
 

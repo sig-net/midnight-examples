@@ -103,3 +103,31 @@ export function identitySecretFromSeed(seed: string): Uint8Array {
   }
   return bytes;
 }
+
+/**
+ * Resolve a 32-byte identity secret from the environment: `env[envVar]` (hex,
+ * optional 0x prefix) when set, else the bytes of `fallbackSeed` via
+ * {@link identitySecretFromSeed}. The value is deliberately NOT key material:
+ * it is an opaque preimage whose commitment is what reaches the ledger, so a
+ * caller proves its identity without surrendering a signing key.
+ *
+ * @param envVar - Name of the environment variable holding the hex secret.
+ * @param env - The environment to read from.
+ * @param fallbackSeed - The wallet seed used as the identity when `env[envVar]` is unset.
+ * @returns The 32-byte identity secret.
+ * @throws {ParseError} If `env[envVar]` is set but is not exactly 32 bytes of
+ *   hex, or if it is unset and `fallbackSeed` does not parse to exactly 32 bytes.
+ */
+export function parseIdentitySecret(
+  envVar: string,
+  env: Record<string, string | undefined>,
+  fallbackSeed: string,
+): Uint8Array {
+  const raw = env[envVar]?.trim();
+  if (!raw) return identitySecretFromSeed(fallbackSeed);
+  const hex = raw.replace(/^0x/i, "");
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+    throw new ParseError(`${envVar} must be exactly 32 bytes of hex`);
+  }
+  return fromHex(hex.toLowerCase());
+}

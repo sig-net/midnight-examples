@@ -14,17 +14,6 @@
 // (src/flows/) — in-process, never a subprocess.
 
 import {
-  banner,
-  getErc20Balance,
-  getEthBalance,
-  getTransactionNonce,
-  isTransactionMined,
-  logSkip,
-  pollSignetNotification,
-  requireEnv as requireEnvOf,
-} from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
-import {
   abiWordToUint128,
   bytesToHex,
   parseSecp256k1PublicKey,
@@ -34,6 +23,23 @@ import {
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
 import { calculateSignetAttestationDigest } from "@sig-net/midnight/testing";
+import { VAULT_PATH_BYTES } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { printVaultState, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  InitializeVaultOutcome,
+  resolveInitializeConfig,
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
+import {
+  banner,
+  getErc20Balance,
+  getEthBalance,
+  getTransactionNonce,
+  isTransactionMined,
+  logSkip,
+  pollSignetNotification,
+  requireEnv as requireEnvOf,
+} from "@sig-net/midnight-examples-test-harness";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { formatEther, JsonRpcProvider, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -49,8 +55,6 @@ import {
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { withdraw } from "../src/flows/withdraw.ts";
-import { VAULT_PATH_BYTES } from "../src/mpc-routing.ts";
-import { printVaultState, readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
 const MINUTE = 60_000;
@@ -101,19 +105,16 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   it(
     "initialize [erc-vault contract method call]: seal vault EVM address + MPC response key and read back state",
     async () => {
-      const vaultEvmAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
-      const mpcResponseKey = requireEnv("MPC_VAULT_RESPONSE_PUBLIC_KEY");
       const context = await session.vaultContext();
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
 
-      if ((await readLedger()).initialized) {
-        logSkip(
-          "initialize",
-          "vault is already initialized (rerun against a kept contract address)",
-        );
-      } else {
-        await initialize(await deployerSession.vaultContext(), { vaultEvmAddress, mpcResponseKey });
+      // The same arguments the stagenet deploy+initialize entrypoint resolves, from the
+      // same env. A rerun against a kept, initialized contract is a no-op inside initialize.
+      const config = resolveInitializeConfig(env, context.vaultContractAddress);
+      const outcome = await initialize(await deployerSession.vaultContext(), config);
+      if (outcome === InitializeVaultOutcome.AlreadyInitialized) {
+        logSkip("initialize", "vault is already initialized (rerun against a kept contract)");
       }
 
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
@@ -121,7 +122,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const state = await readLedger();
       expect(state.initialized).toBe(1n);
       expect(`0x${bytesToHex(state.vaultEvmAddress)}`.toLowerCase()).toBe(
-        vaultEvmAddress.toLowerCase(),
+        config.vaultEvmAddress.toLowerCase(),
       );
       // The pinned chain config: numeric id + zero-padded CAIP-2 string.
       expect(state.evmChainId).toBe(BigInt(requireEnv("EVM_CHAIN_ID")));
@@ -130,7 +131,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
       // The stored MPC response key, verbatim: the sender-scoped key claim and
       // completeWithdraw verify responses against.
-      expect(state.mpcResponseKey).toEqual(parseSecp256k1PublicKey(mpcResponseKey));
+      expect(state.mpcResponseKey).toEqual(parseSecp256k1PublicKey(config.mpcResponseKey));
     },
     15 * MINUTE,
   );
