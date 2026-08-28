@@ -16,7 +16,7 @@ node-modules`), split between shared machinery and the examples integrators copy
 
 Run `yarn install` from the repo root — never from inside a member. Run
 `yarn compile` before `build`/`test`: contract packages typecheck against their
-generated `src/managed/` output. The full layout lives in [README.md](README.md).
+generated `src/managed/` output.
 
 # Examples-repo identity rules
 
