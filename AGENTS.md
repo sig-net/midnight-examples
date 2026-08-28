@@ -27,7 +27,7 @@ node-modules`), split between shared machinery and the examples integrators copy
   in-process by its tests, and its deploy / init flows are typed functions in
   `deploy/src/`, run in-process by the setup pipeline. Both kinds get thin `tsx`
   entrypoints over those SAME functions for hand-driving a live stack
-  (`integration-tests/scripts/`, and the entrypoints at the root of `deploy/`) —
+  (`integration-tests/scripts/` and `deploy/scripts/`) —
   never a subprocess call with its output scraped, which is how the two paths
   silently diverge.
 

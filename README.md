@@ -542,11 +542,10 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
     │   │                       #   midnight-js provider set. Used by deploy AND integration-tests.
     │   │
     │   ├── deploy/             # @sig-net/midnight-examples-erc20-vault-deploy
-    │   │   ├── deploy.ts            # `yarn deploy:erc20-vault`: a shell over src/deploy-vault.ts.
-    │   │   ├── deploy-initialize.ts # `yarn deploy-initialize:erc20-vault`: deploy + initialize,
-    │   │   │                        #   the one-shot bring-up on a remote network.
-    │   │   ├── initialize.ts        # `yarn initialize:erc20-vault`: initialize an existing vault,
-    │   │   │                        #   the recovery half when a deploy landed but init did not.
+    │   │   ├── scripts/            # Thin tsx entrypoints over src/, one per root script:
+    │   │   │                        #   deploy.ts (`yarn deploy:erc20-vault`),
+    │   │   │                        #   deploy-initialize.ts (the one-shot remote bring-up), and
+    │   │   │                        #   initialize.ts (recovery when a deploy landed but init did not).
     │   │   ├── src/
     │   │   │   ├── deploy-vault.ts     # The split deploy (base tx + a maintenance update per
     │   │   │   │                       #   deferred circuit): constructor args & witness

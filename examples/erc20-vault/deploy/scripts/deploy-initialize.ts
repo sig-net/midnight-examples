@@ -9,9 +9,9 @@
 // authority that installs the deferred circuits, and the only way to add or
 // replace one later) and a faucet-funded DEPLOYER_SEED.
 
-import { deployVault } from "./src/deploy-vault.ts";
-import { buildEntrypointEnv } from "./src/entrypoint-env.ts";
-import { assertInitializeInputsPresent, initializeVault } from "./src/initialize-vault.ts";
+import { deployVault } from "../src/deploy-vault.ts";
+import { buildEntrypointEnv } from "../src/entrypoint-env.ts";
+import { assertInitializeInputsPresent, initializeVault } from "../src/initialize-vault.ts";
 
 const env = buildEntrypointEnv();
 
@@ -24,4 +24,4 @@ await initializeVault(env, contractAddress);
 
 console.log("\n==================== DONE ====================");
 console.log(`NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS=${contractAddress}`);
-console.log("=============================================");
+console.log("================================================");

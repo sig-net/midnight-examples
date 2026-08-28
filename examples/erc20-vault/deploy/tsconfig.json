@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["src", "tests", "deploy.ts", "deploy-initialize.ts", "initialize.ts"]
+  "include": ["src", "tests", "scripts"]
 }
