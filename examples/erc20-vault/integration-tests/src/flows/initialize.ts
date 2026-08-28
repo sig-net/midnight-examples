@@ -5,7 +5,7 @@
 // a constructor argument). Gated in-circuit to the deployer identity.
 //
 // The circuit call itself is the deploy package's `initializeVaultContract`,
-// the same function the stagenet deploy+initialize entrypoint runs — this flow
+// the same function the stagenet deploy+initialize entrypoint runs. This flow
 // is the session-shaped face of it, so the suites exercise the code a remote
 // bring-up depends on.
 

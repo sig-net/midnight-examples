@@ -14,7 +14,7 @@ import { REPO_ROOT } from "@sig-net/midnight-examples-lib";
  * provenance comment, creating the file when missing. STRICTLY append-only:
  * existing lines are never read, reordered, or rewritten, so this call
  * cannot corrupt a hand-edited file. Presence and conflict checks are the
- * CALLER's job (via lib's `loadRepoDotEnv`) — never append a key the file
+ * CALLER's job (via lib's `loadRepoDotEnv`). Never append a key the file
  * already holds: duplicate-key precedence differs between consumers (that
  * reader takes the last occurrence; docker compose applies its own rule), so
  * a duplicate is a latent inconsistency, not an override.

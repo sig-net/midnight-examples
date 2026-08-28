@@ -11,7 +11,7 @@
 // initialize flow pins it on-chain.
 
 import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
-import { VAULT_PATH_HEX } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { deriveVaultEvmAddress } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { deployVault } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
   assertEnvironment,
@@ -53,7 +53,7 @@ const PIPELINE_KEYS = [
 
 /**
  * Deploy the vault contract by calling the deploy package's `deployVault`
- * in-process — the same function the `deploy` and `deploy-initialize`
+ * in-process: the same function the `deploy` and `deploy-initialize`
  * entrypoints run, so the split deploy (base deploy plus one maintenance
  * update per deferred circuit) this suite exercises is the one a remote
  * bring-up performs. Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already
@@ -97,22 +97,25 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
 }
 
 /**
- * Ensure `EVM_VAULT_ADDRESS` matches the vault's derived EVM account
- * (`MPC_SECP256K1_PUBKEY` + vault contract address, path = the hex rendering
- * of the contract-fixed `pad(32, "vault")` bytes), deriving it when absent.
+ * Ensure `EVM_VAULT_ADDRESS` matches the vault's derived EVM account, deriving
+ * it when absent. The derivation is the contract package's
+ * {@link deriveVaultEvmAddress}, the same one the deploy package's
+ * `resolveInitializeConfig` seals on-chain, so this step and the initialize
+ * agree by construction.
  *
  * @param env - The suite's env accumulator.
  * @throws {Error} If a preset `EVM_VAULT_ADDRESS` mismatches the derivation.
  */
 function ensureVaultEvmAddress(env: NodeJS.ProcessEnv): void {
-  const expectedAddress = deriveEvmAddress(
+  const expectedAddress = deriveVaultEvmAddress(
     requireEnv(env, "MPC_SECP256K1_PUBKEY"),
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
-    VAULT_PATH_HEX,
   );
   if (env.EVM_VAULT_ADDRESS) {
     console.log(`Found EVM_VAULT_ADDRESS in the environment as ${env.EVM_VAULT_ADDRESS}`);
-    if (env.EVM_VAULT_ADDRESS !== expectedAddress) {
+    // Case-insensitive: an EVM address is EIP-55 checksummed, so the same
+    // account differs only in case between one speller and another.
+    if (env.EVM_VAULT_ADDRESS.toLowerCase() !== expectedAddress.toLowerCase()) {
       throw new Error(
         `EVM_VAULT_ADDRESS should be derived from MPC_SECP256K1_PUBKEY + vault contract address: expected ${expectedAddress}, found ${env.EVM_VAULT_ADDRESS}`,
       );
@@ -148,7 +151,7 @@ function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   );
   if (env.EVM_USER_ADDRESS) {
     console.log(`Found EVM_USER_ADDRESS in the environment as ${env.EVM_USER_ADDRESS}`);
-    if (env.EVM_USER_ADDRESS !== expectedAddress) {
+    if (env.EVM_USER_ADDRESS.toLowerCase() !== expectedAddress.toLowerCase()) {
       throw new Error(
         `EVM_USER_ADDRESS should be derived from MPC_SECP256K1_PUBKEY + vault contract + user identity: expected ${expectedAddress}, found ${env.EVM_USER_ADDRESS}`,
       );

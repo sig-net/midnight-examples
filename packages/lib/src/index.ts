@@ -1,5 +1,5 @@
-// Public surface of @sig-net/midnight-examples-lib — runtime plumbing shared by the
-// examples' deploy scripts, flows and integration tests.
+// Public surface of @sig-net/midnight-examples-lib: runtime plumbing shared
+// by the examples' deploy scripts, flows and integration tests.
 export * from "./deploy.ts";
 export * from "./env.ts";
 export * from "./env-file.ts";

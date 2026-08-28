@@ -14,7 +14,6 @@ import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import {
   asciiPadded,
   CAIP2_ID_BYTES,
-  deriveEvmAddress,
   deriveMidnightResponseKey,
   formatSecp256k1PublicKey,
   parseSecp256k1PublicKey,
@@ -26,9 +25,9 @@ import {
 import {
   createVaultPrivateState,
   type DeployedVaultContract,
+  deriveVaultEvmAddress,
   evmAddressBytes,
   readVaultLedger,
-  VAULT_PATH_HEX,
   VAULT_PRIVATE_STATE_ID,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
@@ -147,14 +146,7 @@ export function resolveInitializeConfig(
 ): VaultInitializeConfig {
   const { mpcSecp256k1PublicKey, evmChainId, targets } = resolveAddressFreeInputs(env);
 
-  // The path is the contract-fixed pad(32, "vault") rendered as hex: the same
-  // rendering the MPC applies to a record's path, so any other spelling of
-  // "vault" derives an account the MPC will never sign from.
-  const vaultEvmAddress = deriveEvmAddress(
-    mpcSecp256k1PublicKey,
-    vaultContractAddress,
-    VAULT_PATH_HEX,
-  );
+  const vaultEvmAddress = deriveVaultEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress);
   assertDerivedMatch(
     envOrUndefined(env, "EVM_VAULT_ADDRESS"),
     vaultEvmAddress,

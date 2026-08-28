@@ -1,6 +1,6 @@
 // Subprocess plumbing for SETUP steps that must shell out: docker compose and
 // the zk compile root scripts. Flows and contract deploys are in-process typed
-// function calls — nothing under a flow should ever need this module.
+// function calls, so nothing under a flow should ever need this module.
 
 import { spawn } from "node:child_process";
 

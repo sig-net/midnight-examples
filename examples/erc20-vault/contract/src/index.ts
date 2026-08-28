@@ -5,7 +5,7 @@
 // or a backend. Anything that cannot (the Node compiled-contract binding, a
 // live provider set, deploy tooling) lives in a sibling package.
 
-import { asciiPadded, bytesToHex, PATH_BYTES } from "@sig-net/midnight";
+import { asciiPadded, bytesToHex, deriveEvmAddress, PATH_BYTES } from "@sig-net/midnight";
 
 export * from "./contract-surface.ts";
 export * from "./evm.ts";
@@ -27,6 +27,23 @@ export const VAULT_PATH_BYTES = asciiPadded("vault", PATH_BYTES);
  * never sign from.
  */
 export const VAULT_PATH_HEX = bytesToHex(VAULT_PATH_BYTES);
+
+/**
+ * Derive the EVM account the MPC signs the vault's transactions from:
+ * `f(MPC public key, this vault's contract address, {@link VAULT_PATH_HEX})`.
+ * The one definition of that derivation, so the address a deploy seals in and
+ * the address a test funds cannot drift apart.
+ *
+ * @param mpcSecp256k1PublicKey - The MPC network's secp256k1 public key (SEC1 hex).
+ * @param vaultContractAddress - The deployed vault contract's address.
+ * @returns The vault's EVM address, 0x-prefixed.
+ */
+export function deriveVaultEvmAddress(
+  mpcSecp256k1PublicKey: string,
+  vaultContractAddress: string,
+): string {
+  return deriveEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress, VAULT_PATH_HEX);
+}
 
 // THIS contract's signet ledger layout (declaration order in
 // erc20-vault.compact): the SignBidirectionalEventMap at field 0, then the
