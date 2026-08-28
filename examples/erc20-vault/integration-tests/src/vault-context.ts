@@ -154,7 +154,8 @@ export function createResponseReader(
   return new SignetRequestResponseReader({
     requesterContractAddress: context.vaultContractAddress,
     // The requestsPath the vault's notifications pack (erc20-vault.compact):
-    // deposit/withdraw at field 0 path [0], swaps at field 11 path [11].
+    // deposit/withdraw at field 0 path [0,0], swaps at field 11 path [1,7] (19 ledger
+    // fields, so the tree is chunked and every path is depth 2).
     requesterRequestsPath: requestsPath,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,

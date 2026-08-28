@@ -23,6 +23,8 @@ const FILE_ORDER = [
   "false-claimer.test.ts",
   "bearer-transfer.test.ts",
   "swap-e2e.test.ts",
+  "supply-redeem-e2e.test.ts",
+  "supply-refund-e2e.test.ts",
   "swap-refund-e2e.test.ts",
 ];
 

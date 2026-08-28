@@ -7,12 +7,144 @@
 
 import "./provided-context.ts";
 
-import { beforeEach, inject } from "vitest";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+import { getMidnightNodeConfig } from "@midnight-examples/lib";
+import { afterAll, beforeAll, beforeEach, inject } from "vitest";
 
 import { testHeader } from "./output.ts";
 import { waitForGo } from "./waitForGo.ts";
 
 const MINUTE = 60_000;
+const execFileAsync = promisify(execFile);
+
+// The local proof server's container name (docker-compose.yaml), the target of the between-file
+// recycle.
+const PROOF_SERVER_CONTAINER = "midnight-proof-server";
+
+/**
+ * Whether the proof server answers at all. Any HTTP response counts: the server binds its port
+ * only once it can serve, so a reply is the readiness signal.
+ *
+ * @param url - The proof server URL to probe.
+ * @returns True when the server replied, false otherwise.
+ */
+async function proofServerAnswers(url: string): Promise<boolean> {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The proof server container's state, as one line. `docker ps` reports a container that died and
+ * came back as merely "Up", which hides the death; `OOMKilled`, `ExitCode` and `RestartCount` do
+ * not. Returns a marker string rather than throwing, so it is safe inside an error path.
+ *
+ * @returns One line of container state, or a marker when docker cannot be reached.
+ */
+async function proofServerContainerState(): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("docker", [
+      "inspect",
+      PROOF_SERVER_CONTAINER,
+      "--format",
+      "running={{.State.Running}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}} restarts={{.RestartCount}} startedAt={{.State.StartedAt}}",
+    ]);
+    return stdout.trim();
+  } catch (error) {
+    return `state unavailable (${String(error)})`;
+  }
+}
+
+/**
+ * Poll `url` until it answers or the deadline passes. Reports the container's state on timeout,
+ * so a failure says whether the server is missing, dead or merely slow.
+ *
+ * @param url - The proof server URL to probe.
+ * @param timeoutMs - How long to keep polling before giving up.
+ */
+async function waitForProofServer(url: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await proofServerAnswers(url)) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `proof server did not answer at ${url} after a restart; container: ${await proofServerContainerState()}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+}
+
+/**
+ * The local proof server URL, or null when the recycle does not apply: `SKIP_PROOF_SERVER_RESTART`
+ * is set, or the configured server is not local (a user's own, or a remote one).
+ *
+ * Reads the URL through {@link getMidnightNodeConfig}, the same resolution the rest of the suite
+ * uses. Reading `MIDNIGHT_PROOF_SERVER_URL` directly is wrong: that variable is how the FAKENET
+ * container finds the proof server, and docker-compose sets it to `http://proof-server:6300`, a
+ * name that resolves only inside the compose network. The test process wants
+ * `MIDNIGHT_NODE_PROOF_SERVER_URL`, which this resolves.
+ *
+ * @returns The local proof server URL, or null when the recycle does not apply.
+ */
+function localProofServerUrl(): string | null {
+  if (process.env.SKIP_PROOF_SERVER_RESTART) return null;
+  const { proofServerUrl } = getMidnightNodeConfig();
+  return /127\.0\.0\.1|localhost/.test(proofServerUrl) ? proofServerUrl : null;
+}
+
+/**
+ * Keep the LOCAL proof server alive across a long sequential run.
+ *
+ * Heavy proofs accumulate memory (fileParallelism is off, so one file follows another against one
+ * server), and a never-restarted server dies late in the suite. The next prove then fails with
+ * ECONNREFUSED, an hour in, naming nothing.
+ *
+ * Two hooks, because a recycle after each file is not enough on its own:
+ * - `beforeAll` refuses to start a file against a dead server. The previous file's recycle can
+ *   have failed, or the server can have died after it.
+ * - `afterAll` reports the container's state, THEN recycles. Reporting first is the point: the
+ *   restart hides a mid-file death, so without this a server that died is invisible in a run that
+ *   otherwise passes.
+ *
+ * Neither hook fails the run when docker is unavailable. A missing local server surfaces as the
+ * test's own error, which is no worse than before.
+ */
+function installProofServerRecycle(): void {
+  beforeAll(async () => {
+    const url = localProofServerUrl();
+    if (url === null) return;
+    if (await proofServerAnswers(url)) return;
+    console.warn(
+      `proof server not answering before this file; container: ${await proofServerContainerState()}`,
+    );
+    try {
+      await execFileAsync("docker", ["restart", PROOF_SERVER_CONTAINER]);
+    } catch (error) {
+      console.warn(`proof-server restart skipped (docker unavailable?): ${String(error)}`);
+      return;
+    }
+    await waitForProofServer(url, 3 * MINUTE);
+  }, 5 * MINUTE);
+
+  afterAll(async () => {
+    const url = localProofServerUrl();
+    if (url === null) return;
+    console.log(`proof server after this file: ${await proofServerContainerState()}`);
+    try {
+      await execFileAsync("docker", ["restart", PROOF_SERVER_CONTAINER]);
+    } catch (error) {
+      console.warn(`proof-server recycle skipped (docker unavailable?): ${String(error)}`);
+      return;
+    }
+    await waitForProofServer(url, 3 * MINUTE);
+  }, 5 * MINUTE);
+}
 
 /**
  * The env accumulator as populated by the setup pipeline (repo-root `.env`
@@ -35,6 +167,7 @@ export function injectE2eEnv(): NodeJS.ProcessEnv {
  *   pause on their own, in the setup pipeline).
  */
 export function installFlowHooks(): void {
+  installProofServerRecycle();
   beforeEach(async (ctx) => {
     const siblings = ctx.task.suite?.tasks ?? [];
     const index = siblings.indexOf(ctx.task);

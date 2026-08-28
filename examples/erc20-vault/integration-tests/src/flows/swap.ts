@@ -289,11 +289,15 @@ export async function settleSwap(
     console.log(`refund settled in tx ${r.public.txId}`);
     return { amountIn: 0n, refunded: true };
   }
+  // completeSwap mints two coins (the swapped output and the unspent change), each under its
+  // own random nonce: a derived second nonce would leave the change coin no entropy of its own.
+  const changeNonce = crypto.getRandomValues(new Uint8Array(32));
   const r = await context.vault.callTx.completeSwap(
     requestIdBytes(requestId),
     outcome.event,
     outcome.serializedOutput,
     mintNonce,
+    changeNonce,
   );
   console.log(
     `completeSwap settled in tx ${r.public.txId} (spent ${String(outcome.amountIn)} tokenIn)`,

@@ -223,19 +223,19 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const decoded = await pollSignetNotification({
         env,
         callerAddress: vaultAddress,
-        requestsPath: [0],
+        requestsPath: [0, 0],
         requestId: depositTransactionSignatureRequestId,
         description: `for request ${depositTransactionSignatureRequestId}`,
       });
 
       // callerAddress points at the vault (the contract whose authenticated
       // ledger holds the request); the event map's resolved ledger-tree path
-      // is [0]. The notification is a doorbell declaring WHICH request (the
+      // is [0, 0] (chunked past 15 fields). The notification is a doorbell declaring WHICH request (the
       // disclosed id) and WHERE to look, and the MPC reads the declared
       // request from the vault's own authenticated ledger.
       expect(decoded.version).toBe(1);
       expect(decoded.callerAddress).toBe(stripHexPrefix(vaultAddress).toLowerCase());
-      expect(decoded.requestsPath).toEqual([0]);
+      expect(decoded.requestsPath).toEqual([0, 0]);
 
       banner([
         "Golden SignBidirectionalEventNotification decoded from the live indexer:",
@@ -538,13 +538,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const decoded = await pollSignetNotification({
         env,
         callerAddress: vaultAddress,
-        requestsPath: [0],
+        requestsPath: [0, 0],
         requestId: withdrawTransactionSignatureRequestId,
         description: `for withdraw request ${withdrawTransactionSignatureRequestId}`,
       });
 
       expect(decoded.callerAddress).toBe(stripHexPrefix(vaultAddress).toLowerCase());
-      expect(decoded.requestsPath).toEqual([0]);
+      expect(decoded.requestsPath).toEqual([0, 0]);
 
       banner([
         "Notification event observed for the withdraw request:",
