@@ -1,10 +1,19 @@
 # Midnight Contracts Calling Foreign Chains with Sig Network
 
-This monorepo holds experimental example Midnight contracts that leverage the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains.
+This monorepo holds experimental example Midnight contracts that leverage the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains through integration of the [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow).
 
-Each example uses the [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight) protocol library to integrate the Sig Network [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow).
+The examples demonstrate how to integrate using the following packages:
+- [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight): the
+  client-agnostic protocol library (the shared Compact modules, state readers,
+  event decoders, request feed and crypto helpers).
+- [`@sig-net/midnight-contract`](https://www.npmjs.com/package/@sig-net/midnight-contract):
+  the central Signet singleton contract.
+- [`@sig-net/midnight-contract-deploy`](https://www.npmjs.com/package/@sig-net/midnight-contract-deploy):
+  deploy tooling for that contract plus generic Midnight deploy and wallet
+  plumbing. Used here by the test harness to deploy the singleton for the
+  local e2e stack.
 
-### Reading Guide:
+## Reading Guide
 - Start by reading the [Sign Bidirectional Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
 - Then go through the [Integration guide](#integration-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
 - Or jump straight into complete [examples](#examples) to see applications of the protocol.
@@ -46,36 +55,20 @@ The diagram numbers the five steps:
 
 ## Integration guide
 
-Integrating a contract on Midnight with the Sig Network MPC is 4 once-off setup
-steps and 5 per-request runtime steps. In setup, you add `@sig-net/midnight` and
-import its Signet Compact module, declare the protocol state in your ledger (the
-`signBidirectionalEventMap` your requests live in, the `SignetSigner` singleton
-reference your circuits notify, and your contract's own `mpcResponseKey`), then
-pin that response key right after deploy through a deployer-gated one-shot
-circuit: its derivation takes the contract's address as input, which exists only
-once the contract is deployed. At runtime, steps 1 and 5 of the flow above are
-circuits on your contract, and the three middle steps are off-chain client code
-built on the readers and helpers in `@sig-net/midnight`.
+Integrating a contract on Midnight with the Sig Network MPC requires 4 once-off setup
+steps and 5 per-request runtime steps.
 
-The full guide, with the Compact and TypeScript for each of those steps, is
-[Integrator Guide](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide)
-in the integration repository. It also carries the two rule sets a first
-integration trips over: how to read your request map's ledger-tree path out of
-the compiled artifacts, and how EVM Type 2 calldata words must be built and read
-back. Every example here is a worked application of that guide, closest to the
-code in the [ERC20 vault](examples/erc20-vault/README.md).
+Setup entails:
+1. Installing `@sig-net/midnight` into your project.
+2. Importing the Signet Compact module into your contract.
+3. Declaring the required protocol state in your ledger (the `signBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits call to notify the MPC of requests).
+4. Setting the contract's own `mpcResponseKey` with an initialisation circuit call after deploy (its derivation takes the contract's address as input, which exists only once the contract is deployed).
 
-The protocol packages the examples integrate against, all developed in
-[sig-net/midnight-integration](https://github.com/sig-net/midnight-integration):
+At runtime you integrate the [Sign Bidirectional Flow above](#sign-bidirectional-protocol-flow):
+- **Steps 1** and **5** are circuits on your contract.
+- **Steps 2**, **3** and **4** are off-chain client/dApp/relayer code built on the readers and helpers in `@sig-net/midnight`.
 
-- [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight): the
-  client-agnostic protocol library (the shared Compact modules, state readers,
-  event decoders, request feed and crypto helpers).
-- [`@sig-net/midnight-contract`](https://www.npmjs.com/package/@sig-net/midnight-contract):
-  the central Signet singleton contract.
-- [`@sig-net/midnight-contract-deploy`](https://www.npmjs.com/package/@sig-net/midnight-contract-deploy):
-  deploy tooling for that contract plus generic Midnight deploy and wallet
-  plumbing.
+Consult the [Integrator Guide documentation](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide) in the Midnight integration repository for a more detailed description of how to integrate.
 
 ## Contributor guide
 
@@ -84,7 +77,8 @@ runtime: no docker stack, no zk keys, seconds not minutes. The end to end
 integration suites drive the full protocol against the local docker stack and
 the fakenet MPC responder, and take minutes.
 
-Everything runs from the repository root. Only contract packages have a compile
+Everything runs from the repository root, with the
+[Prerequisites](#prerequisites) below installed. Only contract packages have a compile
 step, and `build`, `test` and `lint` all read the compiler's generated
 `src/managed/` output, so compile first:
 
