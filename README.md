@@ -2,14 +2,14 @@
 
 This monorepo holds experimental example Midnight contracts that leverage the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains.
 
-Each example uses the [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight) protocol library to integrate the Sig Network [Sign Bidirectional Flow Protocol](#sign-bidirectional-protocol-flow).
+Each example uses the [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight) protocol library to integrate the Sig Network [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow).
 
 ### Reading Guide:
 - Start by reading the [Sign Bidirectional Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
 - Then go through the [Integration guide](#integration-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
 - Or jump straight into complete [examples](#examples) to see applications of the protocol.
 
-In case you landed in the wrong place or are looking for the parts of the Sig Network stack that these examples are built upon:
+If you are looking for the parts of the Sig Network stack that these examples are built upon, visit:
 - [Midnight Integration Protocol and SDK Repository](https://github.com/sig-net/midnight-integration)
 - [Sig Network Distributed MPC Repository](https://github.com/sig-net/mpc)
 
@@ -22,59 +22,29 @@ Each example is a directory under [`examples/`](examples/) holding a `contract` 
 > These are example applications for educational and experimental purposes.
 > Use at your own risk and expect rapid iteration.
 
-Following is a list of available examples:
-
 | Example | What it demonstrates | Flow walkthroughs |
 |---|---|---|
-| [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding ERC20 tokens on an EVM chain: private deposits into MPC-derived accounts, withdrawals, Uniswap swaps and Aave supply/redeem, all driven through the sign bidirectional flow. | [deposit](examples/erc20-vault/docs/deposit/deposit.md), [withdraw](examples/erc20-vault/docs/withdraw/withdraw.md), [swap](examples/erc20-vault/docs/swap/swap.md), [supply](examples/erc20-vault/docs/supply/supply.md), [redeem](examples/erc20-vault/docs/redeem/redeem.md) |
+| [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding, swapping (Uniswap) and lending (Aave) ERC20 tokens on an EVM chain. | [deposit](examples/erc20-vault/docs/deposit/deposit.md), [withdraw](examples/erc20-vault/docs/withdraw/withdraw.md), [swap](examples/erc20-vault/docs/swap/swap.md), [supply](examples/erc20-vault/docs/supply/supply.md), [redeem](examples/erc20-vault/docs/redeem/redeem.md) |
 
 ## Sign Bidirectional Protocol Flow
 
 This Sig Network Protocol Flow brings foreign blockchain assets and functionality to contracts on Midnight. Contracts record signature requests that the Sig Network MPC signs. dApps relay signed transactions to foreign chains and the MPC attests their execution outcomes back to Midnight. Then contracts complete cross chain interactions with in-circuit validation of the MPC foreign execution attestation.
 
-Illustrated below this Protocol is best understood in 5 steps:
+Illustrated below, the protocol is best understood in 5 steps:
 
 ![Sign bidirectional flow](docs/sign-bidirectional-flow.drawio.png)
 
-- **1. Integrating Client Contract records a request**
-  - A user interacts with the integrating dApp, which calls a circuit on the integrating client contract (`startCrossChain(...)` in the diagram).
-   - The circuit stores a `SignBidirectionalEvent` signature request in its own `signBidirectionalEventMap`. The request carries the fields of a transaction destined for a foreign chain, plus the path the MPC uses to derive the key that it will sign the transaction with.
-  - The circuit then notifies the MPC via a cross-contract call to `signBidirectional(...)` on the Sig Network Singleton Contract, which emits a `SignBidirectionalEventNotification`.
-- **2. Sig Network MPC signs**
-  - The MPC, watching the singleton's events, picks up the `SignBidirectionalEventNotification`.
-  - Using the information from the event, the MPC reads the `SignBidirectionalEvent` signature request that the client contract stored in its state in step 1.
-  - The MPC constructs the foreign transaction from the signature request and signs it with the associated `requestSigningKey` derived for that contract and the path of the signature request.
-  - It posts the signature back to Midnight by calling `respond(...)` on the singleton, which emits a `SignatureRespondedEvent`.
-- **3. dApp/Relayer broadcasts**
-  - The dApp, watching the singleton's events, picks up the associated `SignatureRespondedEvent`.
-  - It verifies the posted MPC signature is by the requested signer (i.e. the `requestSigningKey`) and constructs the fully signed transaction.
-  - Acting as the relayer, it then submits the transaction to the foreign chain.
-  - **Note:** The MPC only ever signs. Broadcasting is the dApp's responsibility.
-- **4. Sig Network MPC attests the outcome**
-  - Watching the foreign chain, the MPC observes
-   the transaction execute, serialises the execution output per the request's
-   respond schema, and signs the attestation digest
-   `keccak256(requestId || serializedOutput)` with the response key derived for
-   that contract. It posts the attestation by calling `respondBidirectional(...)`
-   on the singleton, which emits a `RespondBidirectionalEvent`. Neither the
-   digest nor the output itself travels on chain.
-- **5. The contract settles**
-  - The dApp recovers the execution output off chain
-   (it broadcast the transaction in step 3, so it can read the result), takes the
-   attestation from the emitted event and submits both to a settling circuit
-   (`completeCrossChain(...)` in the diagram). That circuit recomputes the digest
-   from the output bytes and verifies the MPC's signature in-circuit against the
-   response key the contract pinned after deploy, completing the cross chain
-   interaction.
+1. A user interacts with a dApp, which starts a cross chain interaction by calling a circuit (`startCrossChain(...)` in the diagram) on a contract on Midnight that has integrated with Sig Network.
+2. The MPC network, watching for events on the Singleton contract, picks up the emitted **SignBidirectionalEventNotification** and honours the signature request it points to.
+3. The integrating dApp, watching for events on the Singleton contract, picks up the emitted **SignatureRespondedEvent** and relays the fully signed transaction to the foreign chain.
+4. The MPC network observes execution of the signed transaction on the foreign blockchain and posts an attestation thereof back to Midnight.
+5. The integrating dApp collects the execution output and its attestation and submits both back to the integrating contract, completing the cross chain interaction.
 
-Both keys the flow uses, the request signing key of step 2 and the response key
-of steps 4 and 5, are derived from the MPC root key scoped by the requesting
-contract's address, so no contract can reach another contract's keys. For the
-full protocol depth (both key derivations, each event's payload, how a failed
-foreign transaction is attested, and how the client recovers the execution
-output) read
-[Sign Bidirectional Flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow)
-in the integration repository.
+Consult the [documentation in the protocol repository](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-protocol-flow) for a more detailed description of the protocol including:
+  - MPC key derivation and signing
+  - MPC discovery and verification of the Sign Bidirectional Event signature requests
+  - MPC & Client foreign transaction execution output recovery (including failed transaction flow)
+  - MPC foreign transaction execution & failure attestation
 
 ## Integration guide
 
