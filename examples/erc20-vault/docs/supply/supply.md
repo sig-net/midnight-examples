@@ -12,7 +12,7 @@ shielded vault token of the wrapper's colour.
 It is best to understand the
 [sign bidirectional flow](../../../../README.md#sign-bidirectional-protocol-flow)
 before you continue here. For more detail see the
-[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow)
+[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-protocol-flow)
 in the midnight integration repository.
 
 ## The integration

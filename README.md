@@ -2,14 +2,14 @@
 
 This monorepo holds experimental example Midnight contracts that leverage the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains.
 
-Each example uses the [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight) protocol library to integrate the Sig Network [Sign Bidirectional Flow Protocol](#sign-bidirectional-protocol-flow).
+Each example uses the [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight) protocol library to integrate the Sig Network [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow).
 
 ### Reading Guide:
 - Start by reading the [Sign Bidirectional Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
 - Then go through the [Integration guide](#integration-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
 - Or jump straight into complete [examples](#examples) to see applications of the protocol.
 
-In case you landed in the wrong place or are looking for the parts of the Sig Network stack that these examples are built upon:
+If you are looking for the parts of the Sig Network stack that these examples are built upon, visit:
 - [Midnight Integration Protocol and SDK Repository](https://github.com/sig-net/midnight-integration)
 - [Sig Network Distributed MPC Repository](https://github.com/sig-net/mpc)
 
@@ -22,17 +22,15 @@ Each example is a directory under [`examples/`](examples/) holding a `contract` 
 > These are example applications for educational and experimental purposes.
 > Use at your own risk and expect rapid iteration.
 
-Following is a list of available examples:
-
 | Example | What it demonstrates | Flow walkthroughs |
 |---|---|---|
-| [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding ERC20 tokens on an EVM chain: private deposits into MPC-derived accounts, withdrawals, Uniswap swaps and Aave supply/redeem, all driven through the sign bidirectional flow. | [deposit](examples/erc20-vault/docs/deposit/deposit.md), [withdraw](examples/erc20-vault/docs/withdraw/withdraw.md), [swap](examples/erc20-vault/docs/swap/swap.md), [supply](examples/erc20-vault/docs/supply/supply.md), [redeem](examples/erc20-vault/docs/redeem/redeem.md) |
+| [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding, swapping (Uniswap) and lending (Aave) ERC20 tokens on an EVM chain. | [deposit](examples/erc20-vault/docs/deposit/deposit.md), [withdraw](examples/erc20-vault/docs/withdraw/withdraw.md), [swap](examples/erc20-vault/docs/swap/swap.md), [supply](examples/erc20-vault/docs/supply/supply.md), [redeem](examples/erc20-vault/docs/redeem/redeem.md) |
 
 ## Sign Bidirectional Protocol Flow
 
 This Sig Network Protocol Flow brings foreign blockchain assets and functionality to contracts on Midnight. Contracts record signature requests that the Sig Network MPC signs. dApps relay signed transactions to foreign chains and the MPC attests their execution outcomes back to Midnight. Then contracts complete cross chain interactions with in-circuit validation of the MPC foreign execution attestation.
 
-Illustrated below this Protocol is best understood in 5 steps:
+Illustrated below, the protocol is best understood in 5 steps:
 
 ![Sign bidirectional flow](docs/sign-bidirectional-flow.drawio.png)
 
