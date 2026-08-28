@@ -3,15 +3,14 @@
 // attests the failure output and completeSwap routes to refund, re-minting the surrendered
 // amountInMaximum of tokenIn. The swap-side twin of deposit-withdrawal-failure-refund. Uniswap
 // only exists on Sepolia (or a Sepolia fork), so this suite gates on the router and self-skips.
-import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
+import { resolveInitializeConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit.ts";
 import { initialize } from "../src/flows/initialize.ts";
 import { runSwapRoundTrip } from "../src/flows/swap.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -42,15 +41,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
         return;
       }
 
-      // Seal the config before any flow unless a kept contract address is already initialized.
-      const readLedger = () =>
-        readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      if (!(await readLedger()).initialized) {
-        await initialize(context, {
-          vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
-        });
-      }
+      // The setup pipeline deploys the vault but does not initialize it (the key it pins
+      // derives from the vault address), so seal the config here before any flow. A kept
+      // contract address that is already initialized is left untouched.
+      await initialize(context, resolveInitializeConfig(env, context.vaultContractAddress));
 
       // Cap the spend at HALF the live quote — guaranteed under the real cost, so the swap
       // reverts. The deposited coin IS the surrendered cap, so deposit exactly it.

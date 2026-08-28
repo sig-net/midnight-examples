@@ -6,7 +6,6 @@
 // off-chain with the library's TS twin of the request-id circuit and asserted
 // against the ledger map key before it is returned.
 
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
 import {
   calculateRequestId,
   evmAddressAbiWord,
@@ -21,17 +20,17 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
+import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import {
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
   ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
   ERC20_TRANSFER_SELECTOR,
-  evmAddressBytes,
 } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { claim, type ShieldedTokenRecipient } from "./claim.ts";

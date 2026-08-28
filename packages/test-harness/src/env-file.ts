@@ -1,54 +1,21 @@
-// Minimal repo-root .env reader + append-only writer. Nothing else in the
-// repo loads .env files (lib and the examples read the provided env map
-// directly), and vitest/node cannot be told to (--env-file is banned in
-// NODE_OPTIONS) — so the suite loads it itself into its env accumulator.
-// Deliberately minimal: KEY=VALUE lines, #-comments, optional single/double
-// quotes; no interpolation, no multiline. Writing is append-only BY DESIGN:
-// the file is hand-edited by operators, and an append can never corrupt or
-// reorder what they wrote.
+// Append-only writer for the repo-root `.env`, used by the setup steps that
+// hand values to docker compose. Append-only BY DESIGN: the file is
+// hand-edited by operators, and an append can never corrupt or reorder what
+// they wrote. Reading is lib's `loadRepoDotEnv`, which every entrypoint (not
+// just the suite) starts from.
 
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { REPO_ROOT } from "./exec.ts";
-
-/**
- * Read the repo-root `.env` file into a plain map. Missing file yields an
- * empty map. Callers should overlay `process.env` on top so the real
- * environment always wins over the file.
- *
- * @returns The parsed KEY=VALUE pairs (empty values skipped).
- */
-export function loadRepoDotEnv(): Record<string, string> {
-  let text: string;
-  try {
-    text = readFileSync(join(REPO_ROOT, ".env"), "utf8");
-  } catch {
-    return {};
-  }
-
-  const parsed: Record<string, string> = {};
-  for (const line of text.split("\n")) {
-    const [, key, rawValue] =
-      /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line) ?? [];
-    if (key === undefined || rawValue === undefined || line.trimStart().startsWith("#")) {
-      continue;
-    }
-    const value = rawValue.replace(/^(["'])(.*)\1$/, "$2");
-    if (value !== "") {
-      parsed[key] = value;
-    }
-  }
-  return parsed;
-}
+import { REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
 /**
  * Append `KEY=value` lines to the repo-root `.env` under a one-line `#`
  * provenance comment, creating the file when missing. STRICTLY append-only:
  * existing lines are never read, reordered, or rewritten, so this call
  * cannot corrupt a hand-edited file. Presence and conflict checks are the
- * CALLER's job (via {@link loadRepoDotEnv}) — never append a key the file
- * already holds: duplicate-key precedence differs between consumers (this
+ * CALLER's job (via lib's `loadRepoDotEnv`) — never append a key the file
+ * already holds: duplicate-key precedence differs between consumers (that
  * reader takes the last occurrence; docker compose applies its own rule), so
  * a duplicate is a latent inconsistency, not an override.
  *

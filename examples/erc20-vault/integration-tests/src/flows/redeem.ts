@@ -4,17 +4,13 @@
 // USDC assets (principal + accrued interest); on EVM failure refund re-mints the shares. Mirrors
 // the supply flow with a redeem-schema (uint64 assets) attestation. No approve is needed: the
 // vault redeems its OWN shares (owner = vault). Runs only where the stataToken is deployed.
-import { VAULT_REDEEM_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
 import {
-  asciiPadded,
   calculateRequestId,
   deserializeEvmOutput,
   evmAddressAbiWord,
   hexToBytes,
   MPC_FAILURE_OUTPUT,
   numericAbiWord,
-  PATH_BYTES,
   requestIdBytes,
   type RequestIdHex,
   requestIdHex,
@@ -27,6 +23,16 @@ import {
   TxParamType,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
+import {
+  VAULT_PATH_BYTES,
+  VAULT_REDEEM_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  evmAddressBytes,
+  readVaultLedger,
+  STATA_USDC,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import {
   REDEEM_MPC_ROUTING,
@@ -36,20 +42,16 @@ import {
   STATA_MAX_FEE_PER_GAS,
   STATA_MAX_PRIORITY_FEE_PER_GAS,
   STATA_REDEEM_SELECTOR,
-  STATA_USDC,
   stataAvailable,
 } from "../evm-stata.ts";
-import { evmAddressBytes } from "../evm-transfer.ts";
 import { fetchFakenetResponse } from "../fakenet-responses.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { vaultTokenType } from "../vault-token.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
 
 const MINUTE = 60_000;
-const VAULT_PATH = asciiPadded("vault", PATH_BYTES);
 
 /** Options for {@link redeem}. */
 export interface RedeemOptions {
@@ -84,7 +86,7 @@ export async function redeem(context: VaultContext, options: RedeemOptions): Pro
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce: before.signetRequestNonce,
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
-    path: VAULT_PATH,
+    path: VAULT_PATH_BYTES,
     ...REDEEM_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
     caip2Id: before.caip2Id,

@@ -1,0 +1,27 @@
+{
+  "name": "@sig-net/midnight-examples-erc20-vault-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node runtime client for the ERC20 vault: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. The half of the vault's client surface that cannot be environment-agnostic, so it sits beside the contract package rather than inside it.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.6",
+    "@sig-net/midnight-examples-erc20-vault-contract": "*",
+    "@sig-net/midnight-examples-lib": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

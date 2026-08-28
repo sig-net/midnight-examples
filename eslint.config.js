@@ -29,7 +29,10 @@ import tseslint from "typescript-eslint";
  *
  * A RELATIVE path into another package's output is `import-x/no-relative-packages`' catch.
  */
-const MANAGED_DEEP_IMPORTS = ["@midnight-examples/*/src/managed/**", "@sig-net/*/src/managed/**"];
+const MANAGED_DEEP_IMPORTS = [
+  "@sig-net/midnight-examples-*/src/managed/**",
+  "@sig-net/*/src/managed/**",
+];
 
 export default defineConfig([
   // Only generated output that ESLint would otherwise lint. node_modules is

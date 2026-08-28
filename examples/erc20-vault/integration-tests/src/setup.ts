@@ -10,6 +10,9 @@
 // deploy: the key derives from the vault's own contract address, and the
 // initialize flow pins it on-chain.
 
+import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
+import { VAULT_PATH_HEX } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { deployVault } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
   assertEnvironment,
   compileContractZk,
@@ -25,19 +28,14 @@ import {
   requireEnv,
   resolveEvmChain,
   retryWhileDustGenerates,
-  runCommand,
   runSetupPipeline,
   type SetupStep,
   startFakenetResponder,
-} from "@midnight-examples/test-harness";
-import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
+} from "@sig-net/midnight-examples-test-harness";
 import type { TestProject } from "vitest/node";
 
 import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
-import { VAULT_PATH_HEX } from "./mpc-routing.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
-
-const MINUTE = 60_000;
 
 // The env keys the setup steps populate, in derivation order — the "Minimal
 // .env block" printout reads like the flow that produced it.
@@ -54,18 +52,18 @@ const PIPELINE_KEYS = [
 ] as const;
 
 /**
- * Deploy the vault contract via the contract package's own `deploy`
- * entrypoint (a subprocess — deploy.ts is a self-executing Node script
- * outside the package's export surface), capturing the printed address.
- * Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already set. Retries while
- * the deployer wallet's dust is still generating on a young chain (the
- * failure text survives into the subprocess error message, so the harness's
- * transient-failure matcher still applies).
+ * Deploy the vault contract by calling the deploy package's `deployVault`
+ * in-process — the same function the `deploy` and `deploy-initialize`
+ * entrypoints run, so the split deploy (base deploy plus one maintenance
+ * update per deferred circuit) this suite exercises is the one a remote
+ * bring-up performs. Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already
+ * set. Retries while the deployer wallet's dust is still generating on a
+ * young chain; a retry restarts from the base deploy.
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
- *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` and node config from it).
- * @throws {Error} If the deploy subprocess fails (after the dust-generation retries)
- *   or its output carries no contract address.
+ *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
+ *   config from it).
+ * @throws {Error} If the deploy fails after the dust-generation retries.
  */
 async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.MIDNIGHT_VAULT_CONTRACT_ADDRESS) {
@@ -87,21 +85,9 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
       "defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialize is deployer-gated)",
     );
   }
-  const contractAddress = await retryWhileDustGenerates("deploy vault contract", async () => {
-    const stdout = await runCommand(
-      "yarn",
-      ["workspace", "@midnight-examples/erc20-vault-contract", "deploy"],
-      env,
-      10 * MINUTE,
-    );
-    const address = /deployed erc20-vault at (\S+)/.exec(stdout)?.[1];
-    if (address === undefined) {
-      throw new Error(
-        "vault deploy succeeded but printed no `deployed erc20-vault at <address>` line",
-      );
-    }
-    return address;
-  });
+  const { contractAddress } = await retryWhileDustGenerates("deploy vault contract", () =>
+    deployVault(env),
+  );
   env.MIDNIGHT_VAULT_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_VAULT_CONTRACT_ADDRESS=${contractAddress}`);
   console.log(` ➜ the vault contract on Midnight — holds deposits and authorizes withdrawals`);

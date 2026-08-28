@@ -1,52 +1,50 @@
-// Deploy entrypoint (`yarn deploy`): builds, balances, proves and submits the
-// vault's deploy transaction using the generic plumbing in
-// @midnight-examples/lib. Everything contract-specific lives HERE: the
-// constructor args (deployerCommitment, the signet contract reference), the
-// witnesses, and the private state. Requires `yarn compile:zk` output
-// (verifier keys) in src/managed. The MPC response key is NOT a deploy input:
-// it derives from the new contract's own address, so the deployer-gated
-// initialize circuit pins it right after deploy (see the initialize flow).
-//
-// This file sits OUTSIDE src/ deliberately: it is a Node entrypoint (env
-// access, lib imports), while everything under src/ stays environment-agnostic.
+// The vault's deploy flow: build, balance, prove and submit the split deploy
+// transaction using the generic plumbing in @sig-net/midnight-examples-lib. Everything
+// contract-specific lives HERE: the constructor args (deployerCommitment, the
+// signet contract reference), the witnesses, and the private state. Requires
+// `yarn compile:zk` output (verifier keys) in the contract package's managed
+// dir. The MPC response key is NOT a deploy input: it derives from the new
+// contract's own address, so the deployer-gated initialize circuit pins it
+// right after deploy (see {@link file://./initialize-vault.ts}).
 
 import { randomBytes } from "node:crypto";
-import { fileURLToPath } from "node:url";
 
-import {
-  assertDeployerFunded,
-  buildDeployTransactionDeferring,
-  buildMaintenanceInsertTransaction,
-  type DeferredCircuit,
-  deriveAccountKeys,
-  getDeployConfig,
-  makeCompiledContract,
-  type MidnightNodeConfig,
-  type NetworkId,
-  parseIdentitySecretKey,
-  submitUnprovenTransaction,
-  type TransactionIdentifier,
-  withSyncedWalletFacade,
-} from "@midnight-examples/lib";
 import {
   type IndexerPublicDataProvider,
   indexerPublicDataProvider,
 } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import * as ledger from "@midnightntwrk/ledger-v9";
 import { hexToBytes } from "@sig-net/midnight";
-
-import { Contract, pureCircuits } from "./src/managed/erc20-vault/contract/index.js";
-import { createVaultPrivateState, type VaultPrivateState, witnesses } from "./src/witnesses.ts";
+import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-client";
+import {
+  createVaultPrivateState,
+  pureCircuits,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  type AccountKeys,
+  assertDeployerFunded,
+  buildDeployTransactionDeferring,
+  buildMaintenanceInsertTransaction,
+  type DeferredCircuit,
+  deriveAccountKeys,
+  envOrUndefined,
+  getDeployConfig,
+  isLocalStandaloneNetwork,
+  type MidnightNodeConfig,
+  type NetworkId,
+  parseIdentitySecretKey,
+  submitUnprovenTransaction,
+  type TransactionIdentifier,
+  withSyncedWalletFacade,
+} from "@sig-net/midnight-examples-lib";
 
 // The full 14-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
 // post-burn keys are large), so the base registers just ONE small circuit and every other
 // circuit is added by a maintenance update right after (each a tiny, fitting tx).
-const BASE_DEPLOY_CIRCUITS = ["approveRouter"] as const;
+const BASE_DEPLOY_CIRCUITS: readonly string[] = ["approveRouter"];
 
 const MINUTE_MS = 60_000;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-type AccountKeys = ReturnType<typeof deriveAccountKeys>;
 
 /**
  * Read the live contract state's serialized bytes and authority counter, or undefined if the
@@ -70,9 +68,11 @@ async function readContractState(
 /**
  * Install the circuits deferred from the base deploy via one maintenance update each, waiting for
  * the authority counter to advance between them so every update binds to the current counter. Each
- * update re-syncs the wallet (fresh fee coins) and is signed by the retained MAINTENANCE_SIGNING_KEY.
+ * update re-syncs the wallet (fresh fee coins) and is signed by the `MAINTENANCE_SIGNING_KEY`
+ * authority sealed at deploy time.
  *
  * @param nodeConfig - The Midnight stack config (node/indexer endpoints + network id).
+ * @param env - The environment carrying the `MAINTENANCE_SIGNING_KEY` that signs each update.
  * @param accountKeys - The deployer's derived account keys (pays the update fees).
  * @param networkId - The network the updates target.
  * @param contractAddress - The deployed base contract's address.
@@ -81,6 +81,7 @@ async function readContractState(
  */
 async function addDeferredCircuits(
   nodeConfig: MidnightNodeConfig,
+  env: Record<string, string | undefined>,
   accountKeys: AccountKeys,
   networkId: NetworkId,
   contractAddress: string,
@@ -108,6 +109,7 @@ async function addDeferredCircuits(
 
     const { serializedTransaction } = buildMaintenanceInsertTransaction(
       networkId,
+      env,
       contractAddress,
       circuitId,
       verifierKey,
@@ -118,7 +120,7 @@ async function addDeferredCircuits(
       return submitUnprovenTransaction(facade, accountKeys, serializedTransaction);
     });
     const target = current.counter + 1n;
-    console.log(`[${circuitId}] maintenance tx ${txId} — waiting for counter ${target.toString()}`);
+    console.log(`[${circuitId}] maintenance tx ${txId}, waiting for counter ${target.toString()}`);
 
     const deadline = Date.now() + 5 * MINUTE_MS;
     for (;;) {
@@ -151,48 +153,73 @@ function contractAddressToReference(contractAddress: string): { bytes: Uint8Arra
   return { bytes: hexToBytes(hex) };
 }
 
+/**
+ * Resolve the environment the deploy signs its maintenance updates with. The split deploy adds the
+ * deferred circuits via maintenance updates, so the contract needs a maintenance authority: on a
+ * deployed network `MAINTENANCE_SIGNING_KEY` is REQUIRED, since it is the only way to add or
+ * replace a circuit afterwards and an ephemeral one would leave the contract unmaintainable
+ * forever. The local standalone chain is throwaway, so an ephemeral key is generated into a COPY
+ * of `env` (never `process.env`, and never the caller's map): the deploy and its adds all run
+ * inside this one call, so it need not outlive them.
+ *
+ * @param env - The caller's environment.
+ * @param networkId - The network the deploy targets.
+ * @returns `env` itself, or a copy carrying a generated ephemeral key.
+ * @throws {Error} If a deployed network has no `MAINTENANCE_SIGNING_KEY`.
+ */
+function resolveMaintenanceEnv(
+  env: Record<string, string | undefined>,
+  networkId: NetworkId,
+): Record<string, string | undefined> {
+  if (envOrUndefined(env, "MAINTENANCE_SIGNING_KEY")) return env;
+  if (!isLocalStandaloneNetwork(networkId)) {
+    throw new Error(
+      `MAINTENANCE_SIGNING_KEY is required on "${networkId}". The split deploy installs most ` +
+        "circuits via maintenance updates, and the key signing them becomes the contract's sealed " +
+        "maintenance authority, the only way to add or replace a circuit later. Set it to 32 " +
+        "bytes of hex (0x optional) and KEEP it.",
+    );
+  }
+  console.log("generated an ephemeral MAINTENANCE_SIGNING_KEY for the local split deploy");
+  return { ...env, MAINTENANCE_SIGNING_KEY: randomBytes(32).toString("hex") };
+}
+
 /** The outcome of a successful vault deployment. */
-interface VaultDeployment {
+export interface VaultDeployment {
   /** Address of the deployed vault contract on Midnight. */
-  contractAddress: string;
-  /** Identifier of the submitted deploy transaction. */
-  txId: TransactionIdentifier;
+  readonly contractAddress: string;
+  /** Identifier of the submitted base deploy transaction. */
+  readonly txId: TransactionIdentifier;
 }
 
 /**
  * Deploy the vault contract: read config from `env`, derive the deployer
- * identity, build/prove the deploy transaction and submit it through a synced
- * wallet. Progress is logged to the console.
+ * identity, build/prove the base deploy transaction, submit it through a synced
+ * wallet, then install every deferred circuit by a maintenance update. Progress
+ * is logged to the console.
  *
  * The deployer identity comes from `VAULT_DEPLOYER_SECRET_KEY` (falling back
  * to the `DEPLOYER_SEED` bytes): its commitment is sealed into the contract
  * as `deployer`, and the same secret must later answer the `callerSecretKey`
  * witness to pass `initialize`'s gate. That gate is what protects the
  * post-deploy configuration (vault EVM address, chain, MPC response key)
- * from front-running.
+ * from front-running (see {@link file://./initialize-vault.ts}).
  *
- * @param env - Environment map providing `DEPLOYER_SEED`,
- *   `VAULT_DEPLOYER_SECRET_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the
- *   signet contract to seal as the cross-contract signer) and lib's Midnight
- *   node configuration.
- * @returns The deployed contract address and deploy transaction id.
- * @throws {Error} If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed, the
- *   deployer wallet holds no funds, or submission fails.
+ * @param env - Environment providing `DEPLOYER_SEED`, `VAULT_DEPLOYER_SECRET_KEY`,
+ *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the signet contract to seal as the
+ *   cross-contract signer), `MAINTENANCE_SIGNING_KEY` and lib's Midnight node
+ *   configuration; defaults to `process.env`.
+ * @returns The deployed contract address and base deploy transaction id.
+ * @throws {Error} If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed,
+ *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, the deployer
+ *   wallet holds no funds, or a submission or maintenance add fails.
  */
-async function deployVault(
+export async function deployVault(
   env: Record<string, string | undefined> = process.env,
 ): Promise<VaultDeployment> {
-  // The split deploy adds the deferred circuits via maintenance updates, which need a maintenance
-  // authority to sign. Generate an ephemeral one when unset (the deploy and the adds run in this
-  // one process, so it need not persist). A real deploy sets MAINTENANCE_SIGNING_KEY to keep the
-  // contract maintainable afterwards; the deploy uses whatever is set as the sealed authority.
-  if (!process.env.MAINTENANCE_SIGNING_KEY?.trim()) {
-    process.env.MAINTENANCE_SIGNING_KEY = randomBytes(32).toString("hex");
-    console.log("generated an ephemeral MAINTENANCE_SIGNING_KEY for the split deploy");
-  }
-
   const deployConfig = getDeployConfig(env);
   const { networkId } = deployConfig.midnightNodeConfig;
+  const deployEnv = resolveMaintenanceEnv(env, networkId);
 
   const secretKey = parseIdentitySecretKey(
     "VAULT_DEPLOYER_SECRET_KEY",
@@ -204,7 +231,7 @@ async function deployVault(
   // The signet contract the vault cross-contract-calls to register signature
   // request notifications, sealed into the vault as the SignetSigner
   // reference, so it must be deployed first.
-  const signetContractAddress = env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS?.trim();
+  const signetContractAddress = envOrUndefined(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
   if (!signetContractAddress) {
     throw new Error(
       "MIDNIGHT_SIGNET_CONTRACT_ADDRESS is required (deploy the signet contract first)",
@@ -212,25 +239,17 @@ async function deployVault(
   }
   const signetSigner = contractAddressToReference(signetContractAddress);
 
-  const compiledContract = makeCompiledContract<Contract<VaultPrivateState>, VaultPrivateState>(
-    "erc20-vault",
-    Contract,
-    witnesses,
-    fileURLToPath(new URL("./src/managed/erc20-vault", import.meta.url)),
-  );
-
   const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, networkId);
 
   console.log(`deploying erc20-vault to ${networkId} (${deployConfig.midnightNodeConfig.nodeUrl})`);
 
-  // The full 14-circuit deploy overflows a block, so register one small circuit in the base deploy
-  // and add every other circuit via maintenance updates (needs MAINTENANCE_SIGNING_KEY).
   const deployTransaction = await buildDeployTransactionDeferring(
-    compiledContract,
+    vaultCompiledContract,
     networkId,
     accountKeys.shieldedSecretKeys.coinPublicKey,
+    deployEnv,
     createVaultPrivateState(secretKey),
-    BASE_DEPLOY_CIRCUITS as unknown as string[],
+    BASE_DEPLOY_CIRCUITS,
     deployerCommitment,
     signetSigner,
   );
@@ -258,6 +277,7 @@ async function deployVault(
 
   await addDeferredCircuits(
     deployConfig.midnightNodeConfig,
+    deployEnv,
     accountKeys,
     networkId,
     contractAddress,
@@ -270,5 +290,3 @@ async function deployVault(
 
   return { contractAddress, txId };
 }
-
-await deployVault();

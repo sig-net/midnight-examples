@@ -54,11 +54,18 @@
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
 
+import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
   VAULT_REDEEM_REQUESTS_PATH,
   VAULT_SUPPLY_REQUESTS_PATH,
   VAULT_SWAP_REQUESTS_PATH,
-} from "@midnight-examples/erc20-vault-contract";
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { AAVE_USDC, STATA_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  InitializeVaultOutcome,
+  resolveInitializeConfig,
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
   banner,
   getErc20Balance,
@@ -66,16 +73,15 @@ import {
   getTransactionNonce,
   logSkip,
   requireEnv as requireEnvOf,
-} from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+} from "@sig-net/midnight-examples-test-harness";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { PROOF_RECORDS_FILE } from "../src/benchmark/paths.ts";
 import { Recorder } from "../src/benchmark/recorder.ts";
 import { BenchmarkLeg } from "../src/benchmark/records.ts";
-import { AAVE_USDC, STATA_USDC, stataAvailable } from "../src/evm-stata.ts";
+import { stataAvailable } from "../src/evm-stata.ts";
 import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
@@ -102,7 +108,6 @@ import {
 } from "../src/flows/supply.ts";
 import { pollSwapOutcome, settleSwap, swap, type SwapOutcome } from "../src/flows/swap.ts";
 import { withdraw } from "../src/flows/withdraw.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -249,18 +254,20 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         // initialize is one-shot per contract: in a full-suite run happy-day
         // (FILE_ORDER-first) has already consumed it, so its prove is only
-        // recorded when this file runs against a fresh deploy.
-        if ((await readLedger()).initialized) {
+        // recorded when this file runs against a fresh deploy, which the flow
+        // reports back. The timed span therefore includes the one indexer read
+        // the flow does to decide that, negligible against the proving leg.
+        recorder.setLeg(BenchmarkLeg.Initialize);
+        const stop = startTimer();
+        const outcome = await initialize(
+          context,
+          resolveInitializeConfig(env, context.vaultContractAddress),
+        );
+        if (outcome === InitializeVaultOutcome.AlreadyInitialized) {
+          recorder.clearLeg();
           logSkip("initialize", "vault already initialized (an earlier flow file ran it)");
           return;
         }
-
-        recorder.setLeg(BenchmarkLeg.Initialize);
-        const stop = startTimer();
-        await initialize(context, {
-          vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnv("MPC_RESPONSE_KEY"),
-        });
         const ms = stop();
         recorder.clearLeg();
         timings.initialize.initialize = ms;

@@ -13,7 +13,6 @@
 //
 // No `vitest` imports here — this runs in vitest's main process (globalSetup).
 
-import { getFaucetUrl } from "@midnight-examples/lib";
 import {
   type AccountFunding,
   assertRootFunded,
@@ -29,6 +28,7 @@ import {
   RootUnfundedError,
   type WalletAddresses,
 } from "@sig-net/midnight-contract-deploy";
+import { getFaucetUrl } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv } from "./env-file.ts";

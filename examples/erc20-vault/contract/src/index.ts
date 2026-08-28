@@ -1,10 +1,32 @@
 // Curated export surface: the "sdk" face of the package.
-// Everything the compiler emitted, plus the handwritten witnesses. Nothing
-// here may touch environment-specific APIs: this surface runs unchanged in a
-// browser or a backend (deploy tooling lives in ../deploy.ts, outside it).
+// Everything the compiler emitted, the handwritten witnesses, the typed client
+// surface, the ledger reads and the contract's EVM-side constants. Nothing here
+// may touch environment-specific APIs: this surface runs unchanged in a browser
+// or a backend. Anything that cannot (the Node compiled-contract binding, a
+// live provider set, deploy tooling) lives in a sibling package.
 
+import { asciiPadded, bytesToHex, PATH_BYTES } from "@sig-net/midnight";
+
+export * from "./contract-surface.ts";
+export * from "./evm.ts";
 export * from "./managed/erc20-vault/contract/index.js";
+export * from "./vault-ledger.ts";
 export * from "./witnesses.ts";
+
+/**
+ * The vault's own derivation path as the ledger stores it: every circuit that
+ * records a vault-signed event sets the record's `path` to `pad(32, "vault")`.
+ */
+export const VAULT_PATH_BYTES = asciiPadded("vault", PATH_BYTES);
+
+/**
+ * The derivation-string rendering of {@link VAULT_PATH_BYTES}: the MPC renders
+ * a record's path as the lowercase hex of the full 32 bytes, padding included,
+ * and `deriveEvmAddress` takes the same rendering. Deriving the vault's EVM
+ * account with any other rendering of "vault" yields an account the MPC will
+ * never sign from.
+ */
+export const VAULT_PATH_HEX = bytesToHex(VAULT_PATH_BYTES);
 
 // THIS contract's signet ledger layout (declaration order in
 // erc20-vault.compact): the SignBidirectionalEventMap at field 0, then the

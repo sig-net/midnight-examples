@@ -18,17 +18,17 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
+import { VAULT_PATH_BYTES } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import {
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
   ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
   ERC20_TRANSFER_SELECTOR,
-  evmAddressBytes,
 } from "../evm-transfer.ts";
-import { VAULT_MPC_ROUTING, VAULT_PATH_BYTES } from "../mpc-routing.ts";
+import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
 
 /** Options for {@link withdraw}. */

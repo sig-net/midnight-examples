@@ -4,16 +4,16 @@
 // USDC on the fork; here we deposit USDC to fund the vault + mint the caller a shielded USDC
 // coin, supply it into the wrapper for shielded stataUSDC shares, then redeem the shares for
 // shielded USDC (principal + accrued interest).
-import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
+import { AAVE_USDC, STATA_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { resolveInitializeConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { AAVE_USDC, STATA_USDC, stataAvailable } from "../src/evm-stata.ts";
+import { stataAvailable } from "../src/evm-stata.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit.ts";
 import { initialize } from "../src/flows/initialize.ts";
 import { runRedeemRoundTrip } from "../src/flows/redeem.ts";
 import { runSupplyRoundTrip } from "../src/flows/supply.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -40,17 +40,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave lending e2
         );
         return;
       }
-      // The setup pipeline deploys the vault but does not initialize it (the key it pins derives
-      // from the vault address), so seal the config here before any flow — unless a kept contract
-      // address is already initialized.
-      const readLedger = () =>
-        readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      if (!(await readLedger()).initialized) {
-        await initialize(context, {
-          vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
-        });
-      }
+      // The setup pipeline deploys the vault but does not initialize it (the key it pins
+      // derives from the vault address), so seal the config here before any flow. A kept
+      // contract address that is already initialized is left untouched.
+      await initialize(context, resolveInitializeConfig(env, context.vaultContractAddress));
 
       // Fund the vault + mint the caller a shielded USDC coin equal to the amount we supply.
       // Deposit Aave's USDC specifically (the wrapper's underlying), independent of the suite's

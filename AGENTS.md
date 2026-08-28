@@ -8,11 +8,28 @@ node-modules`), split between shared machinery and the examples integrators copy
 - **`packages/test-harness`** — test-only machinery (stack bring-up/teardown,
   mpc-keys setup, wallet funding, env/session handling, subprocess helpers).
   Test-only deps live here and never touch an example's manifests.
-- **`examples/*/*`** — one directory per example, each holding 1–2 workspace
-  packages: `contract` (required) and `integration-tests` (as warranted). An
-  example's flows are typed functions in `integration-tests/src/flows/`, run
-  in-process by its tests; `integration-tests/scripts/` holds thin `tsx`
-  entrypoints over those same flows for hand-driving a live stack.
+- **`examples/*/*`** — one directory per example, each holding up to four
+  workspace packages: `contract` (required), then `client`, `deploy` and
+  `integration-tests` as warranted. Each package holds exactly one kind of
+  thing, and the split is by WHAT the code is, never by who happens to call it:
+  - `contract` — the Compact contract plus its environment-agnostic client
+    surface: witnesses, circuit-id/private-state/provider TYPES, ledger reads,
+    and the contract's own constants. Runs unchanged in a browser.
+  - `client` — the same client surface's Node half, the part that cannot be
+    environment-agnostic: the compiled-contract binding over `managed/`, and a
+    live provider set.
+  - `deploy` — ONLY deploying and post-deploy initialisation: constructor args,
+    the deploy transaction, one-shot init circuits, and the configuration those
+    resolve. Anything a client would still need after the deploy is over
+    belongs in `contract` or `client`, never here.
+  - `integration-tests` — flows and specs.
+  An example's flows are typed functions in `integration-tests/src/flows/`, run
+  in-process by its tests, and its deploy / init flows are typed functions in
+  `deploy/src/`, run in-process by the setup pipeline. Both kinds get thin `tsx`
+  entrypoints over those SAME functions for hand-driving a live stack
+  (`integration-tests/scripts/`, and the entrypoints at the root of `deploy/`) —
+  never a subprocess call with its output scraped, which is how the two paths
+  silently diverge.
 
 Run `yarn install` from the repo root — never from inside a member. Run
 `yarn compile` before `build`/`test`: contract packages typecheck against their
@@ -42,13 +59,17 @@ any instinct carried in from product-repo conventions.
   example can't see, and it ideally shrinks toward zero as pieces graduate into
   the SDK. Test-only deps (vitest, hardhat, viem) live in
   `packages/test-harness` and never appear in an example's manifests.
-- **No workspace package is published by default.** Every member uses the
-  `@midnight-examples/*` scope and starts `"private": true`. The one exception
-  is contract packages: each is written to be publishable as-is (see the
-  environment-agnostic rule under "Contract packages"), and individual ones may
-  be published for consumption by downstream example applications that combine
-  many chains. Anything else worth publishing graduates to the protocol repo's
-  SDK packages.
+- **No workspace package is published by default.** Every member is named
+  `@sig-net/midnight-examples-*` and starts `"private": true`. That is the SAME
+  npm scope the published SDK uses (`@sig-net/midnight`,
+  `@sig-net/midnight-contract`), so the `midnight-examples-` prefix is the only
+  thing separating an example from a product package: never drop it, and never
+  clear `"private"` without meaning to publish into the SDK's scope. The one
+  exception is contract packages: each is written to be publishable as-is (see
+  the environment-agnostic rule under "Contract packages"), and individual ones
+  may be published for consumption by downstream example applications that
+  combine many chains. Anything else worth publishing graduates to the protocol
+  repo's SDK packages.
 
 Corollary: an example's `contract` package depends on the Signature Network SDK +
 compact tooling and **nothing else** — its dependency list is itself documentation
@@ -238,10 +259,12 @@ apply to all of them:
   `node:` builtin imports (fs, path, crypto, …), no `process`/`process.env`
   access, no `Buffer` (use `Uint8Array`), no DOM/browser globals, no Node-only
   dependencies. Configuration enters as typed function parameters — never read
-  from the environment. `deploy.ts` sits outside the export surface precisely so
-  it can be a Node entrypoint: env access, filesystem, and
-  `@midnight-examples/lib` imports belong there (or in `integration-tests`),
-  never under `src/`.
+  from the environment. This is the rule that decides what may live here: the
+  ledger reads, the provider TYPE and the circuit-id union qualify, while the
+  Node binding and a live provider set do not and live in the example's
+  `client` package. Env access, filesystem and `@sig-net/midnight-examples-lib` imports
+  belong in `client`, `deploy` or `integration-tests`, never in a contract
+  package.
 - **Compile before you check.** `yarn compile` regenerates `src/managed/`;
   typecheck and tests read its emitted `contract/index.d.ts`.
 - **`src/index.ts` is the curated export surface** — it re-exports the managed
@@ -258,10 +281,20 @@ apply to all of them:
   promise (`await expect(...).rejects.toThrow(...)`). Pure circuits are synchronous,
   called directly via `pureCircuits.<name>(...)`.
 - **The deploy split: generic plumbing in `packages/lib`, everything
-  contract-specific in the example's own `deploy.ts`.** lib's deploy/wallet
-  helpers know no contract; the deploy script owns the constructor args,
-  witnesses, private state and post-deploy circuit calls, statically importing its
-  own generated module so all of it stays fully typed. There is NO generic
-  deployer package: a generic deployer forces dynamic module loading and witness
-  stubs, which break the moment a constructor takes real args — keep deploy logic
-  static and fully typed in the example's own contract package.
+  contract-specific in the example's own `deploy` package.** lib's deploy/wallet
+  helpers know no contract; the example's deploy package owns the constructor
+  args, witnesses, private state and post-deploy circuit calls, statically
+  importing its own contract package's generated module so all of it stays fully
+  typed. There is NO generic deployer package: a generic deployer forces dynamic
+  module loading and witness stubs, which break the moment a constructor takes
+  real args — keep deploy logic static and fully typed in the example's own
+  packages.
+- **Every deploy flow is a typed function taking an `env` map, and the
+  entrypoint is a shell over it.** `deployX(env = process.env)` returns its
+  outcome (the contract address, an initialize outcome enum); the CLI entrypoint
+  and the e2e setup step both CALL it, so the multistage deploy a remote network
+  needs is exercised on every local run. Never spawn a deploy as a subprocess and
+  parse its stdout: config then differs per caller, the return value degrades to
+  a regex, and only one of the two paths gets tested. Config is read from the
+  passed map (never `process.env` directly, never mutated), so every process
+  reads the SAME variable for the same thing.

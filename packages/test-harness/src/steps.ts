@@ -13,15 +13,16 @@
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { inspect } from "node:util";
 
-import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { deriveMidnightResponseKey, formatSecp256k1PublicKey } from "@sig-net/midnight";
 import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
+import { getMidnightNodeConfig, loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
-import { appendRepoDotEnv, loadRepoDotEnv } from "./env-file.ts";
+import { appendRepoDotEnv } from "./env-file.ts";
 import { getEvmChainId } from "./evm.ts";
-import { REPO_ROOT, runCommand, runRootScript } from "./exec.ts";
+import { runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { banner, logSkip } from "./output.ts";
 import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
@@ -243,6 +244,23 @@ export async function compileContractZk(
 }
 
 /**
+ * Whether `error` is the transient "the paying wallet has no spendable DUST
+ * yet" failure a young chain produces, as opposed to a real failure.
+ *
+ * The marker reaches us in several shapes: the wallet SDK's own error, an error
+ * wrapping it as `cause`, or a tagged object. `String(error)` renders only the
+ * top-level message and would miss the wrapped forms, turning the dust window
+ * into a hard failure, so match the inspected error INCLUDING its cause chain.
+ *
+ * @param error - The thrown value to classify.
+ * @returns Whether the failure is the transient dust-generation one.
+ */
+export function isDustGenerationFailure(error: unknown): boolean {
+  const rendered = inspect(error, { depth: 5 });
+  return rendered.includes("InsufficientFunds") || rendered.includes("could not balance dust");
+}
+
+/**
  * Run a fee-paying call (a deploy, a root-to-child funding transfer),
  * retrying while the paying wallet cannot yet cover the fee. On a freshly
  * started dev chain DUST generates block by block from the genesis NIGHT,
@@ -268,10 +286,7 @@ export async function retryWhileDustGenerates<T>(
     try {
       return await action();
     } catch (error) {
-      const message = String(error);
-      const transient =
-        message.includes("InsufficientFunds") || message.includes("could not balance dust");
-      if (!transient || attempt >= MAX_ATTEMPTS) {
+      if (!isDustGenerationFailure(error) || attempt >= MAX_ATTEMPTS) {
         throw error;
       }
       console.log(

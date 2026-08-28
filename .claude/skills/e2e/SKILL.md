@@ -78,10 +78,13 @@ kept contracts.
 - **`/e2e redeploy`**: a circuit changed (any `.compact` edit that alters a
   circuit, struct layout, or the request-id hash domain): comment out
   `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
-  `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS` (and `ERC20_ADDRESS` if the anvil
-  container restarted, its chain is in-memory) in `.env`, then rerun. The
-  whole redeploy completes in ONE run: setup re-compiles (zk keygen, ~10 min,
-  background the run), redeploys, re-derives, re-funds, and
+  `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS` (and
+  `ERC20_ADDRESS` if the anvil container restarted, its chain is in-memory)
+  in `.env`, then rerun. `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS` and
+  `EVM_USER_ADDRESS` all derive from the vault's contract address, so a stale
+  one left set stops the run with a mismatch error rather than being used.
+  The whole redeploy completes in ONE run: setup re-compiles (zk keygen,
+  ~10 min, background the run), redeploys, re-derives, re-funds, and
   `--force-recreate`s the responder automatically. Afterwards, update `.env`
   with the freshly printed values and delete the commented-out lines.
   (The derived EVM accounts move on a redeploy: `EVM_VAULT_ADDRESS` and

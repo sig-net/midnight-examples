@@ -7,18 +7,18 @@
 // contract-specific (providers, joined contract handles, identity) is the
 // example's: it wraps {@link E2eSession.wallet} to build its own context.
 
+import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import {
+  signetEventSourceFromPublicDataProvider,
+  SignetRequestResponseReader,
+} from "@sig-net/midnight";
 import {
   type AccountKeys,
   deriveAccountKeys,
   getMidnightNodeConfig,
   initialiseWalletFacade,
   type WalletFacade,
-} from "@midnight-examples/lib";
-import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
-import {
-  signetEventSourceFromPublicDataProvider,
-  SignetRequestResponseReader,
-} from "@sig-net/midnight";
+} from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
 

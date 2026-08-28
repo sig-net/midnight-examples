@@ -7,7 +7,6 @@
 // RANDOM mint nonce, so the minted coin cannot be linked back to the
 // request.
 
-import type { EncPublicKey } from "@midnight-examples/lib";
 import { type CoinPublicKey, encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
 import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
 import {
@@ -15,6 +14,7 @@ import {
   type RequestIdHex,
   respondBidirectionalEventToCircuitInput,
 } from "@sig-net/midnight";
+import type { EncPublicKey } from "@sig-net/midnight-examples-lib";
 
 import type { VaultContext } from "../vault-context.ts";
 import { fetchAttestedRespondOutcome } from "./respond-output.ts";

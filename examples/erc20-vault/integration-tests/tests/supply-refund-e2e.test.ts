@@ -3,16 +3,16 @@
 // so the MPC attests failure and completeSupply routes to refund, re-minting the surrendered
 // underlying. The lending twin of swap-refund-e2e / deposit-withdrawal-failure-refund. stataUSDC
 // only exists on Sepolia (or a Sepolia fork), so this suite gates on the wrapper and self-skips.
-import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
+import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { resolveInitializeConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { AAVE_USDC, stataAvailable } from "../src/evm-stata.ts";
+import { stataAvailable } from "../src/evm-stata.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit.ts";
 import { initialize } from "../src/flows/initialize.ts";
 import { runSupplyRoundTrip } from "../src/flows/supply.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -39,15 +39,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
         return;
       }
 
-      // Seal the config before any flow unless a kept contract address is already initialized.
-      const readLedger = () =>
-        readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      if (!(await readLedger()).initialized) {
-        await initialize(context, {
-          vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
-        });
-      }
+      // The setup pipeline deploys the vault but does not initialize it (the key it pins
+      // derives from the vault address), so seal the config here before any flow. A kept
+      // contract address that is already initialized is left untouched.
+      await initialize(context, resolveInitializeConfig(env, context.vaultContractAddress));
 
       // Fund: deposit Aave USDC, minting the caller a shielded Aave-USDC coin and funding the
       // vault's EVM Aave-USDC balance (which the drain below then removes).
