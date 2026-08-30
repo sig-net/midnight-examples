@@ -242,6 +242,17 @@ apply to all of them:
   it can be a Node entrypoint: env access, filesystem, and
   `@midnight-examples/lib` imports belong there (or in `integration-tests`),
   never under `src/`.
+- **Every in-circuit hash is `transientHash`** (wrapped in
+  `upgradeFromTransient` where a `Bytes<32>` digest is needed), whatever the
+  persistence class of the hashed value. No circuit calls `persistentHash` or
+  `keccak256`: Poseidon costs ~90 constraint rows where SHA-256 costs ~3,800
+  and keccak ~4,600 per 136-byte block. `transientHash` is pinned by the
+  chain's ledger era and can change at a proof-system hard fork; that exposure
+  is accepted repo-wide and handled operationally, so each derivation site
+  documents its own consequence (drain pending requests before such a fork;
+  persisted digests need coordinated migration). `keccak256` stays correct in
+  off-chain code where a foreign spec fixes it (EVM ABI selectors and storage
+  slots, EIP-1559 transaction hashing, epsilon derivation).
 - **Compile before you check.** `yarn compile` regenerates `src/managed/`;
   typecheck and tests read its emitted `contract/index.d.ts`.
 - **`src/index.ts` is the curated export surface** — it re-exports the managed

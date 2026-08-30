@@ -161,7 +161,7 @@ export async function deposit(
   );
   console.log(`deposit finalized in tx ${result.public.txId}`);
 
-  // The ledger map key IS the record's keccak256 hash: recomputing it
+  // The ledger map key IS the record's transientHash digest: recomputing it
   // off-chain and finding it on the ledger proves both sides agree on every
   // byte of the event.
   const after = await readVaultLedger(
