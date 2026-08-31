@@ -261,7 +261,7 @@ raw traced EVM output from it, so a poll that times out with
 - **`Failed Proof Server response … /check … 400`** with
   `Inputs did not match alignment` in the proof-server docker logs: a
   circuit/runtime encoding disagreement. Known cause: a 1-variant enum in a
-  `persistentHash`ed struct (`bytes(0)` atom: the compiler allocates one
+  hashed struct (`bytes(0)` atom: the compiler allocates one
   field element, the ledger parses zero). Keep every enum in hashed structs
   at ≥ 2 variants (`TxParamType` carries a `reserved` padding variant for
   exactly this).

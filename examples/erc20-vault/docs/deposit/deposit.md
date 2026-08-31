@@ -50,7 +50,7 @@ As illustrated, the flow comprises 6 steps:
     `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS`.
 - **2.** deposit(...) records the request
   - The user calls
-    [`deposit(...)`](../../contract/src/erc20-vault.compact#L367) with the ERC20
+    [`deposit(...)`](../../contract/src/erc20-vault.compact#L380) with the ERC20
     address and a private amount. The circuit composes the ENTIRE EVM sweep
     transaction itself: the calldata is `transfer(vaultEvmAddress, amount)`
     built in-circuit around the initialize-pinned
@@ -58,8 +58,8 @@ As illustrated, the flow comprises 6 steps:
     what stops a malicious client having the MPC sign a transfer to themselves.
   - The request's **derivation path** is not an argument either: the circuit
     recomputes the caller's commitment from the
-    [`callerSecretKey()`](../../contract/src/erc20-vault.compact#L284) witness
-    with [`userCommitment`](../../contract/src/erc20-vault.compact#L288), so the
+    [`callerSecretKey()`](../../contract/src/erc20-vault.compact#L289) witness
+    with [`userCommitment`](../../contract/src/erc20-vault.compact#L297), so the
     MPC signs with THIS caller's deposit account and no one else's. The caller
     supplies only what is genuinely theirs to choose: their account's nonce, the
     gas envelope their account pays, and the MPC key version.
@@ -108,8 +108,8 @@ As illustrated, the flow comprises 6 steps:
     [`respondBidirectional`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-contract/src/signet-contract.compact#L78).
     The emitted event carries the request id it answers and the MPC's ECDSA
     signature over the attestation digest
-    `keccak256(requestId || serializedOutput)`, and nothing else: neither the
-    digest nor the serialised output goes on chain.
+    `upgradeFromTransient(transientHash([requestId, serializedOutput]))`, and
+    nothing else: neither the digest nor the serialised output goes on chain.
   - The client must therefore rebuild the exact bytes the MPC hashed.
     [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L110)
     takes the mined call's raw EVM return data (the fakenet responder caches
@@ -138,7 +138,7 @@ As illustrated, the flow comprises 6 steps:
     unauthenticated, and the authoritative check is the in-circuit verification
     step 6 runs.
 - **6.** claim(...) verifies and mints
-  - The user calls [`claim(...)`](../../contract/src/erc20-vault.compact#L460)
+  - The user calls [`claim(...)`](../../contract/src/erc20-vault.compact#L473)
     with the request id, the attested event and the recomputed output bytes. The
     circuit re-hashes those bytes into the attestation digest and verifies the
     event's ECDSA signature over it against the initialize-pinned

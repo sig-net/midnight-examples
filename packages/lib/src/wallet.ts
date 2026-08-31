@@ -52,13 +52,13 @@ export interface AccountKeys {
  * transaction.
  *
  * The overhead compensates for the wallet sdk pricing a PROOF-ERASED
- * transaction while the node prices the real proof bytes. The vault's
- * keccak-based attestation-verification proofs (claim / completeWithdraw /
- * refund, ~9.2 KB vs ~6.4 KB for persistentHash-based ones) left the
- * node's fee ~2.2e13 above the wallet's estimate, so the node rejected the
- * spend with Malformed(BalanceCheckOverspend) (node custom error 138). 5e13
- * covers that with headroom, and the excess is simply burned dust. Mirrors the
- * same constant in `@sig-net/midnight-contract-deploy`'s wallet plumbing.
+ * transaction while the node prices the real proof bytes. The node's fee
+ * consequently exceeds the wallet's estimate by an amount that grows with
+ * proof size, and the node rejects the spend with
+ * Malformed(BalanceCheckOverspend) (node custom error 138) when the wallet
+ * under-provides. 5e13 covers the gap this repo's circuits produce, with
+ * headroom, and the excess is simply burned dust. Mirrors the same constant
+ * in `@sig-net/midnight-contract-deploy`'s wallet plumbing.
  */
 export const COST_PARAMETERS: {
   readonly additionalFeeOverhead: bigint;

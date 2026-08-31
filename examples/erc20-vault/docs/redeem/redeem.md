@@ -43,9 +43,9 @@ As illustrated, the flow comprises 5 steps:
 
 - **1.** redeem(...) burns the surrendered coin and records the request
   - The caller surrenders a shielded **vault coin** of exactly the shares being
-    redeemed. [`redeem`](../../contract/src/erc20-vault.compact#L1264) checks the
+    redeemed. [`redeem`](../../contract/src/erc20-vault.compact#L1277) checks the
     coin's colour is the wrapper's vault token
-    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L271)
+    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L276)
     over the pinned [`stataToken`](../../contract/src/erc20-vault.compact#L159))
     and that its value equals the shares, then burns it: `receiveShielded`
     assigns the coin to the contract, then `sendImmediateShielded` sends its full
@@ -82,7 +82,7 @@ As illustrated, the flow comprises 5 steps:
   - The redeemer's settle view (commitment, shares) goes into
     [`redeemRefundCommitment`](../../contract/src/erc20-vault.compact#L188),
     whose commitment comes from
-    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L298)
+    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L311)
     over the caller's secret and the request id, the same identity-breaking
     commitment a [withdrawal](../withdraw/withdraw.md) pins. The shares are
     bounded to `Uint<64>` before the burn, so the refund arm can always re-mint
@@ -156,7 +156,7 @@ As illustrated, the flow comprises 5 steps:
     composes the two.
 - **5.** completeRedeem(...) mints shielded(stataUnderlying) for the attested assets
   - An executed redemption settles through
-    [`completeRedeem`](../../contract/src/erc20-vault.compact#L1346), whose
+    [`completeRedeem`](../../contract/src/erc20-vault.compact#L1359), whose
     `Bytes<8>` output argument is the wrapper's packed `uint64` assets.
     `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
     against `mpcResponseKey` before anything else happens.
@@ -184,7 +184,7 @@ As illustrated, the flow comprises 5 steps:
     the redeem.
 - **5.** refund(...) re-mints when the redeem never executed
   - A wrapper redemption that never ran on the EVM chain settles through
-    [`refund`](../../contract/src/erc20-vault.compact#L720) instead, and the
+    [`refund`](../../contract/src/erc20-vault.compact#L733) instead, and the
     attested output's WIDTH is what routes the call: the fixed 5-byte failure
     output cannot type-fit `completeRedeem`'s `Bytes<8>`, and an executed result
     cannot type-fit `refund`'s `Bytes<5>`.

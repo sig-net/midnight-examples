@@ -268,11 +268,16 @@ export pure circuit unlimitedAllowance(): Uint<128> {
 // kernel.self(). claim mints under it, withdraw accepts only coins of it. Exported so
 // off-chain code computes coin colours by calling the compiled circuit, never a TS
 // re-implementation.
+//
+// Coin colours derived here persist in wallets indefinitely and are recomputed at
+// every burn. transientHash is pinned by the chain's ledger era and can change at a
+// proof-system hard fork: coins minted before such a fork then need a coordinated
+// migration, as no drain path exists.
 export pure circuit vaultTokenDomainSeparator(erc20Address: Bytes<20>): Bytes<32> {
-  return persistentHash<Vector<2, Bytes<32>>>([
+  return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([
     pad(32, "erc20:vault:"),
     erc20Address as Field as Bytes<32>
-  ]);
+  ]));
 }
 
 // ---- Identity -----------------------------------------------------------------------
@@ -285,8 +290,12 @@ witness callerSecretKey(): Bytes<32>;
 
 // Exported so off-chain code (deploy tooling, tests) computes commitments by calling
 // the compiled circuit.
+//
+// The commitment doubles as the MPC key-derivation path of deposit requests, and the
+// deployer's is pinned sealed at deploy. A proof-system hard fork that changes
+// transientHash re-keys every derived foreign account and orphans pinned commitments.
 export pure circuit userCommitment(sk: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "vault:user:"), sk]);
+  return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([pad(32, "vault:user:"), sk]));
 }
 
 // The refund commitment both withdraw and swap pin, and their refund paths prove before
@@ -295,12 +304,16 @@ export pure circuit userCommitment(sk: Bytes<32>): Bytes<32> {
 // would let anyone link a refund marker to a depositor's identity. The distinct domain string
 // breaks that link, and binding the (already public) requestId makes every commitment unique,
 // so two refunds by the same secret are unlinkable to each other too.
+//
+// The commitment persists on the ledger only between a request and its settle.
+// transientHash can change at a proof-system hard fork, so before such a fork every
+// pending request must be settled or refunded (the refund path always exists).
 export pure circuit withdrawRefundCommitment(sk: Bytes<32>, requestId: RequestId): Bytes<32> {
-  return persistentHash<Vector<3, Bytes<32>>>([
+  return upgradeFromTransient(transientHash<Vector<3, Bytes<32>>>([
     pad(32, "vault:refund:"),
     sk,
     requestId as Bytes<32>
-  ]);
+  ]));
 }
 
 // ---- Setup step 3 (continued): the constructor --------------------------------------

@@ -48,7 +48,7 @@ As illustrated, the flow comprises 6 steps:
 - **1.** approveRouter(...) records the sign-only allowance request
   - The vault swaps out of one pooled EVM account, so the router must be
     allowed to pull `tokenIn` from it before any swap can execute.
-    [`approveRouter`](../../contract/src/erc20-vault.compact#L838) records
+    [`approveRouter`](../../contract/src/erc20-vault.compact#L851) records
     `approve(uniswapRouter, 2^128-1)` on the ERC20 the caller names. The
     spender is the initialize-pinned
     [`uniswapRouter`](../../contract/src/erc20-vault.compact#L127) and the
@@ -72,16 +72,16 @@ As illustrated, the flow comprises 6 steps:
 - **2.** swap(...) burns the surrendered coin and records the request
   - The caller surrenders a shielded **vault coin** of `tokenIn` worth exactly
     `amountInMaximum`, the worst-case spend.
-    [`swap`](../../contract/src/erc20-vault.compact#L929) checks the coin's
+    [`swap`](../../contract/src/erc20-vault.compact#L942) checks the coin's
     colour is that ERC20's vault token
-    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L271))
+    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L276))
     and burns it with the same pair of calls a
     [withdraw](../withdraw/withdraw.md) uses: `receiveShielded` assigns the
     coin to the contract, then `sendImmediateShielded` sends its full value to
     the shielded burn address. The coin spend IS the authorisation.
   - The trade is EXACT-OUTPUT, and that is what makes the optimistic burn
     safe: `amountOut` is an input of the
-    [`SwapRequest`](../../contract/src/erc20-vault.compact#L909), asserted to
+    [`SwapRequest`](../../contract/src/erc20-vault.compact#L922), asserted to
     fit the `Uint<64>` mint API BEFORE anything is burned, so the mint amount
     is known up front. Under an exact-input trade the mint amount would be the
     swap's result, and an oversized result would strand the already-burned
@@ -118,7 +118,7 @@ As illustrated, the flow comprises 6 steps:
     typed fields the circuit validated and bounded before the burn, so step 6
     reads them from there and never from the seven-word request record. The
     commitment comes from
-    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L298)
+    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L311)
     over the caller's secret and the request id, the same unlinkable marker a
     withdrawal pins, and the entry doubles as the pending-swap marker step 6
     consumes.
@@ -182,7 +182,7 @@ As illustrated, the flow comprises 6 steps:
     poll deadline and hands the resolved outcome to the settle step.
 - **6.** completeSwap(...) mints amountOut of tokenOut plus the unspent tokenIn
   - An executed swap settles through
-    [`completeSwap`](../../contract/src/erc20-vault.compact#L1043), whose
+    [`completeSwap`](../../contract/src/erc20-vault.compact#L1056), whose
     `Bytes<8>` output argument is the packed `amountIn`.
     `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
     against `mpcResponseKey` before anything else happens.
@@ -207,7 +207,7 @@ As illustrated, the flow comprises 6 steps:
     `refund` from it, and passes a fresh random mint nonce either way.
 - **6.** refund(...) re-mints when the swap never executed
   - A swap that never ran on the EVM chain settles through
-    [`refund`](../../contract/src/erc20-vault.compact#L720) instead, and the
+    [`refund`](../../contract/src/erc20-vault.compact#L733) instead, and the
     attested output's WIDTH is what routes the call: the fixed 5-byte failure
     output cannot type-fit `completeSwap`'s `Bytes<8>`, and an executed result
     cannot type-fit `refund`'s `Bytes<5>`.

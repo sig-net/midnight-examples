@@ -1,6 +1,6 @@
 // Respond-output recomputation: the client half of the signature-only
 // attestation protocol. The MPC's RespondBidirectionalEvent carries only the
-// ECDSA signature over the attestation digest (keccak256 of requestId ++
+// ECDSA signature over the attestation digest (binding requestId and
 // serializedOutput), never the digest and never the output itself, so the
 // client obtains the output bytes independently and checks the signature
 // against them. Every call recomputes BOTH candidate outputs the protocol

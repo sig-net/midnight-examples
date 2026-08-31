@@ -44,7 +44,7 @@ As illustrated, the flow comprises 6 steps:
 - **1.** approveStata(...) records the sign-only allowance request
   - The ERC-4626 wrapper pulls the underlying from the account that calls
     `deposit`, so the vault's account must have approved it first.
-    [`approveStata`](../../contract/src/erc20-vault.compact#L1103) builds
+    [`approveStata`](../../contract/src/erc20-vault.compact#L1116) builds
     contract-enforced calldata for `approve(stataToken, MAX)` called ON the
     pinned [`stataUnderlying`](../../contract/src/erc20-vault.compact#L158),
     with the pinned [`stataToken`](../../contract/src/erc20-vault.compact#L159)
@@ -72,9 +72,9 @@ As illustrated, the flow comprises 6 steps:
     calls it before every supply for exactly that reason.
 - **2.** supply(...) burns the surrendered coin and records the request
   - The caller surrenders a shielded **vault coin** of exactly the supply
-    amount. [`supply`](../../contract/src/erc20-vault.compact#L1155) checks the
+    amount. [`supply`](../../contract/src/erc20-vault.compact#L1168) checks the
     coin's colour is the underlying's vault token
-    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L271)
+    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L276)
     over `stataUnderlying`) and that its value equals the amount, then burns it:
     `receiveShielded` assigns the coin to the contract, then
     `sendImmediateShielded` sends its full value to the shielded burn address.
@@ -106,7 +106,7 @@ As illustrated, the flow comprises 6 steps:
   - The supplier's settle view (commitment, amount) goes into
     [`supplyRefundCommitment`](../../contract/src/erc20-vault.compact#L174),
     whose commitment comes from
-    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L298)
+    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L311)
     over the caller's secret and the request id, the same identity-breaking
     commitment a [withdrawal](../withdraw/withdraw.md) pins. The amount is
     bounded to `Uint<64>` before the burn, so the refund arm can always re-mint
@@ -181,7 +181,7 @@ As illustrated, the flow comprises 6 steps:
     composes the two.
 - **6.** completeSupply(...) mints shielded(stataToken) for the attested shares
   - An executed deposit settles through
-    [`completeSupply`](../../contract/src/erc20-vault.compact#L1231), whose
+    [`completeSupply`](../../contract/src/erc20-vault.compact#L1244), whose
     `Bytes<8>` output argument is the wrapper's packed `uint64` shares.
     `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
     against `mpcResponseKey` before anything else happens.
@@ -206,7 +206,7 @@ As illustrated, the flow comprises 6 steps:
     minted.
 - **6.** refund(...) re-mints when the supply never executed
   - A wrapper deposit that never ran on the EVM chain settles through
-    [`refund`](../../contract/src/erc20-vault.compact#L720) instead, and the
+    [`refund`](../../contract/src/erc20-vault.compact#L733) instead, and the
     attested output's WIDTH is what routes the call: the fixed 5-byte failure
     output cannot type-fit `completeSupply`'s `Bytes<8>`, and an executed result
     cannot type-fit `refund`'s `Bytes<5>`.
