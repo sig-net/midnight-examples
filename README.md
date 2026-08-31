@@ -18,7 +18,7 @@ The flow comprises 5 steps:
 1. Client calls a contract on Midnight which requests a signature for a transaction destined for a foreign chain. The signature is made with a key derived for the requesting contract (see [Derived keys](#derived-keys)).
 2. Sig Network MPC honours the request, generating the transaction signature and posting it back to Midnight.
 3. Client extracts the signature, using it to submit the signed transaction to the foreign chain.
-4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: its ECDSA signature over the attestation digest `keccak256(requestId || serializedOutput)`. Both the digest and the output itself travel off chain.
+4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: its ECDSA signature over the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))`. Both the digest and the output itself travel off chain.
 5. Client obtains the execution output off chain (see the output recovery note below: it broadcast the transaction in step 3, so it can read the result), extracts the posted attestation and submits both back to the Midnight contract, which recomputes the digest from the output bytes and verifies the MPC's signature in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
 
 > **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.10.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
@@ -264,7 +264,7 @@ Integrating a contract on Midnight with the Sig Network MPC consists of:
    // Recommended: the deployer identity commitment scheme. Exported so deploy
    // tooling can compute the constructor argument by calling the compiled circuit.
    export pure circuit calculateDeployerCommitment(sk: Bytes<32>): Bytes<32> {
-     return persistentHash<Vector<2, Bytes<32>>>([pad(32, "my-contract:deployer:"), sk]);
+     return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([pad(32, "my-contract:deployer:"), sk]));
    }
 
    // Required: set signet contract and (recommended) deployer commitment on deployment.
@@ -388,7 +388,7 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
    await new JsonRpcProvider(foreignChainRpcUrl).broadcastTransaction(signedTx.serialized);
    ```
 
-4. Poll the Signet singleton for the MPC's remote execution attestation (emitted once the MPC observes the transaction execute on the foreign chain). The event carries the request id it answers plus the MPC's ECDSA signature over the attestation digest `keccak256(requestId || serializedOutput)`: neither the digest nor the serialized output goes on chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and select the posted event whose signature verifies over those bytes against your contract's response key. Posts are emitted unverified, so that signature check is what makes a candidate meaningful off chain. The authoritative check is your contract's verify circuit in step 5:
+4. Poll the Signet singleton for the MPC's remote execution attestation (emitted once the MPC observes the transaction execute on the foreign chain). The event carries the request id it answers plus the MPC's ECDSA signature over the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))`: neither the digest nor the serialized output goes on chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and select the posted event whose signature verifies over those bytes against your contract's response key. Posts are emitted unverified, so that signature check is what makes a candidate meaningful off chain. The authoritative check is your contract's verify circuit in step 5:
 
    ```ts
    import { deserializeEvmOutput, serializeRespondOutput } from "@sig-net/midnight";

@@ -506,7 +506,7 @@ nonce-burned one throws).
 Once the MPC observes the mined execution it emits an ECDSA-signed
 `RespondBidirectionalEvent`. The event carries the request id it answers and
 the MPC's signature over the attestation digest
-`keccak256(requestId || serializedOutput)`. Neither the digest nor the
+`upgradeFromTransient(transientHash([requestId, serializedOutput]))`. Neither the digest nor the
 serialized output goes on chain: the client must reconstruct the exact bytes
 the MPC hashed, in two moves, and then check the signature against them.
 

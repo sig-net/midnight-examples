@@ -513,7 +513,7 @@ describe("deposit round-trip", () => {
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(VAULT_EVM));
     expect(calldata.value.words[1]).toEqual(numericAbiWord(AMOUNT));
 
-    // The map key IS the keccak256 hash of the record, recomputed off-chain
+    // The map key IS the record's transientHash digest, recomputed off-chain
     // with the library's TS twin of the request-id circuit. This assertion is
     // the lockstep check the twin's deviation note relies on: the id computed
     // in TS must equal the key the REAL compiled contract minted in-circuit.
