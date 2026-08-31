@@ -45,7 +45,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import type { ShieldedTokenRecipient } from "../src/flows/complete-deposit.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";

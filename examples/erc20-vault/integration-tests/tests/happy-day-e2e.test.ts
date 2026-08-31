@@ -41,14 +41,14 @@ import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { completeDeposit } from "../src/flows/complete-deposit.ts";
 import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
-import { startDeposit } from "../src/flows/deposit.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import {
   pollRespondBidirectional,
   type RespondOutcome,
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
-import { startWithdraw } from "../src/flows/withdraw.ts";
+import { startDeposit } from "../src/flows/start-deposit.ts";
+import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { VAULT_PATH_BYTES } from "../src/mpc-routing.ts";
 import { printVaultState, readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";

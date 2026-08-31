@@ -12,10 +12,10 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { AAVE_USDC, STATA_USDC, stataAvailable } from "../src/evm-stata.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
-import { runRedeemRoundTrip } from "../src/flows/redeem.ts";
-import { runSupplyRoundTrip } from "../src/flows/supply.ts";
+import { runRedeemRoundTrip } from "../src/flows/redeem-round-trip.ts";
+import { runSupplyRoundTrip } from "../src/flows/supply-round-trip.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";

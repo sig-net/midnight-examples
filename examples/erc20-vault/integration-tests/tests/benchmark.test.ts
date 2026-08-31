@@ -80,29 +80,31 @@ import { AAVE_USDC, STATA_USDC, stataAvailable } from "../src/evm-stata.ts";
 import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
-import { approveRouter } from "../src/flows/approve.ts";
+import { approveRouter } from "../src/flows/approve-router.ts";
 import { approveStata } from "../src/flows/approve-stata.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { completeDeposit } from "../src/flows/complete-deposit.ts";
-import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
-import { runDepositRoundTrip, startDeposit } from "../src/flows/deposit.ts";
-import { initialise } from "../src/flows/initialise.ts";
-import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
-import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import {
   pollRedeemOutcome,
   type RedeemOutcome,
   settleRedeem,
-  startRedeem,
-} from "../src/flows/redeem.ts";
+} from "../src/flows/complete-redeem.ts";
 import {
   pollSupplyOutcome,
   settleSupply,
-  startSupply,
   type SupplyOutcome,
-} from "../src/flows/supply.ts";
-import { pollSwapOutcome, settleSwap, startSwap, type SwapOutcome } from "../src/flows/swap.ts";
-import { startWithdraw } from "../src/flows/withdraw.ts";
+} from "../src/flows/complete-supply.ts";
+import { pollSwapOutcome, settleSwap, type SwapOutcome } from "../src/flows/complete-swap.ts";
+import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
+import { initialise } from "../src/flows/initialise.ts";
+import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
+import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
+import { startDeposit } from "../src/flows/start-deposit.ts";
+import { startRedeem } from "../src/flows/start-redeem.ts";
+import { startSupply } from "../src/flows/start-supply.ts";
+import { startSwap } from "../src/flows/start-swap.ts";
+import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";

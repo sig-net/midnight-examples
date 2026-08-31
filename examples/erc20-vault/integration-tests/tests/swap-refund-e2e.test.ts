@@ -8,9 +8,9 @@ import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/
 import { afterAll, describe, expect, it } from "vitest";
 
 import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
-import { runSwapRoundTrip } from "../src/flows/swap.ts";
+import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";

@@ -455,7 +455,7 @@ await vault.callTx.startDeposit(
 const requestId = requestIdHex(calculateRequestId(expectedRecord));
 ```
 
-[`deposit.ts`](integration-tests/src/flows/deposit.ts) shows the full
+[`start-deposit.ts`](integration-tests/src/flows/start-deposit.ts) shows the full
 `expectedRecord` reconstruction, byte for byte, and asserts the recomputed id
 appears as a ledger map key after the call.
 
@@ -653,7 +653,7 @@ account.
 | Runtime step 5 | `completeDeposit()`: depositor-only, mints on success | `completeWithdraw()`: open to anyone on success, withdrawer-only refund on a false return. `refundWithdraw()`: withdrawer-only refund when the transfer never executed |
 
 Two patterns to take from it
-([`withdraw.ts`](integration-tests/src/flows/withdraw.ts) /
+([`start-withdraw.ts`](integration-tests/src/flows/start-withdraw.ts) /
 [`complete-withdraw.ts`](integration-tests/src/flows/complete-withdraw.ts)):
 
 - **Coin-spend as authorisation.** `startWithdraw()` is optimistic: the surrendered
@@ -690,8 +690,10 @@ the pinned router: it burns `amountInMaximum` of tokenIn up front and asserts
 coin). `completeSwap` mints the exact `amountOut` of tokenOut plus the unspent
 tokenIn as change (the attested `amountIn` spent, native-deserialized from a uint64
 respond schema), and a swap that reverts settles through `refundSwap`. Flow
-functions: [`approve.ts`](integration-tests/src/flows/approve.ts),
-[`swap.ts`](integration-tests/src/flows/swap.ts).
+functions: [`approve-router.ts`](integration-tests/src/flows/approve-router.ts),
+[`start-swap.ts`](integration-tests/src/flows/start-swap.ts),
+[`complete-swap.ts`](integration-tests/src/flows/complete-swap.ts),
+[`swap-round-trip.ts`](integration-tests/src/flows/swap-round-trip.ts).
 
 # Package layout
 

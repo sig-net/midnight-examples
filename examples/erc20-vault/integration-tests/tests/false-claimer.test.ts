@@ -6,7 +6,7 @@
 // success attestation posted.
 //
 // Arrange: a deposit round trip up to but NOT including the claim
-// (src/flows/deposit.ts with skipClaim). Act: attempt claim through a
+// (src/flows/deposit-round-trip.ts with skipClaim). Act: attempt claim through a
 // SECOND session whose USER_SEED and VAULT_USER_SECRET_KEY both differ from
 // the depositor's — both must be overridden together: a changed secret under
 // the SAME seed would hit midnight-js's persisted private state
@@ -42,7 +42,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { completeDeposit } from "../src/flows/complete-deposit.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 

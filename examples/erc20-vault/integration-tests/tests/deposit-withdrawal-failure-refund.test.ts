@@ -16,7 +16,7 @@
 //
 // The arrange stage runs a full deposit round trip first (the caller must
 // hold shielded vault tokens to escrow) — that is what
-// src/flows/deposit.ts's runDepositRoundTrip exists for. Run AFTER
+// src/flows/deposit-round-trip.ts's runDepositRoundTrip exists for. Run AFTER
 // tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives there. Recovery
 // from a run that died mid-flow (proof-server OOM): rerun this file with
 // FAILURE_REFUND_DEPOSIT_REQUEST_ID / FAILURE_REFUND_WITHDRAW_REQUEST_ID set
@@ -42,13 +42,13 @@ import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import {
   pollRespondBidirectional,
   type RespondOutcome,
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
-import { startWithdraw } from "../src/flows/withdraw.ts";
+import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 

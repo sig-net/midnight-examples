@@ -32,7 +32,7 @@ import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
 
 /** Options for {@link withdraw}. */
-export interface WithdrawOptions {
+export interface StartWithdrawOptions {
   /** Withdraw amount in ERC20 base units. */
   readonly amount: bigint;
   /** Destination EVM address (20-byte 0x hex) receiving the ERC20. */
@@ -68,7 +68,7 @@ export interface WithdrawOptions {
  */
 export async function startWithdraw(
   context: VaultContext,
-  options: WithdrawOptions,
+  options: StartWithdrawOptions,
 ): Promise<RequestIdHex> {
   if (options.amount <= 0n) {
     throw new Error(`amount must be a positive integer; got ${String(options.amount)}.`);
