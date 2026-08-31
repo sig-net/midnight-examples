@@ -61,8 +61,8 @@ export async function approveRouter(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized)
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised)
+    throw new Error("vault is not initialised, run the initialise flow first");
 
   // approve(router, MAX) on the ERC20, signed with the vault account (path "vault"), same
   // 2-word map + bool schema as a transfer.

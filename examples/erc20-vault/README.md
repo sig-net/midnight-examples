@@ -18,24 +18,27 @@ What this example demonstrates, end to end:
 - A Compact contract requesting EVM transaction signatures from the Signature Network singleton contract with a cross-contract call on Midnight.
 - The MPC observing the request, signing the EVM transaction (secp256k1), and later attesting the EVM outcome with an ECDSA-signed `RespondBidirectionalEvent`, signed by a response key derived for THIS contract (from the MPC root key, the vault's own address and the fixed path `"midnight response key"`). Both responses are emitted as contract events on Midnight.
 - The vault verifying that response in-circuit against the response key it
-  pinned at `initialize` time, and minting or burning shielded vault tokens
+  pinned at `initialise` time, and minting or burning shielded vault tokens
   accordingly, including a refund branch for when the EVM leg fails.
 
 # The vault's circuits
 
 Every circuit is a variation on one shape: record a signature request, let the
 MPC sign and broadcast it, then settle in-circuit against the MPC's attestation.
-The walkthrough below documents that shape in full for **`deposit` → `claim`**;
+The walkthrough below documents that shape in full for **`startDeposit` → `completeDeposit`**;
 the rest of the circuits reuse it, so the table names each and what it adds
 without repeating the detail.
 
-| Circuit(s) | What it adds over `deposit` → `claim` |
+| Circuit(s) | What it adds over `startDeposit` → `completeDeposit` |
 |---|---|
-| `deposit` → `claim` | **The reference flow, documented in full below.** Request → sign → broadcast → attest → verify-and-mint. |
-| `withdraw` / `completeWithdraw` | The same flow in the other direction, plus the coin-spend-as-authorisation pattern and a settle circuit that branches on the EVM result. |
-| `refund` | Settling a request whose transaction never executed, routed by the 5-byte failure-output width (shared by the withdraw and swap failure paths). |
+| `startDeposit` → `completeDeposit` | **The reference flow, documented in full below.** Request → sign → broadcast → attest → verify-and-mint. |
+| `startWithdraw` / `completeWithdraw` | The same flow in the other direction, plus the coin-spend-as-authorisation pattern and a settle circuit that branches on the EVM result. |
+| `refundWithdraw` / `refundSwap` / `refundSupply` / `refundRedeem` | Settling a request whose transaction never executed, routed by the 5-byte failure-output width. One refund circuit per request kind, each reading only its own kind's pending marker. |
 | `approveRouter` | A sign-only request, with no settle circuit at all. |
-| `swap` / `completeSwap` | A second request map at its own ledger field and calldata width, reusing the same optimistic burn-then-mint shape. exactOutputSingle: mint the exact `amountOut` of tokenOut plus the unspent tokenIn as change. |
+| `startSwap` / `completeSwap` | A second request map at its own ledger field and calldata width, reusing the same optimistic burn-then-mint shape. exactOutputSingle: mint the exact `amountOut` of tokenOut plus the unspent tokenIn as change. |
+| `approveStata` | `approveRouter` for the Aave leg: a sign-only approve(stataToken, MAX) on the pinned underlying USDC, so the wrapper can pull it during supply. |
+| `startSupply` / `completeSupply` | Aave lending via the pinned ERC-4626 stataUSDC wrapper: burn shielded USDC, record `deposit(amount, vault)`, then mint shielded stataUSDC for the MPC-attested shares. |
+| `startRedeem` / `completeRedeem` | The Aave exit: burn shielded stataUSDC, record `redeem(shares, vault, vault)`, then mint shielded USDC for the MPC-attested assets (principal + accrued interest). |
 
 # Vault Sign Bidirectional Flow
 
@@ -46,11 +49,11 @@ runs the whole flow twice, once per direction:
 
 | # | Step | Deposit round trip | Withdraw round trip |
 |---|---|---|---|
-| 1 | Contract records a signature request and notifies the MPC | `deposit()` requests `transfer(vaultEvmAddress, amount)` on the ERC20, to be signed by the **user's deposit account** | `withdraw()` takes the surrendered vault tokens and requests `transfer(destEvmAddress, amount)`, to be signed by the **vault's account** |
+| 1 | Contract records a signature request and notifies the MPC | `startDeposit()` requests `transfer(vaultEvmAddress, amount)` on the ERC20, to be signed by the **user's deposit account** | `startWithdraw()` takes the surrendered vault tokens and requests `transfer(destEvmAddress, amount)`, to be signed by the **vault's account** |
 | 2 | MPC posts the transaction signature back to Midnight | Signature by the user's derived key | Signature by the vault's derived key |
 | 3 | Client broadcasts the signed transaction on the foreign chain | The ERC20 moves user → vault | The ERC20 moves vault → destination |
 | 4 | MPC attests the execution output back to Midnight | Signed `RespondBidirectionalEvent` for the sweep | The same, for the payout |
-| 5 | Contract verifies the attestation in-circuit and settles | `claim()` mints shielded vault tokens to the depositor | `completeWithdraw()` finalises an executed transfer, or refunds the withdrawer on a false return. `refund()` refunds the withdrawer when the transfer never executed (reverted or replaced) |
+| 5 | Contract verifies the attestation in-circuit and settles | `completeDeposit()` mints shielded vault tokens to the depositor | `completeWithdraw()` finalises an executed transfer, or refunds the withdrawer on a false return. `refundWithdraw()` refunds the withdrawer when the transfer never executed (reverted or replaced) |
 
 > **Output recovery (between steps 4 and 5):** the attestation event carries the request id it answers and the MPC's signature, never the output, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), signature verification in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.10.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
@@ -70,7 +73,7 @@ exactly three derivations:
 |---|---|---|
 | The user's deposit account (EVM) | `userCommitment(callerSecretKey)`, the caller's 32-byte identity commitment | Signs the deposit sweep `transfer(vault, amount)`. The user funds this address with the ERC20 being deposited plus gas ETH. One account per identity: the contract recomputes the commitment in-circuit from the secret-key witness, so the path is never a circuit argument and the MPC can only ever sign with THIS caller's account. |
 | The vault's own account (EVM) | The contract-fixed literal `"vault"` (`pad(32, "vault")`) | Holds the vault's ERC20 balance and signs every withdraw `transfer(destination, amount)`. It also pays the withdraw gas, which is why the whole fee envelope is contract-fixed. |
-| The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id and execution output (the event carries the id it answers plus the signature, nothing else). It never signs transactions: it is per-client-contract yet independent of any request's own path, and `claim`/`completeWithdraw` verify responses against it in-circuit. |
+| The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id and execution output (the event carries the id it answers plus the signature, nothing else). It never signs transactions: it is per-client-contract yet independent of any request's own path, and `completeDeposit`/`completeWithdraw` verify responses against it in-circuit. |
 
 Deposits and withdrawals therefore move between two MPC-derived accounts on
 the EVM chain, and neither key ever exists anywhere: the MPC network signs
@@ -82,7 +85,7 @@ accounts and `deriveMidnightResponseKey(mpcPublicKey, vaultContractAddress)`
 for the response key (the setup pipeline derives all three and prints them).
 The vault's own address and the response key both take the contract address
 as INPUT, so they cannot exist at construction time: the deployer-gated
-one-shot `initialize` circuit pins them right after deploy, when the address
+one-shot `initialise` circuit pins them right after deploy, when the address
 (and therefore the derivations) exist.
 
 The MPC composes the derivation string by rendering the 32 opaque path bytes
@@ -176,12 +179,12 @@ export ledger mpcResponseKey: Secp256k1Point;
 
 // The vault's own state.
 export ledger signetRequestNonce: Counter;  // keeps identical requests' ids distinct
-export ledger initialized: Counter;         // one-shot initialize marker
+export ledger initialised: Counter;         // one-shot initialise marker
 export ledger vaultEvmAddress: Bytes<20>;   // the vault's derived EVM account
 export ledger evmChainId: Uint<64>;         // the pinned EVM chain, numeric...
 export ledger caip2Id: Bytes<32>;           // ...and CAIP-2 form
-sealed ledger deployer: Bytes<32>;          // only they may initialize
-export ledger refundCommitment: Map<RequestId, Bytes<32>>; // pending withdrawals
+sealed ledger deployer: Bytes<32>;          // only they may initialise
+export ledger withdrawSettleViews: Map<RequestId, WithdrawSettleView>; // pending withdrawals: gate commitment + typed token/amount
 
 constructor(deployerCommitment: Bytes<32>, signetContract: SignetSigner) {
   deployer = disclose(deployerCommitment);
@@ -219,19 +222,19 @@ const mpcResponseKey = deriveMidnightResponseKey(mpcRootPublicKey, vaultContract
 ```
 
 and seal them (together with the one EVM chain this vault operates on) with
-the deployer-gated one-shot `initialize` circuit:
+the deployer-gated one-shot `initialise` circuit:
 
 ```compact
-export circuit initialize(
+export circuit initialise(
   vaultEvm: Bytes<20>,
   chainId: Uint<64>,
   chainCaip2Id: Bytes<32>,
   responseKey: Secp256k1Point
 ): [] {
-  assert(initialized == 0, "Already initialized");
+  assert(initialised == 0, "Already initialised");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
   assert(chainId > 0 as Uint<64>, "Chain ID must be positive");
-  initialized.increment(1);
+  initialised.increment(1);
   vaultEvmAddress = disclose(vaultEvm);
   evmChainId = disclose(chainId);
   caip2Id = disclose(chainCaip2Id);
@@ -241,13 +244,13 @@ export circuit initialize(
 
 The gate prevents front-running: nobody else can initialise the vault to
 point at their own address, chain or key. Flow function:
-[`initialize.ts`](integration-tests/src/flows/initialize.ts). The setup
+[`initialise.ts`](integration-tests/src/flows/initialise.ts). The setup
 pipeline derives and prints all three derived values as `EVM_VAULT_ADDRESS`,
 `EVM_USER_ADDRESS` and `MPC_RESPONSE_KEY`.
 
 ## Deploying
 
-The contract has 14 circuits and their verifier keys do not fit in one block, so
+The contract has 17 circuits and their verifier keys do not fit in one block, so
 a deploy is two phases:
 
 1. The base transaction registers the whole ledger state and ONE small circuit.
@@ -265,7 +268,7 @@ script, so local and remote deploys take the same path:
 # local, against the docker stack
 yarn workspace @midnight-examples/erc20-vault-contract deploy
 
-# stagenet: deploy, then run the deployer-gated initialize
+# stagenet: deploy, then run the deployer-gated initialise
 yarn workspace @midnight-examples/erc20-vault-integration-tests exec \
   tsx deploy-init-stagenet.ts
 ```
@@ -360,11 +363,11 @@ const evmUserAddress = deriveEvmAddress(
 );
 ```
 
-### Runtime step 1: `deposit()` records the request
+### Runtime step 1: `startDeposit()` records the request
 
 The user calls the deposit circuit on Midnight. The contract composes the
 ENTIRE transaction itself: the calldata is `transfer(vaultEvmAddress, amount)`
-built in-circuit around the initialize-pinned recipient (which is what stops
+built in-circuit around the initialise-pinned recipient (which is what stops
 a malicious client having the MPC sign a transfer to themselves), and the
 derivation path is the caller's identity commitment recomputed from the
 secret-key witness, so it is not even an argument. The caller supplies only
@@ -372,7 +375,7 @@ what is genuinely theirs to choose: their account's nonce, the gas envelope
 their account pays, and the MPC key version.
 
 ```compact
-export circuit deposit(
+export circuit startDeposit(
   evmNonce: Uint<64>,
   gasLimit: Uint<64>,
   maxFeePerGas: Uint<128>,
@@ -394,7 +397,7 @@ export circuit deposit(
     ]
   };
   // ... assemble EvmType2TxParams for the deposit's ERC20 on the
-  //     initialize-pinned chain, carrying no ETH ...
+  //     initialise-pinned chain, carrying no ETH ...
 
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
@@ -422,7 +425,7 @@ export circuit deposit(
     requestId,
     constructSignBidirectionalEventNotificationV1(
       kernel.self(),
-      1 as Uint<8>,                        // requestsPathDepth
+      2 as Uint<8>,                        // requestsPathDepth
       [0, 0, 0, 0] as Vector<4, Uint<8>>,  // requestsPath, zero padded
     ),
   );
@@ -438,7 +441,7 @@ import { calculateRequestId, requestIdHex, SIGNET_DEFAULT_KEY_VERSION } from "@s
 // The sweep sender is the user's deposit account: fetch its next nonce.
 const evmNonce = await new JsonRpcProvider(evmRpcUrl).getTransactionCount(evmUserAddress);
 
-await vault.callTx.deposit(
+await vault.callTx.startDeposit(
   BigInt(evmNonce),
   100_000n,         // gasLimit: the user's account pays
   30_000_000_000n,  // maxFeePerGas (wei)
@@ -522,8 +525,8 @@ whole selection.
 
 Everything stays UNTRUSTED here (the respond events are open to anyone, and
 the helper API is unauthenticated): the authoritative check is the in-circuit
-signature verification `claim` runs in step 5, against the same response key
-the vault pinned at initialize.
+signature verification `completeDeposit` runs in step 5, against the same response key
+the vault pinned at initialise.
 
 ```ts
 import { deserializeEvmOutput, serializeRespondOutput } from "@sig-net/midnight";
@@ -545,7 +548,7 @@ const decoded = deserializeEvmOutput('[{"name":"success","type":"bool"}]', outpu
 const serializedOutput = serializeRespondOutput('[{"name":"success","type":"bool"}]', decoded);
 
 // Signature verification selects WHICH posted event the MPC attested for
-// these bytes. mpcResponseKey is the key the vault pinned at initialize,
+// these bytes. mpcResponseKey is the key the vault pinned at initialise,
 // read back from its own ledger, so an accepted post is one that proves.
 const attestation = await reader.getVerifiedRespondBidirectionalEvent(
   requestId,
@@ -561,7 +564,7 @@ and [`respond-output.ts`](integration-tests/src/flows/respond-output.ts)
 (which also handles the failure case: a reverted or replaced transaction is
 attested as the protocol's fixed 5-byte failure output, `0xdeadbeef01`).
 
-### Runtime step 5: `claim()` verifies and mints
+### Runtime step 5: `completeDeposit()` verifies and mints
 
 The depositor presents the attestation AND the recomputed output bytes to
 the vault, which re-hashes the bytes into the digest and verifies the
@@ -570,7 +573,7 @@ mints shielded vault tokens for the deposited amount, to the caller or to an
 optional alternate recipient's coin public key:
 
 ```compact
-export circuit claim(
+export circuit completeDeposit(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<1>,  // the schema-packed EVM result at its exact width
@@ -582,7 +585,7 @@ export circuit claim(
 
   // The only authentication gate: the attestation digest is recomputed here
   // from the presented output, and the event's ECDSA signature over it must
-  // verify against the initialize-pinned response key.
+  // verify against the initialise-pinned response key.
   assert(
     verifyRespondBidirectionalEvent<1>(
       disclosedRequestId,
@@ -593,7 +596,7 @@ export circuit claim(
     "Invalid attestation signature"
   );
 
-  // Double-claim protection: the request must exist and is consumed here.
+  // Double-settle protection: the request must exist and is consumed here.
   const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
   signBidirectionalEventMap.remove(disclosedRequestId);
 
@@ -612,29 +615,29 @@ Invoking it:
 ```ts
 import { requestIdBytes } from "@sig-net/midnight";
 
-// A fresh RANDOM mint nonce per claim: one derived from the (public) request
+// A fresh RANDOM mint nonce per settle: one derived from the (public) request
 // id would let any observer link the minted coin to the deposit.
 const mintNonce = crypto.getRandomValues(new Uint8Array(32));
 
 // Mint to the caller's own wallet (recipient: none). Compact's Maybe/Either
 // are plain structs, so a `none` still carries a default-valued payload.
-await vault.callTx.claim(requestIdBytes(requestId), attestation, serializedOutput, mintNonce, {
+await vault.callTx.completeDeposit(requestIdBytes(requestId), attestation, serializedOutput, mintNonce, {
   is_some: false,
   value: { is_left: true, left: { bytes: new Uint8Array(32) }, right: { bytes: new Uint8Array(32) } },
 });
 ```
 
 The deposited amount is in the caller's wallet as shielded vault tokens.
-Flow function: [`claim.ts`](integration-tests/src/flows/claim.ts), including
+Flow function: [`complete-deposit.ts`](integration-tests/src/flows/complete-deposit.ts), including
 how to mint to a different wallet's coin public key.
 
 ## Runtime: the other circuits
 
-The remaining circuits reuse the `deposit` → `claim` shape. Below is only what
+The remaining circuits reuse the `startDeposit` → `completeDeposit` shape. Below is only what
 each one changes. Full code lives in the flow files under
 [`integration-tests/src/flows/`](integration-tests/src/flows/).
 
-### Withdraw (`withdraw` / `completeWithdraw` / `refund`)
+### Withdraw (`startWithdraw` / `completeWithdraw` / `refundWithdraw`)
 
 The same five steps with the roles swapped: the caller surrenders shielded vault
 tokens up front, and the requested EVM transfer spends from the vault's own
@@ -642,50 +645,51 @@ account.
 
 | | Deposit round trip | Withdraw round trip |
 |---|---|---|
-| Runtime step 1 | `deposit()` | `withdraw()`, which also takes (and burns) the surrendered coin |
+| Runtime step 1 | `startDeposit()` | `startWithdraw()`, which also takes (and burns) the surrendered coin |
 | Derivation path → signer | The caller's identity commitment → the user's deposit account | `"vault"` → the vault's own account |
 | Who pays the EVM gas | The user's account, caller-chosen envelope | The vault's account, contract-fixed envelope |
 | Runtime step 2 `expectedSigner` | `evmUserAddress` | `evmVaultAddress = deriveEvmAddress(mpcRootPublicKey, vaultContractAddress, "vault")` |
 | Runtime steps 3 and 4 | Identical mechanics | Identical mechanics |
-| Runtime step 5 | `claim()`: depositor-only, mints on success | `completeWithdraw()`: open to anyone on success, withdrawer-only refund on a false return. `refund()`: withdrawer-only refund when the transfer never executed |
+| Runtime step 5 | `completeDeposit()`: depositor-only, mints on success | `completeWithdraw()`: open to anyone on success, withdrawer-only refund on a false return. `refundWithdraw()`: withdrawer-only refund when the transfer never executed |
 
 Two patterns to take from it
 ([`withdraw.ts`](integration-tests/src/flows/withdraw.ts) /
 [`complete-withdraw.ts`](integration-tests/src/flows/complete-withdraw.ts)):
 
-- **Coin-spend as authorisation.** `withdraw()` is optimistic: the surrendered
+- **Coin-spend as authorisation.** `startWithdraw()` is optimistic: the surrendered
   coin is BURNED first (`sendImmediateShielded` forwards its full value to the
   stdlib's `shieldedBurnAddress()`, so vault tokens are IOUs a refund
   re-mints), and the refund path exists for when the EVM leg later fails. The spend IS the auth, so anyone may
   withdraw to any destination. Because the vault's account pays the gas, the fee
   envelope is contract-FIXED (a caller-chosen cap would let anyone drain the
   vault's ETH). The request is keyed under the vault's own `"vault"` path so the
-  MPC signs with the vault account, and a `refundCommitment` is pinned so only the
-  withdrawer can claim a refund.
+  MPC signs with the vault account, and a settle view carrying the withdrawer's
+  refund commitment is pinned in `withdrawSettleViews` so only they can claim a
+  refund.
 - **The settle branches on the MPC-attested output, never the caller, and the
   output WIDTH routes the call.** An executed transfer's 1-byte packed bool settles
   through `completeWithdraw` (final on success, so anyone holding the attestation
   may settle it, withdrawer-only re-mint on a `0x00` false return). A transfer that
   never executed is attested as the protocol's fixed 5-byte failure output
-  (`0xdeadbeef01`, `MPC_FAILURE_OUTPUT`) and can only type-fit `refund`'s
+  (`0xdeadbeef01`, `MPC_FAILURE_OUTPUT`) and can only type-fit `refundWithdraw`'s
   `Bytes<5>`. Refunds re-mint under a fresh nonce (unlinkable to the request), and
   the refund commitment is a DIFFERENT scheme from `userCommitment` (distinct
   domain + the request id) so a withdrawal's refund marker can't be linked to a
   depositor's identity.
 
-### Swap (`approveRouter`, `swap` / `completeSwap`)
+### Swap (`approveRouter`, `startSwap` / `completeSwap`)
 
 The swap leg has the vault trade its pooled ERC20s on Uniswap V3 as if it were an
 EVM user. `approveRouter` is a **sign-only** request: one allowance per token,
 contract-fixed spender and amount, and no settle circuit at all (a stale allowance
-just makes the next swap revert and refund). `swap` reuses the optimistic
+just makes the next swap revert and refund). `startSwap` reuses the optimistic
 burn-then-mint shape on a SEPARATE request map at its own ledger field (the
 calldata width is part of the ledger type), recording an `exactOutputSingle` on
 the pinned router: it burns `amountInMaximum` of tokenIn up front and asserts
 `amountOut ≤ Uint64` BEFORE the burn (so an oversized mint can never strand the
 coin). `completeSwap` mints the exact `amountOut` of tokenOut plus the unspent
 tokenIn as change (the attested `amountIn` spent, native-deserialized from a uint64
-respond schema), and a swap that reverts settles through the shared `refund`. Flow
+respond schema), and a swap that reverts settles through `refundSwap`. Flow
 functions: [`approve.ts`](integration-tests/src/flows/approve.ts),
 [`swap.ts`](integration-tests/src/flows/swap.ts).
 
@@ -749,7 +753,7 @@ failure recovery) and will drive it for you.
 
 # The e2e suite
 
-Eight specs run serially in a pinned order (see
+Eleven specs run serially in a pinned order (see
 `integration-tests/vitest.config.ts`). `happy-day-e2e` runs first because it
 initialises the vault and cycles the funds that the later flows build on.
 Each spec is rerun-tolerant against kept contract addresses and prints resume
@@ -759,15 +763,20 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 |---|---|---|---|
 | `happy-day-e2e` | 15 | Full deposit + withdraw round trips, every leg asserted (incl. the MPC-convention reads a responder does) | `DEPOSIT_REQUEST_ID`, `WITHDRAW_REQUEST_ID` |
 | `deposit-withdrawal-failure-refund` | 9 | A withdraw whose EVM transfer reverts ends in an in-circuit REFUND of the escrowed shielded value | `FAILURE_REFUND_DEPOSIT_REQUEST_ID`, `FAILURE_REFUND_WITHDRAW_REQUEST_ID` |
-| `deposit-claimant-not-caller` | 6 | `claim` can direct the mint to a different wallet's coin public key, discovered from chain data alone | `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID` |
-| `benchmark` | 29 | Per-leg wall-clock report covering every vault circuit — initialize (fresh deploys), approveRouter, deposit/claim, withdraw/completeWithdraw, swap/completeSwap, and a forced-revert refund (`BENCHMARK_TIMINGS_JSON` greppable line) | `BENCHMARK_DEPOSIT_REQUEST_ID`, `BENCHMARK_WITHDRAW_REQUEST_ID`, `BENCHMARK_SWAP_REQUEST_ID`, `BENCHMARK_REFUND_DEPOSIT_REQUEST_ID`, `BENCHMARK_REFUND_WITHDRAW_REQUEST_ID` |
+| `deposit-claimant-not-caller` | 6 | `completeDeposit` can direct the mint to a different wallet's coin public key, discovered from chain data alone | `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID` |
+| `benchmark` | 43 | Per-leg wall-clock report covering every vault circuit: initialise (fresh deploys), approveRouter, startDeposit/completeDeposit, startWithdraw/completeWithdraw, startSwap/completeSwap, approveStata, startSupply/completeSupply, startRedeem/completeRedeem, and forced-revert refunds (`BENCHMARK_TIMINGS_JSON` greppable line) | `BENCHMARK_DEPOSIT_REQUEST_ID`, `BENCHMARK_WITHDRAW_REQUEST_ID`, `BENCHMARK_SWAP_REQUEST_ID`, `BENCHMARK_SUPPLY_REQUEST_ID`, `BENCHMARK_REDEEM_REQUEST_ID`, `BENCHMARK_REFUND_DEPOSIT_REQUEST_ID`, `BENCHMARK_REFUND_WITHDRAW_REQUEST_ID` |
 | `false-claimer` | 6 | A deposit recorded for identity A is NOT claimable by identity B, even with the valid MPC attestation | `FALSE_CLAIMER_DEPOSIT_REQUEST_ID` |
 | `bearer-transfer` | 11 | Shielded vault tokens are bearer assets: a plain Midnight transfer hands the claim to wallet B, the emptied wallet A cannot withdraw, and B completes a full withdraw on the transferred balance | `BEARER_TRANSFER_DEPOSIT_REQUEST_ID`, `BEARER_TRANSFER_WITHDRAW_REQUEST_ID` |
 | `swap-e2e` | 1 | A deposit-funded `exactOutputSingle` swap mints exactly the requested `amountOut` of tokenOut plus the unspent tokenIn as change | none |
+| `supply-redeem-e2e` | 1 | A deposit-funded Aave supply mints the attested stataUSDC shares, and redeeming them mints back the attested USDC (principal + interest) | none |
+| `supply-refund-e2e` | 1 | A supply whose wrapper deposit reverts on-chain (drained vault balance) ends in an in-circuit REFUND of the surrendered USDC | none |
 | `swap-refund-e2e` | 1 | A swap whose `amountInMaximum` is below the real cost reverts on-chain and the settle re-mints the surrendered tokenIn | none |
+| `redeem-refund-e2e` | 1 | A redeem whose wrapper burn reverts on-chain (drained vault stataUSDC balance) ends in an in-circuit REFUND of the surrendered shares | none |
 
-78 tests total (the two swap specs and the benchmark's swap legs self-skip
-when the EVM chain has no Uniswap router, e.g. an un-forked anvil). A rerun
+95 tests total (the swap and aave specs, and the benchmark's swap/aave legs,
+self-skip when the EVM chain lacks the Uniswap router or the stataUSDC
+wrapper, e.g. an un-forked anvil; in CI the aave gate specs fail instead of
+skipping). A rerun
 against kept contract addresses (a populated `.env`)
 completes in roughly 25–35 minutes on a laptop. A fresh deployment adds the
 setup pipeline's deploys (a few minutes) on top, and a cold clone adds the

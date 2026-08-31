@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-ten-spec suite (78 tests). The pipeline itself (globalSetup steps + flow test
+eleven-spec suite (95 tests). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest
 globalSetup before ANY flow file (including single-file runs), and flow files
@@ -103,10 +103,11 @@ kept contracts.
   order: it stops at the first failure.
 - Expected per-spec test counts, in run order: `happy-day-e2e` **15**,
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
-  **6**, `benchmark` **27**, `false-claimer` **6**, `bearer-transfer` **11**,
+  **6**, `benchmark` **43**, `false-claimer` **6**, `bearer-transfer` **11**,
   `swap-e2e` **1**, `supply-redeem-e2e` **1**, `supply-refund-e2e` **1**,
-  `swap-refund-e2e` **1**. 78 total (the swap and aave specs self-skip if
-  Uniswap / the stataUSDC wrapper is absent, e.g. an un-forked anvil).
+  `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**. 95 total (the swap and aave specs self-skip if
+  Uniswap / the stataUSDC wrapper is absent, e.g. an un-forked anvil; in CI
+  the aave gate specs fail instead of skipping).
 - **Wallets are role wallets funded from ROOT at setup.** The setup's
   wallet steps resolve/generate `ROOT_SEED` plus the role seeds
   (`DEPLOYER_SEED`, `USER_SEED`, `MPC_RESPONDER_SEED`, `BEARER_SEED`),
@@ -122,12 +123,12 @@ kept contracts.
   section. A signature/attestation poll timing out while earlier contract
   calls passed almost always means the responder is down or watching stale
   addresses.
-- Give the Docker VM **16 GB**: a single claim/settle proof peaks above
+- Give the Docker VM **16 GB**: a single completeDeposit/settle proof peaks above
   12 GiB inside the proof server (see the OOM playbook below).
 - On a 16 GB VM, **restarting the proof server between spec files is the
   DEFAULT cadence, not just OOM recovery**: the OOM consistently hits a
   proving leg once the same server instance has already served several
-  proofs (observed on claim legs and once on a benchmark deposit leg).
+  proofs (observed on completeDeposit legs and once on a benchmark startDeposit leg).
   For an attended run: `yarn test:erc20-vault:e2e tests/<spec-file>` per
   file in the pinned order, `docker restart midnight-proof-server` between
   files (only while the responder log is quiet, see the responder-killed
@@ -175,10 +176,10 @@ raw traced EVM output from it, so a poll that times out with
 
 ## Reading failures
 
-- **`connect ECONNREFUSED 127.0.0.1:6300` mid-claim/settle**, with
+- **`connect ECONNREFUSED 127.0.0.1:6300` mid-settle**, with
   `docker ps -a` showing `midnight-proof-server` `Exited (137)` (and
   `docker inspect midnight-proof-server --format '{{.State.OOMKilled}}'`
-  printing `true`): the proof server was OOM-killed. The claim/settle
+  printing `true`): the proof server was OOM-killed. The settle
   proofs peak above 12 GiB, so a 16 GB Docker VM is marginal. Recover with
   `docker restart midnight-proof-server`, then rerun the SAME spec file,
   resuming its pending request via its resume var so it does not spend
@@ -201,9 +202,9 @@ raw traced EVM output from it, so a poll that times out with
   `broadcastEvm` is idempotent, so already-mined transfers skip through, and
   every spec skips already-claimed/settled requests cleanly. Expect the OOM
   (when it comes) at a proving leg once the same server instance has served
-  several proofs, most often the CLAIM (by the time a claim proves, the
-  server has already done the deposit proof plus the responder's two posts),
-  but a file's first DEPOSIT prove can also be the victim when earlier spec
+  several proofs, most often the COMPLETE-DEPOSIT (by the time it proves, the
+  server has already done the startDeposit proof plus the responder's two posts),
+  but a file's first startDeposit prove can also be the victim when earlier spec
   files exhausted the server. If the OOM killed the prove itself (the spec
   failed at a `callTx.…` with `/prove … ECONNREFUSED` and printed NO
   request-id banner), there is nothing to resume: rerun the spec plain (it
@@ -265,7 +266,7 @@ raw traced EVM output from it, so a poll that times out with
   the previous chain. Comment out the derived EVM address vars
   (`EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS`) and rerun so setup re-derives and
   re-deals ETH + real USDC to the accounts on the fork.
-- **`vault is already initialized`** on a kept address is informational: the
+- **`vault is already initialised`** on a kept address is informational: the
   test still asserts state and passes.
 - **`Insufficient funds: … Dust`** from a deploy/call: the wallet's NIGHT
   has not generated spendable DUST yet, and the setup's own retry loop

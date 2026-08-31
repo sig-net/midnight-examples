@@ -17,7 +17,7 @@
 // The arrange stage runs a full deposit round trip first (the caller must
 // hold shielded vault tokens to escrow) — that is what
 // src/flows/deposit.ts's runDepositRoundTrip exists for. Run AFTER
-// tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives there. Recovery
+// tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives there. Recovery
 // from a run that died mid-flow (proof-server OOM): rerun this file with
 // FAILURE_REFUND_DEPOSIT_REQUEST_ID / FAILURE_REFUND_WITHDRAW_REQUEST_ID set
 // to the ids the failed run printed.
@@ -48,7 +48,7 @@ import {
   type RespondOutcome,
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
-import { withdraw } from "../src/flows/withdraw.ts";
+import { startWithdraw } from "../src/flows/withdraw.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
@@ -137,7 +137,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "vault-initialized preflight: the vault contract is initialized (read-only)",
+      "vault-initialised preflight: the vault contract is initialised (read-only)",
       async () => {
         const context = await session.vaultContext();
         const state = await readVaultLedger(
@@ -145,8 +145,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          state.initialized,
-          "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
+          state.initialised,
+          "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
         ).toBe(1n);
       },
       5 * MINUTE,
@@ -221,7 +221,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requireEnv("EVM_VAULT_ADDRESS"),
         );
 
-        withdrawRequestId = await withdraw(context, {
+        withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
           evmNonce,
@@ -337,7 +337,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       async () => {
         // Final leg: the request is on the vault ledger and the MPC's FAILURE
         // attestation is posted (previous steps). The settle flow routes the
-        // fixed 5-byte failure output to the refund circuit, which
+        // fixed 5-byte failure output to refundWithdraw, which
         // re-verifies the attestation in-circuit (digest equality + ECDSA
         // against the stored MPC response key), checks the sentinel bytes, and
         // re-mints the surrendered shielded value to the withdrawer (this
@@ -360,7 +360,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // completeWithdraw would reject with "Withdrawal not found" — skip
         // cleanly instead.
         const before = await readLedger();
-        if (!before.refundCommitment.member(requestKey)) {
+        if (!before.withdrawSettleViews.member(requestKey)) {
           logSkip(
             "completeWithdraw",
             `withdrawal ${withdrawRequestId} already settled (no pending marker on the ledger)`,
@@ -377,7 +377,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "refund must consume the request from the ledger",
         ).toBe(false);
         expect(
-          after.refundCommitment.member(requestKey),
+          after.withdrawSettleViews.member(requestKey),
           "refund must consume the pending-withdrawal marker",
         ).toBe(false);
 

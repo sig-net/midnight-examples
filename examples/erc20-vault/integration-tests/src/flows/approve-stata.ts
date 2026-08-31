@@ -58,8 +58,8 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized)
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised)
+    throw new Error("vault is not initialised, run the initialise flow first");
 
   // approve(stataToken, MAX) on the underlying USDC, signed with the vault account (path
   // "vault"), the same 2-word map + bool schema as a transfer.

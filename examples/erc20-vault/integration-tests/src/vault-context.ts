@@ -37,8 +37,8 @@ import {
 
 /**
  * The joined vault contract handle — midnight-js's found-contract shape typed
- * to the vault's generated contract, so `callTx.initialize(...)` /
- * `callTx.deposit(...)` carry the real circuit signatures.
+ * to the vault's generated contract, so `callTx.initialise(...)` /
+ * `callTx.startDeposit(...)` carry the real circuit signatures.
  */
 export type DeployedVaultContract = FoundContract<VaultContract<VaultPrivateState>>;
 
@@ -143,8 +143,9 @@ export async function createVaultContext(
  *
  * @param context - The flow's context.
  * @param requestsPath - The resolved ledger-tree path of the request map.
- *   Defaults to [0] (deposit/withdraw's signBidirectionalEventMap); swaps
- *   pass VAULT_SWAP_REQUESTS_PATH ([11], the swapEventMap).
+ *   Defaults to VAULT_REQUESTS_PATH ([0, 0], deposit/withdraw's
+ *   signBidirectionalEventMap); swaps pass VAULT_SWAP_REQUESTS_PATH ([1, 7],
+ *   the swapEventMap), supply and redeem their own maps' exported paths.
  * @returns The reader.
  */
 export function createResponseReader(

@@ -2,7 +2,9 @@
 // supply. The wrapper's deposit does transferFrom(vault, ...) which reverts (the vault holds none),
 // so the MPC attests failure and completeSupply routes to refund, re-minting the surrendered
 // underlying. The lending twin of swap-refund-e2e / deposit-withdrawal-failure-refund. stataUSDC
-// only exists on Sepolia (or a Sepolia fork), so this suite gates on the wrapper and self-skips.
+// only exists on Sepolia (or a Sepolia fork), so this suite gates on the wrapper: it self-skips
+// on a local un-forked anvil, but in CI (where the fork is mandatory) an unavailable wrapper
+// FAILS, so a fork misconfiguration cannot turn the gate green while covering nothing.
 import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
 import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
@@ -10,7 +12,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { AAVE_USDC, stataAvailable } from "../src/evm-stata.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit.ts";
-import { initialize } from "../src/flows/initialize.ts";
+import { initialise } from "../src/flows/initialise.ts";
 import { runSupplyRoundTrip } from "../src/flows/supply.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
@@ -33,17 +35,22 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
     async () => {
       const context = await session.vaultContext();
       if (!(await stataAvailable(context.evmRpcUrl))) {
+        if (env.CI) {
+          throw new Error(
+            "stataUSDC wrapper unavailable on the CI fork: the Aave gate must run in CI, not skip",
+          );
+        }
         console.log(
           "SKIP: stataUSDC wrapper not deployed on this EVM chain (need Sepolia or a Sepolia fork)",
         );
         return;
       }
 
-      // Seal the config before any flow unless a kept contract address is already initialized.
+      // Seal the config before any flow unless a kept contract address is already initialised.
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      if (!(await readLedger()).initialized) {
-        await initialize(context, {
+      if (!(await readLedger()).initialised) {
+        await initialise(context, {
           vaultEvmAddress: context.evmVaultAddress,
           mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
         });

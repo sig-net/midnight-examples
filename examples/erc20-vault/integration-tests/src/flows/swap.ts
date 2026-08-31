@@ -70,15 +70,18 @@ export interface SwapOptions {
  * @param options - The swap parameters (tokenOut, fee, amountOut, amountInMaximum, evmNonce).
  * @returns The recorded swap request id.
  */
-export async function swap(context: VaultContext, options: SwapOptions): Promise<RequestIdHex> {
+export async function startSwap(
+  context: VaultContext,
+  options: SwapOptions,
+): Promise<RequestIdHex> {
   const tokenIn = evmAddressBytes(context.erc20Address);
   const tokenOut = evmAddressBytes(options.tokenOut);
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized)
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised)
+    throw new Error("vault is not initialised, run the initialise flow first");
 
   // Surrender the tokenIn vault coin of exactly amountInMaximum (burned; completeSwap returns
   // the unspent remainder as change).
@@ -128,7 +131,7 @@ export async function swap(context: VaultContext, options: SwapOptions): Promise
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  const result = await context.vault.callTx.swap(
+  const result = await context.vault.callTx.startSwap(
     options.evmNonce,
     SIGNET_DEFAULT_KEY_VERSION,
     {
@@ -281,7 +284,7 @@ export async function settleSwap(
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
   if (outcome.matchedFailureOutput) {
     console.log("swap tx never executed: refunding tokenIn to this wallet");
-    const r = await context.vault.callTx.refund(
+    const r = await context.vault.callTx.refundSwap(
       requestIdBytes(requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
@@ -376,7 +379,7 @@ export async function runSwapRoundTrip(
   );
 
   const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await swap(context, {
+  const requestId = await startSwap(context, {
     tokenOut: opts.tokenOut,
     fee: opts.fee,
     amountOut: opts.amountOut,

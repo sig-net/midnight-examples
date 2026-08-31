@@ -10,7 +10,7 @@ import {
 } from "@sig-net/midnight";
 import { ethers } from "ethers";
 
-/** Aave v3 Sepolia USDC: the underlying the vault lends (initialize's stataUnderlying). */
+/** Aave v3 Sepolia USDC: the underlying the vault lends (initialise's stataUnderlying). */
 export const AAVE_USDC = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8";
 
 /** Aave v3 Sepolia stataUSDC: the non-rebasing ERC-4626 wrapper (a proxy). */

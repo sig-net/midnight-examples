@@ -1,5 +1,5 @@
 // Thin tsx entrypoint over src/vault-ledger.ts for hand-driving a live
-// stack: print the vault's public ledger state (initialization, sealed EVM
+// stack: print the vault's public ledger state (initialisation, sealed EVM
 // address, pinned chain, pending signature requests). Needs only the indexer
 // — no wallet, no proving keys. Run:
 //   yarn workspace @midnight-examples/erc20-vault-integration-tests read-state

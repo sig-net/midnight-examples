@@ -1,4 +1,4 @@
-// The happy-day e2e flow: initialization → deposit round trip → withdraw
+// The happy-day e2e flow: initialisation → deposit round trip → withdraw
 // round trip, against contracts the globalSetup pipeline (src/setup.ts) has
 // already compiled/deployed/derived — vitest.config.ts holds the
 // orchestration contract (setup runs first, flow files run one at a time in
@@ -39,16 +39,16 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
-import { claim } from "../src/flows/claim.ts";
+import { completeDeposit } from "../src/flows/complete-deposit.ts";
 import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
-import { deposit } from "../src/flows/deposit.ts";
-import { initialize } from "../src/flows/initialize.ts";
+import { startDeposit } from "../src/flows/deposit.ts";
+import { initialise } from "../src/flows/initialise.ts";
 import {
   pollRespondBidirectional,
   type RespondOutcome,
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
-import { withdraw } from "../src/flows/withdraw.ts";
+import { startWithdraw } from "../src/flows/withdraw.ts";
 import { VAULT_PATH_BYTES } from "../src/mpc-routing.ts";
 import { printVaultState, readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
@@ -89,7 +89,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   });
 
   it(
-    "initialize [erc-vault contract method call]: seal vault EVM address + MPC response key and read back state",
+    "initialise [erc-vault contract method call]: seal vault EVM address + MPC response key and read back state",
     async () => {
       const vaultEvmAddress = requireEnv("EVM_VAULT_ADDRESS");
       const mpcResponseKey = requireEnv("MPC_RESPONSE_KEY");
@@ -97,19 +97,19 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
 
-      if ((await readLedger()).initialized) {
+      if ((await readLedger()).initialised) {
         logSkip(
-          "initialize",
-          "vault is already initialized (rerun against a kept contract address)",
+          "initialise",
+          "vault is already initialised (rerun against a kept contract address)",
         );
       } else {
-        await initialize(context, { vaultEvmAddress, mpcResponseKey });
+        await initialise(context, { vaultEvmAddress, mpcResponseKey });
       }
 
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       const state = await readLedger();
-      expect(state.initialized).toBe(1n);
+      expect(state.initialised).toBe(1n);
       expect(`0x${bytesToHex(state.vaultEvmAddress)}`.toLowerCase()).toBe(
         vaultEvmAddress.toLowerCase(),
       );
@@ -178,7 +178,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
       const amount = parseUnits("0.1", 6); // 0.1 USDC — the funding preflight's minimum
 
-      depositTransactionSignatureRequestId = await deposit(context, { amount, evmNonce });
+      depositTransactionSignatureRequestId = await startDeposit(context, { amount, evmNonce });
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       expect(depositTransactionSignatureRequestId).toMatch(/^[0-9a-f]{64}$/);
@@ -410,7 +410,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         return;
       }
 
-      await claim(context, { requestId: depositTransactionSignatureRequestId });
+      await completeDeposit(context, { requestId: depositTransactionSignatureRequestId });
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       expect(await isRequestOnLedger(), "claim must consume the request from the ledger").toBe(
@@ -492,7 +492,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
       const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
 
-      withdrawTransactionSignatureRequestId = await withdraw(context, {
+      withdrawTransactionSignatureRequestId = await startWithdraw(context, {
         amount: WITHDRAW_AMOUNT,
         destEvmAddress,
         evmNonce,
@@ -682,7 +682,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // this request the pending-withdrawal marker is gone and completeWithdraw
       // would reject with "Withdrawal not found" — skip cleanly instead.
       const before = await readLedger();
-      if (!before.refundCommitment.member(requestKey)) {
+      if (!before.withdrawSettleViews.member(requestKey)) {
         logSkip(
           "completeWithdraw",
           `withdrawal ${withdrawTransactionSignatureRequestId} already settled (no pending marker on the ledger)`,
@@ -700,7 +700,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         "completeWithdraw must consume the request from the ledger",
       ).toBe(false);
       expect(
-        after.refundCommitment.member(requestKey),
+        after.withdrawSettleViews.member(requestKey),
         "completeWithdraw must consume the pending-withdrawal marker",
       ).toBe(false);
 

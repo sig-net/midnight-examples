@@ -1,6 +1,8 @@
 // Aave lending round trip against the live stack. The stataUSDC wrapper only exists on Sepolia
-// (or a Sepolia fork), so this suite gates on the wrapper being deployed and self-skips
-// otherwise (incl. CI's bare anvil). The setup pipeline deals the derived accounts ETH + real
+// (or a Sepolia fork), so this suite gates on the wrapper being deployed: it self-skips on a
+// local un-forked anvil, but in CI (where the fork is mandatory) an unavailable wrapper FAILS,
+// so a fork misconfiguration cannot turn the gate green while covering nothing.
+// The setup pipeline deals the derived accounts ETH + real
 // USDC on the fork; here we deposit USDC to fund the vault + mint the caller a shielded USDC
 // coin, supply it into the wrapper for shielded stataUSDC shares, then redeem the shares for
 // shielded USDC (principal + accrued interest).
@@ -10,7 +12,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { AAVE_USDC, STATA_USDC, stataAvailable } from "../src/evm-stata.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit.ts";
-import { initialize } from "../src/flows/initialize.ts";
+import { initialise } from "../src/flows/initialise.ts";
 import { runRedeemRoundTrip } from "../src/flows/redeem.ts";
 import { runSupplyRoundTrip } from "../src/flows/supply.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
@@ -35,18 +37,23 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave lending e2
     async () => {
       const context = await session.vaultContext();
       if (!(await stataAvailable(context.evmRpcUrl))) {
+        if (env.CI) {
+          throw new Error(
+            "stataUSDC wrapper unavailable on the CI fork: the Aave gate must run in CI, not skip",
+          );
+        }
         console.log(
           "SKIP: stataUSDC wrapper not deployed on this EVM chain (need Sepolia or a Sepolia fork)",
         );
         return;
       }
-      // The setup pipeline deploys the vault but does not initialize it (the key it pins derives
+      // The setup pipeline deploys the vault but does not initialise it (the key it pins derives
       // from the vault address), so seal the config here before any flow — unless a kept contract
-      // address is already initialized.
+      // address is already initialised.
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      if (!(await readLedger()).initialized) {
-        await initialize(context, {
+      if (!(await readLedger()).initialised) {
+        await initialise(context, {
           vaultEvmAddress: context.evmVaultAddress,
           mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
         });

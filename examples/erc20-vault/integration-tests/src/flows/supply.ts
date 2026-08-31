@@ -67,13 +67,16 @@ export interface SupplyOptions {
  * @param options - The supply parameters (amount, evmNonce).
  * @returns The recorded supply request id.
  */
-export async function supply(context: VaultContext, options: SupplyOptions): Promise<RequestIdHex> {
+export async function startSupply(
+  context: VaultContext,
+  options: SupplyOptions,
+): Promise<RequestIdHex> {
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized)
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised)
+    throw new Error("vault is not initialised, run the initialise flow first");
 
   const coin = {
     nonce: crypto.getRandomValues(new Uint8Array(32)),
@@ -116,7 +119,7 @@ export async function supply(context: VaultContext, options: SupplyOptions): Pro
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  const result = await context.vault.callTx.supply(
+  const result = await context.vault.callTx.startSupply(
     options.evmNonce,
     SIGNET_DEFAULT_KEY_VERSION,
     options.amount,
@@ -262,7 +265,7 @@ export async function settleSupply(
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
   if (outcome.matchedFailureOutput) {
     console.log("supply tx never executed: refunding the underlying to this wallet");
-    const r = await context.vault.callTx.refund(
+    const r = await context.vault.callTx.refundSupply(
       requestIdBytes(requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
@@ -331,7 +334,7 @@ export async function runSupplyRoundTrip(
   await ensureStataApproved(session);
 
   const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await supply(context, { amount: opts.amount, evmNonce });
+  const requestId = await startSupply(context, { amount: opts.amount, evmNonce });
 
   // The deposit tx is signed by the VAULT's account (it holds the pooled funds). tolerateRevert:
   // an on-chain revert is a valid outcome the MPC attests as a failure and completeSupply settles

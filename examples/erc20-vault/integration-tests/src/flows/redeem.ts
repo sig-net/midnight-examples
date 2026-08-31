@@ -65,13 +65,16 @@ export interface RedeemOptions {
  * @param options - The redeem parameters (shares, evmNonce).
  * @returns The recorded redeem request id.
  */
-export async function redeem(context: VaultContext, options: RedeemOptions): Promise<RequestIdHex> {
+export async function startRedeem(
+  context: VaultContext,
+  options: RedeemOptions,
+): Promise<RequestIdHex> {
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized)
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised)
+    throw new Error("vault is not initialised, run the initialise flow first");
 
   const coin = {
     nonce: crypto.getRandomValues(new Uint8Array(32)),
@@ -114,7 +117,7 @@ export async function redeem(context: VaultContext, options: RedeemOptions): Pro
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  const result = await context.vault.callTx.redeem(
+  const result = await context.vault.callTx.startRedeem(
     options.evmNonce,
     SIGNET_DEFAULT_KEY_VERSION,
     options.shares,
@@ -257,7 +260,7 @@ export async function settleRedeem(
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
   if (outcome.matchedFailureOutput) {
     console.log("redeem tx never executed: refunding the shares to this wallet");
-    const r = await context.vault.callTx.refund(
+    const r = await context.vault.callTx.refundRedeem(
       requestIdBytes(requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
@@ -323,7 +326,7 @@ export async function runRedeemRoundTrip(
   }
 
   const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await redeem(context, { shares: opts.shares, evmNonce });
+  const requestId = await startRedeem(context, { shares: opts.shares, evmNonce });
 
   const signed = await pollSignatureResponse(context, {
     requestId,

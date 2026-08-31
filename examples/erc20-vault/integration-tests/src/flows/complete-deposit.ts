@@ -34,7 +34,7 @@ export interface ShieldedTokenRecipient {
 }
 
 /** Options for {@link claim}. */
-export interface ClaimOptions {
+export interface CompleteDepositOptions {
   /** The request id being claimed. */
   readonly requestId: RequestIdHex;
   /**
@@ -57,7 +57,7 @@ export interface ClaimOptions {
  * and the caller identity against the stored request, and mints shielded
  * vault tokens on success: to `options.recipient` when given, otherwise to
  * the caller. The mint's coin handling is midnight-js's job:
- * `vault.callTx.claim(...)` balances the resulting offer like any other
+ * `vault.callTx.completeDeposit(...)` balances the resulting offer like any other
  * call.
  *
  * @param context - The flow context.
@@ -66,7 +66,10 @@ export interface ClaimOptions {
  *   yet, or the attested outcome is not a success (a failed sweep cannot be
  *   claimed).
  */
-export async function claim(context: VaultContext, options: ClaimOptions): Promise<void> {
+export async function completeDeposit(
+  context: VaultContext,
+  options: CompleteDepositOptions,
+): Promise<void> {
   console.log(`vault contract:  ${context.vaultContractAddress}`);
   console.log(`signet contract: ${context.signetContractAddress}`);
   console.log(`request id:      ${options.requestId}`);
@@ -120,7 +123,7 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
       ? await withContractScopedTransaction(
           context.providers,
           async (txCtx) => {
-            await context.vault.callTx.claim(
+            await context.vault.callTx.completeDeposit(
               txCtx,
               requestIdBytes(options.requestId),
               respondBidirectionalEventToCircuitInput(outcome.event),
@@ -135,7 +138,7 @@ export async function claim(context: VaultContext, options: ClaimOptions): Promi
             ]),
           },
         )
-      : await context.vault.callTx.claim(
+      : await context.vault.callTx.completeDeposit(
           requestIdBytes(options.requestId),
           respondBidirectionalEventToCircuitInput(outcome.event),
           outcome.serializedOutput,

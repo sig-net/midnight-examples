@@ -30,7 +30,7 @@ export async function readVaultLedger(
 }
 
 /**
- * Read and print the vault's public ledger state: initialization status, the
+ * Read and print the vault's public ledger state: initialisation status, the
  * configured vault EVM address, the pinned EVM chain, and the pending signet
  * signature requests. No proving keys or transactions involved.
  *
@@ -49,7 +49,7 @@ export async function printVaultState(
   const address = bytesToHex(hexToBytes(vaultContractAddress));
   const state = await readVaultLedger(publicDataProvider, address);
   console.log(`vault contract:    ${address}`);
-  console.log(`initialized:       ${String(state.initialized)}`);
+  console.log(`initialised:       ${String(state.initialised)}`);
   console.log(`vault EVM address: 0x${bytesToHex(state.vaultEvmAddress)}`);
   // caip2Id is zero-padded ASCII; NUL-trim for display.
   console.log(

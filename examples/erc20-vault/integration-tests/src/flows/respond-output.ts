@@ -16,7 +16,7 @@
 //                        always a candidate.
 //
 // Candidate selection is by SIGNATURE VERIFICATION alone, against the
-// response key the vault pinned at initialize: the cache's own success flag
+// response key the vault pinned at initialise: the cache's own success flag
 // is unauthenticated and never decides anything, it only gates whether a
 // success candidate can be built at all. With no digest on the event there is
 // nothing else to match on. Which candidate verified is also what routes
@@ -84,7 +84,7 @@ function warnOnce(key: string, message: string): void {
  * Resolve the attested outcome for `requestId`: fetch the posted
  * RespondBidirectionalEvents, recompute both candidate serialized outputs,
  * and return the first event whose signature verifies over one of the
- * candidates against the response key the vault pinned at initialize.
+ * candidates against the response key the vault pinned at initialise.
  *
  * The failure candidate (the protocol's fixed 5-byte failure output) is
  * always computed. The success candidate (the fakenet's cached raw output,

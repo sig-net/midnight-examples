@@ -180,7 +180,7 @@ FAKENET_EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
 ERC20_ADDRESS=0x...
 ```
 
-Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialize.
+Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialise.
 
 What does NOT happen automatically on a real chain, by design:
 

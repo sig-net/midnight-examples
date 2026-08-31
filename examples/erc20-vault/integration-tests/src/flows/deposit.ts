@@ -34,7 +34,7 @@ import type { VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
-import { claim, type ShieldedTokenRecipient } from "./claim.ts";
+import { completeDeposit, type ShieldedTokenRecipient } from "./complete-deposit.ts";
 import { pollRespondBidirectional } from "./poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
 
@@ -63,7 +63,7 @@ export interface DepositOptions {
  * `ERC20_TRANSFER_*` defaults, and the caller's account pays), the MPC key
  * version, and the deposit itself. Everything else (chain, calldata, routing,
  * and even the derivation path, which is the caller's identity commitment
- * recomputed in-circuit) is contract-composed from the initialize-pinned
+ * recomputed in-circuit) is contract-composed from the initialise-pinned
  * config. The expected event record is reconstructed off-chain (chain fields
  * read from the ledger, routing from the {@link VAULT_MPC_ROUTING} mirror),
  * its id computed with the library's `calculateRequestId` TS twin, and
@@ -72,10 +72,10 @@ export interface DepositOptions {
  * @param context - The flow context.
  * @param options - The deposit arguments.
  * @returns The request id as 64-char lowercase hex.
- * @throws {Error} If an option is invalid, the vault is uninitialized, or the
+ * @throws {Error} If an option is invalid, the vault is uninitialised, or the
  *   recomputed id does not appear on the ledger.
  */
-export async function deposit(
+export async function startDeposit(
   context: VaultContext,
   options: DepositOptions,
 ): Promise<RequestIdHex> {
@@ -100,8 +100,8 @@ export async function deposit(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized) {
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised) {
+    throw new Error("vault is not initialised, run the initialise flow first");
   }
   const requestNonce = before.signetRequestNonce;
   const vaultEvmAddress = before.vaultEvmAddress;
@@ -113,7 +113,7 @@ export async function deposit(
 
   // The record the contract will store, reconstructed byte for byte: the
   // event's own sender (the vault contract, kernel.self() in-circuit), the
-  // contract-composed envelope on the initialize-pinned chain, the
+  // contract-composed envelope on the initialise-pinned chain, the
   // contract-built `transfer(vaultEvmAddress, amount)` calldata (the raw
   // selector, the ABI-ready big-endian address and amount words, as broadcast), the
   // caller's identity commitment as the 32-byte derivation path, and the
@@ -148,7 +148,7 @@ export async function deposit(
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  const result = await context.vault.callTx.deposit(
+  const result = await context.vault.callTx.startDeposit(
     options.evmNonce,
     gasLimit,
     maxFeePerGas,
@@ -258,7 +258,7 @@ export async function runDepositRoundTrip(
     // The sweep tx sender is the user's derived EVM account; its next nonce
     // comes from the chain, exactly as a wallet would fetch it.
     const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmUserAddress);
-    requestId = await deposit(context, {
+    requestId = await startDeposit(context, {
       amount: opts.amount,
       evmNonce,
       erc20Address: opts.erc20Address,
@@ -296,7 +296,7 @@ export async function runDepositRoundTrip(
 
   let claimed = false;
   if (opts.skipClaim) {
-    logSkip("claim", `skipClaim set — request ${requestId} left unclaimed on the ledger`);
+    logSkip("completeDeposit", `skipClaim set: request ${requestId} left unclaimed on the ledger`);
     return { requestId, claimed };
   }
 
@@ -308,9 +308,9 @@ export async function runDepositRoundTrip(
     context.vaultContractAddress,
   );
   if (!ledger.signBidirectionalEventMap.member(requestIdBytes(requestId))) {
-    logSkip("claim", `request ${requestId} already claimed (not on the ledger)`);
+    logSkip("completeDeposit", `request ${requestId} already claimed (not on the ledger)`);
   } else {
-    await claim(context, { requestId, recipient: opts.claimRecipient });
+    await completeDeposit(context, { requestId, recipient: opts.claimRecipient });
     claimed = true;
   }
 

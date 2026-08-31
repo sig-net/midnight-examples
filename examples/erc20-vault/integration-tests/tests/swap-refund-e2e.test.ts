@@ -9,7 +9,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit.ts";
-import { initialize } from "../src/flows/initialize.ts";
+import { initialise } from "../src/flows/initialise.ts";
 import { runSwapRoundTrip } from "../src/flows/swap.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
@@ -42,11 +42,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
         return;
       }
 
-      // Seal the config before any flow unless a kept contract address is already initialized.
+      // Seal the config before any flow unless a kept contract address is already initialised.
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      if (!(await readLedger()).initialized) {
-        await initialize(context, {
+      if (!(await readLedger()).initialised) {
+        await initialise(context, {
           vaultEvmAddress: context.evmVaultAddress,
           mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
         });

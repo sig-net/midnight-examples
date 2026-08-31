@@ -50,7 +50,7 @@ export async function assertEnvironment(env: NodeJS.ProcessEnv): Promise<void> {
 /**
  * Resolve `EVM_CHAIN_ID` from `EVM_RPC_URL` (or verify a preset value
  * against what the RPC reports — loud failure on mismatch, since examples
- * seal the chain id into their contracts at initialize).
+ * seal the chain id into their contracts at initialise).
  *
  * @param env - The suite's env accumulator.
  * @throws {Error} If the RPC is unreachable or a preset `EVM_CHAIN_ID` mismatches it.
@@ -72,7 +72,7 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
     if (BigInt(env.EVM_CHAIN_ID) !== chainId) {
       throw new Error(
         `EVM_CHAIN_ID must match the chain EVM_RPC_URL serves (it is sealed into the example's contract at` +
-          ` initialize): the RPC reports ${String(chainId)}, found ${env.EVM_CHAIN_ID}`,
+          ` initialise): the RPC reports ${String(chainId)}, found ${env.EVM_CHAIN_ID}`,
       );
     }
     logSkip("resolve EVM chain id", `EVM_CHAIN_ID is set correctly`);
@@ -80,7 +80,7 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
     env.EVM_CHAIN_ID = chainId.toString();
     console.log(`resolved EVM_CHAIN_ID=${env.EVM_CHAIN_ID} from EVM_RPC_URL`);
     console.log(
-      ` ➜ sealed into the example's contract at initialize as CAIP-2 eip155:${env.EVM_CHAIN_ID}`,
+      ` ➜ sealed into the example's contract at initialise as CAIP-2 eip155:${env.EVM_CHAIN_ID}`,
     );
     console.log(` ➜ 💡 Set as EVM_CHAIN_ID in the environment to pin it explicitly`);
   }
@@ -114,8 +114,8 @@ const mpcKeys = (env: NodeJS.ProcessEnv) => deriveMpcKeys(requireEnv(env, "MPC_R
  * response key")`, the sender-scoped derivation the real MPC uses for
  * respond-bidirectional signing. The key depends on the client contract's
  * address, so this step MUST run after the client contract deploy; the
- * example's initialize flow then pins the key on-chain via the contract's
- * one-shot initialize circuit. The fakenet responder derives the same key
+ * example's initialise flow then pins the key on-chain via the contract's
+ * one-shot initialise circuit. The fakenet responder derives the same key
  * per request from its MPC_ROOT_KEY + the request's sender, so nothing
  * extra is handed off.
  *
@@ -145,7 +145,7 @@ export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvV
   env.MPC_RESPONSE_KEY = expected;
   console.log(`derived a fresh MPC_RESPONSE_KEY=${env.MPC_RESPONSE_KEY}`);
   console.log(
-    ` ➜ the MPC's respond-bidirectional key for the client contract; the initialize flow pins it on-chain`,
+    ` ➜ the MPC's respond-bidirectional key for the client contract; the initialise flow pins it on-chain`,
   );
   console.log(` ➜ 💡 Set as MPC_RESPONSE_KEY in the environment to skip this step on the next run`);
 }

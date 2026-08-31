@@ -18,7 +18,7 @@ export enum BenchRecordKind {
  * match the keys of that file's `timings` report.
  */
 export enum BenchmarkLeg {
-  Initialize = "initialize.initialize",
+  Initialise = "initialise.initialise",
   ApproveRequest = "approve.approveRouter",
   ApprovePollSignatureResponse = "approve.pollSignatureResponse",
   ApproveBroadcastEvm = "approve.broadcastEvm",
@@ -77,9 +77,11 @@ export interface BenchRecord {
   /** Bare circuit id parsed out of `keyLocation`, when it is a contract location. */
   readonly keyCircuit?: string;
   /**
-   * 1-based occurrence of this (kind, keyLocation) within the run. `seq === 1`
-   * on a prove marks the cold prove: the proof server loads that circuit's
-   * prover key (up to hundreds of MB) on first use.
+   * 1-based occurrence of this (kind, keyLocation) within the run, counting
+   * successful observations only (an errored record reports the seq it would
+   * have taken without consuming it). `seq === 1` on a prove marks the cold
+   * prove: the proof server loads that circuit's prover key (up to hundreds
+   * of MB) on first use.
    */
   readonly seq?: number;
   /** Byte length of the serialized proof preimage sent to the proof server. */

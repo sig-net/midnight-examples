@@ -62,11 +62,11 @@ export interface WithdrawOptions {
  * @param context - The flow context.
  * @param options - The withdraw arguments.
  * @returns The request id as 64-char lowercase hex.
- * @throws {Error} If an option is invalid, the vault is uninitialized, the caller's
+ * @throws {Error} If an option is invalid, the vault is uninitialised, the caller's
  *   shielded balance cannot cover `options.amount`, or the recomputed id
  *   does not appear on the ledger.
  */
-export async function withdraw(
+export async function startWithdraw(
   context: VaultContext,
   options: WithdrawOptions,
 ): Promise<RequestIdHex> {
@@ -91,8 +91,8 @@ export async function withdraw(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized) {
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised) {
+    throw new Error("vault is not initialised, run the initialise flow first");
   }
   const requestNonce = before.signetRequestNonce;
 
@@ -142,7 +142,7 @@ export async function withdraw(
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  const result = await context.vault.callTx.withdraw(
+  const result = await context.vault.callTx.startWithdraw(
     options.evmNonce,
     keyVersion,
     {

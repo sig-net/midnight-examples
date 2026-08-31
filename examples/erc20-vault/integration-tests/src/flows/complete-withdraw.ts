@@ -74,7 +74,7 @@ export async function completeWithdraw(
 
   if (outcome.matchedFailureOutput) {
     console.log("EVM transfer never executed: refunding to this wallet (the withdrawer)");
-    const result = await context.vault.callTx.refund(
+    const result = await context.vault.callTx.refundWithdraw(
       requestIdBytes(options.requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,

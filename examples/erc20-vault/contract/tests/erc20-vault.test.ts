@@ -107,7 +107,7 @@ const OTHER_COMMITMENT = pureCircuits.userCommitment(OTHER_SECRET_KEY);
 
 // The "MPC" of these tests: its response key (secp256k1, derived per client
 // contract from the contract address + the fixed path "midnight response
-// key") is pinned by the one-shot initialize circuit right after deploy,
+// key") is pinned by the one-shot initialise circuit right after deploy,
 // exactly as a real deployment pins the off-chain-derived key (the key
 // depends on the contract's own address, so it cannot be a constructor arg).
 const MPC_RESPONSE_SECRET = bytes(32, 0x42);
@@ -144,17 +144,17 @@ const signetStateProvider = async () => {
 };
 
 const VAULT_EVM = bytes(20, 0xee);
-// The pinned Uniswap SwapRouter02 (initialize arg + swap `to`).
+// The pinned Uniswap SwapRouter02 (initialise arg + swap `to`).
 const ROUTER = bytes(20, 0x11);
 const ERC20 = bytes(20, 0xaa);
-// The pinned Aave USDC pair (initialize args): the underlying and its stataUSDC wrapper.
+// The pinned Aave USDC pair (initialise args): the underlying and its stataUSDC wrapper.
 const STATA_UNDERLYING = bytes(20, 0xdd); // supply burns this colour, redeem mints it
 const STATA_TOKEN = bytes(20, 0xcc); // supply/redeem `to`; supply mints this colour
 const ZERO_ADDRESS = new Uint8Array(20);
 const AMOUNT = 1_000_000n;
 const UINT64_MAX = 18446744073709551615n;
 
-// The chain config initialize() pins (matching Sepolia's CAIP-2 form).
+// The chain config initialise() pins (matching Sepolia's CAIP-2 form).
 const CHAIN_ID = 11155111n;
 const CAIP2_ID = asciiPadded("eip155:11155111", 32);
 
@@ -217,7 +217,7 @@ const deployContract = async (deployerCommitment: Uint8Array = DEPLOYER_COMMITME
     SIGNET_CONTRACT_REF,
   );
   const ctx = createCircuitContext(
-    "deposit",
+    "startDeposit",
     VAULT_ADDRESS,
     CPK,
     currentContractState,
@@ -238,7 +238,7 @@ const deployContract = async (deployerCommitment: Uint8Array = DEPLOYER_COMMITME
  */
 const strangerContext = async (
   circuitId: string,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["deposit"]>[0],
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startDeposit"]>[0],
 ) =>
   createCircuitContext(
     circuitId,
@@ -254,13 +254,13 @@ const strangerContext = async (
   );
 
 /**
- * Deploy + initialize(VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY) as
+ * Deploy + initialise(VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY) as
  * the deployer: the ready-to-use vault, with the MPC response key stored.
  */
-const deployInitialized = async () => {
+const deployInitialised = async () => {
   const { contract, ctx } = await deployContract();
   const next = (
-    await contract.circuits.initialize(
+    await contract.circuits.initialise(
       ctx,
       VAULT_EVM,
       ROUTER,
@@ -277,10 +277,10 @@ const deployInitialized = async () => {
 /** Call deposit with its flat args spread in circuit order. */
 const deposit = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["deposit"]>[0],
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startDeposit"]>[0],
   args: DepositCallArgs,
 ) =>
-  contract.circuits.deposit(
+  contract.circuits.startDeposit(
     ctx,
     args.evmNonce,
     args.gasLimit,
@@ -335,22 +335,20 @@ describe("userCommitment", () => {
   });
 });
 
-describe("withdrawRefundCommitment", () => {
+describe("refundCommitment", () => {
   it("is domain-separated from userCommitment and unique per secret AND per request id", () => {
     const requestIdA = bytes(32, 0x01);
     const requestIdB = bytes(32, 0x02);
-    const commitment = pureCircuits.withdrawRefundCommitment(SECRET_KEY, requestIdA);
+    const commitment = pureCircuits.refundCommitment(SECRET_KEY, requestIdA);
     expect(commitment).toHaveLength(32);
     // Never the deposit-identity commitment: THAT one is public on the ledger
     // as the deposit's derivation path, so equality would link withdraw to
     // deposit.
     expect(commitment).not.toEqual(pureCircuits.userCommitment(SECRET_KEY));
     // Bound to the request id: two withdrawals by the same secret differ.
-    expect(commitment).not.toEqual(pureCircuits.withdrawRefundCommitment(SECRET_KEY, requestIdB));
+    expect(commitment).not.toEqual(pureCircuits.refundCommitment(SECRET_KEY, requestIdB));
     // And bound to the secret: another identity's commitment differs.
-    expect(commitment).not.toEqual(
-      pureCircuits.withdrawRefundCommitment(OTHER_SECRET_KEY, requestIdA),
-    );
+    expect(commitment).not.toEqual(pureCircuits.refundCommitment(OTHER_SECRET_KEY, requestIdA));
   });
 });
 
@@ -365,12 +363,12 @@ describe("ABI words (shared library circuits)", () => {
   });
 });
 
-describe("initialize", () => {
+describe("initialise", () => {
   it("is deployer-gated", async () => {
-    // Deployed with a stranger's commitment; our caller key can't initialize.
+    // Deployed with a stranger's commitment; our caller key can't initialise.
     const { contract, ctx } = await deployContract(OTHER_COMMITMENT);
     await expect(
-      contract.circuits.initialize(
+      contract.circuits.initialise(
         ctx,
         VAULT_EVM,
         ROUTER,
@@ -384,9 +382,9 @@ describe("initialize", () => {
   });
 
   it("is one-shot", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     await expect(
-      contract.circuits.initialize(
+      contract.circuits.initialise(
         ctx,
         VAULT_EVM,
         ROUTER,
@@ -396,13 +394,13 @@ describe("initialize", () => {
         CAIP2_ID,
         MPC_RESPONSE_KEY,
       ),
-    ).rejects.toThrow(/Already initialized/);
+    ).rejects.toThrow(/Already initialised/);
   });
 
   it("rejects a zero chain id", async () => {
     const { contract, ctx } = await deployContract();
     await expect(
-      contract.circuits.initialize(
+      contract.circuits.initialise(
         ctx,
         VAULT_EVM,
         ROUTER,
@@ -416,9 +414,9 @@ describe("initialize", () => {
   });
 
   it("stores the vault EVM address, the chain config and the MPC response key", async () => {
-    const { ctx } = await deployInitialized();
+    const { ctx } = await deployInitialised();
     const state = ledger(ctx.callContext.currentQueryContext.state);
-    expect(state.initialized).toBe(1n);
+    expect(state.initialised).toBe(1n);
     expect(state.vaultEvmAddress).toEqual(VAULT_EVM);
     expect(state.uniswapRouter).toEqual(ROUTER);
     expect(state.evmChainId).toBe(CHAIN_ID);
@@ -429,7 +427,7 @@ describe("initialize", () => {
 
 describe("deposit round-trip", () => {
   it("stores a fully contract-composed event readable identically via ledger(), the shared parser, and the RAW reader", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
 
     const { context: next } = await deposit(contract, ctx, VALID_DEPOSIT);
     const state = next.callContext.currentQueryContext.state;
@@ -471,7 +469,7 @@ describe("deposit round-trip", () => {
     });
 
     // The contract-composed envelope: the deposit's token on the
-    // initialize-pinned chain, no ETH value, the caller's nonce + gas args.
+    // initialise-pinned chain, no ETH value, the caller's nonce + gas args.
     const { calldata, ...envelope } = record.txParams;
     expect(envelope).toEqual({
       to: ERC20,
@@ -564,20 +562,20 @@ const DEPOSIT_REJECTION_CASES: DepositRejectionCase[] = [
 
 describe("deposit validation", () => {
   it.each(DEPOSIT_REJECTION_CASES)("rejects $name", async ({ args, throws }) => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     await expect(deposit(contract, ctx, args)).rejects.toThrow(throws);
   });
 
-  it("rejects before initialize", async () => {
+  it("rejects before initialise", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(deposit(contract, ctx, VALID_DEPOSIT)).rejects.toThrow(/Not initialized/);
+    await expect(deposit(contract, ctx, VALID_DEPOSIT)).rejects.toThrow(/Not initialised/);
   });
 
   it("identical deposits get DISTINCT ids: requestNonce differentiates them", async () => {
     // The dedup assert (!member) is a belt-and-braces invariant: it cannot
     // trip in the normal flow, as the nonce is part of the hashed record and
     // an identical resubmission is therefore a NEW request. Document that here.
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
 
     const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
     const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
@@ -594,9 +592,9 @@ describe("deposit validation", () => {
     // The derivation path (the caller's commitment) is part of the hashed
     // record too, so the same deposit by two different identities can never
     // collide even at the same nonce.
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
-    const stranger = await strangerContext("deposit", afterFirst);
+    const stranger = await strangerContext("startDeposit", afterFirst);
     const afterSecond = (await deposit(contract, stranger, VALID_DEPOSIT)).context;
 
     const index = toSignBidirectionalEventIndex(
@@ -655,15 +653,15 @@ const VALID_WITHDRAW: WithdrawCallArgs = {
 /** Call withdraw with its flat args spread in circuit order. */
 const withdraw = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["withdraw"]>[0],
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startWithdraw"]>[0],
   args: WithdrawCallArgs,
-) => contract.circuits.withdraw(ctx, args.evmNonce, args.keyVersion, args.withdraw, args.coin);
+) => contract.circuits.startWithdraw(ctx, args.evmNonce, args.keyVersion, args.withdraw, args.coin);
 
 // ---- Withdraw tests ----
 
 describe("withdraw round-trip", () => {
   it("burns the coin and stores a vault-path event with a contract-fixed envelope", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
 
     const { context: next } = await withdraw(contract, ctx, VALID_WITHDRAW);
     const state = next.callContext.currentQueryContext.state;
@@ -698,7 +696,7 @@ describe("withdraw round-trip", () => {
     expect(record.path).toEqual(asciiPadded("vault", 32));
 
     // The envelope is contract-composed end to end: the withdraw's token on
-    // the initialize-pinned chain, the caller's account nonce, and the
+    // the initialise-pinned chain, the caller's account nonce, and the
     // CONTRACT-FIXED gas envelope. The gas literals here are the lockstep
     // check for any off-chain code that rebuilds this record (the example's
     // withdraw flow ERC20_TRANSFER_* constants).
@@ -743,9 +741,9 @@ describe("withdraw round-trip", () => {
     // commitment (recomputed off-chain here via the compiled circuit,
     // domain-separated from userCommitment and bound to THIS request id) plus
     // the typed token + amount settle circuits read back; nonce bumped.
-    expect(ledger(state).refundCommitment.member(requestIdBytes(idHex))).toBe(true);
-    expect(ledger(state).refundCommitment.lookup(requestIdBytes(idHex))).toEqual({
-      commitment: pureCircuits.withdrawRefundCommitment(SECRET_KEY, requestIdBytes(idHex)),
+    expect(ledger(state).withdrawSettleViews.member(requestIdBytes(idHex))).toBe(true);
+    expect(ledger(state).withdrawSettleViews.lookup(requestIdBytes(idHex))).toEqual({
+      commitment: pureCircuits.refundCommitment(SECRET_KEY, requestIdBytes(idHex)),
       erc20: ERC20,
       amount: AMOUNT,
     });
@@ -797,7 +795,7 @@ describe("withdraw round-trip", () => {
     // No shared escrow slot: each withdrawal only touches its own request-id
     // keyed entries, so coins of different colors surrendered back-to-back
     // must both record.
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     const otherErc20 = bytes(20, 0xab);
     const otherColor = hexToBytes(
       rawTokenType(pureCircuits.vaultTokenDomainSeparator(otherErc20), VAULT_ADDRESS),
@@ -815,7 +813,7 @@ describe("withdraw round-trip", () => {
     const state = afterSecond.callContext.currentQueryContext.state;
     const index = toSignBidirectionalEventIndex(ledger(state).signBidirectionalEventMap);
     expect(index.size).toBe(2);
-    expect(ledger(state).refundCommitment.size()).toBe(2n);
+    expect(ledger(state).withdrawSettleViews.size()).toBe(2n);
   });
 });
 
@@ -875,19 +873,19 @@ const WITHDRAW_REJECTION_CASES: WithdrawRejectionCase[] = [
 
 describe("withdraw validation", () => {
   it.each(WITHDRAW_REJECTION_CASES)("rejects $name", async ({ args, throws }) => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     await expect(withdraw(contract, ctx, args)).rejects.toThrow(throws);
   });
 
-  it("rejects before initialize", async () => {
+  it("rejects before initialise", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(withdraw(contract, ctx, VALID_WITHDRAW)).rejects.toThrow(/Not initialized/);
+    await expect(withdraw(contract, ctx, VALID_WITHDRAW)).rejects.toThrow(/Not initialised/);
   });
 });
 
 // ---- Response fixtures (shared by the completeWithdraw + claim settle suites) ----
 
-// An MPC response secret OTHER than the one initialize pinned the key of.
+// An MPC response secret OTHER than the one initialise pinned the key of.
 const IMPOSTER_SECRET = bytes(32, 0x43);
 
 // The caller-chosen mint nonce claim/completeWithdraw take. In production the
@@ -944,12 +942,12 @@ const respond = (
 // ---- Complete-withdraw fixtures ----
 
 /**
- * Deploy + initialize + withdraw(VALID_WITHDRAW): the arrange step of
+ * Deploy + initialise + withdraw(VALID_WITHDRAW): the arrange step of
  * every complete-withdraw test. Returns the pending withdrawal's request id
  * (the single ledger map key) alongside the threaded context.
  */
 const withdrawRequested = async () => {
-  const { contract, ctx } = await deployInitialized();
+  const { contract, ctx } = await deployInitialised();
   const next = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -976,7 +974,7 @@ describe("completeWithdraw settle", () => {
 
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
-    expect(state.refundCommitment.isEmpty()).toBe(true);
+    expect(state.withdrawSettleViews.isEmpty()).toBe(true);
   });
 
   it("success settle is permissionless: a STRANGER finalizes (cleanup mints nothing)", async () => {
@@ -994,7 +992,7 @@ describe("completeWithdraw settle", () => {
 
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
-    expect(state.refundCommitment.isEmpty()).toBe(true);
+    expect(state.withdrawSettleViews.isEmpty()).toBe(true);
   });
 
   it("false-return response: the WITHDRAWER re-mints the surrendered value and consumes the withdrawal", async () => {
@@ -1017,7 +1015,7 @@ describe("completeWithdraw settle", () => {
 
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
-    expect(state.refundCommitment.isEmpty()).toBe(true);
+    expect(state.withdrawSettleViews.isEmpty()).toBe(true);
   });
 
   it("false-return response: a caller other than the withdrawer cannot take the refund", async () => {
@@ -1120,7 +1118,7 @@ describe("completeWithdraw settle", () => {
   });
 
   it("rejects settling a DEPOSIT request (no refund marker) even with a genuine response", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     const next = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1142,7 +1140,7 @@ describe("completeWithdraw settle", () => {
 
 // ---- Refund-withdraw tests ----
 
-describe("refund (withdrawal) settle", () => {
+describe("refundWithdraw settle", () => {
   it("failure output: the WITHDRAWER re-mints the surrendered value and consumes the withdrawal", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
 
@@ -1150,7 +1148,7 @@ describe("refund (withdrawal) settle", () => {
     // call resolving proves the mint executed, the observable effect is the
     // consumption of the request and its pending-withdrawal marker.
     const next = (
-      await contract.circuits.refund(
+      await contract.circuits.refundWithdraw(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
@@ -1161,20 +1159,20 @@ describe("refund (withdrawal) settle", () => {
 
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
-    expect(state.refundCommitment.isEmpty()).toBe(true);
+    expect(state.withdrawSettleViews.isEmpty()).toBe(true);
   });
 
   it("a caller other than the withdrawer cannot take the refund", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     await expect(
-      contract.circuits.refund(
-        await strangerContext("refund", ctx),
+      contract.circuits.refundWithdraw(
+        await strangerContext("refundWithdraw", ctx),
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Not the requester/);
+    ).rejects.toThrow(/Not the withdrawer/);
   });
 
   it("rejects a genuinely attested 5-byte output that is not the failure output", async () => {
@@ -1183,7 +1181,7 @@ describe("refund (withdrawal) settle", () => {
     // no refund. Guards against width collisions as respond schemas grow.
     const notTheSentinel = bytes(5, 0x01);
     await expect(
-      contract.circuits.refund(
+      contract.circuits.refundWithdraw(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, notTheSentinel),
@@ -1196,7 +1194,7 @@ describe("refund (withdrawal) settle", () => {
   it("rejects a failure output signed by a key other than the stored MPC response key", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     await expect(
-      contract.circuits.refund(
+      contract.circuits.refundWithdraw(
         ctx,
         requestId,
         respond(IMPOSTER_SECRET, requestId, OUTPUT_REVERTED),
@@ -1212,7 +1210,7 @@ describe("refund (withdrawal) settle", () => {
     // recomputed digest no longer matches what the signature covers, so the
     // signature check rejects it before the sentinel gate.
     await expect(
-      contract.circuits.refund(
+      contract.circuits.refundWithdraw(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, bytes(5, 0x01)),
@@ -1223,7 +1221,7 @@ describe("refund (withdrawal) settle", () => {
   });
 
   it("rejects refunding a DEPOSIT request (no refund marker) even with a genuine failure output", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     const next = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1232,22 +1230,22 @@ describe("refund (withdrawal) settle", () => {
     const depositId = requestIdBytes(depositIdHex);
 
     await expect(
-      contract.circuits.refund(
+      contract.circuits.refundWithdraw(
         next,
         depositId,
         respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-      // Neither refundCommitment nor swapRefundCommitment holds a deposit id, so the
-      // merged refund's swap branch is the one that ultimately rejects.
-    ).rejects.toThrow(/Request not found/);
+      // Deposits never insert the pending-withdrawal marker, so a deposit id
+      // cannot be refunded as a withdrawal.
+    ).rejects.toThrow(/Withdrawal not found/);
   });
 
   it("refunds once: a second refund for the same request rejects", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     const next = (
-      await contract.circuits.refund(
+      await contract.circuits.refundWithdraw(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
@@ -1256,15 +1254,15 @@ describe("refund (withdrawal) settle", () => {
       )
     ).context;
     await expect(
-      contract.circuits.refund(
+      contract.circuits.refundWithdraw(
         next,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-      // Once consumed, the id is in neither marker map, so the swap branch rejects.
-    ).rejects.toThrow(/Request not found/);
+      // The first refund consumed the pending-withdrawal marker.
+    ).rejects.toThrow(/Withdrawal not found/);
   });
 });
 
@@ -1300,12 +1298,12 @@ const CONTRACT_RECIPIENT = {
 };
 
 /**
- * Deploy + initialize + deposit(VALID_DEPOSIT): the arrange step of
+ * Deploy + initialise + deposit(VALID_DEPOSIT): the arrange step of
  * every claim test. Returns the pending deposit's request id (the single
  * ledger map key) alongside the threaded context.
  */
 const depositRequested = async () => {
-  const { contract, ctx } = await deployInitialized();
+  const { contract, ctx } = await deployInitialised();
   const next = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1316,7 +1314,7 @@ const depositRequested = async () => {
 
 // ---- Claim-deposit tests ----
 
-describe("claim settle", () => {
+describe("completeDeposit settle", () => {
   // The mint itself is shielded: the call resolving proves it executed, and
   // the publicly-observable effect asserted here is the request's consumption.
   it.each([
@@ -1333,7 +1331,7 @@ describe("claim settle", () => {
     const { contract, ctx, requestId } = await depositRequested();
 
     const next = (
-      await contract.circuits.claim(
+      await contract.circuits.completeDeposit(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
@@ -1350,7 +1348,7 @@ describe("claim settle", () => {
   it("rejects a response signed by a key other than the stored MPC response key", async () => {
     const { contract, ctx, requestId } = await depositRequested();
     await expect(
-      contract.circuits.claim(
+      contract.circuits.completeDeposit(
         ctx,
         requestId,
         respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS),
@@ -1364,7 +1362,7 @@ describe("claim settle", () => {
   it("rejects a genuinely signed sweep that returned false", async () => {
     const { contract, ctx, requestId } = await depositRequested();
     await expect(
-      contract.circuits.claim(
+      contract.circuits.completeDeposit(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
@@ -1383,7 +1381,7 @@ describe("claim settle", () => {
     // success. (The reverse presentation would trip the return-value assert
     // first.)
     await expect(
-      contract.circuits.claim(
+      contract.circuits.completeDeposit(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
@@ -1398,7 +1396,7 @@ describe("claim settle", () => {
     const { contract, ctx } = await depositRequested();
     const unknownId = bytes(32, 0xab);
     await expect(
-      contract.circuits.claim(
+      contract.circuits.completeDeposit(
         ctx,
         unknownId,
         respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS),
@@ -1412,7 +1410,7 @@ describe("claim settle", () => {
   it("claims once: a second claim for the same request rejects", async () => {
     const { contract, ctx, requestId } = await depositRequested();
     const next = (
-      await contract.circuits.claim(
+      await contract.circuits.completeDeposit(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
@@ -1422,7 +1420,7 @@ describe("claim settle", () => {
       )
     ).context;
     await expect(
-      contract.circuits.claim(
+      contract.circuits.completeDeposit(
         next,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
@@ -1438,8 +1436,8 @@ describe("claim settle", () => {
     // stranger's witness recomputes a different one.
     const { contract, ctx, requestId } = await depositRequested();
     await expect(
-      contract.circuits.claim(
-        await strangerContext("claim", ctx),
+      contract.circuits.completeDeposit(
+        await strangerContext("completeDeposit", ctx),
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
@@ -1497,9 +1495,9 @@ const VALID_SWAP: SwapCallArgs = {
 
 const swap = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["swap"]>[0],
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startSwap"]>[0],
   args: SwapCallArgs,
-) => contract.circuits.swap(ctx, args.evmNonce, args.keyVersion, args.swap, args.coin);
+) => contract.circuits.startSwap(ctx, args.evmNonce, args.keyVersion, args.swap, args.coin);
 
 // A successful swap's attested output: the amountIn spent as the MPC serializes it — a
 // Midnight-native little-endian uint64 (8 bytes), the twin of serializeRespondOutput.
@@ -1517,7 +1515,7 @@ const OUTPUT_SWAP = swapOutput(SWAP_AMOUNT_IN_SPENT);
 
 describe("approveRouter", () => {
   it("records an approve(router, ~unlimited) on field 0 from the vault path, no coin", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     const { context: next } = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
 
     const index = toSignBidirectionalEventIndex(
@@ -1537,12 +1535,12 @@ describe("approveRouter", () => {
     expect(calldata.value.words[1]).toEqual(numericAbiWord(MAX_APPROVE));
   });
 
-  it("is permissionless (a stranger may ready a token) and needs initialize", async () => {
+  it("is permissionless (a stranger may ready a token) and needs initialise", async () => {
     const { contract, ctx } = await deployContract();
     await expect(contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).rejects.toThrow(
-      /Not initialized/,
+      /Not initialised/,
     );
-    const ready = await deployInitialized();
+    const ready = await deployInitialised();
     await expect(
       ready.contract.circuits.approveRouter(
         await strangerContext("approveRouter", ready.ctx),
@@ -1556,7 +1554,7 @@ describe("approveRouter", () => {
 
 describe("swap round-trip", () => {
   it("burns tokenIn and stores a vault-path exactOutputSingle event on field 11", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     const { context: next } = await swap(contract, ctx, VALID_SWAP);
     const state = ledger(next.callContext.currentQueryContext.state);
 
@@ -1598,7 +1596,7 @@ describe("swap round-trip", () => {
     expect(calldata.value.words[6]).toEqual(numericAbiWord(0n));
 
     // Pending-swap marker pinned.
-    expect(state.swapRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
+    expect(state.swapSettleViews.member(requestIdBytes(idHex))).toBe(true);
 
     // Same burn as withdraw (which asserts the receive/spend pairing in
     // detail): amountInMaximum of the tokenIn vault coin is received, spent,
@@ -1640,7 +1638,7 @@ describe("swap round-trip", () => {
   });
 
   it("rejects a coin that is not the tokenIn vault color or not amountInMaximum", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     await expect(
       swap(contract, ctx, { ...VALID_SWAP, coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR_OUT) }),
     ).rejects.toThrow(/Coin is not the vault token for tokenIn/);
@@ -1653,7 +1651,7 @@ describe("swap round-trip", () => {
 // ---- Swap settle fixtures ----
 
 const swapRequested = async () => {
-  const { contract, ctx } = await deployInitialized();
+  const { contract, ctx } = await deployInitialised();
   const next = (await swap(contract, ctx, VALID_SWAP)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).swapEventMap,
@@ -1677,7 +1675,7 @@ describe("completeSwap settle", () => {
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.swapEventMap.isEmpty()).toBe(true);
-    expect(state.swapRefundCommitment.isEmpty()).toBe(true);
+    expect(state.swapSettleViews.isEmpty()).toBe(true);
   });
 
   it("a caller other than the swapper cannot take the minted tokenOut", async () => {
@@ -1692,6 +1690,20 @@ describe("completeSwap settle", () => {
         CHANGE_NONCE,
       ),
     ).rejects.toThrow(/Not the swapper/);
+  });
+
+  it("rejects a changeNonce equal to mintNonce (the two coins must not share a nonce)", async () => {
+    const { contract, ctx, requestId } = await swapRequested();
+    await expect(
+      contract.circuits.completeSwap(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        OUTPUT_SWAP,
+        MINT_NONCE,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/changeNonce must differ from mintNonce/);
   });
 
   it("rejects an attestation signed by the wrong key, and presented bytes that differ", async () => {
@@ -1719,11 +1731,11 @@ describe("completeSwap settle", () => {
   });
 });
 
-describe("refund (swap) settle", () => {
+describe("refundSwap settle", () => {
   it("on the MPC failure output, re-mints tokenIn to the swapper and cleans up", async () => {
     const { contract, ctx, requestId } = await swapRequested();
     const next = (
-      await contract.circuits.refund(
+      await contract.circuits.refundSwap(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
@@ -1733,20 +1745,33 @@ describe("refund (swap) settle", () => {
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.swapEventMap.isEmpty()).toBe(true);
-    expect(state.swapRefundCommitment.isEmpty()).toBe(true);
+    expect(state.swapSettleViews.isEmpty()).toBe(true);
   });
 
   it("is swapper-gated", async () => {
     const { contract, ctx, requestId } = await swapRequested();
     await expect(
-      contract.circuits.refund(
-        await strangerContext("refund", ctx),
+      contract.circuits.refundSwap(
+        await strangerContext("refundSwap", ctx),
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Not the requester/);
+    ).rejects.toThrow(/Not the swapper/);
+  });
+
+  it("a swap id cannot be refunded through refundWithdraw (kind isolation)", async () => {
+    const { contract, ctx, requestId } = await swapRequested();
+    await expect(
+      contract.circuits.refundWithdraw(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Withdrawal not found/);
   });
 });
 
@@ -1775,21 +1800,21 @@ const REDEEM_ASSETS = 2_780_944n; // attested USDC assets minted (principal + in
 
 const supply = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["supply"]>[0],
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startSupply"]>[0],
   amount: bigint,
   coin: ReturnType<typeof vaultCoin>,
-) => contract.circuits.supply(ctx, 0n, 1n, amount, coin);
+) => contract.circuits.startSupply(ctx, 0n, 1n, amount, coin);
 
 const redeem = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["redeem"]>[0],
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startRedeem"]>[0],
   shares: bigint,
   coin: ReturnType<typeof vaultCoin>,
-) => contract.circuits.redeem(ctx, 0n, 1n, shares, coin);
+) => contract.circuits.startRedeem(ctx, 0n, 1n, shares, coin);
 
 describe("approveStata", () => {
   it("records approve(stataToken, MAX) on field 0 from the vault path, to = the underlying", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     const { context: next } = await contract.circuits.approveStata(ctx, 0n, 1n);
 
     const index = toSignBidirectionalEventIndex(
@@ -1809,7 +1834,7 @@ describe("approveStata", () => {
 
 describe("supply round-trip", () => {
   it("burns the underlying and stores a vault-path deposit event on the supply map", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     const { context: next } = await supply(
       contract,
       ctx,
@@ -1834,7 +1859,7 @@ describe("supply round-trip", () => {
     expect(calldata.value.words[0]).toEqual(numericAbiWord(SUPPLY_AMOUNT));
     expect(calldata.value.words[1]).toEqual(evmAddressAbiWord(VAULT_EVM));
 
-    expect(state.supplyRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
+    expect(state.supplySettleViews.member(requestIdBytes(idHex))).toBe(true);
 
     // Same burn as withdraw (which asserts the receive/spend pairing in
     // detail): the underlying vault coin is received, spent, and paid whole to
@@ -1871,7 +1896,7 @@ describe("supply round-trip", () => {
   });
 
   it("rejects a coin that is not the underlying color or not the amount", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     await expect(
       supply(contract, ctx, SUPPLY_AMOUNT, vaultCoin(SUPPLY_AMOUNT, STATA_COLOR)),
     ).rejects.toThrow(/Coin is not the vault token for the underlying/);
@@ -1879,10 +1904,21 @@ describe("supply round-trip", () => {
       supply(contract, ctx, SUPPLY_AMOUNT, vaultCoin(SUPPLY_AMOUNT + 1n, STATA_UNDERLYING_COLOR)),
     ).rejects.toThrow(/Coin value must equal amount/);
   });
+
+  it("rejects a zero amount and an amount past the Uint<64> refund cap", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(supply(contract, ctx, 0n, vaultCoin(0n, STATA_UNDERLYING_COLOR))).rejects.toThrow(
+      /amount must be positive/,
+    );
+    const overCap = 1n << 64n;
+    await expect(
+      supply(contract, ctx, overCap, vaultCoin(overCap, STATA_UNDERLYING_COLOR)),
+    ).rejects.toThrow(/amount exceeds Uint<64> max/);
+  });
 });
 
 const supplyRequested = async () => {
-  const { contract, ctx } = await deployInitialized();
+  const { contract, ctx } = await deployInitialised();
   const next = (
     await supply(contract, ctx, SUPPLY_AMOUNT, vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR))
   ).context;
@@ -1908,7 +1944,7 @@ describe("completeSupply settle", () => {
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.supplyEventMap.isEmpty()).toBe(true);
-    expect(state.supplyRefundCommitment.isEmpty()).toBe(true);
+    expect(state.supplySettleViews.isEmpty()).toBe(true);
   });
 
   it("a caller other than the supplier cannot take the minted shares", async () => {
@@ -1928,7 +1964,7 @@ describe("completeSupply settle", () => {
 
 describe("redeem round-trip", () => {
   it("burns the stataToken and stores a vault-path redeem event on the redeem map", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     const { context: next } = await redeem(
       contract,
       ctx,
@@ -1952,7 +1988,7 @@ describe("redeem round-trip", () => {
     expect(calldata.value.words[1]).toEqual(evmAddressAbiWord(VAULT_EVM));
     expect(calldata.value.words[2]).toEqual(evmAddressAbiWord(VAULT_EVM));
 
-    expect(state.redeemRefundCommitment.member(requestIdBytes(idHex))).toBe(true);
+    expect(state.redeemSettleViews.member(requestIdBytes(idHex))).toBe(true);
 
     // Same burn as supply: the wrapper vault coin is received, spent, and paid
     // whole to the shielded burn address.
@@ -1988,7 +2024,7 @@ describe("redeem round-trip", () => {
   });
 
   it("rejects a coin that is not the wrapper color or not the shares", async () => {
-    const { contract, ctx } = await deployInitialized();
+    const { contract, ctx } = await deployInitialised();
     await expect(
       redeem(contract, ctx, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_UNDERLYING_COLOR)),
     ).rejects.toThrow(/Coin is not the vault token for the wrapper/);
@@ -1996,10 +2032,21 @@ describe("redeem round-trip", () => {
       redeem(contract, ctx, REDEEM_SHARES, vaultCoin(REDEEM_SHARES + 1n, STATA_COLOR)),
     ).rejects.toThrow(/Coin value must equal shares/);
   });
+
+  it("rejects zero shares and shares past the Uint<64> refund cap", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(redeem(contract, ctx, 0n, vaultCoin(0n, STATA_COLOR))).rejects.toThrow(
+      /shares must be positive/,
+    );
+    const overCap = 1n << 64n;
+    await expect(redeem(contract, ctx, overCap, vaultCoin(overCap, STATA_COLOR))).rejects.toThrow(
+      /shares exceeds Uint<64> max/,
+    );
+  });
 });
 
 const redeemRequested = async () => {
-  const { contract, ctx } = await deployInitialized();
+  const { contract, ctx } = await deployInitialised();
   const next = (await redeem(contract, ctx, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_COLOR)))
     .context;
   const index = toSignBidirectionalEventIndex(
@@ -2010,6 +2057,20 @@ const redeemRequested = async () => {
 };
 
 describe("completeRedeem settle", () => {
+  it("a caller other than the redeemer cannot take the minted underlying", async () => {
+    const { contract, ctx, requestId } = await redeemRequested();
+    const out = swapOutput(REDEEM_ASSETS);
+    await expect(
+      contract.circuits.completeRedeem(
+        await strangerContext("completeRedeem", ctx),
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, out),
+        out,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Not the redeemer/);
+  });
+
   it("verifies the assets attestation, mints the underlying, and cleans up", async () => {
     const { contract, ctx, requestId } = await redeemRequested();
     const out = swapOutput(REDEEM_ASSETS);
@@ -2024,15 +2085,15 @@ describe("completeRedeem settle", () => {
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.redeemEventMap.isEmpty()).toBe(true);
-    expect(state.redeemRefundCommitment.isEmpty()).toBe(true);
+    expect(state.redeemSettleViews.isEmpty()).toBe(true);
   });
 });
 
-describe("refund (supply/redeem) settle", () => {
+describe("refundSupply / refundRedeem settle", () => {
   it("supply: on the MPC failure output, re-mints the underlying to the supplier and cleans up", async () => {
     const { contract, ctx, requestId } = await supplyRequested();
     const next = (
-      await contract.circuits.refund(
+      await contract.circuits.refundSupply(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
@@ -2042,13 +2103,13 @@ describe("refund (supply/redeem) settle", () => {
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.supplyEventMap.isEmpty()).toBe(true);
-    expect(state.supplyRefundCommitment.isEmpty()).toBe(true);
+    expect(state.supplySettleViews.isEmpty()).toBe(true);
   });
 
   it("redeem: on the MPC failure output, re-mints the stataToken to the redeemer and cleans up", async () => {
     const { contract, ctx, requestId } = await redeemRequested();
     const next = (
-      await contract.circuits.refund(
+      await contract.circuits.refundRedeem(
         ctx,
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
@@ -2058,19 +2119,19 @@ describe("refund (supply/redeem) settle", () => {
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
     expect(state.redeemEventMap.isEmpty()).toBe(true);
-    expect(state.redeemRefundCommitment.isEmpty()).toBe(true);
+    expect(state.redeemSettleViews.isEmpty()).toBe(true);
   });
 
   it("is supplier/redeemer-gated (a stranger cannot trigger the re-mint)", async () => {
     const { contract, ctx, requestId } = await supplyRequested();
     await expect(
-      contract.circuits.refund(
-        await strangerContext("refund", ctx),
+      contract.circuits.refundSupply(
+        await strangerContext("refundSupply", ctx),
         requestId,
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Not the requester/);
+    ).rejects.toThrow(/Not the supplier/);
   });
 });

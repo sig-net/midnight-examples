@@ -1,4 +1,4 @@
-// `initialize`: the deployer's one-off call sealing the vault's post-deploy
+// `initialise`: the deployer's one-off call sealing the vault's post-deploy
 // configuration into the contract, i.e. the vault's EVM address, the EVM
 // chain it operates on, and the MPC RESPONSE key (derived from the vault's
 // own contract address, so it cannot be a constructor argument). Gated
@@ -11,8 +11,8 @@ import { UNISWAP_SWAP_ROUTER_02 } from "../evm-swap.ts";
 import { evmAddressBytes } from "../evm-transfer.ts";
 import type { VaultContext } from "../vault-context.ts";
 
-/** Options for {@link initialize}. */
-export interface InitializeOptions {
+/** Options for {@link initialise}. */
+export interface InitialiseOptions {
   /** The vault's EVM address (20-byte 0x hex) to seal into the contract. */
   readonly vaultEvmAddress: string;
   /** The Uniswap SwapRouter02 to pin; defaults to the Sepolia canonical. */
@@ -31,7 +31,7 @@ export interface InitializeOptions {
 }
 
 /**
- * Call the vault's `initialize` circuit on the deployed contract, pinning the
+ * Call the vault's `initialise` circuit on the deployed contract, pinning the
  * vault's EVM address, the chain it lives on (`EVM_CHAIN_ID`, in both its
  * numeric and CAIP-2 forms) and the MPC response key. After this, requests
  * never take a chain argument and responses verify against the stored key.
@@ -41,10 +41,10 @@ export interface InitializeOptions {
  * so `VAULT_USER_SECRET_KEY` must hold the deployer's secret for this call.
  *
  * @param context - The flow context.
- * @param options - The initialize arguments.
+ * @param options - The initialise arguments.
  * @throws {Error} If an argument is malformed or the circuit rejects the caller.
  */
-export async function initialize(context: VaultContext, options: InitializeOptions): Promise<void> {
+export async function initialise(context: VaultContext, options: InitialiseOptions): Promise<void> {
   if (!/^0x[0-9a-fA-F]{40}$/.test(options.vaultEvmAddress)) {
     throw new Error(
       `vaultEvmAddress must be a 20-byte 0x hex address; got "${options.vaultEvmAddress}".`,
@@ -58,7 +58,7 @@ export async function initialize(context: VaultContext, options: InitializeOptio
     `caller commitment: ${context.identity.commitmentHex} (must equal the sealed deployer)`,
   );
 
-  const result = await context.vault.callTx.initialize(
+  const result = await context.vault.callTx.initialise(
     evmAddressBytes(options.vaultEvmAddress),
     evmAddressBytes(options.routerAddress ?? UNISWAP_SWAP_ROUTER_02),
     evmAddressBytes(options.stataUnderlyingAddress ?? AAVE_USDC),
@@ -67,5 +67,5 @@ export async function initialize(context: VaultContext, options: InitializeOptio
     asciiPadded(context.caip2Id, CAIP2_ID_BYTES),
     parseSecp256k1PublicKey(options.mpcResponseKey),
   );
-  console.log(`initialize finalized in tx ${result.public.txId}`);
+  console.log(`initialise finalized in tx ${result.public.txId}`);
 }

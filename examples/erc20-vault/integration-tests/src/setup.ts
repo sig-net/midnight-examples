@@ -8,7 +8,7 @@
 // proving keys ship inside the published @sig-net/midnight-contract package
 // the deploy reads them from. The MPC response key step runs AFTER the vault
 // deploy: the key derives from the vault's own contract address, and the
-// initialize flow pins it on-chain.
+// initialise flow pins it on-chain.
 
 import {
   assertEnvironment,
@@ -60,7 +60,10 @@ const PIPELINE_KEYS = [
  * Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already set. Retries while
  * the deployer wallet's dust is still generating on a young chain (the
  * failure text survives into the subprocess error message, so the harness's
- * transient-failure matcher still applies).
+ * transient-failure matcher still applies), but ONLY while the subprocess
+ * has not yet submitted its base deploy: the split deploy has no resume
+ * path, so a rerun past that point would deploy a SECOND contract and
+ * orphan the half-installed first one.
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` and node config from it).
@@ -76,7 +79,7 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
     return;
   }
   // The deploy seals the DEPLOYER identity commitment into the contract and
-  // `initialize` is deployer-gated, while the flows drive the identity-gated
+  // `initialise` is deployer-gated, while the flows drive the identity-gated
   // circuits AS THE USER. The wallets are split roles (the deployer wallet
   // pays, the user wallet drives), so keep the IDENTITIES equal by sealing
   // the user's: default VAULT_DEPLOYER_SECRET_KEY to the user identity
@@ -84,16 +87,38 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (!env.VAULT_DEPLOYER_SECRET_KEY) {
     env.VAULT_DEPLOYER_SECRET_KEY = bytesToHex(resolveUserIdentity(env).secretKey);
     console.log(
-      "defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialize is deployer-gated)",
+      "defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialise is deployer-gated)",
     );
   }
   const contractAddress = await retryWhileDustGenerates("deploy vault contract", async () => {
-    const stdout = await runCommand(
-      "yarn",
-      ["workspace", "@midnight-examples/erc20-vault-contract", "deploy"],
-      env,
-      10 * MINUTE,
-    );
+    let stdout: string;
+    try {
+      // 30 minutes, matching deploy-init-stagenet.ts: the split deploy is a base
+      // tx plus one maintenance add per remaining circuit, each with a wallet
+      // re-sync and a counter-confirmation wait.
+      stdout = await runCommand(
+        "yarn",
+        ["workspace", "@midnight-examples/erc20-vault-contract", "deploy"],
+        env,
+        30 * MINUTE,
+      );
+    } catch (error) {
+      const message = String(error);
+      // The error message carries the subprocess output tail. Once it shows the
+      // base deploy was submitted, defuse the dust matcher's trigger strings so
+      // retryWhileDustGenerates rethrows instead of deploying a second contract.
+      if (/submitted base deploy tx|deployed erc20-vault base at|maintenance-add/.test(message)) {
+        throw new Error(
+          "vault deploy failed after its base deploy was submitted; not retrying " +
+            "(a rerun would deploy a second contract and orphan this one): " +
+            message
+              .replace(/InsufficientFunds/g, "Insufficient-Funds")
+              .replace(/could not balance dust/g, "could-not-balance-dust"),
+          { cause: error },
+        );
+      }
+      throw error;
+    }
     const address = /deployed erc20-vault at (\S+)/.exec(stdout)?.[1];
     if (address === undefined) {
       throw new Error(

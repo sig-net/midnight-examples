@@ -5,12 +5,14 @@
 // deploy.ts and arrives here through the type parameters.
 
 import { NodeContext } from "@effect/platform-node";
-import { CompiledContract, Contract, ContractExecutable } from "@midnight-ntwrk/compact-js/effect";
+import {
+  CompiledContract,
+  type Contract,
+  ContractExecutable,
+} from "@midnight-ntwrk/compact-js/effect";
 import { ZKFileConfiguration } from "@midnight-ntwrk/compact-js-node/effect";
-import { ContractState as RuntimeContractState } from "@midnight-ntwrk/compact-runtime";
 import * as CoinPublicKey from "@midnight-ntwrk/platform-js/effect/CoinPublicKey";
 import * as Configuration from "@midnight-ntwrk/platform-js/effect/Configuration";
-import * as ContractAddress from "@midnight-ntwrk/platform-js/effect/ContractAddress";
 import * as SigningKey from "@midnight-ntwrk/platform-js/effect/SigningKey";
 import * as ledger from "@midnightntwrk/ledger-v9";
 import type { FacadeState } from "@midnightntwrk/wallet-sdk-facade";
@@ -230,7 +232,7 @@ const operationIdToString = (id: string | Uint8Array): string =>
  * Like {@link buildDeployTransaction}, but registers ONLY the circuits in
  * `baseCircuitIds` in the initial contract state, returning the REST so the caller
  * can add them with {@link buildMaintenanceInsertTransaction}. A contract whose full
- * verifier-key set overflows a block (the 14-circuit vault) deploys as a small base
+ * verifier-key set overflows a block (the 17-circuit vault) deploys as a small base
  * plus per-circuit maintenance adds. Keep `baseCircuitIds` minimal (one small circuit
  * is enough) so the base tx is well under the block limit; every other circuit is
  * deferred. The constructor runs once over the full assets (every key must be present);
@@ -244,7 +246,9 @@ const operationIdToString = (id: string | Uint8Array): string =>
  * @param baseCircuitIds - Circuit ids to register in the base deploy; all others are deferred.
  * @param constructorArgs - The contract's constructor arguments.
  * @returns The base {@link DeployTransaction} plus the {@link DeferredCircuit}s to add next.
- * @throws {Error} If the constructor traps or a verifier key is missing (run `compile:zk`).
+ * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is unset (the deferred circuits could never be
+ *   installed), a `baseCircuitIds` entry matches no compiled circuit, the constructor traps,
+ *   or a verifier key is missing (run `compile:zk`).
  */
 export async function buildDeployTransactionDeferring<C extends Contract.Contract<PS>, PS>(
   compiledContract: CompiledContract.CompiledContract<C, PS>,
@@ -254,6 +258,15 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   baseCircuitIds: readonly string[],
   ...constructorArgs: Contract.Contract.InitializeParameters<C>
 ): Promise<SplitDeployTransaction> {
+  // Fail before anything is built, let alone submitted: without an authority key the
+  // base deploy would land under an SDK-sampled throwaway authority and the deferred
+  // circuits could never be installed, leaving a permanently unusable contract.
+  if (Option.isNone(resolveMaintenanceSigningKey())) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY must be set for a split deploy: the deferred circuits are " +
+        "installed by maintenance updates its authority signs.",
+    );
+  }
   const keysLayer = Layer.succeed(Configuration.Keys, {
     coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
     getSigningKey: () => resolveMaintenanceSigningKey(),
@@ -281,14 +294,26 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   base.data = fullState.data;
   base.maintenanceAuthority = fullState.maintenanceAuthority;
   const deferred: DeferredCircuit[] = [];
+  const kept = new Set<string>();
   for (const id of fullState.operations()) {
     const op = fullState.operation(id);
     if (!op) continue;
-    if (keep.has(operationIdToString(id))) {
+    const name = operationIdToString(id);
+    if (keep.has(name)) {
       base.setOperation(id, op);
+      kept.add(name);
     } else {
-      deferred.push({ circuitId: operationIdToString(id), verifierKey: op.verifierKey });
+      deferred.push({ circuitId: name, verifierKey: op.verifierKey });
     }
+  }
+  // A baseCircuitIds entry that matched nothing (a typo, or a renamed circuit) would
+  // otherwise silently defer everything and deploy a zero-operation base.
+  const unmatched = baseCircuitIds.filter((id) => !kept.has(id));
+  if (unmatched.length > 0) {
+    throw new Error(
+      `baseCircuitIds ${unmatched.map((id) => `"${id}"`).join(", ")} match no compiled circuit; ` +
+        `compiled circuits: ${[...fullState.operations()].map(operationIdToString).join(", ")}`,
+    );
   }
 
   const deploy = new ledger.ContractDeploy(base);
@@ -305,6 +330,26 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
     serializedTransaction: transaction.serialize(),
     deferred,
   };
+}
+
+/**
+ * `MAINTENANCE_SIGNING_KEY` as normalized 64-digit hex, or undefined when unset. The single
+ * definition of the env var's accepted format; {@link resolveMaintenanceSigningKey} and
+ * {@link buildMaintenanceInsertTransaction} both parse through it.
+ *
+ * @returns The normalized key hex, or undefined when the env var is unset.
+ * @throws {Error} If the env var is set but not 32 bytes of hex.
+ */
+function maintenanceSigningKeyHex(): string | undefined {
+  const raw = envOrUndefined(process.env, "MAINTENANCE_SIGNING_KEY");
+  if (!raw) return undefined;
+  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hex)) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
+    );
+  }
+  return hex;
 }
 
 /**
@@ -329,16 +374,10 @@ export function buildMaintenanceInsertTransaction(
   verifierKey: Uint8Array,
   currentContractStateBytes: Uint8Array,
 ): { serializedTransaction: Uint8Array } {
-  const raw = envOrUndefined(process.env, "MAINTENANCE_SIGNING_KEY");
-  if (!raw) {
+  const hex = maintenanceSigningKeyHex();
+  if (hex === undefined) {
     throw new Error(
       "MAINTENANCE_SIGNING_KEY must be set to sign a maintenance update for the contract's authority.",
-    );
-  }
-  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(hex)) {
-    throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 key.",
     );
   }
 
@@ -391,84 +430,7 @@ export function assertDeployerFunded(state: FacadeState): void {
  * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is set but not 32 bytes of hex.
  */
 export function resolveMaintenanceSigningKey(): Option.Option<SigningKey.SigningKey> {
-  const raw = envOrUndefined(process.env, "MAINTENANCE_SIGNING_KEY");
-  if (!raw) return Option.none();
-  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(hex)) {
-    throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
-    );
-  }
+  const hex = maintenanceSigningKeyHex();
+  if (hex === undefined) return Option.none();
   return Option.some(SigningKey.make(hex));
-}
-
-/**
- * Build an unproven maintenance-update transaction that installs `verifierKey`
- * under `circuitId` on the already-deployed contract at `contractAddressHex`,
- * signed by the authority from `MAINTENANCE_SIGNING_KEY`. This routes through
- * the same compact-js path as {@link buildDeployTransaction}, so it accepts the
- * v7 verifier keys the compiler emits. `currentContractStateBytes` is the live
- * on-chain contract state, whose authority counter the update binds to. Submit
- * the result like a deploy (balance/sign/prove/submit via a wallet).
- *
- * @param compiledContract - The compiled contract whose circuit is being installed.
- * @param networkId - The target network id the transaction is built for.
- * @param coinPublicKeyHex - The fee-payer's coin public key (hex).
- * @param contractAddressHex - The deployed contract's address (hex).
- * @param circuitId - The circuit id to install `verifierKey` under.
- * @param verifierKey - The new circuit's verifier key bytes (managed keys dir).
- * @param currentContractStateBytes - Serialized live contract state (from queryContractState).
- * @returns The contract address and the serialized unproven maintenance transaction.
- * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is unset, so no authority can sign.
- */
-export async function buildInsertVerifierKeyTransaction<C extends Contract.Contract<PS>, PS>(
-  compiledContract: CompiledContract.CompiledContract<C, PS>,
-  networkId: NetworkId,
-  coinPublicKeyHex: string,
-  contractAddressHex: string,
-  circuitId: string,
-  verifierKey: Uint8Array,
-  currentContractStateBytes: Uint8Array,
-): Promise<DeployTransaction> {
-  if (Option.isNone(resolveMaintenanceSigningKey())) {
-    throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be set to sign a maintenance update for the contract's authority.",
-    );
-  }
-  const keysLayer = Layer.succeed(Configuration.Keys, {
-    coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
-    getSigningKey: () => resolveMaintenanceSigningKey(),
-  });
-
-  const contractState = RuntimeContractState.deserialize(currentContractStateBytes);
-
-  const result = await Effect.runPromise(
-    ContractExecutable.make(compiledContract)
-      .addOrReplaceContractOperation(
-        Contract.ProvableCircuitId(circuitId as never),
-        Contract.VerifierKey(verifierKey),
-        {
-          address: ContractAddress.ContractAddress(contractAddressHex),
-          contractState,
-        },
-      )
-      .pipe(
-        Effect.provide(
-          ZKFileConfiguration.layer(CompiledContract.getCompiledAssetsPath(compiledContract)),
-        ),
-        Effect.provide(NodeContext.layer),
-        Effect.provide(keysLayer),
-      ),
-  );
-
-  const intent = ledger.Intent.new(new Date(Date.now() + DEPLOY_TTL_MS)).addMaintenanceUpdate(
-    result.public.maintenanceUpdate,
-  );
-  const transaction = ledger.Transaction.fromPartsRandomized(
-    networkId,
-    undefined,
-    undefined,
-    intent,
-  );
-  return { contractAddress: contractAddressHex, serializedTransaction: transaction.serialize() };
 }

@@ -14,7 +14,7 @@ import {
 import { durationStats, latestRunRecords } from "../src/benchmark/report.ts";
 import { type CircuitModel, parseCircuitModel } from "../src/benchmark/static-metrics.ts";
 
-// A real `zkir-v3 mock-compile -v` line (initialize circuit), with the SGR
+// A real `zkir-v3 mock-compile -v` line (initialise circuit), with the SGR
 // colour sequences the binary emits even when piped. \u001b is ESC.
 const ANSI_MODEL_OUTPUT =
   "\u001b[2m2026-08-18T07:54:35.466499Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mzkir\u001b[0m\u001b[2m:\u001b[0m " +
@@ -49,7 +49,7 @@ describe("parseCircuitModel", () => {
     { name: "ANSI-coloured output", output: ANSI_MODEL_OUTPUT },
     { name: "plain output", output: PLAIN_MODEL_OUTPUT },
   ])("parses the model line from $name", ({ output }) => {
-    expect(parseCircuitModel(output, "initialize.bzkir")).toEqual(INITIALIZE_MODEL);
+    expect(parseCircuitModel(output, "initialise.bzkir")).toEqual(INITIALIZE_MODEL);
   });
 
   it.each([
@@ -71,8 +71,8 @@ describe("parseCircuitModel", () => {
 describe("circuitIdFromKeyLocation", () => {
   it.each([
     {
-      keyLocation: "contract:0200aabbcc/deposit?vk=1f2e3d",
-      expected: "deposit",
+      keyLocation: "contract:0200aabbcc/startDeposit?vk=1f2e3d",
+      expected: "startDeposit",
     },
     {
       keyLocation: "contract:0200aabbcc/signBidirectional",

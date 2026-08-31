@@ -85,7 +85,7 @@ export interface ProofServerObservation {
   readonly serializedPreimage: Uint8Array;
   /** The proof returned by /prove (successful {@link ProofServerPhase.Prove} observations only). */
   readonly proof?: Uint8Array;
-  /** Error message when the round trip threw (the error is rethrown after observing). */
+  /** Error message when the round trip threw. Observed first; a connection-level failure may then be retried rather than reach the caller. */
   readonly error?: string;
 }
 
@@ -158,7 +158,7 @@ async function withConnectionRetry<T>(what: string, call: () => Promise<T>): Pro
  *
  * @param proofServerUrl - The proof server's HTTP endpoint.
  * @param zkConfigProviders - One provider per compiled contract in the call tree; must be non-empty.
- * @param observer - Called after every /check and /prove round trip (also on failure, before the error rethrows).
+ * @param observer - Called after every /check and /prove HTTP round trip, one call per attempt: a retried connection failure yields one errored observation per failed attempt plus one for the success, and retry backoff never counts into an observation's `ms`.
  * @returns The proof provider to place in a contract's midnight-js provider set.
  * @throws {Error} If `zkConfigProviders` is empty.
  */
@@ -211,71 +211,74 @@ export function createCrossContractProofServerProvider(
     return undefined;
   };
 
+  // The observer sits INSIDE the connection retry, wrapping the base HTTP client
+  // directly: each attempt is one observation with its own ms and (on failure) its
+  // own error, so retry backoff sleeps never inflate a recorded round trip and
+  // failed attempts are visible even when a later attempt succeeds.
+  const observed: Pick<ProvingProvider, "check" | "prove"> =
+    observer === undefined
+      ? base
+      : {
+          async check(serializedPreimage, keyLocation) {
+            const start = performance.now();
+            try {
+              const result = await base.check(serializedPreimage, keyLocation);
+              observer({
+                phase: ProofServerPhase.Check,
+                keyLocation,
+                serializedPreimage,
+                ms: performance.now() - start,
+              });
+              return result;
+            } catch (error) {
+              observer({
+                phase: ProofServerPhase.Check,
+                keyLocation,
+                serializedPreimage,
+                ms: performance.now() - start,
+                error: String(error),
+              });
+              throw error;
+            }
+          },
+          async prove(serializedPreimage, keyLocation, overwriteBindingInput) {
+            const start = performance.now();
+            try {
+              const proof = await base.prove(
+                serializedPreimage,
+                keyLocation,
+                overwriteBindingInput,
+              );
+              observer({
+                phase: ProofServerPhase.Prove,
+                keyLocation,
+                serializedPreimage,
+                proof,
+                ms: performance.now() - start,
+              });
+              return proof;
+            } catch (error) {
+              observer({
+                phase: ProofServerPhase.Prove,
+                keyLocation,
+                serializedPreimage,
+                ms: performance.now() - start,
+                error: String(error),
+              });
+              throw error;
+            }
+          },
+        };
+
   const provingProvider: ProvingProvider = {
     ...base,
     lookupKey,
     check: (serializedPreimage, keyLocation) =>
-      withConnectionRetry("check", () => base.check(serializedPreimage, keyLocation)),
+      withConnectionRetry("check", () => observed.check(serializedPreimage, keyLocation)),
     prove: (serializedPreimage, keyLocation, overwriteBindingInput) =>
       withConnectionRetry("prove", () =>
-        base.prove(serializedPreimage, keyLocation, overwriteBindingInput),
+        observed.prove(serializedPreimage, keyLocation, overwriteBindingInput),
       ),
   };
-  if (observer === undefined) {
-    return createProofProvider(provingProvider);
-  }
-
-  const observed: ProvingProvider = {
-    async check(serializedPreimage, keyLocation) {
-      const start = performance.now();
-      try {
-        const result = await provingProvider.check(serializedPreimage, keyLocation);
-        observer({
-          phase: ProofServerPhase.Check,
-          keyLocation,
-          serializedPreimage,
-          ms: performance.now() - start,
-        });
-        return result;
-      } catch (error) {
-        observer({
-          phase: ProofServerPhase.Check,
-          keyLocation,
-          serializedPreimage,
-          ms: performance.now() - start,
-          error: String(error),
-        });
-        throw error;
-      }
-    },
-    async prove(serializedPreimage, keyLocation, overwriteBindingInput) {
-      const start = performance.now();
-      try {
-        const proof = await provingProvider.prove(
-          serializedPreimage,
-          keyLocation,
-          overwriteBindingInput,
-        );
-        observer({
-          phase: ProofServerPhase.Prove,
-          keyLocation,
-          serializedPreimage,
-          proof,
-          ms: performance.now() - start,
-        });
-        return proof;
-      } catch (error) {
-        observer({
-          phase: ProofServerPhase.Prove,
-          keyLocation,
-          serializedPreimage,
-          ms: performance.now() - start,
-          error: String(error),
-        });
-        throw error;
-      }
-    },
-    lookupKey,
-  };
-  return createProofProvider(observed);
+  return createProofProvider(provingProvider);
 }
