@@ -43,6 +43,8 @@ export default defineConfig([
     // hardhat solc output: absent until `yarn compile:evm` runs.
     "examples/*/integration-tests/artifacts/**",
     "examples/*/integration-tests/cache/**",
+    // The published packages' emit, produced by `prepack` and gitignored.
+    "**/dist/**",
   ]),
 
   {

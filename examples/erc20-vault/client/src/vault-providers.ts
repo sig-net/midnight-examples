@@ -16,12 +16,14 @@ import {
   type AccountKeys,
   createCrossContractProofServerProvider,
   createWalletAndMidnightProvider,
+  isLocalStandaloneNetwork,
   type MidnightNodeConfig,
   type ProofServerObserver,
   type WalletFacade,
 } from "@sig-net/midnight-examples-lib";
 
 import { SIGNET_SIGNER_MANAGED_PATH, VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
+import { VaultReleaseZkConfigProvider } from "./vault-release-zk-config-provider.ts";
 
 /**
  * Build the midnight-js provider set for the vault.
@@ -41,7 +43,15 @@ export function buildVaultProviders(
   // Retrieves the ZK artifacts of a contract needed to create proofs.
   // Key methods: getProverKey(id), getVerifierKey(id), getZKIR(id) — id is
   // typed to the circuit-name union.
-  const vaultZkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH);
+  //
+  // The local standalone stack proves against the keys `compile:zk` just wrote,
+  // so it reads them straight off disk. Every deployed network goes through the
+  // release-backed provider, which serves local keys when they are there and
+  // otherwise downloads the circuit's key from the contract package version's
+  // GitHub release: the published package ships verifier keys only.
+  const vaultZkConfigProvider = isLocalStandaloneNetwork(config.networkId)
+    ? new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH)
+    : new VaultReleaseZkConfigProvider();
 
   // The callee (signet contract) circuits, resolved for the cross-contract
   // proof provider so deposit's whole call tree proves.

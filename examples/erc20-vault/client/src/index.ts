@@ -5,3 +5,4 @@
 // the contract package; everything here needs Node, which is why it does not.
 export * from "./vault-contract-binding.ts";
 export * from "./vault-providers.ts";
+export * from "./vault-release-zk-config-provider.ts";
