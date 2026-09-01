@@ -917,7 +917,7 @@ prefix. The tag carries the example name, the npm version does not:
    approves it.
 
 4. The workflow creates the GitHub release for the tag and uploads the ZK
-   artifacts to it: the 14 prover keys, one asset per circuit, plus
+   artifacts to it: the 17 prover keys, one asset per circuit, plus
    `zk-config.tar.gz` (the zkir, the verifier keys and the integrity manifest,
    for an app that serves them from its own origin) and a `SHA256SUMS` file
    covering all 15. The assets go up **before** anything reaches npm, so a
@@ -935,8 +935,8 @@ failure resumes rather than erroring.
 
 ## A note on package size
 
-The vault has 14 circuits carrying roughly 1.1 GB of prover keys, against 56 KB
-for the verifier keys that actually go on-chain. Those prover keys are not on
+The vault has 17 circuits carrying over a gigabyte of prover keys, against
+kilobytes for the verifier keys that actually go on-chain. Those prover keys are not on
 npm: they are assets on the `erc20-vault-vX.Y.Z` GitHub release, which leaves
 the contract package at roughly 2 MB packed. The workflow logs the packed and
 unpacked size before it publishes anything, so a registry size rejection
