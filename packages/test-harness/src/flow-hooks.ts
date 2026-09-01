@@ -84,17 +84,20 @@ async function waitForProofServer(url: string, timeoutMs: number): Promise<void>
  * The local proof server URL, or null when the recycle does not apply: `SKIP_PROOF_SERVER_RESTART`
  * is set, or the configured server is not local (a user's own, or a remote one).
  *
- * Reads the URL through {@link getMidnightNodeConfig}, the same resolution the rest of the suite
- * uses. Reading `MIDNIGHT_PROOF_SERVER_URL` directly is wrong: that variable is how the FAKENET
- * container finds the proof server, and docker-compose sets it to `http://proof-server:6300`, a
- * name that resolves only inside the compose network. The test process wants
- * `MIDNIGHT_PROOF_SERVER_URL`, which this resolves.
+ * Reads everything from the injected e2e env accumulator, the same env source the flows use:
+ * repo-root `.env` values reach the workers ONLY through the accumulator (nothing loads `.env`
+ * into `process.env`), so a bare `process.env` read here would miss them and diverge from the
+ * suite's own config. The URL itself resolves through {@link getMidnightNodeConfig}
+ * (`MIDNIGHT_PROOF_SERVER_URL`), the same resolution the rest of the suite uses; the fakenet
+ * container's own view travels separately as `FAKENET_MIDNIGHT_PROOF_SERVER_URL`, whose compose
+ * default `http://proof-server:6300` resolves only inside the compose network.
  *
+ * @param env - The injected e2e env accumulator (see {@link injectE2eEnv}).
  * @returns The local proof server URL, or null when the recycle does not apply.
  */
-function localProofServerUrl(): string | null {
-  if (process.env.SKIP_PROOF_SERVER_RESTART) return null;
-  const { proofServerUrl } = getMidnightNodeConfig();
+function localProofServerUrl(env: NodeJS.ProcessEnv): string | null {
+  if (env.SKIP_PROOF_SERVER_RESTART) return null;
+  const { proofServerUrl } = getMidnightNodeConfig(env);
   return /127\.0\.0\.1|localhost/.test(proofServerUrl) ? proofServerUrl : null;
 }
 
@@ -117,7 +120,7 @@ function localProofServerUrl(): string | null {
  */
 function installProofServerRecycle(): void {
   beforeAll(async () => {
-    const url = localProofServerUrl();
+    const url = localProofServerUrl(injectE2eEnv());
     if (url === null) return;
     if (await proofServerAnswers(url)) return;
     console.warn(
@@ -133,7 +136,7 @@ function installProofServerRecycle(): void {
   }, 5 * MINUTE);
 
   afterAll(async () => {
-    const url = localProofServerUrl();
+    const url = localProofServerUrl(injectE2eEnv());
     if (url === null) return;
     console.log(`proof server after this file: ${await proofServerContainerState()}`);
     try {

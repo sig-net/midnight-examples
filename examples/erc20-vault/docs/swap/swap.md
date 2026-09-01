@@ -1,5 +1,13 @@
 # Swap
 
+<!-- FIXME(docs-diagrams): this page was written against the pre-rename
+     contract. Circuit and flow names in the text are updated to the renamed
+     circuits (initialise, startX/completeX, per-kind refundX), but the
+     drawio/PNG diagram still draws the old names, ledger-field names and any
+     remaining #L line anchors predate the refactor. Re-render the diagram and
+     re-verify names and anchors against the current contract and flows. -->
+
+
 The swap round trip has the vault trade its pooled ERC20 tokens on Uniswap V3
 as if it were an ordinary EVM user, against shielded vault tokens the swapper
 surrenders on Midnight. The swapper burns a coin of one token colour and, on
@@ -30,11 +38,11 @@ all to the settle call that closes the request. It is the
 [withdraw](../withdraw/withdraw.md) shape with a router in the middle: the same
 optimistic burn, the same vault-signed EVM transaction, the same attested
 settle, over a **separate request map at its own ledger field**
-([`swapEventMap`](../../contract/src/erc20-vault.compact#L135)) sized for the
+([`swapEventMap`](../../contract/src/erc20-vault.compact)) sized for the
 seven-word `exactOutputSingle` call. Step 1 sits ahead of the trade proper: a
 one-time allowance per token that any caller may run, and that
-[`runSwapRoundTrip`](../../integration-tests/src/flows/swap.ts#L348) runs first
-through [`ensureRouterApproved`](../../integration-tests/src/flows/approve.ts#L125).
+[`runSwapRoundTrip`](../../integration-tests/src/flows/swap-round-trip.ts) runs first
+through [`ensureRouterApproved`](../../integration-tests/src/flows/approve-router.ts).
 The user's wallet drives the Midnight transactions, the Vault dApp/Relayer
 does the polling and the broadcasts, and the MPC reads, signs and attests
 exactly as it does for a [deposit](../deposit/deposit.md). The settle is a
@@ -48,15 +56,15 @@ As illustrated, the flow comprises 6 steps:
 - **1.** approveRouter(...) records the sign-only allowance request
   - The vault swaps out of one pooled EVM account, so the router must be
     allowed to pull `tokenIn` from it before any swap can execute.
-    [`approveRouter`](../../contract/src/erc20-vault.compact#L851) records
+    [`approveRouter`](../../contract/src/erc20-vault.compact) records
     `approve(uniswapRouter, 2^128-1)` on the ERC20 the caller names. The
-    spender is the initialize-pinned
-    [`uniswapRouter`](../../contract/src/erc20-vault.compact#L127) and the
+    spender is the initialise-pinned
+    [`uniswapRouter`](../../contract/src/erc20-vault.compact) and the
     amount is contract-fixed, so the caller chooses ONLY the token: nobody can
     approve an arbitrary spender or point the pooled funds at a fake router.
   - The request is **sign-only**. It is a two-word call with the same bool
     result schema as a transfer, so it reuses
-    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L66),
+    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact),
     is signed with the vault's own account, and is polled for and broadcast
     exactly as steps 3 and 4 do for the swap itself, and then it ends. No
     attestation is consumed and there is no settle circuit, so its map entry
@@ -64,24 +72,24 @@ As illustrated, the flow comprises 6 steps:
     it surfaces as the next swap reverting on chain and refunding.
   - The allowance is global per token, one pooled account being the only
     holder, so the first caller readies a token for everyone.
-    [`ensureRouterApproved`](../../integration-tests/src/flows/approve.ts#L125)
+    [`ensureRouterApproved`](../../integration-tests/src/flows/approve-router.ts)
     reads the live `allowance()` on chain and short-circuits when it is
     nonzero, and
-    [`approveRouter`](../../integration-tests/src/flows/approve.ts#L55) records
+    [`approveRouter`](../../integration-tests/src/flows/approve-router.ts) records
     the request when it is not.
-- **2.** swap(...) burns the surrendered coin and records the request
+- **2.** startSwap(...) burns the surrendered coin and records the request
   - The caller surrenders a shielded **vault coin** of `tokenIn` worth exactly
     `amountInMaximum`, the worst-case spend.
-    [`swap`](../../contract/src/erc20-vault.compact#L942) checks the coin's
+    [`startSwap`](../../contract/src/erc20-vault.compact) checks the coin's
     colour is that ERC20's vault token
-    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L276))
+    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact))
     and burns it with the same pair of calls a
     [withdraw](../withdraw/withdraw.md) uses: `receiveShielded` assigns the
     coin to the contract, then `sendImmediateShielded` sends its full value to
     the shielded burn address. The coin spend IS the authorisation.
   - The trade is EXACT-OUTPUT, and that is what makes the optimistic burn
     safe: `amountOut` is an input of the
-    [`SwapRequest`](../../contract/src/erc20-vault.compact#L922), asserted to
+    [`SwapRequest`](../../contract/src/erc20-vault.compact), asserted to
     fit the `Uint<64>` mint API BEFORE anything is burned, so the mint amount
     is known up front. Under an exact-input trade the mint amount would be the
     swap's result, and an oversized result would strand the already-burned
@@ -89,12 +97,12 @@ As illustrated, the flow comprises 6 steps:
   - The circuit builds contract-enforced calldata for
     `exactOutputSingle((tokenIn, tokenOut, fee, recipient, amountOut, amountInMaximum, 0))`
     on the pinned router. The recipient is
-    [`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L91), so the
+    [`vaultEvmAddress`](../../contract/src/erc20-vault.compact), so the
     bought tokens come back to the pool, and the price bound is 0: slippage is
     enforced on chain by `amountInMaximum` alone, and a trade that would cost
     more reverts into step 6's refund arm.
   - The assembled **SignBidirectionalEvent** goes into
-    [`swapEventMap`](../../contract/src/erc20-vault.compact#L135) under the
+    [`swapEventMap`](../../contract/src/erc20-vault.compact) under the
     **RequestId** (the record's own hash), and the singleton's
     `signBidirectional(...)` call carries that map's own ledger-tree path,
     exported for off-chain readers as
@@ -102,9 +110,9 @@ As illustrated, the flow comprises 6 steps:
     separate from the deposit and withdraw one deliberately: the calldata width
     and both schema widths are part of a request map's ledger type.
   - A swap needs TWO schemas where a transfer needs one.
-    [`swapOutputSchema`](../../contract/src/erc20-vault.compact#L218) tells the
+    [`swapOutputSchema`](../../contract/src/erc20-vault.compact) tells the
     MPC how to decode the router's `uint256` return, and
-    [`swapRespondSchema`](../../contract/src/erc20-vault.compact#L221) how to
+    [`swapRespondSchema`](../../contract/src/erc20-vault.compact) how to
     repack it as a `uint64` for the attestation, which is what lets step 6
     native-deserialise an 8-byte output.
   - The derivation path is the contract-fixed literal `pad(32, "vault")`, so
@@ -114,15 +122,15 @@ As illustrated, the flow comprises 6 steps:
     headroom for an exact-output trade crossing many ticks.
   - The swapper's settle view (commitment, `tokenIn`, `tokenOut`, `amountOut`,
     `amountInMaximum`) goes into
-    [`swapRefundCommitment`](../../contract/src/erc20-vault.compact#L149) as
+    [`swapSettleViews`](../../contract/src/erc20-vault.compact) as
     typed fields the circuit validated and bounded before the burn, so step 6
     reads them from there and never from the seven-word request record. The
     commitment comes from
-    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L311)
+    [`refundCommitment`](../../contract/src/erc20-vault.compact)
     over the caller's secret and the request id, the same unlinkable marker a
     withdrawal pins, and the entry doubles as the pending-swap marker step 6
     consumes.
-  - Off chain, [`swap.ts`](../../integration-tests/src/flows/swap.ts#L73)
+  - Off chain, [`start-swap.ts`](../../integration-tests/src/flows/start-swap.ts)
     reads the vault account's next EVM nonce, funds the coin from the caller's
     shielded balance, calls the circuit, and asserts that the request id it
     recomputes with the SDK's `calculateRequestId` twin appears as a key of the
@@ -161,7 +169,7 @@ As illustrated, the flow comprises 6 steps:
     id and the output bytes, so the client recomputes the output bytes
     independently and checks the signature against them, exactly as a
     [deposit](../deposit/deposit.md) does.
-  - [`swap.ts`](../../integration-tests/src/flows/swap.ts#L178) recomputes TWO
+  - [`complete-swap.ts`](../../integration-tests/src/flows/complete-swap.ts) recomputes TWO
     candidate outputs on every tick. **The success candidate** is computable
     only when the transaction executed: the raw execution output, decoded per
     the request's `uint256` output schema and re-packed per its `uint64`
@@ -172,21 +180,21 @@ As illustrated, the flow comprises 6 steps:
     (`0xdeadbeef01`), which the MPC attests for a transaction that never
     executed at all, reverted on chain or was replaced on the same nonce.
   - Selection is by signature verification alone, against
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L78), the response
-    key the vault pinned at initialize and reads back from its own ledger.
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact), the response
+    key the vault pinned at initialise and reads back from its own ledger.
   - Which candidate verifies is also what routes step 6. Everything fetched
     here stays UNTRUSTED: the verified bytes go into the settle circuit as an
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
-  - [`pollSwapOutcome`](../../integration-tests/src/flows/swap.ts#L248) owns the
+  - [`pollSwapOutcome`](../../integration-tests/src/flows/complete-swap.ts) owns the
     poll deadline and hands the resolved outcome to the settle step.
 - **6.** completeSwap(...) mints amountOut of tokenOut plus the unspent tokenIn
   - An executed swap settles through
-    [`completeSwap`](../../contract/src/erc20-vault.compact#L1056), whose
+    [`completeSwap`](../../contract/src/erc20-vault.compact), whose
     `Bytes<8>` output argument is the packed `amountIn`.
     `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
     against `mpcResponseKey` before anything else happens.
-  - Membership of `swapRefundCommitment` is the double-settle protection and the
+  - Membership of `swapSettleViews` is the double-settle protection and the
     proof that this request is a pending swap. Withdrawals mark a separate map,
     so a withdrawal can never be settled here and a swap can never be settled
     through `completeWithdraw`. The settle view carries the typed tokens and
@@ -198,33 +206,32 @@ As illustrated, the flow comprises 6 steps:
     the burned coin from being stranded by an unexpected result size. The
     second mint returns the unspent `tokenIn` as change, `amountInMaximum`
     minus the attested `amountIn` deserialised from the 8-byte output into
-    [`ExactOutputSingleReturnValue`](../../contract/src/erc20-vault.compact#L228).
+    [`ExactOutputSingleReturnValue`](../../contract/src/erc20-vault.compact).
     An exact spend mints a zero-value coin, which is harmless, and the change
     coin takes a nonce derived from the caller's own random `mintNonce` so the
     two minted coins stay unlinkable.
-  - [`settleSwap`](../../integration-tests/src/flows/swap.ts#L276) is the single
+  - [`settleSwap`](../../integration-tests/src/flows/complete-swap.ts) is the single
     settle call site: it takes the attested outcome, picks this circuit or
-    `refund` from it, and passes a fresh random mint nonce either way.
-- **6.** refund(...) re-mints when the swap never executed
+    `refundSwap` from it, and passes a fresh random mint nonce either way.
+- **6.** refundSwap(...) re-mints when the swap never executed
   - A swap that never ran on the EVM chain settles through
-    [`refund`](../../contract/src/erc20-vault.compact#L733) instead, and the
+    [`refundSwap`](../../contract/src/erc20-vault.compact) instead, and the
     attested output's WIDTH is what routes the call: the fixed 5-byte failure
     output cannot type-fit `completeSwap`'s `Bytes<8>`, and an executed result
-    cannot type-fit `refund`'s `Bytes<5>`.
+    cannot type-fit `refundSwap`'s `Bytes<5>`.
   - The same authentication gate runs at the failure width
     (`verifyRespondBidirectionalEvent<5>`), followed by an exact-bytes check:
     only `0xdeadbeef01` refunds, and any other attested 5-byte output is not a
     failure.
-  - One circuit serves the withdraw, swap, supply and redeem failure paths. All
-    four share this exact signature, so `refund` routes on which pending marker
-    holds the request id, and the four markers are separate maps, so exactly one
-    matches. A request id in no map, a deposit or an already-settled request,
-    fails here with a clean "Request not found".
-  - For a swap the marker is `swapRefundCommitment`, and the re-minted colour
-    and amount are its `tokenIn` and `amountInMaximum`: the router pulled
-    nothing, so the whole surrendered worst-case value comes back. The taken
-    arm's event map entry and marker are both consumed, and the value re-mints
-    once after the join.
+  - Each request kind has its own refund circuit (`refundWithdraw`,
+    `refundSwap`, `refundSupply`, `refundRedeem`) sharing one signature and one
+    failure check, and `refundSwap` reads ONLY the swap settle-view map: a
+    request id of another kind, or one already settled, fails with a clean
+    "not found".
+  - For a swap that map is `swapSettleViews`, and the re-minted colour and
+    amount are its `tokenIn` and `amountInMaximum`: the router pulled nothing,
+    so the whole surrendered worst-case value comes back. The event map entry
+    and the settle view are both consumed, and the value re-mints once.
   - Every arm is requester-only, as a refund mints a private coin: the caller
     must prove the secret behind the pinned commitment. The swapper's `tokenIn`
     vault tokens are back in their wallet, minted under a nonce that ties them
@@ -243,7 +250,7 @@ A swap starts from a shielded balance the swapper already holds, so a
 [deposit](../deposit/deposit.md) precedes it: the caller must hold
 `amountInMaximum` of the `tokenIn` vault coin before step 2 can surrender it.
 The leg also needs a live Uniswap V3 deployment, so
-[`runSwapRoundTrip`](../../integration-tests/src/flows/swap.ts#L348) gates the
+[`runSwapRoundTrip`](../../integration-tests/src/flows/swap-round-trip.ts) gates the
 whole round trip on `uniswapAvailable` and skips it on an EVM chain without the
 router, and it quotes the trade off chain to choose the `amountInMaximum` cap it
 surrenders.
@@ -285,8 +292,8 @@ sequenceDiagram
     Vault->>Singleton: signBidirectional(...)
     MPC->>Singleton: respond(...) posts the signature
     DApp->>EVM: broadcasts the MPC-signed approve(uniswapRouter, 2^128-1)
-    Note over User,Singleton: Step 2: swap(...) burns the surrendered coin and records the request
-    User->>Vault: swap(...) surrendering a shielded tokenIn vault coin
+    Note over User,Singleton: Step 2: startSwap(...) burns the surrendered coin and records the request
+    User->>Vault: startSwap(...) surrendering a shielded tokenIn vault coin
     Vault->>Singleton: signBidirectional(...)
     Note over DApp,MPC: Step 3: poll for the MPC's signature
     MPC->>Vault: reads the recorded request
@@ -302,8 +309,8 @@ sequenceDiagram
         Note over User,Vault: Step 6: completeSwap(...) mints amountOut of tokenOut plus the unspent tokenIn
         User->>Vault: completeSwap(...)
     else the swap never executed (5-byte failure output)
-        Note over User,Vault: Step 6: refund(...) re-mints when the swap never executed
-        User->>Vault: refund(...)
+        Note over User,Vault: Step 6: refundSwap(...) re-mints when the swap never executed
+        User->>Vault: refundSwap(...)
     end
 ```
 

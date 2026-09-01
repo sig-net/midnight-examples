@@ -1,9 +1,17 @@
 # Deposit
 
+<!-- FIXME(docs-diagrams): this page was written against the pre-rename
+     contract. Circuit and flow names in the text are updated to the renamed
+     circuits (initialise, startX/completeX, per-kind refundX), but the
+     drawio/PNG diagram still draws the old names, ledger-field names and any
+     remaining #L line anchors predate the refactor. Re-render the diagram and
+     re-verify names and anchors against the current contract and flows. -->
+
+
 The deposit round trip moves ERC20 tokens from the user's derived EVM deposit
 address into the vault's own EVM account, and mints the user's balance on
 Midnight once the MPC has attested the transfer. It is one full pass through the
-sign bidirectional flow: two Midnight transactions (`deposit(...)`, `claim(...)`)
+sign bidirectional flow: two Midnight transactions (`startDeposit(...)`, `completeDeposit(...)`)
 bracketing one MPC-signed EVM transaction.
 
 ## The protocol
@@ -48,30 +56,30 @@ As illustrated, the flow comprises 6 steps:
     ([`dealForkEvmAccounts`](../../integration-tests/src/fork-funding.ts#L154)),
     and on a real chain the user funds the printed
     `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS`.
-- **2.** deposit(...) records the request
+- **2.** startDeposit(...) records the request
   - The user calls
-    [`deposit(...)`](../../contract/src/erc20-vault.compact#L380) with the ERC20
+    [`startDeposit(...)`](../../contract/src/erc20-vault.compact) with the ERC20
     address and a private amount. The circuit composes the ENTIRE EVM sweep
     transaction itself: the calldata is `transfer(vaultEvmAddress, amount)`
-    built in-circuit around the initialize-pinned
-    [`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L91), which is
+    built in-circuit around the initialise-pinned
+    [`vaultEvmAddress`](../../contract/src/erc20-vault.compact), which is
     what stops a malicious client having the MPC sign a transfer to themselves.
   - The request's **derivation path** is not an argument either: the circuit
     recomputes the caller's commitment from the
-    [`callerSecretKey()`](../../contract/src/erc20-vault.compact#L289) witness
-    with [`userCommitment`](../../contract/src/erc20-vault.compact#L297), so the
+    [`callerSecretKey()`](../../contract/src/erc20-vault.compact) witness
+    with [`userCommitment`](../../contract/src/erc20-vault.compact), so the
     MPC signs with THIS caller's deposit account and no one else's. The caller
     supplies only what is genuinely theirs to choose: their account's nonce, the
     gas envelope their account pays, and the MPC key version.
   - The assembled **SignBidirectionalEvent**
     ([`constructSignBidirectionalEvent`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L135))
     is stored in the ledger's
-    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L66)
+    [`depositEventMap`](../../contract/src/erc20-vault.compact)
     under its **request id**, the hash of the record itself, and the circuit
     then calls the singleton's
     [`signBidirectional`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-contract/src/signet-contract.compact#L31)
     to notify the MPC, carrying the map's resolved ledger-tree path.
-  - Off-chain, [`deposit.ts`](../../integration-tests/src/flows/deposit.ts#L78)
+  - Off-chain, [`start-deposit.ts`](../../integration-tests/src/flows/start-deposit.ts)
     reconstructs that expected record byte for byte, hashes it with the
     library's
     [`calculateRequestId`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-id.ts#L28)
@@ -128,7 +136,7 @@ As illustrated, the flow comprises 6 steps:
     [`MPC_FAILURE_OUTPUT`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/constants.ts#L29)
     (`0xdeadbeef01`), which the MPC attests when the transaction reverted or was
     replaced. Whichever candidate a posted signature verifies over, against the
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L78) read from the
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact) read from the
     vault's own ledger, is the attested outcome. The success candidate is
     skipped when no output was cached, and a decode failure drops it with a
     warning instead of crashing the poll.
@@ -137,22 +145,22 @@ As illustrated, the flow comprises 6 steps:
     UNTRUSTED: the respond events are open to anyone and the helper API is
     unauthenticated, and the authoritative check is the in-circuit verification
     step 6 runs.
-- **6.** claim(...) verifies and mints
-  - The user calls [`claim(...)`](../../contract/src/erc20-vault.compact#L473)
+- **6.** completeDeposit(...) verifies and mints
+  - The user calls [`completeDeposit(...)`](../../contract/src/erc20-vault.compact)
     with the request id, the attested event and the recomputed output bytes. The
     circuit re-hashes those bytes into the attestation digest and verifies the
-    event's ECDSA signature over it against the initialize-pinned
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L78) with
+    event's ECDSA signature over it against the initialise-pinned
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact) with
     [`verifyRespondBidirectionalEvent`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L327).
     The singleton emits MPC posts unverified, so this is the only authentication
     gate.
   - The one-byte output is deserialised into the schema's `VaultResponse` and
     its `success` flag asserted, so only an attested successful transfer mints.
     A sweep the MPC attested as failed cannot be claimed at all, and
-    [`claim.ts`](../../integration-tests/src/flows/claim.ts#L69) refuses to call
+    [`complete-deposit.ts`](../../integration-tests/src/flows/complete-deposit.ts) refuses to call
     the circuit for one.
   - The stored request is looked up and removed from
-    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L66),
+    [`depositEventMap`](../../contract/src/erc20-vault.compact),
     which is the double-claim protection, and the caller's recomputed commitment
     must equal that request's path, which makes claims depositor-only.
   - The mint's amount and token colour come from the stored request itself,
@@ -178,7 +186,7 @@ vault and singleton pair, built by
 expected signer of the deposit sweep is the user's deposit account, derived with
 [`deriveEvmAddress`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/epsilon-derivation.ts#L73)
 from the caller's identity commitment rendered as full-width lowercase hex, the
-MPC's rendering of every request's 32 opaque path bytes. The key `claim` verifies
+MPC's rendering of every request's 32 opaque path bytes. The key `completeDeposit` verifies
 against is derived with
 [`deriveMidnightResponseKey`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/epsilon-derivation.ts#L144).
 Those two functions are the concrete work behind the diagram's abstract
@@ -201,8 +209,8 @@ sequenceDiagram
 
     Note over User,EVM: Step 1: fund the user's deposit account
     User->>EVM: funds the deposit account with the ERC20 being deposited plus gas ETH
-    Note over User,Singleton: Step 2: deposit(...) records the request
-    User->>Vault: deposit(...)
+    Note over User,Singleton: Step 2: startDeposit(...) records the request
+    User->>Vault: startDeposit(...)
     Vault->>Singleton: signBidirectional(...)
     Note over DApp,MPC: Step 3: poll for the MPC's signature
     MPC->>Vault: reads the recorded request
@@ -214,8 +222,8 @@ sequenceDiagram
     MPC->>EVM: watches for transaction execution
     MPC->>Singleton: respondBidirectional(...) posts the attestation
     DApp->>Singleton: polls for the attestation
-    Note over User,Vault: Step 6: claim(...) verifies and mints
-    User->>Vault: claim(...)
+    Note over User,Vault: Step 6: completeDeposit(...) verifies and mints
+    User->>Vault: completeDeposit(...)
 ```
 
 ---

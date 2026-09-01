@@ -20,6 +20,13 @@ export interface PollRespondBidirectionalOptions {
   readonly intervalMs: number;
   /** Give-up timeout in milliseconds. */
   readonly timeoutMs: number;
+  /**
+   * The resolved ledger-tree path of the map holding the request. Deposits
+   * pass VAULT_DEPOSIT_REQUESTS_PATH (the depositEventMap); withdrawals take
+   * the default VAULT_REQUESTS_PATH (the signBidirectionalEventMap they share
+   * with the approves).
+   */
+  readonly requestsPath?: readonly number[];
 }
 
 /**
@@ -62,7 +69,11 @@ export async function pollRespondBidirectional(
   }, options.timeoutMs);
   try {
     while (!giveUp.signal.aborted) {
-      const outcome = await fetchAttestedRespondOutcome(context, options.requestId);
+      const outcome = await fetchAttestedRespondOutcome(
+        context,
+        options.requestId,
+        options.requestsPath,
+      );
       if (outcome !== undefined) {
         if (outcome.matchedFailureOutput) {
           console.log("remote execution FAILED (MPC failure output attested)");

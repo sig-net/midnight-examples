@@ -2,17 +2,22 @@
 // (environment check -> wallet seeds + root funding -> EVM chain + test token
 // -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
 // vault zk compile + deploy -> MPC response key -> derived EVM addresses ->
-// local funding -> MPC hand-off printout) from the harness's generic steps
-// plus the vault-specific steps below, and run it via `runSetupPipeline` in
-// vitest's main process. The signet contract needs no zk-compile step: its
+// fork dealing -> fork dependency check -> MPC hand-off printout) from the
+// harness's generic steps plus the vault-specific steps below, and run it via
+// `runSetupPipeline` in vitest's main process. The signet contract needs no zk-compile step: its
 // proving keys ship inside the published @sig-net/midnight-contract package
 // the deploy reads them from. The MPC response key step runs AFTER the vault
 // deploy: the key derives from the vault's own contract address, and the
-// initialize flow pins it on-chain.
+// initialise flow pins it on-chain.
 
 import { deriveEvmAddress } from "@sig-net/midnight";
-import { deriveVaultEvmAddress } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  deriveVaultEvmAddress,
+  STATA_USDC,
+  UNISWAP_SWAP_ROUTER_02,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import { deployVault } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { SplitDeployAfterBaseSubmitError } from "@sig-net/midnight-examples-lib";
 import {
   assertEnvironment,
   compileContractZk,
@@ -23,6 +28,7 @@ import {
   ensureWalletSeeds,
   ensureWalletsFunded,
   logSkip,
+  NonRetryableError,
   persistFakenetHandoffToDotEnv,
   printMpcServerConfig,
   requireEnv,
@@ -34,6 +40,8 @@ import {
 } from "@sig-net/midnight-examples-test-harness";
 import type { TestProject } from "vitest/node";
 
+import { stataAvailable } from "./evm-stata.ts";
+import { uniswapAvailable } from "./evm-swap.ts";
 import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 
@@ -53,17 +61,20 @@ const PIPELINE_KEYS = [
 
 /**
  * Deploy the vault contract by calling the deploy package's `deployVault`
- * in-process: the same function the `deploy` and `deploy-initialize`
+ * in-process: the same function the `deploy` and `deploy-initialise`
  * entrypoints run, so the split deploy (base deploy plus one maintenance
  * update per deferred circuit) this suite exercises is the one a remote
  * bring-up performs. Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already
  * set. Retries while the deployer wallet's dust is still generating on a
- * young chain; a retry restarts from the base deploy.
+ * young chain, but ONLY while the base deploy has not been submitted: the
+ * split deploy has no resume path, so a rerun past that point would deploy a
+ * SECOND contract and orphan the half-installed first one.
  *
  * @param env - The suite's env accumulator (the deploy reads `MIDNIGHT_DEPLOYER_WALLET_SEED`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` and node
  *   config from it).
- * @throws {Error} If the deploy fails after the dust-generation retries.
+ * @throws {NonRetryableError} If the deploy failed after its base deploy was submitted.
+ * @throws {Error} If the deploy fails otherwise, after the dust-generation retries.
  */
 async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.MIDNIGHT_VAULT_CONTRACT_ADDRESS) {
@@ -74,13 +85,26 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
     return;
   }
   // The deploy seals the DEPLOYER identity commitment, defaulting to the
-  // deployer wallet seed's bytes, and `initialize` is deployer-gated. The
-  // suites therefore drive initialize from a deployer session, exactly as the
+  // deployer wallet seed's bytes, and `initialise` is deployer-gated. The
+  // suites therefore drive initialise from a deployer session, exactly as the
   // deploy package's own entrypoint does, so the local run exercises the same
   // gate a remote bring-up meets.
-  const { contractAddress } = await retryWhileDustGenerates("deploy vault contract", () =>
-    deployVault(env),
-  );
+  const { contractAddress } = await retryWhileDustGenerates("deploy vault contract", async () => {
+    try {
+      return await deployVault(env);
+    } catch (error) {
+      // Past base submission a rerun costs a second contract. Everything else
+      // stays retryable and keeps its original error.
+      if (error instanceof SplitDeployAfterBaseSubmitError) {
+        throw new NonRetryableError(
+          "vault deploy failed after its base deploy was submitted, not retrying: " +
+            "a retry would deploy a second contract and orphan the first",
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  });
   env.MIDNIGHT_VAULT_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_VAULT_CONTRACT_ADDRESS=${contractAddress}`);
   console.log(` ➜ the vault contract on Midnight — holds deposits and authorizes withdrawals`);
@@ -93,7 +117,7 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
  * Ensure `EVM_VAULT_ACCOUNT_ADDRESS` matches the vault's derived EVM account, deriving
  * it when absent. The derivation is the contract package's
  * {@link deriveVaultEvmAddress}, the same one the deploy package's
- * `resolveInitializeConfig` seals on-chain, so this step and the initialize
+ * `resolveInitialiseConfig` seals on-chain, so this step and the initialise
  * agree by construction.
  *
  * @param env - The suite's env accumulator.
@@ -203,6 +227,35 @@ function ensureErc20Address(env: NodeJS.ProcessEnv): void {
   );
 }
 
+/**
+ * Verify the EVM protocols the vault's circuits call are deployed at `EVM_RPC_URL`: the Uniswap
+ * SwapRouter02 behind the swap flows, and the stataUSDC wrapper behind the supply/redeem flows.
+ * Both are pinned Sepolia addresses, so an absent one is a fork misconfiguration, and catching it
+ * here turns what would surface as an opaque revert deep inside a spec into one pointed failure.
+ * The two probes are independent reads, so they run concurrently and both report together.
+ *
+ * @param env - The suite's env accumulator (reads `EVM_RPC_URL`).
+ * @throws {Error} If either contract has no code at `EVM_RPC_URL`, naming every missing one.
+ */
+async function verifyForkDependencies(env: NodeJS.ProcessEnv): Promise<void> {
+  const rpcUrl = requireEnv(env, "EVM_RPC_URL");
+  const [uniswap, stata] = await Promise.all([uniswapAvailable(rpcUrl), stataAvailable(rpcUrl)]);
+  const missing: string[] = [];
+  if (!uniswap) missing.push(`${UNISWAP_SWAP_ROUTER_02} (Uniswap SwapRouter02)`);
+  if (!stata) missing.push(`${STATA_USDC} (stataUSDC wrapper)`);
+  if (missing.length > 0) {
+    throw new Error(
+      `no code on ${rpcUrl} at ${missing.join(" and at ")}: the suites run against a Sepolia ` +
+        `fork that deploys both, so either SEPOLIA_FORK_RPC_URL is not a Sepolia endpoint or ` +
+        `SEPOLIA_FORK_BLOCK is pinned before the contract was deployed.`,
+    );
+  }
+  console.log(
+    `fork dependencies present on ${rpcUrl}: Uniswap SwapRouter02 ${UNISWAP_SWAP_ROUTER_02}, ` +
+      `stataUSDC wrapper ${STATA_USDC}`,
+  );
+}
+
 // Step names match what the operator greps for and what STEP_THROUGH prompts show.
 const STEPS: readonly SetupStep[] = [
   [
@@ -240,6 +293,7 @@ const STEPS: readonly SetupStep[] = [
   ["setup: check/derive vault EVM address", ensureVaultEvmAddress],
   ["setup: check/derive user EVM address", ensureUserEvmAddress],
   ["setup: deal derived EVM accounts on the Sepolia fork (ETH + real USDC)", dealForkEvmAccounts],
+  ["setup: verify fork dependencies (Uniswap router + stataUSDC wrapper)", verifyForkDependencies],
   [
     "setup: print MPC server configuration",
     (env) => {

@@ -30,7 +30,7 @@ import {
   logSkip,
 } from "@sig-net/midnight-examples-test-harness";
 
-import { APPROVE_SELECTOR, MAX_APPROVE, stataAvailable } from "../evm-stata.ts";
+import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-stata.ts";
 import {
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
@@ -56,8 +56,8 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized)
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised)
+    throw new Error("vault is not initialised, run the initialise flow first");
 
   // approve(stataToken, MAX) on the underlying USDC, signed with the vault account (path
   // "vault"), the same 2-word map + bool schema as a transfer.
@@ -112,10 +112,6 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
  */
 export async function ensureStataApproved(session: VaultSession): Promise<void> {
   const context = await session.vaultContext();
-  if (!(await stataAvailable(context.evmRpcUrl))) {
-    logSkip("approveStata", "stataToken not deployed on this EVM chain");
-    return;
-  }
   const { ethers } = await import("ethers");
   const token = new ethers.Contract(
     AAVE_USDC,

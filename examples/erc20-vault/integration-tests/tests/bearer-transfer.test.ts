@@ -22,7 +22,7 @@
 // withdrawn amount strand on its seed, like the claimant-not-caller
 // recipient's.
 //
-// Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives
+// Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives
 // there. Recovery from a run that died mid-flow (proof-server OOM): rerun
 // this file with BEARER_TRANSFER_DEPOSIT_REQUEST_ID /
 // BEARER_TRANSFER_WITHDRAW_REQUEST_ID set to the ids the failed run printed.
@@ -47,14 +47,14 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
-import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import { settleWithdraw } from "../src/flows/complete-withdraw.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import {
   pollRespondBidirectional,
   type RespondOutcome,
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
-import { withdraw } from "../src/flows/withdraw.ts";
+import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -167,7 +167,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "vault-initialized preflight: the vault contract is initialized (read-only)",
+      "vault-initialised preflight: the vault contract is initialised (read-only)",
       async () => {
         const context = await session.vaultContext();
         const state = await readVaultLedger(
@@ -175,8 +175,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          state.initialized,
-          "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
+          state.initialised,
+          "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
         ).toBe(1n);
       },
       5 * MINUTE,
@@ -328,7 +328,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           ).signetRequestNonce;
         const nonceBefore = await readNonce();
 
-        // The withdraw circuit demands a surrendered coin of the full amount;
+        // The `startWithdraw` circuit demands a surrendered coin of the full amount;
         // A's wallet holds none of the color, so balancing cannot fund it and
         // the attempt dies client-side — the tx is never submitted.
         const evmNonce = await getTransactionNonce(
@@ -336,7 +336,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
         await expect(
-          withdraw(context, {
+          startWithdraw(context, {
             amount: WITHDRAW_AMOUNT,
             destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
             evmNonce,
@@ -384,7 +384,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
 
-        withdrawRequestId = await withdraw(context, {
+        withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
           evmNonce,
@@ -493,7 +493,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // completeWithdraw would reject with "Withdrawal not found" — skip
         // cleanly instead.
         const before = await readLedger();
-        if (!before.refundCommitment.member(requestKey)) {
+        if (!before.withdrawSettleViews.member(requestKey)) {
           logSkip(
             "completeWithdraw",
             `withdrawal ${withdrawRequestId} already settled (no pending marker on the ledger)`,
@@ -502,7 +502,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
         expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await completeWithdraw(context, { requestId: withdrawRequestId });
+        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
 
         const after = await readLedger();
         expect(
@@ -510,7 +510,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "completeWithdraw must consume the request from the ledger",
         ).toBe(false);
         expect(
-          after.refundCommitment.member(requestKey),
+          after.withdrawSettleViews.member(requestKey),
           "completeWithdraw must consume the pending-withdrawal marker",
         ).toBe(false);
 

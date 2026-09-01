@@ -34,7 +34,7 @@ const readBalance = (
  * `balanceOf(holder)` reads it back, and restore the original word either way. Tries the
  * Solidity mapping layout (`keccak256(holder ++ slot)`) and the Vyper layout
  * (`keccak256(slot ++ holder)`) for each slot. Works through proxies, since the probe targets
- * the address `balanceOf` is called on — where a proxy keeps its storage.
+ * the address `balanceOf` is called on, which is where a proxy keeps its storage.
  *
  * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
  * @param token - The ERC20 token contract.
@@ -73,8 +73,8 @@ async function findBalanceLocation(
 
 /**
  * Set `to`'s balance of `token` to `amount` on the fork by writing the balance mapping slot
- * directly. Total supply is left untouched, exactly like foundry's `deal` — irrelevant on a
- * throwaway fork. Setting (rather than transferring) makes dealing idempotent across setup
+ * directly. Total supply is left untouched, exactly like foundry's `deal`, which is irrelevant
+ * on a throwaway fork. Setting the balance outright makes dealing idempotent across setup
  * reruns and independent of any source account's balance.
  *
  * @param provider - The fork's JSON-RPC provider (anvil with cheatcodes).
@@ -167,8 +167,9 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
   }
 
   // The lending suite deposits Aave's own USDC (the stataUSDC wrapper's asset()), a different
-  // token from Circle's USDC. Deal it only when it forks in; on a fork missing it, the lending
-  // e2e self-skips (stataAvailable), so a hard failure here would be too strict.
+  // token from Circle's USDC. Deal it only when it forks in: the fork-dependency step that runs
+  // next fails the whole pipeline on a fork missing the stataUSDC wrapper this is the asset() of,
+  // with an error naming the wrapper.
   const aaveUsdcOnFork = (await provider.getCode(AAVE_USDC)) !== "0x";
   const userAaveUsdc = aaveUsdcOnFork ? USER_USDC : 0n;
 

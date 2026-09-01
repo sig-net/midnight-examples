@@ -1,28 +1,27 @@
 // Aave supply REFUND round trip: deposit Aave USDC, drain the vault's Aave-USDC EVM balance, then
 // supply. The wrapper's deposit does transferFrom(vault, ...) which reverts (the vault holds none),
 // so the MPC attests failure and completeSupply routes to refund, re-minting the surrendered
-// underlying. The lending twin of swap-refund-e2e / deposit-withdrawal-failure-refund. stataUSDC
-// only exists on Sepolia (or a Sepolia fork), so this suite gates on the wrapper and self-skips.
+// underlying. The lending twin of swap-refund-e2e / deposit-withdrawal-failure-refund. It runs
+// against the Sepolia fork the setup pipeline verifies, where the stataUSDC wrapper is deployed.
 import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { resolveInitializeConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { stataAvailable } from "../src/evm-stata.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
-import { initialize } from "../src/flows/initialize.ts";
-import { runSupplyRoundTrip } from "../src/flows/supply.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
+import { initialise } from "../src/flows/initialise.ts";
+import { runSupplyRoundTrip } from "../src/flows/supply-round-trip.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
-// The deployer's session, for initialize only: the circuit is gated to the
+// The deployer's session, for initialise only: the circuit is gated to the
 // deployer identity (the deployer wallet seed's bytes, whose commitment the
 // deploy sealed), so the user session cannot drive it. Lazily built like
-// every session — a rerun against an initialized vault never starts it.
+// every session — a rerun against an initialised vault never starts it.
 const deployerSession = createVaultSession({
   ...env,
   MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
@@ -42,19 +41,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
     "refunds the underlying when the supply reverts on-chain (vault holds no USDC)",
     async () => {
       const context = await session.vaultContext();
-      if (!(await stataAvailable(context.evmRpcUrl))) {
-        console.log(
-          "SKIP: stataUSDC wrapper not deployed on this EVM chain (need Sepolia or a Sepolia fork)",
-        );
-        return;
-      }
 
-      // The setup pipeline deploys the vault but does not initialize it (the key it pins
+      // The setup pipeline deploys the vault but does not initialise it (the key it pins
       // derives from the vault address), so seal the config here before any flow. A kept
-      // contract address that is already initialized is left untouched.
-      await initialize(
+      // contract address that is already initialised is left untouched.
+      await initialise(
         await deployerSession.vaultContext(),
-        resolveInitializeConfig(env, context.vaultContractAddress),
+        resolveInitialiseConfig(env, context.vaultContractAddress),
       );
 
       // Fund: deposit Aave USDC, minting the caller a shielded Aave-USDC coin and funding the
@@ -78,8 +71,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
       // The supply's stataUSDC.deposit reverts on-chain -> the MPC attests failure -> the settle
       // re-mints the surrendered underlying (tolerateRevert is the round trip's default).
       const result = await runSupplyRoundTrip(session, { amount: SUPPLY_AMOUNT });
-      if (!result)
-        throw new Error("supply unexpectedly skipped (wrapper availability already checked)");
       expect(result.refunded).toBe(true);
 
       // The refund re-minted exactly the surrendered underlying: the shielded balance is whole.

@@ -1,26 +1,26 @@
 // Swap REFUND round trip: deposit tokenIn, then submit a swap whose amountInMaximum is set
 // below the real cost so exactOutputSingle reverts on-chain ("Too much requested"). The MPC
 // attests the failure output and completeSwap routes to refund, re-minting the surrendered
-// amountInMaximum of tokenIn. The swap-side twin of deposit-withdrawal-failure-refund. Uniswap
-// only exists on Sepolia (or a Sepolia fork), so this suite gates on the router and self-skips.
-import { resolveInitializeConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+// amountInMaximum of tokenIn. The swap-side twin of deposit-withdrawal-failure-refund. It runs
+// against the Sepolia fork the setup pipeline verifies, where the Uniswap router is deployed.
+import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
-import { initialize } from "../src/flows/initialize.ts";
-import { runSwapRoundTrip } from "../src/flows/swap.ts";
+import { quoteExactOutputSingle } from "../src/evm-swap.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
+import { initialise } from "../src/flows/initialise.ts";
+import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
-// The deployer's session, for initialize only: the circuit is gated to the
+// The deployer's session, for initialise only: the circuit is gated to the
 // deployer identity (the deployer wallet seed's bytes, whose commitment the
 // deploy sealed), so the user session cannot drive it. Lazily built like
-// every session — a rerun against an initialized vault never starts it.
+// every session — a rerun against an initialised vault never starts it.
 const deployerSession = createVaultSession({
   ...env,
   MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
@@ -44,19 +44,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
     "refunds tokenIn when the swap reverts on-chain (amountInMaximum too low)",
     async () => {
       const context = await session.vaultContext();
-      if (!(await uniswapAvailable(context.evmRpcUrl))) {
-        console.log(
-          "SKIP: Uniswap not deployed on this EVM chain (need Sepolia or a Sepolia fork)",
-        );
-        return;
-      }
 
-      // The setup pipeline deploys the vault but does not initialize it (the key it pins
+      // The setup pipeline deploys the vault but does not initialise it (the key it pins
       // derives from the vault address), so seal the config here before any flow. A kept
-      // contract address that is already initialized is left untouched.
-      await initialize(
+      // contract address that is already initialised is left untouched.
+      await initialise(
         await deployerSession.vaultContext(),
-        resolveInitializeConfig(env, context.vaultContractAddress),
+        resolveInitialiseConfig(env, context.vaultContractAddress),
       );
 
       // Cap the spend at HALF the live quote — guaranteed under the real cost, so the swap
@@ -87,8 +81,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
         amountOut: AMOUNT_OUT,
         amountInMaximum: cap,
       });
-      if (!result)
-        throw new Error("swap unexpectedly skipped (router availability already checked)");
       expect(result.refunded).toBe(true);
 
       // The refund re-minted exactly the surrendered tokenIn: the shielded balance is whole.

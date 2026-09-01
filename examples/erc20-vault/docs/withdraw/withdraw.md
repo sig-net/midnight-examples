@@ -1,5 +1,13 @@
 # Withdraw
 
+<!-- FIXME(docs-diagrams): this page was written against the pre-rename
+     contract. Circuit and flow names in the text are updated to the renamed
+     circuits (initialise, startX/completeX, per-kind refundX), but the
+     drawio/PNG diagram still draws the old names, ledger-field names and any
+     remaining #L line anchors predate the refactor. Re-render the diagram and
+     re-verify names and anchors against the current contract and flows. -->
+
+
 The withdraw round trip moves ERC20 tokens out of the vault's own EVM account
 to any destination the caller names, against shielded vault tokens the caller
 surrenders on Midnight. It is the deposit round trip with the roles swapped:
@@ -28,7 +36,7 @@ in the midnight integration repository.
 The round trip runs from the caller surrendering their vault tokens on
 Midnight to the settle call that closes the request. There is no fund step:
 the ERC20 to move already sits in the vault's own EVM account, pinned at
-initialize as [`vaultEvmAddress`](../../contract/src/erc20-vault.compact#L91).
+initialise as [`vaultEvmAddress`](../../contract/src/erc20-vault.compact).
 The user's wallet drives the two Midnight transactions, the Vault dApp
 (Relayer) does the polling and the broadcast, and the MPC reads, signs and
 attests exactly as it does for a [deposit](../deposit/deposit.md). The settle
@@ -39,20 +47,20 @@ attested output, never by the caller.
 
 As illustrated, the flow comprises 5 steps:
 
-- **1.** withdraw(...) burns the surrendered coin and records the request
+- **1.** startWithdraw(...) burns the surrendered coin and records the request
   - The caller surrenders a shielded **vault coin** of exactly the withdraw
-    amount. [`withdraw`](../../contract/src/erc20-vault.compact#L549) checks
+    amount. [`startWithdraw`](../../contract/src/erc20-vault.compact) checks
     the coin's colour is that ERC20's vault token
-    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact#L276))
+    ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact))
     and burns it: `receiveShielded` assigns the coin to the contract, then
     `sendImmediateShielded` sends its full value to the shielded burn address.
     Both calls are needed, as a contract can only spend coins it owns. Vault
     tokens are IOUs, and a refund re-mints them.
   - The circuit builds contract-enforced calldata for
     `transfer(destEvmAddress, amount)` on the ERC20 named in the
-    [`WithdrawRequest`](../../contract/src/erc20-vault.compact#L532),
+    [`WithdrawRequest`](../../contract/src/erc20-vault.compact),
     constructs the **SignBidirectionalEvent** around it, stores that record in
-    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact#L66)
+    [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact)
     under the **RequestId** (the record's own hash), and calls the Sig Network
     singleton's `signBidirectional(...)` so the MPC picks the request up.
   - The derivation path is the contract-fixed literal `pad(32, "vault")`, so
@@ -65,17 +73,17 @@ As illustrated, the flow comprises 5 steps:
     can only fund the coin from the caller's own balance, so anyone holding
     vault tokens may withdraw to any destination.
   - The withdrawer's settle view (commitment, token, amount) goes into
-    [`refundCommitment`](../../contract/src/erc20-vault.compact#L121), whose
+    [`withdrawSettleViews`](../../contract/src/erc20-vault.compact), whose
     commitment comes from
-    [`withdrawRefundCommitment`](../../contract/src/erc20-vault.compact#L311)
+    [`refundCommitment`](../../contract/src/erc20-vault.compact)
     over the caller's secret and the request id. It is deliberately NOT
-    [`userCommitment`](../../contract/src/erc20-vault.compact#L297): the
+    [`userCommitment`](../../contract/src/erc20-vault.compact): the
     deposit path publishes that commitment on the ledger as its request's
     derivation path, so reusing it here would let anyone link a refund marker
     to a depositor's identity. Binding the request id also keeps two refunds by
     the same secret unlinkable to each other. The entry doubles as the
     pending-withdrawal marker step 5 consumes.
-  - Off chain, [`withdraw.ts`](../../integration-tests/src/flows/withdraw.ts#L69)
+  - Off chain, [`start-withdraw.ts`](../../integration-tests/src/flows/start-withdraw.ts)
     reads the vault account's next EVM nonce, funds the coin from the caller's
     shielded balance, calls the circuit, and asserts that the request id it
     recomputes with the SDK's `calculateRequestId` twin appears as a ledger map
@@ -124,8 +132,8 @@ As illustrated, the flow comprises 5 steps:
     (`0xdeadbeef01`), which the MPC attests for a transaction that never
     executed at all, reverted on chain or replaced on the same nonce.
   - Selection is by signature verification alone, against
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact#L78), the response
-    key the vault pinned at initialize and reads back from its own ledger. The
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact), the response
+    key the vault pinned at initialise and reads back from its own ledger. The
     fetched output's own success flag is unauthenticated and decides nothing.
   - Which candidate verifies is also what routes step 5. Everything fetched here
     stays UNTRUSTED: the verified bytes go into the settle circuit as an
@@ -135,14 +143,14 @@ As illustrated, the flow comprises 5 steps:
     owns the poll deadline and hands the resolved outcome to the settle step.
 - **5.** completeWithdraw(...) settles on the attested output
   - An executed transfer settles through
-    [`completeWithdraw`](../../contract/src/erc20-vault.compact#L665), whose
+    [`completeWithdraw`](../../contract/src/erc20-vault.compact), whose
     `Bytes<1>` output argument is the transfer's packed bool.
     `verifyRespondBidirectionalEvent<1>` re-verifies the MPC's signature over it
     against `mpcResponseKey` before anything else happens.
-  - Membership of `refundCommitment` is the double-settle protection and the
+  - Membership of `withdrawSettleViews` is the double-settle protection and the
     proof that this request is a pending withdrawal. Deposits never insert that
     marker, so a deposit request cannot be settled here, and its own settle
-    circuit is the depositor-gated `claim`. The settle view carries the typed
+    circuit is the depositor-gated `completeDeposit`. The settle view carries the typed
     token and amount, so the request record itself is only removed.
   - On `0x01` the withdrawal is final, the surrendered value stays burned, and
     the call is pure cleanup: it mints nothing and needs no identity, so ANYONE
@@ -154,26 +162,26 @@ As illustrated, the flow comprises 5 steps:
     would link the refunded coin to the withdrawal.
   - [`complete-withdraw.ts`](../../integration-tests/src/flows/complete-withdraw.ts#L53)
     is the single settle call site: it resolves the attested outcome, picks this
-    circuit or `refund` from it, and passes a fresh random mint nonce either way.
-- **5.** refund(...) re-mints when the transfer never executed
+    circuit or `refundWithdraw` from it, and passes a fresh random mint nonce either way.
+- **5.** refundWithdraw(...) re-mints when the transfer never executed
   - A transfer that never ran on the EVM chain settles through
-    [`refund`](../../contract/src/erc20-vault.compact#L733) instead, and the
+    [`refundWithdraw`](../../contract/src/erc20-vault.compact) instead, and the
     attested output's WIDTH is what routes the call: the fixed 5-byte failure
     output cannot type-fit `completeWithdraw`'s `Bytes<1>`, and an executed
-    result cannot type-fit `refund`'s `Bytes<5>`.
+    result cannot type-fit `refundWithdraw`'s `Bytes<5>`.
   - The same authentication gate runs at the failure width
     (`verifyRespondBidirectionalEvent<5>`), followed by an exact-bytes check:
     only `0xdeadbeef01` refunds, and any other attested 5-byte output is not a
     failure.
-  - One circuit serves the withdraw, swap, supply and redeem failure paths. All
-    four share this exact signature, so `refund` routes on which pending marker
-    holds the request id, and the four markers are separate maps, so exactly one
-    matches. A request id in no map, a deposit or an already-settled request,
-    fails here with a clean "Request not found".
-  - For a withdrawal the marker is `refundCommitment`, and the commitment, token
-    and amount come from the settle view pinned at withdraw time. The taken
-    arm's event map entry and marker are both consumed, and the value re-mints
-    once after the join.
+  - Each request kind has its own refund circuit (`refundWithdraw`,
+    `refundSwap`, `refundSupply`, `refundRedeem`) sharing one signature and one
+    failure check, and `refundWithdraw` reads ONLY the withdraw settle-view map: a
+    request id of another kind, or one already settled, fails with a clean
+    "not found".
+  - For a withdrawal that map is `withdrawSettleViews`, and the commitment,
+    token and amount come from the settle view pinned at startWithdraw time.
+    The event map entry and the settle view are both consumed, and the value
+    re-mints once.
   - Every arm is requester-only, as a refund mints a private coin: the caller
     must prove the secret behind the pinned commitment. The withdrawer's vault
     tokens are back in their wallet, minted under a nonce that ties them to
@@ -216,8 +224,8 @@ sequenceDiagram
     participant MPC as Sig Network Distributed MPC
     participant EVM as EVM Blockchain
 
-    Note over User,Singleton: Step 1: withdraw(...) burns the surrendered coin and records the request
-    User->>Vault: withdraw(...) surrendering a shielded vault coin
+    Note over User,Singleton: Step 1: startWithdraw(...) burns the surrendered coin and records the request
+    User->>Vault: startWithdraw(...) surrendering a shielded vault coin
     Vault->>Singleton: signBidirectional(...)
     Note over DApp,MPC: Step 2: poll for the MPC's signature
     MPC->>Vault: reads the recorded request
@@ -233,8 +241,8 @@ sequenceDiagram
         Note over User,Vault: Step 5: completeWithdraw(...) settles on the attested output
         User->>Vault: completeWithdraw(...)
     else the transfer never executed (5-byte failure output)
-        Note over User,Vault: Step 5: refund(...) re-mints when the transfer never executed
-        User->>Vault: refund(...)
+        Note over User,Vault: Step 5: refundWithdraw(...) re-mints when the transfer never executed
+        User->>Vault: refundWithdraw(...)
     end
 ```
 

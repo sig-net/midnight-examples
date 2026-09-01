@@ -1,26 +1,25 @@
-// Swap round trip against the live stack. Uniswap only exists on Sepolia (or a Sepolia fork:
-// set SEPOLIA_FORK_RPC_URL on the compose anvil), so this suite gates on the router being
-// deployed and self-skips otherwise (incl. CI's bare anvil). The setup pipeline deals the
-// derived accounts ETH + real USDC on the fork; here we deposit to fund the vault + mint the
-// caller a shielded tokenIn coin, then swap it for tokenOut.
-import { resolveInitializeConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+// Swap round trip against the live stack, which runs on the Sepolia fork the setup pipeline
+// verifies: the Uniswap router is deployed there, and the derived accounts hold ETH + real USDC.
+// Here we deposit to fund the vault + mint the caller a shielded tokenIn coin, then swap it for
+// tokenOut.
+import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
-import { initialize } from "../src/flows/initialize.ts";
-import { runSwapRoundTrip } from "../src/flows/swap.ts";
+import { quoteExactOutputSingle } from "../src/evm-swap.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
+import { initialise } from "../src/flows/initialise.ts";
+import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
-// The deployer's session, for initialize only: the circuit is gated to the
+// The deployer's session, for initialise only: the circuit is gated to the
 // deployer identity (the deployer wallet seed's bytes, whose commitment the
 // deploy sealed), so the user session cannot drive it. Lazily built like
-// every session — a rerun against an initialized vault never starts it.
+// every session — a rerun against an initialised vault never starts it.
 const deployerSession = createVaultSession({
   ...env,
   MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
@@ -46,19 +45,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
     "deposits tokenIn, then swaps it for tokenOut and mints the shielded amountOut",
     async () => {
       const context = await session.vaultContext();
-      if (!(await uniswapAvailable(context.evmRpcUrl))) {
-        console.log(
-          "SKIP: Uniswap not deployed on this EVM chain (need Sepolia or a Sepolia fork)",
-        );
-        return;
-      }
 
-      // The setup pipeline deploys the vault but does not initialize it (the key it pins
+      // The setup pipeline deploys the vault but does not initialise it (the key it pins
       // derives from the vault address), so seal the config here before any flow. A kept
-      // contract address that is already initialized is left untouched.
-      await initialize(
+      // The setup pipeline deploys the vault but does not initialise it (the key it pins
+      // derives from the vault address), so seal the config here before any flow. A kept
+      // contract address that is already initialised is left untouched.
+      await initialise(
         await deployerSession.vaultContext(),
-        resolveInitializeConfig(env, context.vaultContractAddress),
+        resolveInitialiseConfig(env, context.vaultContractAddress),
       );
 
       // Size the deposit/cap from a LIVE exactOutput quote (the fork pool price is arbitrary),
@@ -90,8 +85,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
         amountOut: AMOUNT_OUT,
         amountInMaximum,
       });
-      if (!result)
-        throw new Error("swap unexpectedly skipped (router availability already checked)");
       expect(result.refunded).toBe(false);
       // exactOutput: exactly AMOUNT_OUT is minted, and less than the cap was spent (change exists).
       expect(result.amountOut).toBe(AMOUNT_OUT);

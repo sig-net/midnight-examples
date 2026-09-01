@@ -1,4 +1,4 @@
-// `initialize`: the deployer's one-off call sealing the vault's post-deploy
+// `initialise`: the deployer's one-off call sealing the vault's post-deploy
 // configuration into the contract: the vault's own EVM address, the EVM chain
 // it operates on, the contracts it trades and lends through, and the MPC
 // RESPONSE key. The EVM address and the response key both derive from the
@@ -40,16 +40,16 @@ import {
 
 import { resolveEvmTargets, type VaultEvmTargets } from "./evm-targets.ts";
 
-/** What an {@link initializeVaultContract} call did. */
-export enum InitializeVaultOutcome {
-  /** The initialize circuit ran and sealed the configuration in this call. */
-  Initialized = "initialized",
-  /** The ledger already reported the vault initialized; nothing was submitted. */
-  AlreadyInitialized = "already-initialized",
+/** What an {@link initialiseVaultContract} call did. */
+export enum InitialiseVaultOutcome {
+  /** The initialise circuit ran and sealed the configuration in this call. */
+  Initialised = "initialised",
+  /** The ledger already reported the vault initialised; nothing was submitted. */
+  AlreadyInitialised = "already-initialised",
 }
 
-/** Every argument the vault's `initialize` circuit takes, fully resolved. */
-export interface VaultInitializeConfig {
+/** Every argument the vault's `initialise` circuit takes, fully resolved. */
+export interface VaultInitialiseConfig {
   /** The vault's own derived EVM account (20-byte 0x hex), the sender of its EVM transactions. */
   readonly vaultEvmAddress: string;
   /** The Uniswap SwapRouter02 the swap circuits call. */
@@ -60,7 +60,7 @@ export interface VaultInitializeConfig {
   readonly stataTokenAddress: string;
   /** The EVM chain the vault operates on. */
   readonly evmChainId: bigint;
-  /** CAIP-2 rendering of {@link VaultInitializeConfig.evmChainId} (`eip155:<id>`), the MPC routing key. */
+  /** CAIP-2 rendering of {@link VaultInitialiseConfig.evmChainId} (`eip155:<id>`), the MPC routing key. */
   readonly caip2Id: string;
   /**
    * The MPC response key for THIS vault contract (SEC1 hex): `f(MPC root key,
@@ -77,13 +77,13 @@ function requireValue(
   produces: string,
 ): string {
   const value = envOrUndefined(env, name);
-  if (!value) throw new Error(`${name} is required to initialize the vault: ${produces}`);
+  if (!value) throw new Error(`${name} is required to initialise the vault: ${produces}`);
   return value;
 }
 
 // Guard a value the caller may have pinned in the environment against the value
 // derived here. A mismatch means the environment and the contract about to be
-// initialized disagree, which would seal an address nothing can sign for.
+// initialised disagree, which would seal an address nothing can sign for.
 function assertDerivedMatch(preset: string | undefined, derived: string, name: string): void {
   if (preset && preset.toLowerCase() !== derived.toLowerCase()) {
     throw new Error(
@@ -93,7 +93,7 @@ function assertDerivedMatch(preset: string | undefined, derived: string, name: s
   }
 }
 
-// Everything initialize needs that does NOT depend on the vault's own address,
+// Everything initialise needs that does NOT depend on the vault's own address,
 // fully validated. Split out so a caller can fail on a missing or malformed
 // value BEFORE deploying the contract those values would configure.
 function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
@@ -116,7 +116,7 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
   }
 
   // Parse the targets here rather than at the circuit call: a malformed
-  // override must fail before anything is submitted, not mid-initialize.
+  // override must fail before anything is submitted, not mid-initialise.
   const targets = resolveEvmTargets(env);
   evmAddressBytes(targets.routerAddress);
   evmAddressBytes(targets.stataUnderlyingAddress);
@@ -126,7 +126,7 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
 }
 
 /**
- * Resolve every `initialize` argument for the vault at `vaultContractAddress`.
+ * Resolve every `initialise` argument for the vault at `vaultContractAddress`.
  * The vault's EVM address and MPC response key are DERIVED from the MPC's
  * secp256k1 public key plus that contract address, so a fresh deploy needs no
  * new configuration; values already pinned in the environment are verified
@@ -140,10 +140,10 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
  * @throws {Error} If a required variable is missing, `EVM_CHAIN_ID` is not a positive
  *   integer, or a preset `EVM_VAULT_ACCOUNT_ADDRESS` / `MPC_VAULT_RESPONSE_PUBLIC_KEY` contradicts the derivation.
  */
-export function resolveInitializeConfig(
+export function resolveInitialiseConfig(
   env: Record<string, string | undefined>,
   vaultContractAddress: string,
-): VaultInitializeConfig {
+): VaultInitialiseConfig {
   const { mpcSecp256k1PublicKey, evmChainId, targets } = resolveAddressFreeInputs(env);
 
   const vaultEvmAddress = deriveVaultEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress);
@@ -172,21 +172,21 @@ export function resolveInitializeConfig(
 }
 
 /**
- * Fail now on anything `initialize` needs that does NOT depend on the vault's
- * address, so a deploy+initialize run cannot spend a full multistage deploy and
+ * Fail now on anything `initialise` needs that does NOT depend on the vault's
+ * address, so a deploy+initialise run cannot spend a full multistage deploy and
  * only then discover a missing chain id or a malformed router address, leaving
- * a deployed vault stranded uninitialized.
+ * a deployed vault stranded uninitialised.
  *
- * @param env - The environment the subsequent {@link resolveInitializeConfig} will read.
+ * @param env - The environment the subsequent {@link resolveInitialiseConfig} will read.
  * @throws {Error} If a required variable is missing or malformed.
  */
-export function assertInitializeInputsPresent(env: Record<string, string | undefined>): void {
+export function assertInitialiseInputsPresent(env: Record<string, string | undefined>): void {
   resolveAddressFreeInputs(env);
 }
 
 /**
- * Run the vault's one-shot `initialize` circuit, skipping when the ledger
- * already reports the vault initialized (so a rerun against a kept contract
+ * Run the vault's one-shot `initialise` circuit, skipping when the ledger
+ * already reports the vault initialised (so a rerun against a kept contract
  * address is a no-op rather than a circuit failure).
  *
  * The caller must hold the DEPLOYER identity: the circuit compares the
@@ -195,19 +195,19 @@ export function assertInitializeInputsPresent(env: Record<string, string | undef
  * @param vault - The joined vault contract handle.
  * @param publicDataProvider - The provider to read the vault's current ledger state through.
  * @param vaultContractAddress - The vault contract's address (the state to read).
- * @param config - The resolved circuit arguments, from {@link resolveInitializeConfig}.
- * @returns Whether this call initialized the vault or found it already initialized.
+ * @param config - The resolved circuit arguments, from {@link resolveInitialiseConfig}.
+ * @returns Whether this call initialised the vault or found it already initialised.
  * @throws {Error} If an argument is malformed or the circuit rejects the caller.
  */
-export async function initializeVaultContract(
+export async function initialiseVaultContract(
   vault: DeployedVaultContract,
   publicDataProvider: PublicDataProvider,
   vaultContractAddress: string,
-  config: VaultInitializeConfig,
-): Promise<InitializeVaultOutcome> {
-  if ((await readVaultLedger(publicDataProvider, vaultContractAddress)).initialized) {
-    console.log("vault is already initialized, skipping initialize");
-    return InitializeVaultOutcome.AlreadyInitialized;
+  config: VaultInitialiseConfig,
+): Promise<InitialiseVaultOutcome> {
+  if ((await readVaultLedger(publicDataProvider, vaultContractAddress)).initialised) {
+    console.log("vault is already initialised, skipping initialise");
+    return InitialiseVaultOutcome.AlreadyInitialised;
   }
 
   console.log(`vault contract:    ${vaultContractAddress}`);
@@ -217,7 +217,7 @@ export async function initializeVaultContract(
   console.log(`EVM chain:         ${String(config.evmChainId)} (${config.caip2Id})`);
   console.log(`MPC response key:  ${config.mpcResponseKey}`);
 
-  const result = await vault.callTx.initialize(
+  const result = await vault.callTx.initialise(
     evmAddressBytes(config.vaultEvmAddress),
     evmAddressBytes(config.routerAddress),
     evmAddressBytes(config.stataUnderlyingAddress),
@@ -226,29 +226,29 @@ export async function initializeVaultContract(
     asciiPadded(config.caip2Id, CAIP2_ID_BYTES),
     parseSecp256k1PublicKey(config.mpcResponseKey),
   );
-  console.log(`initialize finalized in tx ${result.public.txId}`);
-  return InitializeVaultOutcome.Initialized;
+  console.log(`initialise finalized in tx ${result.public.txId}`);
+  return InitialiseVaultOutcome.Initialised;
 }
 
 /**
- * Join a deployed vault as the deployer and initialize it: the standalone
- * counterpart of {@link initializeVaultContract} for entrypoints that hold no
+ * Join a deployed vault as the deployer and initialise it: the standalone
+ * counterpart of {@link initialiseVaultContract} for entrypoints that hold no
  * session. The deployer identity resolves exactly as the deploy resolves it
  * (`VAULT_DEPLOYER_SECRET`, falling back to the `MIDNIGHT_DEPLOYER_WALLET_SEED` bytes), so
  * the caller and the commitment sealed at deploy agree by construction.
  *
  * @param env - The environment: lib's Midnight node configuration, `MIDNIGHT_DEPLOYER_WALLET_SEED`,
- *   `VAULT_DEPLOYER_SECRET`, and everything {@link resolveInitializeConfig} reads;
+ *   `VAULT_DEPLOYER_SECRET`, and everything {@link resolveInitialiseConfig} reads;
  *   defaults to `process.env`.
- * @param contractAddress - The vault to initialize; defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
- * @returns Whether this call initialized the vault or found it already initialized.
+ * @param contractAddress - The vault to initialise; defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
+ * @returns Whether this call initialised the vault or found it already initialised.
  * @throws {Error} If no contract address is available, a required variable is missing,
  *   no contract answers at the address, or the circuit rejects the caller.
  */
-export async function initializeVault(
+export async function initialiseVault(
   env: Record<string, string | undefined> = process.env,
   contractAddress?: string,
-): Promise<InitializeVaultOutcome> {
+): Promise<InitialiseVaultOutcome> {
   // A blank explicit address is treated as absent, so a caller threading an
   // unset value through still gets the environment's answer (or its error).
   const explicitAddress = contractAddress?.trim();
@@ -257,7 +257,7 @@ export async function initializeVault(
       ? requireValue(
           env,
           "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
-          "it names the vault to initialize (the deploy prints it)",
+          "it names the vault to initialise (the deploy prints it)",
         )
       : explicitAddress;
 
@@ -267,7 +267,7 @@ export async function initializeVault(
 
   // Resolve the arguments before starting a wallet: a missing variable or a
   // preset contradicting the derivation should fail here, not after a sync.
-  const config = resolveInitializeConfig(env, vaultContractAddress);
+  const config = resolveInitialiseConfig(env, vaultContractAddress);
 
   const secretKey = parseIdentitySecret("VAULT_DEPLOYER_SECRET", env, deployConfig.deployerSeed);
   const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, nodeConfig.networkId);
@@ -280,7 +280,7 @@ export async function initializeVault(
       privateStateId: VAULT_PRIVATE_STATE_ID,
       initialPrivateState: createVaultPrivateState(secretKey),
     });
-    return initializeVaultContract(
+    return initialiseVaultContract(
       vault,
       providers.publicDataProvider,
       vaultContractAddress,

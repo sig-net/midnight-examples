@@ -92,15 +92,18 @@ yarn build           # typecheck every package
 yarn test            # unit tests: offline, simulator only
 yarn format:check    # prettier check. `yarn format` rewrites
 yarn lint            # eslint, type-aware. `yarn lint:fix` applies the autofixes
+yarn deploy:erc20-vault             # deploy a vault. Needs `yarn compile:zk` first
+yarn deploy-initialise:erc20-vault  # deploy + the deployer-gated initialise (remote networks)
+yarn initialise:erc20-vault         # initialise an already-deployed vault (recovers a half-done run)
 ```
 
 Scripts targeting one example carry that example's directory name:
 `yarn compile:erc20-vault`, `yarn compile:erc20-vault:zk`,
 `yarn test:erc20-vault` and `yarn build:erc20-vault`. Deploying a vault is
 `yarn deploy:erc20-vault` (needing `yarn compile:erc20-vault:zk` first), with
-`yarn deploy-initialize:erc20-vault` for the one-shot remote bring-up and
-`yarn initialize:erc20-vault` to recover a run whose deploy landed but whose
-initialize did not. ESLint and Prettier are
+`yarn deploy-initialise:erc20-vault` for the one-shot remote bring-up and
+`yarn initialise:erc20-vault` to recover a run whose deploy landed but whose
+initialise did not. ESLint and Prettier are
 configured once at the repo root and cover every member, and each example's CI
 workflow runs `yarn format:check` and `yarn lint` before its tests, so
 formatting drift or a lint finding fails the build.

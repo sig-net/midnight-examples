@@ -13,7 +13,7 @@ import { defineConfig } from "vitest/config";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 
 // Explicit flow order. New flow files must be appended here; unknown files
-// run last, name-ordered. happy-day runs first: it initializes the vault and
+// run last, name-ordered. happy-day runs first: it initialises the vault and
 // cycles the funds later flows build on.
 const FILE_ORDER = [
   "happy-day-e2e.test.ts",
@@ -26,6 +26,7 @@ const FILE_ORDER = [
   "supply-redeem-e2e.test.ts",
   "supply-refund-e2e.test.ts",
   "swap-refund-e2e.test.ts",
+  "redeem-refund-e2e.test.ts",
 ];
 
 const rank = (moduleId: string): number => {

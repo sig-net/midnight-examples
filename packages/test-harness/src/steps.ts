@@ -22,7 +22,7 @@ import { getMidnightNodeConfig, loadRepoDotEnv, REPO_ROOT } from "@sig-net/midni
 import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv } from "./env-file.ts";
 import { getEvmChainId } from "./evm.ts";
-import { runCommand, runRootScript } from "./exec.ts";
+import { CommandError, runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { banner, logSkip } from "./output.ts";
 import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
@@ -51,7 +51,7 @@ export async function assertEnvironment(env: NodeJS.ProcessEnv): Promise<void> {
 /**
  * Resolve `EVM_CHAIN_ID` from `EVM_RPC_URL` (or verify a preset value
  * against what the RPC reports — loud failure on mismatch, since examples
- * seal the chain id into their contracts at initialize).
+ * seal the chain id into their contracts at initialise).
  *
  * @param env - The suite's env accumulator.
  * @throws {Error} If the RPC is unreachable or a preset `EVM_CHAIN_ID` mismatches it.
@@ -73,7 +73,7 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
     if (BigInt(env.EVM_CHAIN_ID) !== chainId) {
       throw new Error(
         `EVM_CHAIN_ID must match the chain EVM_RPC_URL serves (it is sealed into the example's contract at` +
-          ` initialize): the RPC reports ${String(chainId)}, found ${env.EVM_CHAIN_ID}`,
+          ` initialise): the RPC reports ${String(chainId)}, found ${env.EVM_CHAIN_ID}`,
       );
     }
     logSkip("resolve EVM chain id", `EVM_CHAIN_ID is set correctly`);
@@ -81,7 +81,7 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
     env.EVM_CHAIN_ID = chainId.toString();
     console.log(`resolved EVM_CHAIN_ID=${env.EVM_CHAIN_ID} from EVM_RPC_URL`);
     console.log(
-      ` ➜ sealed into the example's contract at initialize as CAIP-2 eip155:${env.EVM_CHAIN_ID}`,
+      ` ➜ sealed into the example's contract at initialise as CAIP-2 eip155:${env.EVM_CHAIN_ID}`,
     );
     console.log(` ➜ 💡 Set as EVM_CHAIN_ID in the environment to pin it explicitly`);
   }
@@ -120,8 +120,8 @@ const mpcKeys = (env: NodeJS.ProcessEnv) => deriveMpcKeys(requireEnv(env, "MPC_R
  * response key")`, the sender-scoped derivation the real MPC uses for
  * respond-bidirectional signing. The key depends on the client contract's
  * address, so this step MUST run after the client contract deploy; the
- * example's initialize flow then pins the key on-chain via the contract's
- * one-shot initialize circuit. The fakenet responder derives the same key
+ * example's initialise flow then pins the key on-chain via the contract's
+ * one-shot initialise circuit. The fakenet responder derives the same key
  * per request from its MPC_ROOT_PRIVATE_KEY + the request's sender, so nothing
  * extra is handed off.
  *
@@ -156,7 +156,7 @@ export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvV
   env.MPC_VAULT_RESPONSE_PUBLIC_KEY = expected;
   console.log(`derived a fresh MPC_VAULT_RESPONSE_PUBLIC_KEY=${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`);
   console.log(
-    ` ➜ the MPC's respond-bidirectional key for the client contract; the initialize flow pins it on-chain`,
+    ` ➜ the MPC's respond-bidirectional key for the client contract; the initialise flow pins it on-chain`,
   );
   console.log(
     ` ➜ 💡 Set as MPC_VAULT_RESPONSE_PUBLIC_KEY in the environment to skip this step on the next run`,
@@ -257,17 +257,30 @@ export async function compileContractZk(
  * yet" failure a young chain produces, as opposed to a real failure.
  *
  * The marker reaches us in several shapes: the wallet SDK's own error, an error
- * wrapping it as `cause`, or a tagged object. `String(error)` renders only the
- * top-level message and would miss the wrapped forms, turning the dust window
- * into a hard failure, so match the inspected error INCLUDING its cause chain.
+ * wrapping it as `cause`, a tagged object, or a subprocess failure. A
+ * {@link CommandError} is matched on its FULL captured output, since the
+ * trigger the child printed may sit far above the tail its message quotes.
+ * Anything else is inspected INCLUDING its cause chain: `String(error)`
+ * renders only the top-level message and would miss the wrapped forms,
+ * turning the dust window into a hard failure.
  *
  * @param error - The thrown value to classify.
  * @returns Whether the failure is the transient dust-generation one.
  */
 export function isDustGenerationFailure(error: unknown): boolean {
-  const rendered = inspect(error, { depth: 5 });
+  const rendered = error instanceof CommandError ? error.output : inspect(error, { depth: 5 });
   return rendered.includes("InsufficientFunds") || rendered.includes("could not balance dust");
 }
+
+/**
+ * Thrown by an action that must never be reattempted, whatever its text says:
+ * it left behind partial state (an on-chain deploy, a half-installed contract)
+ * that a second attempt would duplicate rather than resume.
+ * {@link retryWhileDustGenerates} rethrows it untouched, ahead of any
+ * transient-failure matching, so an action can carry a transient failure as
+ * its `cause` and still stop the retry loop.
+ */
+export class NonRetryableError extends Error {}
 
 /**
  * Run a fee-paying call (a deploy, a root-to-child funding transfer),
@@ -279,9 +292,14 @@ export function isDustGenerationFailure(error: unknown): boolean {
  * (see wallets.ts) instead, so the bounded retry here cannot mask real
  * underfunding.
  *
+ * A {@link NonRetryableError} takes precedence over that matching and is
+ * rethrown on the spot: an action that knows a second attempt is unsafe says
+ * so by its error TYPE, which no output text can override.
+ *
  * @param what - Step label for the retry log lines.
  * @param action - The fee-paying call to (re)attempt.
  * @returns Whatever `action` resolves to.
+ * @throws {NonRetryableError} Immediately, whatever the error text says.
  * @throws {Error} The last error when attempts are exhausted, or immediately for
  *   any error that is not the transient insufficient-dust failure.
  */
@@ -295,6 +313,9 @@ export async function retryWhileDustGenerates<T>(
     try {
       return await action();
     } catch (error) {
+      if (error instanceof NonRetryableError) {
+        throw error;
+      }
       if (!isDustGenerationFailure(error) || attempt >= MAX_ATTEMPTS) {
         throw error;
       }

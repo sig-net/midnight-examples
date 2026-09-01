@@ -39,7 +39,7 @@ export type VaultProviders = MidnightProviders<
 
 /**
  * A joined vault contract handle: midnight-js's found-contract shape typed to
- * the vault's generated contract, so `callTx.initialize(...)` /
+ * the vault's generated contract, so `callTx.initialise(...)` /
  * `callTx.deposit(...)` carry the real circuit signatures.
  */
 export type DeployedVaultContract = FoundContract<Contract<VaultPrivateState>>;

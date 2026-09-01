@@ -14,7 +14,7 @@ import {
 import { durationStats, latestRunRecords } from "../src/benchmark/report.ts";
 import { type CircuitModel, parseCircuitModel } from "../src/benchmark/static-metrics.ts";
 
-// A real `zkir-v3 mock-compile -v` line (initialize circuit), with the SGR
+// A real `zkir-v3 mock-compile -v` line (initialise circuit), with the SGR
 // colour sequences the binary emits even when piped. \u001b is ESC.
 const ANSI_MODEL_OUTPUT =
   "\u001b[2m2026-08-18T07:54:35.466499Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mzkir\u001b[0m\u001b[2m:\u001b[0m " +
@@ -22,7 +22,7 @@ const ANSI_MODEL_OUTPUT =
   "table_rows: 7939, nb_unusable_rows: 7, max_deg: 5, advice_columns: 9, fixed_columns: 56, " +
   "lookups: 7, permutations: 12, column_queries: 84, point_sets: 5, size: 6224 } }";
 
-const INITIALIZE_MODEL: CircuitModel = {
+const INITIALISE_MODEL: CircuitModel = {
   k: 13,
   rows: 4272,
   tableRows: 7939,
@@ -49,7 +49,7 @@ describe("parseCircuitModel", () => {
     { name: "ANSI-coloured output", output: ANSI_MODEL_OUTPUT },
     { name: "plain output", output: PLAIN_MODEL_OUTPUT },
   ])("parses the model line from $name", ({ output }) => {
-    expect(parseCircuitModel(output, "initialize.bzkir")).toEqual(INITIALIZE_MODEL);
+    expect(parseCircuitModel(output, "initialise.bzkir")).toEqual(INITIALISE_MODEL);
   });
 
   it.each([
@@ -71,8 +71,8 @@ describe("parseCircuitModel", () => {
 describe("circuitIdFromKeyLocation", () => {
   it.each([
     {
-      keyLocation: "contract:0200aabbcc/deposit?vk=1f2e3d",
-      expected: "deposit",
+      keyLocation: "contract:0200aabbcc/startDeposit?vk=1f2e3d",
+      expected: "startDeposit",
     },
     {
       keyLocation: "contract:0200aabbcc/signBidirectional",
@@ -108,35 +108,36 @@ describe("durationStats", () => {
 });
 
 describe("latestRunRecords", () => {
-  // Two composed runs: run-b re-measured only the deposit leg, so leg
-  // selection must return run-b's deposit record and run-a's claim record.
+  // Two composed runs: run-b re-measured only the startDeposit leg, so leg
+  // selection must return run-b's startDeposit record and run-a's
+  // completeDeposit record.
   const RECORDS: BenchRecord[] = [
     {
       kind: BenchRecordKind.Leg,
       runId: "run-a",
       at: "2026-08-18T08:00:00.000Z",
       ms: 100,
-      leg: BenchmarkLeg.DepositRequest,
+      leg: BenchmarkLeg.DepositStart,
     },
     {
       kind: BenchRecordKind.Leg,
       runId: "run-a",
       at: "2026-08-18T08:01:00.000Z",
       ms: 200,
-      leg: BenchmarkLeg.DepositClaim,
+      leg: BenchmarkLeg.DepositComplete,
     },
     {
       kind: BenchRecordKind.Leg,
       runId: "run-b",
       at: "2026-08-18T09:00:00.000Z",
       ms: 150,
-      leg: BenchmarkLeg.DepositRequest,
+      leg: BenchmarkLeg.DepositStart,
     },
   ];
 
   it.each([
-    { leg: BenchmarkLeg.DepositRequest, expectedRunId: "run-b", expectedMs: [150] },
-    { leg: BenchmarkLeg.DepositClaim, expectedRunId: "run-a", expectedMs: [200] },
+    { leg: BenchmarkLeg.DepositStart, expectedRunId: "run-b", expectedMs: [150] },
+    { leg: BenchmarkLeg.DepositComplete, expectedRunId: "run-a", expectedMs: [200] },
   ])("selects the latest run containing leg $leg", ({ leg, expectedRunId, expectedMs }) => {
     const selected = latestRunRecords(RECORDS, (record) => record.leg === leg);
     expect(selected.map((record) => record.runId)).toEqual(selected.map(() => expectedRunId));

@@ -1,15 +1,19 @@
-// The binding resolves the contract package's compiler output through the
-// PACKAGE SPECIFIER, so it keeps working wherever the consumer lives. A wrong
-// path fails late and obscurely (a proof server that cannot find a key, a
-// deploy with no verifier keys), so lock it here: these run without any
-// compile:zk output, only the default `yarn compile` managed dir.
+// The binding resolves each package's compiler output through the PACKAGE
+// SPECIFIER, so it keeps working wherever the consumer lives. A wrong path
+// fails late and obscurely (a proof server that cannot find a key, a deploy
+// with no verifier keys), so lock it here: these run without any compile:zk
+// output, only the default `yarn compile` managed dir.
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { SIGNET_SIGNER_MANAGED_PATH, VAULT_MANAGED_PATH } from "../src/vault-contract-binding.ts";
+import {
+  SIGNET_SIGNER_MANAGED_PATH,
+  VAULT_CONTRACT_PACKAGE_VERSION,
+  VAULT_MANAGED_PATH,
+} from "../src/vault-contract-binding.ts";
 
 describe("vault contract binding", () => {
   it("resolves the vault's compiler output inside the contract package", () => {
@@ -19,11 +23,13 @@ describe("vault contract binding", () => {
     );
   });
 
-  it("resolves the signet callee's compiler output (the compile-time symlink)", () => {
-    expect(SIGNET_SIGNER_MANAGED_PATH).toMatch(
-      /erc20-vault\/contract\/src\/managed\/SignetSigner$/,
-    );
-    expect(existsSync(join(SIGNET_SIGNER_MANAGED_PATH, "zkir")), `run \`yarn compile\` first`).toBe(
+  it("reads the contract package's own version, which is the workspace placeholder here", () => {
+    expect(VAULT_CONTRACT_PACKAGE_VERSION).toBe("0.0.0");
+  });
+
+  it("resolves the signet callee's compiler output inside the SDK package that ships it", () => {
+    expect(SIGNET_SIGNER_MANAGED_PATH).toMatch(/@sig-net\/midnight-contract\/dist\/managed$/);
+    expect(existsSync(join(SIGNET_SIGNER_MANAGED_PATH, "zkir")), `run \`yarn install\` first`).toBe(
       true,
     );
   });

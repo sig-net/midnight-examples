@@ -1,4 +1,4 @@
-// `withdraw`: the first half of the withdraw flow. Surrender a shielded
+// `startWithdraw`: the first half of the withdraw flow. Surrender a shielded
 // vault coin (burned by the contract) and record a SignBidirectionalEvent
 // asking the MPC to sign an EVM `transfer(destination, amount)` on the
 // ERC20, sent from the VAULT's derived address (path = "vault"). The request
@@ -31,8 +31,8 @@ import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
 
-/** Options for {@link withdraw}. */
-export interface WithdrawOptions {
+/** Options for {@link startWithdraw}. */
+export interface StartWithdrawOptions {
   /** Withdraw amount in ERC20 base units. */
   readonly amount: bigint;
   /** Destination EVM address (20-byte 0x hex) receiving the ERC20. */
@@ -42,7 +42,7 @@ export interface WithdrawOptions {
 }
 
 /**
- * Call the vault's `withdraw` circuit on the deployed contract and return
+ * Call the vault's `startWithdraw` circuit on the deployed contract and return
  * the resulting request id.
  *
  * Surrenders a shielded vault coin of exactly `amount` — the coin's color
@@ -62,13 +62,13 @@ export interface WithdrawOptions {
  * @param context - The flow context.
  * @param options - The withdraw arguments.
  * @returns The request id as 64-char lowercase hex.
- * @throws {Error} If an option is invalid, the vault is uninitialized, the caller's
+ * @throws {Error} If an option is invalid, the vault is uninitialised, the caller's
  *   shielded balance cannot cover `options.amount`, or the recomputed id
  *   does not appear on the ledger.
  */
-export async function withdraw(
+export async function startWithdraw(
   context: VaultContext,
-  options: WithdrawOptions,
+  options: StartWithdrawOptions,
 ): Promise<RequestIdHex> {
   if (options.amount <= 0n) {
     throw new Error(`amount must be a positive integer; got ${String(options.amount)}.`);
@@ -91,8 +91,8 @@ export async function withdraw(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized) {
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised) {
+    throw new Error("vault is not initialised, run the initialise flow first");
   }
   const requestNonce = before.signetRequestNonce;
 
@@ -142,7 +142,7 @@ export async function withdraw(
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  const result = await context.vault.callTx.withdraw(
+  const result = await context.vault.callTx.startWithdraw(
     options.evmNonce,
     keyVersion,
     {

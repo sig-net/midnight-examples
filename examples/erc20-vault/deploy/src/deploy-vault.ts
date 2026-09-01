@@ -4,8 +4,8 @@
 // signet contract reference), the witnesses, and the private state. Requires
 // `yarn compile:zk` output (verifier keys) in the contract package's managed
 // dir. The MPC response key is NOT a deploy input: it derives from the new
-// contract's own address, so the deployer-gated initialize circuit pins it
-// right after deploy (see {@link file://./initialize-vault.ts}).
+// contract's own address, so the deployer-gated initialise circuit pins it
+// right after deploy (see {@link file://./initialise-vault.ts}).
 
 import { randomBytes } from "node:crypto";
 
@@ -33,12 +33,14 @@ import {
   type MidnightNodeConfig,
   type NetworkId,
   parseIdentitySecret,
+  SPLIT_DEPLOY_BASE_SUBMITTED_MARKER,
+  SplitDeployAfterBaseSubmitError,
   submitUnprovenTransaction,
   type TransactionIdentifier,
   withSyncedWalletFacade,
 } from "@sig-net/midnight-examples-lib";
 
-// The full 14-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
+// The full 17-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
 // post-burn keys are large), so the base registers just ONE small circuit and every other
 // circuit is added by a maintenance update right after (each a tiny, fitting tx).
 const BASE_DEPLOY_CIRCUITS: readonly string[] = ["approveRouter"];
@@ -201,9 +203,9 @@ export interface VaultDeployment {
  * The deployer identity comes from `VAULT_DEPLOYER_SECRET` (falling back
  * to the `MIDNIGHT_DEPLOYER_WALLET_SEED` bytes): its commitment is sealed into the contract
  * as `deployer`, and the same secret must later answer the `callerSecretKey`
- * witness to pass `initialize`'s gate. That gate is what protects the
+ * witness to pass `initialise`'s gate. That gate is what protects the
  * post-deploy configuration (vault EVM address, chain, MPC response key)
- * from front-running (see {@link file://./initialize-vault.ts}).
+ * from front-running (see {@link file://./initialise-vault.ts}).
  *
  * @param env - Environment providing `MIDNIGHT_DEPLOYER_WALLET_SEED`, `VAULT_DEPLOYER_SECRET`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the signet contract to seal as the
@@ -212,7 +214,10 @@ export interface VaultDeployment {
  * @returns The deployed contract address and base deploy transaction id.
  * @throws {Error} If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed,
  *   `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` is missing on a deployed network, the deployer
- *   wallet holds no funds, or a submission or maintenance add fails.
+ *   wallet holds no funds, or the base deploy submission fails.
+ * @throws {SplitDeployAfterBaseSubmitError} If installing the deferred
+ *   circuits fails after the base deploy was submitted: a rerun would deploy
+ *   a second contract, so callers must not retry on it.
  */
 export async function deployVault(
   env: Record<string, string | undefined> = process.env,
@@ -268,17 +273,29 @@ export async function deployVault(
       );
     },
   );
+  // First line printed once submission returns: a driver watching this
+  // entrypoint's output stops retrying here, and the maintenance adds below
+  // are what it must not restart from the top.
+  console.log(SPLIT_DEPLOY_BASE_SUBMITTED_MARKER);
   console.log(`submitted base deploy tx ${txId}`);
   console.log(`deployed erc20-vault base at ${contractAddress}`);
 
-  await addDeferredCircuits(
-    deployConfig.midnightNodeConfig,
-    deployEnv,
-    accountKeys,
-    networkId,
-    contractAddress,
-    deferred,
-  );
+  try {
+    await addDeferredCircuits(
+      deployConfig.midnightNodeConfig,
+      deployEnv,
+      accountKeys,
+      networkId,
+      contractAddress,
+      deferred,
+    );
+  } catch (error) {
+    throw new SplitDeployAfterBaseSubmitError(
+      `installing the deferred circuits on ${contractAddress} failed after its base deploy ` +
+        "was submitted",
+      { cause: error },
+    );
+  }
   console.log(
     `deployed erc20-vault at ${contractAddress} ` +
       `(all ${String(deferred.length + BASE_DEPLOY_CIRCUITS.length)} circuits installed)`,

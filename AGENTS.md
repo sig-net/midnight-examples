@@ -64,12 +64,30 @@ any instinct carried in from product-repo conventions.
   npm scope the published SDK uses (`@sig-net/midnight`,
   `@sig-net/midnight-contract`), so the `midnight-examples-` prefix is the only
   thing separating an example from a product package: never drop it, and never
-  clear `"private"` without meaning to publish into the SDK's scope. The one
-  exception is contract packages: each is written to be publishable as-is (see
-  the environment-agnostic rule under "Contract packages"), and individual ones
-  may be published for consumption by downstream example applications that
-  combine many chains. Anything else worth publishing graduates to the protocol
-  repo's SDK packages.
+  clear `"private"` without meaning to publish into the SDK's scope. Anything
+  else worth publishing graduates to the protocol repo's SDK packages.
+  The packages that ARE published today are the erc20-vault trio plus the lib
+  they run on: `@sig-net/midnight-examples-lib`,
+  `@sig-net/midnight-examples-erc20-vault-{contract,client,deploy}`. They exist
+  for downstream example applications that combine many chains. Each drops
+  `"private"` and carries `files`, `publishConfig` and a `prepack`; the rest of
+  the workspace stays private. A contract package ships no `*.prover`: prover
+  keys publish as assets on the example's release tag, the client downloads the
+  one circuit it needs and verifies it against the manifest the npm package
+  ships, and the assets of a version already on npm are frozen (that manifest
+  pins their hashes, and keygen is not byte-reproducible).
+- **A published package's intra-workspace deps use `workspace:*`; its SDK deps
+  use a fixed npm version.** `workspace:*` resolves to the sibling during
+  development and yarn rewrites it to that sibling's EXACT version at pack time,
+  which is what keeps a release's packages pinned to each other rather than to
+  whatever the registry serves later. This does not soften the rule above that
+  an example names `@sig-net/midnight` / `@sig-net/midnight-contract` as a plain
+  npm semver range: `workspace:` is only ever for members of THIS repo, never a
+  reference back to the protocol repo.
+- **Every published package version moves in lockstep with its example's release
+  tag.** A release is tagged `<example-dir>-vX.Y.Z` (or `-vX.Y.Z-rc.N`) and the
+  publish workflow refuses to run unless every package it publishes is already
+  at exactly `X.Y.Z`. Bump them together in the commit that precedes the tag.
 
 Corollary: an example's `contract` package depends on the Signature Network SDK +
 compact tooling and **nothing else** — its dependency list is itself documentation
@@ -107,13 +125,16 @@ exception for that specific case.
   `yarn npm audit` reports no new advisory. The compact toolchain is likewise
   pinned: install it with `compact update 0.33.0-rc.2` (the exact version named
   in the README's prerequisites), and CI installs exactly that version. The
-  toolchain pin lives in several places that move TOGETHER: the workflow's
-  launcher URL (`compact-v0.5.1`) and compiler zip URL, the SHA-256 checksums
-  the workflow verifies for those two downloads (recompute each from a fresh
-  download of the new URL), the workflow cache keys, and the README's
-  Prerequisites table. This trigger is bidirectional: a request to "update the
-  compact version" AND a request to edit the version in the README's table
-  both mean updating every one of these sites in the same change.
+  toolchain pin lives in several places that move TOGETHER, in EVERY workflow
+  that installs the toolchain (`example-test.yaml` and `publish-erc20-vault.yml`
+  both do): each workflow's launcher URL (`compact-v0.5.1`) and compiler zip
+  URL, the SHA-256 checksums it verifies for those two downloads (recompute
+  each from a fresh download of the new URL), the workflow cache keys, and the
+  README's Prerequisites table. This trigger is bidirectional: a request to
+  "update the compact version" AND a request to edit the version in the README's
+  table both mean updating every one of these sites in the same change. Grep
+  `.github/workflows/` for the old version rather than editing the workflows you
+  happen to remember.
   Corollary: a dependency shared by two members MUST resolve to the same
   version in every member. Bump it everywhere in the same change and
   `yarn install` from the root: a single shared version is what keeps the
@@ -124,6 +145,12 @@ exception for that specific case.
   No `dist/`, no `tsc --outDir`, no ts-node loaders, no copy steps. Tests run under
   vitest; entrypoints run under `tsx`. If you think you need a build step, stop and
   ask — a build step is a defect in this workspace, not a missing feature.
+  **The one exception is publishing:** each npm-published package additionally
+  emits `dist/` via a `tsconfig.build.json`, ships ONLY `dist/`
+  (`files: ["dist"]`), and swaps its entry to it through `publishConfig.exports`
+  at pack time. The emit belongs to `prepack`, never to `build`, so `yarn build`
+  keeps meaning "typecheck, no emit" everywhere and the workspace itself always
+  resolves raw `src/index.ts`, never `dist/`.
 - **ALWAYS finish a change with `yarn format:check && yarn lint && yarn build && yarn test`**
   in the member you touched (or from the root). `tsx` and vitest execute without
   typechecking — "it runs" is NOT verification. If you add a new top-level TS
@@ -302,7 +329,7 @@ apply to all of them:
   packages.
 - **Every deploy flow is a typed function taking an `env` map, and the
   entrypoint is a shell over it.** `deployX(env = process.env)` returns its
-  outcome (the contract address, an initialize outcome enum); the CLI entrypoint
+  outcome (the contract address, an initialise outcome enum); the CLI entrypoint
   and the e2e setup step both CALL it, so the multistage deploy a remote network
   needs is exercised on every local run. Never spawn a deploy as a subprocess and
   parse its stdout: config then differs per caller, the return value degrades to

@@ -230,10 +230,31 @@ const operationIdToString = (id: string | Uint8Array): string =>
   typeof id === "string" ? id : new TextDecoder().decode(id);
 
 /**
+ * Machine-readable phase marker a split-deploy entrypoint prints, on a line of
+ * its own, the instant its base deploy transaction is submitted. Everything
+ * after that line installs circuits INTO the deployed contract, so a driver
+ * that reruns the entrypoint past this point deploys a SECOND contract and
+ * orphans the first. A caller running such an entrypoint as a subprocess scans
+ * its output for this exact string and refuses to retry once it appears.
+ */
+export const SPLIT_DEPLOY_BASE_SUBMITTED_MARKER = "[split-deploy] base deploy tx submitted";
+
+/**
+ * Thrown by a split-deploy flow that fails AFTER its base deploy transaction
+ * was submitted. The split deploy has no resume path, so rerunning the flow
+ * from the top would deploy a SECOND contract and orphan the half-installed
+ * first one: a caller wrapping the flow in a retry loop must rethrow this
+ * error instead of reattempting, whatever transient failure it carries as its
+ * `cause`. The in-process counterpart of
+ * {@link SPLIT_DEPLOY_BASE_SUBMITTED_MARKER}.
+ */
+export class SplitDeployAfterBaseSubmitError extends Error {}
+
+/**
  * Like {@link buildDeployTransaction}, but registers ONLY the circuits in
  * `baseCircuitIds` in the initial contract state, returning the REST so the caller
  * can add them with {@link buildMaintenanceInsertTransaction}. A contract whose full
- * verifier-key set overflows a block (the 14-circuit vault) deploys as a small base
+ * verifier-key set overflows a block (the 17-circuit vault) deploys as a small base
  * plus per-circuit maintenance adds. Keep `baseCircuitIds` minimal (one small circuit
  * is enough) so the base tx is well under the block limit; every other circuit is
  * deferred. The constructor runs once over the full assets (every key must be present);
@@ -248,7 +269,9 @@ const operationIdToString = (id: string | Uint8Array): string =>
  * @param baseCircuitIds - Circuit ids to register in the base deploy; all others are deferred.
  * @param constructorArgs - The contract's constructor arguments.
  * @returns The base {@link DeployTransaction} plus the {@link DeferredCircuit}s to add next.
- * @throws {Error} If the constructor traps or a verifier key is missing (run `compile:zk`).
+ * @throws {Error} If `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` is unset (the deferred circuits could never be
+ *   installed), a `baseCircuitIds` entry matches no compiled circuit, the constructor traps,
+ *   or a verifier key is missing (run `compile:zk`).
  */
 export async function buildDeployTransactionDeferring<C extends Contract.Contract<PS>, PS>(
   compiledContract: CompiledContract.CompiledContract<C, PS>,
@@ -259,6 +282,15 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   baseCircuitIds: readonly string[],
   ...constructorArgs: Contract.Contract.InitializeParameters<C>
 ): Promise<SplitDeployTransaction> {
+  // Fail before anything is built, let alone submitted: without an authority key the
+  // base deploy would land under an SDK-sampled throwaway authority and the deferred
+  // circuits could never be installed, leaving a permanently unusable contract.
+  if (Option.isNone(resolveMaintenanceSigningKey(env))) {
+    throw new Error(
+      "MIDNIGHT_MAINTENANCE_PRIVATE_KEY must be set for a split deploy: the deferred circuits are " +
+        "installed by maintenance updates its authority signs.",
+    );
+  }
   const keysLayer = Layer.succeed(Configuration.Keys, {
     coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
     getSigningKey: () => resolveMaintenanceSigningKey(env),
@@ -286,14 +318,26 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   base.data = fullState.data;
   base.maintenanceAuthority = fullState.maintenanceAuthority;
   const deferred: DeferredCircuit[] = [];
+  const kept = new Set<string>();
   for (const id of fullState.operations()) {
     const op = fullState.operation(id);
     if (!op) continue;
-    if (keep.has(operationIdToString(id))) {
+    const name = operationIdToString(id);
+    if (keep.has(name)) {
       base.setOperation(id, op);
+      kept.add(name);
     } else {
-      deferred.push({ circuitId: operationIdToString(id), verifierKey: op.verifierKey });
+      deferred.push({ circuitId: name, verifierKey: op.verifierKey });
     }
+  }
+  // A baseCircuitIds entry that matched nothing (a typo, or a renamed circuit) would
+  // otherwise silently defer everything and deploy a zero-operation base.
+  const unmatched = baseCircuitIds.filter((id) => !kept.has(id));
+  if (unmatched.length > 0) {
+    throw new Error(
+      `baseCircuitIds ${unmatched.map((id) => `"${id}"`).join(", ")} match no compiled circuit. ` +
+        `compiled circuits: ${[...fullState.operations()].map(operationIdToString).join(", ")}`,
+    );
   }
 
   const deploy = new ledger.ContractDeploy(base);
