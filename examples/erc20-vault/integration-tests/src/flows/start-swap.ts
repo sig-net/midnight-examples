@@ -2,12 +2,10 @@
 // map, surrendering amountInMaximum of the tokenIn vault coin (burned), to be signed with the
 // VAULT's account and broadcast. The settle side lives in complete-swap.ts.
 import {
-  asciiPadded,
   calculateRequestId,
   evmAddressAbiWord,
   hexToBytes,
   numericAbiWord,
-  PATH_BYTES,
   type RequestIdHex,
   requestIdHex,
   type SignBidirectionalEvent,
@@ -25,11 +23,10 @@ import {
   SWAP_MPC_ROUTING,
 } from "../evm-swap.ts";
 import { evmAddressBytes } from "../evm-transfer.ts";
+import { VAULT_PATH_BYTES } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
-
-const VAULT_PATH = asciiPadded("vault", PATH_BYTES);
 
 /** Options for {@link startSwap}. */
 export interface StartSwapOptions {
@@ -74,7 +71,7 @@ export async function startSwap(
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce: before.signetRequestNonce,
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
-    path: VAULT_PATH,
+    path: VAULT_PATH_BYTES,
     ...SWAP_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
     caip2Id: before.caip2Id,

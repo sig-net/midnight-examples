@@ -3,6 +3,7 @@
 
 import {
   type CircuitContext,
+  type CircuitResults,
   createCircuitContext,
   createConstructorContext,
   rawTokenType,
@@ -26,6 +27,7 @@ import {
   numericAbiWord,
   pureCircuits as signetCircuits,
   readSignetRequestsLedgerFromState,
+  type RequestId,
   requestIdBytes,
   requestIdHex,
   type RespondBidirectionalEvent,
@@ -1760,19 +1762,6 @@ describe("refundSwap settle", () => {
       ),
     ).rejects.toThrow(/Not the swapper/);
   });
-
-  it("a swap id cannot be refunded through refundWithdraw (kind isolation)", async () => {
-    const { contract, ctx, requestId } = await swapRequested();
-    await expect(
-      contract.circuits.refundWithdraw(
-        ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
-        OUTPUT_REVERTED,
-        MINT_NONCE,
-      ),
-    ).rejects.toThrow(/Withdrawal not found/);
-  });
 });
 
 // ---- Aave: supply/redeem fixtures ----
@@ -2133,5 +2122,215 @@ describe("refundSupply / refundRedeem settle", () => {
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the supplier/);
+  });
+});
+
+// ---- Cross-kind settle isolation ----
+
+// Every settle circuit takes the same shaped arguments under one signature
+// scheme, so a genuine attestation for ANY request id verifies in all of them.
+// The per-kind map membership assert is the whole barrier, and this matrix
+// exercises it: each kind's id against every OTHER kind's settle and refund
+// circuit.
+
+/** A request kind that pins a settle view, so it has a settle + refund pair. */
+enum SettleKind {
+  Withdraw = "withdraw",
+  Swap = "swap",
+  Supply = "supply",
+  Redeem = "redeem",
+}
+
+/** A started request: the threaded context plus the id its ledger map keyed it by. */
+interface PendingRequest {
+  contract: Contract<VaultPrivateState>;
+  ctx: CircuitContext<VaultPrivateState>;
+  requestId: RequestId;
+}
+
+/**
+ * Deploy + initialise + approveRouter(ERC20). The recorded request lands on
+ * completeDeposit's own map under the vault path.
+ */
+const approveRouterRequested = async (): Promise<PendingRequest> => {
+  const { contract, ctx } = await deployInitialised();
+  const next = (await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).context;
+  const index = toSignBidirectionalEventIndex(
+    ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+  );
+  const idHex = first(index.keys(), "indexed approveRouter request");
+  return { contract, ctx: next, requestId: requestIdBytes(idHex) };
+};
+
+const OUTPUT_SUPPLY = swapOutput(SUPPLY_SHARES);
+const OUTPUT_REDEEM = swapOutput(REDEEM_ASSETS);
+
+/** One column of the matrix: a settle circuit, and the guard a foreign id must trip. */
+interface CrossKindTarget {
+  /** The kind whose requests this circuit settles. */
+  kind: SettleKind;
+  /** Circuit name, completing the title "... presented to <circuit>". */
+  circuit: string;
+  /** Calls the circuit with an attestation genuinely signed for the presented id. */
+  settle: (pending: PendingRequest) => Promise<CircuitResults<VaultPrivateState, []>>;
+  /** Error the circuit must throw on an id of another kind. */
+  throws: RegExp;
+}
+
+const CROSS_KIND_TARGETS: CrossKindTarget[] = [
+  {
+    kind: SettleKind.Withdraw,
+    circuit: "completeWithdraw",
+    settle: ({ contract, ctx, requestId }) =>
+      contract.circuits.completeWithdraw(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
+        MINT_NONCE,
+      ),
+    throws: /Withdrawal not found/,
+  },
+  {
+    kind: SettleKind.Withdraw,
+    circuit: "refundWithdraw",
+    settle: ({ contract, ctx, requestId }) =>
+      contract.circuits.refundWithdraw(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    throws: /Withdrawal not found/,
+  },
+  {
+    kind: SettleKind.Swap,
+    circuit: "completeSwap",
+    settle: ({ contract, ctx, requestId }) =>
+      contract.circuits.completeSwap(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        OUTPUT_SWAP,
+        MINT_NONCE,
+        CHANGE_NONCE,
+      ),
+    throws: /Swap not found/,
+  },
+  {
+    kind: SettleKind.Swap,
+    circuit: "refundSwap",
+    settle: ({ contract, ctx, requestId }) =>
+      contract.circuits.refundSwap(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    throws: /Swap not found/,
+  },
+  {
+    kind: SettleKind.Supply,
+    circuit: "completeSupply",
+    settle: ({ contract, ctx, requestId }) =>
+      contract.circuits.completeSupply(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUPPLY),
+        OUTPUT_SUPPLY,
+        MINT_NONCE,
+      ),
+    throws: /Supply not found/,
+  },
+  {
+    kind: SettleKind.Supply,
+    circuit: "refundSupply",
+    settle: ({ contract, ctx, requestId }) =>
+      contract.circuits.refundSupply(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    throws: /Supply not found/,
+  },
+  {
+    kind: SettleKind.Redeem,
+    circuit: "completeRedeem",
+    settle: ({ contract, ctx, requestId }) =>
+      contract.circuits.completeRedeem(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REDEEM),
+        OUTPUT_REDEEM,
+        MINT_NONCE,
+      ),
+    throws: /Redeem not found/,
+  },
+  {
+    kind: SettleKind.Redeem,
+    circuit: "refundRedeem",
+    settle: ({ contract, ctx, requestId }) =>
+      contract.circuits.refundRedeem(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        OUTPUT_REVERTED,
+        MINT_NONCE,
+      ),
+    throws: /Redeem not found/,
+  },
+];
+
+/** One row of the matrix: the kind of request whose id gets presented. */
+interface CrossKindPresented {
+  /** The started request's kind, naming the columns it is legitimately settled by. */
+  kind: SettleKind;
+  /** Arrange: deploy, initialise and start one request of this kind. */
+  start: () => Promise<PendingRequest>;
+}
+
+const CROSS_KIND_PRESENTED: CrossKindPresented[] = [
+  { kind: SettleKind.Withdraw, start: withdrawRequested },
+  { kind: SettleKind.Swap, start: swapRequested },
+  { kind: SettleKind.Supply, start: supplyRequested },
+  { kind: SettleKind.Redeem, start: redeemRequested },
+];
+
+describe("cross-kind settle isolation", () => {
+  it.each(
+    CROSS_KIND_PRESENTED.flatMap(({ kind, start }) =>
+      CROSS_KIND_TARGETS.filter((target) => target.kind !== kind).map((target) => ({
+        presented: kind,
+        start,
+        ...target,
+      })),
+    ),
+  )("rejects a $presented request id presented to $circuit", async ({ start, settle, throws }) => {
+    await expect(settle(await start())).rejects.toThrow(throws);
+  });
+
+  // completeDeposit shares its ledger map with withdraw and both approves, so
+  // membership cannot isolate it: the path comparison is the whole barrier.
+  // Those requests carry the vault path literal, never a caller commitment. An
+  // approve settled here mints calldata word 1, the unlimited allowance.
+  it.each([
+    { presented: SettleKind.Withdraw, start: withdrawRequested },
+    { presented: "approveRouter", start: approveRouterRequested },
+  ])("rejects a $presented request id presented to completeDeposit", async ({ start }) => {
+    const { contract, ctx, requestId } = await start();
+    await expect(
+      contract.circuits.completeDeposit(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      ),
+    ).rejects.toThrow(/Not the depositor/);
   });
 });

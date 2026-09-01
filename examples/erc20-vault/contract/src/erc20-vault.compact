@@ -626,10 +626,10 @@ export circuit refundWithdraw(
 // ==== Swap (Uniswap V3) ==============================================================
 
 // The MPC decodes the uint256 return (outputSchema), then attests it packed as uint64.
-pure circuit swapOutputSchema(): Bytes<38> {
+export pure circuit swapOutputSchema(): Bytes<38> {
   return "[{\"name\":\"amountIn\",\"type\":\"uint256\"}]" as Bytes<38>;
 }
-pure circuit swapRespondSchema(): Bytes<37> {
+export pure circuit swapRespondSchema(): Bytes<37> {
   return "[{\"name\":\"amountIn\",\"type\":\"uint64\"}]" as Bytes<37>;
 }
 
@@ -815,10 +815,10 @@ export circuit refundSwap(
 
 // ==== Supply (Aave, via the stataUSDC wrapper) =======================================
 
-pure circuit supplyOutputSchema(): Bytes<36> {
+export pure circuit supplyOutputSchema(): Bytes<36> {
   return "[{\"name\":\"shares\",\"type\":\"uint256\"}]" as Bytes<36>;
 }
-pure circuit supplyRespondSchema(): Bytes<35> {
+export pure circuit supplyRespondSchema(): Bytes<35> {
   return "[{\"name\":\"shares\",\"type\":\"uint64\"}]" as Bytes<35>;
 }
 
@@ -950,10 +950,10 @@ export circuit refundSupply(
 
 // ==== Redeem (Aave, via the stataUSDC wrapper) =======================================
 
-pure circuit redeemOutputSchema(): Bytes<36> {
+export pure circuit redeemOutputSchema(): Bytes<36> {
   return "[{\"name\":\"assets\",\"type\":\"uint256\"}]" as Bytes<36>;
 }
-pure circuit redeemRespondSchema(): Bytes<35> {
+export pure circuit redeemRespondSchema(): Bytes<35> {
   return "[{\"name\":\"assets\",\"type\":\"uint64\"}]" as Bytes<35>;
 }
 

@@ -63,7 +63,7 @@ environment is a hard error, not an overwrite. On the Sepolia-forked anvil
 are dealt ETH + real USDC via anvil cheatcodes, and the setup starts the fakenet
 responder itself mid-run. The FLOW files are another matter: on a
 16 GB Docker VM expect the proof-server OOM (see "Reading failures") to
-interrupt the suite at some proving leg partway through the ten files:
+interrupt the suite at some proving leg partway through the flow files:
 that is routine, not a defect. Recover per the playbook and the suite
 completes across two or three invocations.
 
@@ -91,8 +91,8 @@ kept contracts.
 
 ## Ground rules (violating these wastes 10+ minutes per mistake)
 
-- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all ten
-  specs) or `yarn test:erc20-vault:e2e tests/<spec-file>` for one spec (the
+- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (the whole
+  suite) or `yarn test:erc20-vault:e2e tests/<spec-file>` for one spec (the
   setup pipeline still runs first, and extra args pass through to vitest).
 - **Background any run that may zk-compile or deploy** (fresh clone,
   redeploy): `> logfile 2>&1 &`, then watch the log. Never sit on a

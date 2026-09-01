@@ -3,12 +3,7 @@
 // read-only QuoterV2 quote. Mirrors evm-transfer.ts for the swap leg.
 import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
 import type { ContractReadMethod } from "@midnight-examples/test-harness";
-import {
-  asciiPadded,
-  MPC_PARAMS_BYTES,
-  MPCDestination,
-  MPCSignatureAlgorithm,
-} from "@sig-net/midnight";
+import { MPC_PARAMS_BYTES, MPCDestination, MPCSignatureAlgorithm } from "@sig-net/midnight";
 import { ethers } from "ethers";
 
 /** Uniswap V3 SwapRouter02 on Sepolia (also present on a Sepolia fork). */
@@ -36,23 +31,17 @@ export const SWAP_MAX_FEE_PER_GAS = 30_000_000_000n;
 export const SWAP_MAX_PRIORITY_FEE_PER_GAS = 1_000_000_000n;
 
 /**
- * The schema the MPC decodes the swap's EVM return against: exactOutputSingle returns a uint256
- * amountIn. Byte-matches the contract's swapOutputSchema (38 bytes).
+ * The schema the MPC decodes the swap's EVM return against, read from the compiled circuit so
+ * it cannot drift: exactOutputSingle returns a uint256 amountIn.
  */
-export const SWAP_OUTPUT_SCHEMA = '[{"name":"amountIn","type":"uint256"}]';
+export const SWAP_OUTPUT_SCHEMA = pureCircuits.swapOutputSchema();
 
 /**
- * The schema the MPC re-packs the decoded amountIn into for the attestation: a lean uint64,
- * lossless because the swap caps amountIn at amountInMaximum (<= Uint64). Byte-matches the
- * contract's swapRespondSchema (37 bytes).
+ * The schema the MPC re-packs the decoded amountIn into for the attestation, read from the
+ * compiled circuit so it cannot drift: a lean uint64, lossless as the swap caps amountIn at
+ * amountInMaximum (<= Uint64).
  */
-export const SWAP_RESPOND_SCHEMA = '[{"name":"amountIn","type":"uint64"}]';
-
-/** Byte width of {@link SWAP_OUTPUT_SCHEMA} (Compact `Bytes<38>`). */
-export const SWAP_OUTPUT_SCHEMA_BYTES = SWAP_OUTPUT_SCHEMA.length;
-
-/** Byte width of {@link SWAP_RESPOND_SCHEMA} (Compact `Bytes<37>`). */
-export const SWAP_RESPOND_SCHEMA_BYTES = SWAP_RESPOND_SCHEMA.length;
+export const SWAP_RESPOND_SCHEMA = pureCircuits.swapRespondSchema();
 
 const QUOTER_ABI = [
   "function quoteExactOutputSingle((address tokenIn,address tokenOut,uint256 amount,uint24 fee,uint160 sqrtPriceLimitX96)) returns (uint256 amountIn,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)",
@@ -108,6 +97,6 @@ export const SWAP_MPC_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
   dest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
-  outputDeserializationSchema: asciiPadded(SWAP_OUTPUT_SCHEMA, SWAP_OUTPUT_SCHEMA_BYTES),
-  respondSerializationSchema: asciiPadded(SWAP_RESPOND_SCHEMA, SWAP_RESPOND_SCHEMA_BYTES),
+  outputDeserializationSchema: SWAP_OUTPUT_SCHEMA,
+  respondSerializationSchema: SWAP_RESPOND_SCHEMA,
 };

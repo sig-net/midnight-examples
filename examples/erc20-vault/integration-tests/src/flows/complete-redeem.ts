@@ -7,52 +7,65 @@ import {
   MPC_FAILURE_OUTPUT,
   requestIdBytes,
   type RequestIdHex,
+  type RespondBidirectionalEvent,
   respondBidirectionalEventToCircuitInput,
+  type Secp256k1Point,
   serializeRespondOutput,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
 
 import { REDEEM_OUTPUT_SCHEMA, REDEEM_RESPOND_SCHEMA } from "../evm-stata.ts";
-import { fetchFakenetResponse } from "../fakenet-responses.ts";
+import { type FakenetResponse, fetchFakenetResponse } from "../fakenet-responses.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
-
-const MINUTE = 60_000;
+import { warnOnce } from "../warn-once.ts";
 
 /** The resolved attested outcome of a redeem (uint64 assets minted, or the failure output). */
 export interface RedeemOutcome {
-  readonly event: Awaited<ReturnType<SignetReader["getRespondBidirectionalEvents"]>>[number];
+  readonly event: RespondBidirectionalEvent;
   readonly serializedOutput: Uint8Array;
   readonly assets: bigint;
   readonly matchedFailureOutput: boolean;
 }
-type SignetReader = ReturnType<typeof createResponseReader>;
+
+/** One output a posted attestation may commit to, and the assets settling on it yields. */
+interface RedeemCandidate {
+  readonly serializedOutput: Uint8Array;
+  readonly assets: bigint;
+  readonly isFailureOutput: boolean;
+}
+
+// How long one candidate build waits on the fakenet's /responses API. Short on purpose: the
+// poll loop owns the deadline, so a tick that cannot fetch gives up fast and the next retries.
+const FAKENET_FETCH_TICK_TIMEOUT_MS = 3_000;
 
 /**
- * Resolve the MPC's attested redeem outcome by signature verification (the redeem-schema twin of
- * fetchSupplyOutcome).
+ * Recompute both candidate outputs the protocol allows for a redeem (the redeem-schema twin of
+ * complete-supply.ts's candidate build): the success candidate is the fakenet's cached traced
+ * output decoded per the uint256 output schema and re-packed per the uint64 respond schema, the
+ * failure candidate is the protocol's fixed 5-byte output. A decode failure drops the success
+ * candidate with a warning. The fakenet serves one fixed observation per request, so a caller
+ * resolving this once holds the candidates for its whole poll.
  *
- * @param context - The flow context.
- * @param requestId - The redeem request id to resolve.
- * @returns The resolved outcome (attested assets, or the failure output), or undefined.
+ * @param requestId - The redeem request id whose execution result to recompute.
+ * @returns The candidates, failure last, or undefined when the fakenet cannot serve this tick.
  */
-async function fetchRedeemOutcome(
-  context: VaultContext,
+async function fetchRedeemCandidates(
   requestId: RequestIdHex,
-): Promise<RedeemOutcome | undefined> {
-  const reader = createResponseReader(context, VAULT_REDEEM_REQUESTS_PATH);
-  const events = await reader.getRespondBidirectionalEvents(requestId);
-  if (events.length === 0) return undefined;
+): Promise<RedeemCandidate[] | undefined> {
+  let cached: FakenetResponse;
+  try {
+    cached = await fetchFakenetResponse(requestId, FAKENET_FETCH_TICK_TIMEOUT_MS);
+  } catch (error) {
+    warnOnce(
+      `redeem-fetch:${requestId}`,
+      `fakenet /responses fetch failed for redeem ${requestId}, will retry on the next poll tick: ${String(error)}`,
+    );
+    return undefined;
+  }
 
-  const { mpcResponseKey } = await readVaultLedger(
-    context.providers.publicDataProvider,
-    context.vaultContractAddress,
-  );
-
-  const cached = await fetchFakenetResponse(requestId, 3_000).catch(() => undefined);
-  const candidates: { serializedOutput: Uint8Array; assets: bigint; isFailureOutput: boolean }[] =
-    [];
-  if (cached?.success && cached.output != null) {
+  const candidates: RedeemCandidate[] = [];
+  if (cached.success && cached.output !== null) {
     try {
       const decoded = deserializeEvmOutput(REDEEM_OUTPUT_SCHEMA, cached.output);
       candidates.push({
@@ -60,27 +73,50 @@ async function fetchRedeemOutcome(
         assets: (decoded as { assets: bigint }).assets,
         isFailureOutput: false,
       });
-    } catch {
-      /* only the failure candidate can match */
+    } catch (error) {
+      warnOnce(
+        `redeem-decode:${requestId}`,
+        `could not decode/re-pack the cached output for redeem ${requestId} ` +
+          `(matching against the failure candidate only): ${String(error)}`,
+      );
     }
   }
   candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, assets: 0n, isFailureOutput: true });
+  return candidates;
+}
 
-  for (const c of candidates) {
+/**
+ * Select the outcome of the first posted event whose ECDSA signature verifies over one of
+ * `candidates`. The signature-only event carries no digest, so this signature check against the
+ * vault-pinned response key is the whole of candidate selection.
+ *
+ * @param events - The posts declared under `requestId`, unverified as the event log allows.
+ * @param requestId - The redeem request id the attestation must commit to.
+ * @param candidates - The recomputed outputs to try, in preference order.
+ * @param mpcResponseKey - The response key the vault pinned at initialise.
+ * @returns The matching outcome, or undefined when no post attests any candidate.
+ */
+function matchRedeemOutcome(
+  events: readonly RespondBidirectionalEvent[],
+  requestId: RequestIdHex,
+  candidates: readonly RedeemCandidate[],
+  mpcResponseKey: Secp256k1Point,
+): RedeemOutcome | undefined {
+  for (const candidate of candidates) {
     const event = events.find((posted) =>
       verifyRespondBidirectionalSignature(
         requestIdBytes(requestId),
-        c.serializedOutput,
+        candidate.serializedOutput,
         posted,
         mpcResponseKey,
       ),
     );
-    if (event) {
+    if (event !== undefined) {
       return {
         event,
-        serializedOutput: c.serializedOutput,
-        assets: c.assets,
-        matchedFailureOutput: c.isFailureOutput,
+        serializedOutput: candidate.serializedOutput,
+        assets: candidate.assets,
+        matchedFailureOutput: candidate.isFailureOutput,
       };
     }
   }
@@ -97,9 +133,16 @@ export interface PollRedeemOutcomeOptions {
   readonly timeoutMs?: number;
 }
 
+const MINUTE = 60_000;
+
 /**
  * Poll until the MPC posts a signature-verified attestation for the redeem
- * (see {@link fetchRedeemOutcome} for candidate resolution).
+ * (see {@link matchRedeemOutcome} for candidate selection).
+ *
+ * Everything a tick would otherwise redo is resolved once: the reader, whose request-record
+ * cache a rebuild would throw away, the response key the vault pinned at initialise, and the
+ * candidates {@link fetchRedeemCandidates} builds from the fakenet's fixed observation. A tick
+ * costs one event read plus a signature check per candidate.
  *
  * @param context - The flow context.
  * @param options - The request id and poll cadence.
@@ -110,17 +153,31 @@ export async function pollRedeemOutcome(
   context: VaultContext,
   options: PollRedeemOutcomeOptions,
 ): Promise<RedeemOutcome> {
+  const reader = createResponseReader(context, VAULT_REDEEM_REQUESTS_PATH);
+  // The key the settle circuit verifies against, read from the vault's own ledger: checking
+  // off-chain against anything else risks accepting a post that cannot prove. initialise
+  // writes it once and nothing rewrites it, so one read serves every tick.
+  const { mpcResponseKey } = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+
   const end = Date.now() + (options.timeoutMs ?? 6 * MINUTE);
-  let outcome: RedeemOutcome | undefined;
-  while (
-    Date.now() < end &&
-    (outcome = await fetchRedeemOutcome(context, options.requestId)) === undefined
-  ) {
+  let candidates: RedeemCandidate[] | undefined;
+  while (Date.now() < end) {
+    const events = await reader.getRespondBidirectionalEvents(options.requestId);
+    // A posted attestation means the fakenet has already cached the observed result (it caches
+    // before it posts), so the candidates are worth building only once a post appears.
+    if (events.length > 0) {
+      candidates ??= await fetchRedeemCandidates(options.requestId);
+      if (candidates !== undefined) {
+        const outcome = matchRedeemOutcome(events, options.requestId, candidates, mpcResponseKey);
+        if (outcome !== undefined) return outcome;
+      }
+    }
     await new Promise((r) => setTimeout(r, options.intervalMs ?? 1000));
   }
-  if (!outcome)
-    throw new Error(`timed out waiting for a redeem attestation for ${options.requestId}`);
-  return outcome;
+  throw new Error(`timed out waiting for a redeem attestation for ${options.requestId}`);
 }
 
 /**

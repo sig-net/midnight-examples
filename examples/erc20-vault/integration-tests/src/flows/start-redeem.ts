@@ -2,12 +2,10 @@
 // vault's REDEEM ledger map, surrendering `shares` of the stataUSDC vault coin (burned), to be
 // signed with the VAULT's account and broadcast. The settle side lives in complete-redeem.ts.
 import {
-  asciiPadded,
   calculateRequestId,
   evmAddressAbiWord,
   hexToBytes,
   numericAbiWord,
-  PATH_BYTES,
   type RequestIdHex,
   requestIdHex,
   type SignBidirectionalEvent,
@@ -25,11 +23,10 @@ import {
   STATA_REDEEM_SELECTOR,
   STATA_USDC,
 } from "../evm-stata.ts";
+import { VAULT_PATH_BYTES } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
-
-const VAULT_PATH = asciiPadded("vault", PATH_BYTES);
 
 /** Options for {@link startRedeem}. */
 export interface StartRedeemOptions {
@@ -66,7 +63,7 @@ export async function startRedeem(
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce: before.signetRequestNonce,
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
-    path: VAULT_PATH,
+    path: VAULT_PATH_BYTES,
     ...REDEEM_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
     caip2Id: before.caip2Id,

@@ -147,7 +147,7 @@ Prettier.
 The e2e suites need the running docker stack and the fakenet MPC responder: the [Quickstart](#quickstart) walks the first run end to end, and the [erc20-vault README](examples/erc20-vault/README.md) documents every spec in the suite. From the root:
 
 ```sh
-yarn test:erc20-vault:e2e                              # the full eight-spec suite, requires 'yarn compile'
+yarn test:erc20-vault:e2e                              # the full e2e suite, requires 'yarn compile'
 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any tests/*.test.ts name works), requires 'yarn compile'
 ```
 

@@ -41,6 +41,7 @@ import { fetchFakenetResponse } from "../fakenet-responses.ts";
 import { ERC20_TRANSFER_RESULT_SCHEMA } from "../mpc-routing.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
+import { warnOnce } from "../warn-once.ts";
 
 /** What the MPC attested for a request, resolved by signature verification. */
 export interface RespondOutcome {
@@ -68,17 +69,6 @@ export interface RespondOutcome {
 // intervalMs) owns the deadline, so a tick that cannot fetch gives up fast
 // and lets the next tick retry.
 const FAKENET_FETCH_TICK_TIMEOUT_MS = 3_000;
-
-// One warning per distinct condition per request, so a poll loop retrying
-// every second does not repeat the same message every tick.
-const warnedKeys = new Set<string>();
-function warnOnce(key: string, message: string): void {
-  if (warnedKeys.has(key)) {
-    return;
-  }
-  warnedKeys.add(key);
-  console.warn(message);
-}
 
 /**
  * Resolve the attested outcome for `requestId`: fetch the posted
