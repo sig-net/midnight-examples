@@ -229,6 +229,16 @@ const operationIdToString = (id: string | Uint8Array): string =>
   typeof id === "string" ? id : new TextDecoder().decode(id);
 
 /**
+ * Machine-readable phase marker a split-deploy entrypoint prints, on a line of
+ * its own, the instant its base deploy transaction is submitted. Everything
+ * after that line installs circuits INTO the deployed contract, so a driver
+ * that reruns the entrypoint past this point deploys a SECOND contract and
+ * orphans the first. A caller running such an entrypoint as a subprocess scans
+ * its output for this exact string and refuses to retry once it appears.
+ */
+export const SPLIT_DEPLOY_BASE_SUBMITTED_MARKER = "[split-deploy] base deploy tx submitted";
+
+/**
  * Like {@link buildDeployTransaction}, but registers ONLY the circuits in
  * `baseCircuitIds` in the initial contract state, returning the REST so the caller
  * can add them with {@link buildMaintenanceInsertTransaction}. A contract whose full

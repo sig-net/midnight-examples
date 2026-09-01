@@ -10,8 +10,10 @@
 // deploy: the key derives from the vault's own contract address, and the
 // initialise flow pins it on-chain.
 
+import { SPLIT_DEPLOY_BASE_SUBMITTED_MARKER } from "@midnight-examples/lib";
 import {
   assertEnvironment,
+  CommandError,
   compileContractZk,
   deploySignetContractStep,
   ensureMpcResponseKey,
@@ -20,6 +22,7 @@ import {
   ensureWalletSeeds,
   ensureWalletsFunded,
   logSkip,
+  NonRetryableError,
   persistFakenetHandoffToDotEnv,
   printMpcServerConfig,
   requireEnv,
@@ -59,16 +62,17 @@ const PIPELINE_KEYS = [
  * outside the package's export surface), capturing the printed address.
  * Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already set. Retries while
  * the deployer wallet's dust is still generating on a young chain (the
- * failure text survives into the subprocess error message, so the harness's
- * transient-failure matcher still applies), but ONLY while the subprocess
- * has not yet submitted its base deploy: the split deploy has no resume
- * path, so a rerun past that point would deploy a SECOND contract and
- * orphan the half-installed first one.
+ * subprocess failure carries the child's full output, which the harness's
+ * transient-failure matcher reads), but ONLY while the subprocess has not yet
+ * submitted its base deploy: the split deploy has no resume path, so a rerun
+ * past that point would deploy a SECOND contract and orphan the
+ * half-installed first one.
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` and node config from it).
- * @throws {Error} If the deploy subprocess fails (after the dust-generation retries)
- *   or its output carries no contract address.
+ * @throws {NonRetryableError} If the subprocess failed after its base deploy was submitted.
+ * @throws {Error} If the deploy subprocess fails otherwise (after the dust-generation
+ *   retries) or its output carries no contract address.
  */
 async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.MIDNIGHT_VAULT_CONTRACT_ADDRESS) {
@@ -103,17 +107,16 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
         30 * MINUTE,
       );
     } catch (error) {
-      const message = String(error);
-      // The error message carries the subprocess output tail. Once it shows the
-      // base deploy was submitted, defuse the dust matcher's trigger strings so
-      // retryWhileDustGenerates rethrows instead of deploying a second contract.
-      if (/submitted base deploy tx|deployed erc20-vault base at|maintenance-add/.test(message)) {
-        throw new Error(
-          "vault deploy failed after its base deploy was submitted; not retrying " +
-            "(a rerun would deploy a second contract and orphan this one): " +
-            message
-              .replace(/InsufficientFunds/g, "Insufficient-Funds")
-              .replace(/could not balance dust/g, "could-not-balance-dust"),
+      // The deploy entrypoint prints the marker the instant its base deploy is
+      // submitted, which is the point past which a rerun costs a second
+      // contract. Everything else stays retryable and keeps its original error.
+      if (
+        error instanceof CommandError &&
+        error.output.includes(SPLIT_DEPLOY_BASE_SUBMITTED_MARKER)
+      ) {
+        throw new NonRetryableError(
+          "vault deploy failed after its base deploy was submitted, not retrying: " +
+            "a retry would deploy a second contract and orphan the first",
           { cause: error },
         );
       }

@@ -18,8 +18,7 @@ export const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
  *   accumulator, not `process.env`).
  * @param timeoutMs - Kill the child and fail after this many milliseconds.
  * @returns The captured stdout.
- * @throws {Error} If the script exits non-zero, is killed by a signal, or times out;
- *   the error message includes the tail of the combined output.
+ * @throws {CommandError} If the script exits non-zero, is killed by a signal, or times out.
  */
 export async function runRootScript(
   script: string,
@@ -27,6 +26,33 @@ export async function runRootScript(
   timeoutMs: number,
 ): Promise<string> {
   return await runCommand("yarn", ["run", script], env, timeoutMs);
+}
+
+// How much of the combined output the error MESSAGE quotes. The full output
+// stays on the error as `output` for callers that match on it.
+const MESSAGE_TAIL_LINES = 20;
+
+/**
+ * A failed subprocess: the message quotes the last {@link MESSAGE_TAIL_LINES}
+ * lines of the child's output, and `output` carries all of it.
+ *
+ * Match on `output`, never on `message`, when a decision depends on something
+ * the child printed: a verbose crash pushes any earlier line out of the tail
+ * the message quotes.
+ */
+export class CommandError extends Error {
+  /** The child's combined stdout and stderr, in the order the child wrote it. */
+  readonly output: string;
+
+  /**
+   * @param message - Human-readable failure summary, ending in the output tail.
+   * @param output - The child's full combined stdout and stderr.
+   */
+  constructor(message: string, output: string) {
+    super(message);
+    this.name = "CommandError";
+    this.output = output;
+  }
 }
 
 /**
@@ -40,8 +66,7 @@ export async function runRootScript(
  *   accumulator, not `process.env`).
  * @param timeoutMs - Kill the child and fail after this many milliseconds.
  * @returns The captured stdout.
- * @throws {Error} If the command exits non-zero, is killed by a signal, or times
- *   out; the error message includes the tail of the combined output.
+ * @throws {CommandError} If the command exits non-zero, is killed by a signal, or times out.
  */
 export async function runCommand(
   command: string,
@@ -77,10 +102,11 @@ export async function runCommand(
         resolve(stdout);
         return;
       }
-      const tail = combined.split("\n").slice(-20).join("\n");
+      const tail = combined.split("\n").slice(-MESSAGE_TAIL_LINES).join("\n");
       reject(
-        new Error(
+        new CommandError(
           `${command} ${args.join(" ")} ${signal ? `killed by ${signal} (timeout ${String(timeoutMs)}ms?)` : `exited with code ${String(code)}`}\n--- output tail ---\n${tail}`,
+          combined,
         ),
       );
     });

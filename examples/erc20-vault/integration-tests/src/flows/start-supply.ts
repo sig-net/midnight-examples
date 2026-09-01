@@ -24,10 +24,8 @@ import {
   STATA_GAS_LIMIT,
   STATA_MAX_FEE_PER_GAS,
   STATA_MAX_PRIORITY_FEE_PER_GAS,
-  STATA_USDC,
   SUPPLY_MPC_ROUTING,
 } from "../evm-stata.ts";
-import { evmAddressBytes } from "../evm-transfer.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
@@ -76,7 +74,7 @@ export async function startSupply(
     txParamType: TxParamType.evmType2,
     caip2Id: before.caip2Id,
     txParams: {
-      to: evmAddressBytes(STATA_USDC),
+      to: before.stataToken,
       chainId: before.evmChainId,
       nonce: options.evmNonce,
       gasLimit: STATA_GAS_LIMIT,
@@ -90,10 +88,7 @@ export async function startSupply(
         value: {
           selector: STATA_DEPOSIT_SELECTOR,
           noWords: 2n,
-          words: [
-            numericAbiWord(options.amount),
-            evmAddressAbiWord(evmAddressBytes(context.evmVaultAddress)),
-          ],
+          words: [numericAbiWord(options.amount), evmAddressAbiWord(before.vaultEvmAddress)],
         },
       },
     },

@@ -25,7 +25,6 @@ import {
   STATA_REDEEM_SELECTOR,
   STATA_USDC,
 } from "../evm-stata.ts";
-import { evmAddressBytes } from "../evm-transfer.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
@@ -63,7 +62,6 @@ export async function startRedeem(
     value: options.shares,
   };
 
-  const vault = evmAddressBytes(context.evmVaultAddress);
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce: before.signetRequestNonce,
@@ -73,7 +71,7 @@ export async function startRedeem(
     txParamType: TxParamType.evmType2,
     caip2Id: before.caip2Id,
     txParams: {
-      to: evmAddressBytes(STATA_USDC),
+      to: before.stataToken,
       chainId: before.evmChainId,
       nonce: options.evmNonce,
       gasLimit: STATA_GAS_LIMIT,
@@ -89,8 +87,8 @@ export async function startRedeem(
           noWords: 3n,
           words: [
             numericAbiWord(options.shares),
-            evmAddressAbiWord(vault),
-            evmAddressAbiWord(vault),
+            evmAddressAbiWord(before.vaultEvmAddress),
+            evmAddressAbiWord(before.vaultEvmAddress),
           ],
         },
       },

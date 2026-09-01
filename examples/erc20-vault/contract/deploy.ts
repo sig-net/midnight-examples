@@ -24,6 +24,7 @@ import {
   type MidnightNodeConfig,
   type NetworkId,
   parseIdentitySecretKey,
+  SPLIT_DEPLOY_BASE_SUBMITTED_MARKER,
   submitUnprovenTransaction,
   type TransactionIdentifier,
   withSyncedWalletFacade,
@@ -257,6 +258,10 @@ async function deployVault(
       );
     },
   );
+  // First line printed once submission returns: a driver watching this
+  // entrypoint's output stops retrying here, and the maintenance adds below
+  // are what it must not restart from the top.
+  console.log(SPLIT_DEPLOY_BASE_SUBMITTED_MARKER);
   console.log(`submitted base deploy tx ${txId}`);
   console.log(`deployed erc20-vault base at ${contractAddress}`);
 

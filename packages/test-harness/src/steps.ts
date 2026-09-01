@@ -21,7 +21,7 @@ import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
 import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv, loadRepoDotEnv } from "./env-file.ts";
 import { getEvmChainId } from "./evm.ts";
-import { REPO_ROOT, runCommand, runRootScript } from "./exec.ts";
+import { CommandError, REPO_ROOT, runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { banner, logSkip } from "./output.ts";
 import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
@@ -243,6 +243,16 @@ export async function compileContractZk(
 }
 
 /**
+ * Thrown by an action that must never be reattempted, whatever its text says:
+ * it left behind partial state (an on-chain deploy, a half-installed contract)
+ * that a second attempt would duplicate rather than resume.
+ * {@link retryWhileDustGenerates} rethrows it untouched, ahead of any
+ * transient-failure matching, so an action can carry a transient failure as
+ * its `cause` and still stop the retry loop.
+ */
+export class NonRetryableError extends Error {}
+
+/**
  * Run a fee-paying call (a deploy, a root-to-child funding transfer),
  * retrying while the paying wallet cannot yet cover the fee. On a freshly
  * started dev chain DUST generates block by block from the genesis NIGHT,
@@ -252,9 +262,14 @@ export async function compileContractZk(
  * (see wallets.ts) instead, so the bounded retry here cannot mask real
  * underfunding.
  *
+ * A {@link NonRetryableError} takes precedence over that matching and is
+ * rethrown on the spot: an action that knows a second attempt is unsafe says
+ * so by its error TYPE, which no output text can override.
+ *
  * @param what - Step label for the retry log lines.
  * @param action - The fee-paying call to (re)attempt.
  * @returns Whatever `action` resolves to.
+ * @throws {NonRetryableError} Immediately, whatever the error text says.
  * @throws {Error} The last error when attempts are exhausted, or immediately for
  *   any error that is not the transient insufficient-dust failure.
  */
@@ -268,9 +283,14 @@ export async function retryWhileDustGenerates<T>(
     try {
       return await action();
     } catch (error) {
-      const message = String(error);
+      if (error instanceof NonRetryableError) {
+        throw error;
+      }
+      // A subprocess failure is matched on its FULL output: the trigger the
+      // child printed may sit far above the tail its message quotes.
+      const text = error instanceof CommandError ? error.output : String(error);
       const transient =
-        message.includes("InsufficientFunds") || message.includes("could not balance dust");
+        text.includes("InsufficientFunds") || text.includes("could not balance dust");
       if (!transient || attempt >= MAX_ATTEMPTS) {
         throw error;
       }

@@ -23,7 +23,6 @@ import {
   SWAP_MAX_FEE_PER_GAS,
   SWAP_MAX_PRIORITY_FEE_PER_GAS,
   SWAP_MPC_ROUTING,
-  UNISWAP_SWAP_ROUTER_02,
 } from "../evm-swap.ts";
 import { evmAddressBytes } from "../evm-transfer.ts";
 import type { VaultContext } from "../vault-context.ts";
@@ -80,7 +79,7 @@ export async function startSwap(
     txParamType: TxParamType.evmType2,
     caip2Id: before.caip2Id,
     txParams: {
-      to: evmAddressBytes(UNISWAP_SWAP_ROUTER_02),
+      to: before.uniswapRouter,
       chainId: before.evmChainId,
       nonce: options.evmNonce,
       gasLimit: SWAP_GAS_LIMIT,
@@ -98,7 +97,7 @@ export async function startSwap(
             evmAddressAbiWord(tokenIn),
             evmAddressAbiWord(tokenOut),
             numericAbiWord(options.fee),
-            evmAddressAbiWord(evmAddressBytes(context.evmVaultAddress)),
+            evmAddressAbiWord(before.vaultEvmAddress),
             numericAbiWord(options.amountOut),
             numericAbiWord(options.amountInMaximum),
             numericAbiWord(0n),

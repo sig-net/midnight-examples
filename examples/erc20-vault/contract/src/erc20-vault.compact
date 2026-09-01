@@ -14,14 +14,9 @@ import CompactStandardLibrary;
 import "@sig-net/midnight/src/Signet";
 
 // ---- Ledger state -------------------------------------------------------------------
-// CAUTION: 19 ledger fields is past the 15-field flat limit, so the compiler chunks
-// the state tree: every field resolves to a depth-2 [chunk, slot] path (remainder
-// chunk first) and ANY change to the field count or order re-indexes it. Four fields
-// are named by compiled path in MPC notifications and must keep that path across a
-// deploy: signBidirectionalEventMap [0,0], swapEventMap [1,7], supplyEventMap [1,11],
-// redeemEventMap [1,13]. Read paths from managed/erc20-vault/compiler/contract-info.json.
 
 // Deposit/withdraw/approve requests (2-word ERC20 transfer, 34-byte schemas).
+// Compiled path for MPC notification: [0, 0] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // The Signet singleton the request circuits cross-contract call to notify the MPC.
@@ -30,7 +25,7 @@ sealed ledger signetSigner: SignetSigner;
 // Verifies every attestation (the Signet singleton emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
-// Keeps otherwise identical requests hashing to distinct request ids.
+// Nonce to keep otherwise identical requests hashing to distinct request ids.
 export ledger signetRequestNonce: Counter;
 
 // Becomes 1 once initialise() has run.
@@ -39,31 +34,37 @@ export ledger initialised: Counter;
 // The vault's own EVM address (derivation path "vault"), the enforced deposit recipient.
 export ledger vaultEvmAddress: Bytes<20>;
 
-// The ONE EVM chain this vault operates on; initialise() supplies a consistent pair.
+// The ONE EVM chain this vault operates on: initialise() supplies a consistent pair.
 export ledger evmChainId: Uint<64>;
 export ledger caip2Id: Bytes<32>;
 
 // Identity commitment of the deployer. Only they may call initialise().
 sealed ledger deployer: Bytes<32>;
 
-// Pending-request marker + settle view, one map per request kind (so a requestId only
-// settles through its own kind's circuits). Each view holds the refund commitment plus
-// typed copies of the values the start circuit validated and bounded before the burn,
-// so settle circuits never decode the request record's ABI words.
+// withdrawSettleViews:
+// Map of pending withdrawal requestIds against the refund commitment that gates them,
+// plus the erc20 and amount they settle. Keeping the amount as Uint<64> prevents having
+// to decode amounts from ABI words in the SignBidirectionalEvent signature request
+// in the completeWithdraw or refundWithdraw circuits.
 struct WithdrawSettleView {
   commitment: Bytes<32>;
   erc20: Bytes<20>;
   amount: Uint<64>;
 }
-
 export ledger withdrawSettleViews: Map<RequestId, WithdrawSettleView>;
 
 // The pinned Uniswap SwapRouter02: the only approveRouter spender and swap `to`.
 export ledger uniswapRouter: Bytes<20>;
 
 // Swap requests (exactOutputSingle: 7 words, uint256 result repacked to uint64).
+// Compiled path for MPC notification: [1, 7] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger swapEventMap: SignBidirectionalEventMap<EvmType2TxParams<7, 0, 0>, 38, 37>;
 
+// swapSettleViews:
+// Map of pending swap requestIds against a view of their settlement amounts.
+// Keeping a view of the settlement amounts as Uint<64> prevents having to
+// decode amounts from ABI words in the SignBidirectionalEvent signature request
+// in the completeSwap or refundSwap circuits.
 struct SwapSettleView {
   commitment: Bytes<32>;
   tokenIn: Bytes<20>;
@@ -71,7 +72,6 @@ struct SwapSettleView {
   amountOut: Uint<64>;
   amountInMaximum: Uint<64>;
 }
-
 export ledger swapSettleViews: Map<RequestId, SwapSettleView>;
 
 // The pinned Aave USDC pair: underlying ERC20 + its ERC-4626 wrapper (stataUSDC).
@@ -79,23 +79,29 @@ export ledger stataUnderlying: Bytes<20>;
 export ledger stataToken: Bytes<20>;
 
 // Supply requests (stataToken.deposit(assets, receiver): 2 words, uint256 -> uint64).
+// Compiled path for MPC notification: [1, 11] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger supplyEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 36, 35>;
 
+// supplySettleViews:
+// Map of pending supply requestIds against a view of their settlement amounts for use
+// in the completeSupply or refundSupply circuits.
 struct SupplySettleView {
   commitment: Bytes<32>;
   amount: Uint<64>;
 }
-
 export ledger supplySettleViews: Map<RequestId, SupplySettleView>;
 
 // Redeem requests (stataToken.redeem(shares, receiver, owner): 3 words, uint256 -> uint64).
+// Compiled path for MPC notification: [1, 13] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger redeemEventMap: SignBidirectionalEventMap<EvmType2TxParams<3, 0, 0>, 36, 35>;
 
+// redeemSettleViews:
+// Map of pending redeem requestIds against a view of their settlement amounts for use
+// in the completeRedeem or refundRedeem circuits.
 struct RedeemSettleView {
   commitment: Bytes<32>;
   shares: Uint<64>;
 }
-
 export ledger redeemSettleViews: Map<RequestId, RedeemSettleView>;
 
 // ---- Shared helpers -----------------------------------------------------------------
@@ -471,7 +477,8 @@ export circuit startWithdraw(
   assert(initialised >= 1, "Not initialised");
   assert(withdrawRequest.erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
   assert(withdrawRequest.amount > 0 as Uint<128>, "Amount must be positive");
-  // refundWithdraw re-mints via the Uint<64> mint API, so reject unrefundable amounts.
+
+  // refundWithdraw re-mints via stdlib mintShieldedToken, which takes a Uint<64> amount.
   assert(withdrawRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
 
   const color = tokenType(
@@ -529,11 +536,14 @@ export circuit startWithdraw(
 
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
-  withdrawSettleViews.insert(requestId, WithdrawSettleView {
-    commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
-    erc20: disclose(withdrawRequest.erc20Address),
-    amount: disclose(withdrawRequest.amount as Uint<64>),
-  });
+  withdrawSettleViews.insert(
+    requestId,
+    WithdrawSettleView {
+      commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
+      erc20: disclose(withdrawRequest.erc20Address),
+      amount: disclose(withdrawRequest.amount as Uint<64>),
+    },
+  );
 
   signetSigner.signBidirectional(
     requestId,
@@ -575,11 +585,12 @@ export circuit completeWithdraw(
 
   const succeeded = disclose(deserialize<VaultResponse, 1>(serializedOutput).success);
 
-  // The hashes sit OUTSIDE the guard on purpose: the proving circuit evaluates both
-  // branches regardless, and moving them back inside re-inflates the circuit.
+  // These hashes sit outside the if on purpose: the proving circuit evaluates both
+  // branches, so hoisting them keeps the circuit to one copy of each hash.
   const myCommitment = refundCommitment(callerSecretKey(), disclosedRequestId);
   const domainSep = vaultTokenDomainSeparator(view.erc20);
 
+  // The transfer can fail by the ERC20 returning false even when the transaction succeeds.
   if (!succeeded) {
     assert(myCommitment == view.commitment, "Not the withdrawer");
     const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
