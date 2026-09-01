@@ -1,4 +1,4 @@
-// Deploy + initialize entrypoint (`yarn deploy-initialize:erc20-vault`): the
+// Deploy + initialise entrypoint (`yarn deploy-initialise:erc20-vault`): the
 // one-shot bring-up of a vault on a REMOTE network, where no test pipeline runs
 // the two halves for you. Both halves are the same functions the e2e setup and
 // the flow tests exercise locally, so the multistage deploy this performs is
@@ -11,16 +11,16 @@
 
 import { deployVault } from "../src/deploy-vault.ts";
 import { buildEntrypointEnv } from "../src/entrypoint-env.ts";
-import { assertInitializeInputsPresent, initializeVault } from "../src/initialize-vault.ts";
+import { assertInitialiseInputsPresent, initialiseVault } from "../src/initialise-vault.ts";
 
 const env = buildEntrypointEnv();
 
 // Before spending a whole multistage deploy: a missing chain id or a malformed
 // router override must fail now, not after the contract exists.
-assertInitializeInputsPresent(env);
+assertInitialiseInputsPresent(env);
 
 const { contractAddress } = await deployVault(env);
-await initializeVault(env, contractAddress);
+await initialiseVault(env, contractAddress);
 
 console.log("\n==================== DONE ====================");
 console.log(`NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS=${contractAddress}`);

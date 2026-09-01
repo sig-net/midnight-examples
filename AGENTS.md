@@ -329,7 +329,7 @@ apply to all of them:
   packages.
 - **Every deploy flow is a typed function taking an `env` map, and the
   entrypoint is a shell over it.** `deployX(env = process.env)` returns its
-  outcome (the contract address, an initialize outcome enum); the CLI entrypoint
+  outcome (the contract address, an initialise outcome enum); the CLI entrypoint
   and the e2e setup step both CALL it, so the multistage deploy a remote network
   needs is exercised on every local run. Never spawn a deploy as a subprocess and
   parse its stdout: config then differs per caller, the return value degrades to

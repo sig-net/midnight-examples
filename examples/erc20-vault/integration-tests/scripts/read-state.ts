@@ -1,5 +1,5 @@
 // Thin tsx entrypoint over the contract package's ledger reads for hand-driving
-// a live stack: print the vault's public ledger state (initialization, sealed
+// a live stack: print the vault's public ledger state (initialisation, sealed
 // EVM address, pinned chain, pending signature requests). Needs only the
 // indexer: no wallet, no proving keys. Run:
 //   yarn workspace @sig-net/midnight-examples-erc20-vault-integration-tests read-state

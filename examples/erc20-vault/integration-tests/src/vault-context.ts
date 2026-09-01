@@ -138,8 +138,10 @@ export async function createVaultContext(
  *
  * @param context - The flow's context.
  * @param requestsPath - The resolved ledger-tree path of the request map.
- *   Defaults to [0] (deposit/withdraw's signBidirectionalEventMap); swaps
- *   pass VAULT_SWAP_REQUESTS_PATH ([11], the swapEventMap).
+ *   Defaults to VAULT_REQUESTS_PATH ([0, 0], the signBidirectionalEventMap the
+ *   approves and withdraw share); deposits pass VAULT_DEPOSIT_REQUESTS_PATH
+ *   ([1, 3], the depositEventMap), swaps VAULT_SWAP_REQUESTS_PATH ([1, 7], the
+ *   swapEventMap), supply and redeem their own maps' exported paths.
  * @returns The reader.
  */
 export function createResponseReader(
@@ -148,9 +150,8 @@ export function createResponseReader(
 ): SignetRequestResponseReader {
   return new SignetRequestResponseReader({
     requesterContractAddress: context.vaultContractAddress,
-    // The requestsPath the vault's notifications pack (erc20-vault.compact):
-    // deposit/withdraw at field 0 path [0,0], swaps at field 11 path [1,7] (19 ledger
-    // fields, so the tree is chunked and every path is depth 2).
+    // The requestsPath the vault's notifications pack (erc20-vault.compact).
+    // The vault's 21 ledger fields chunk the state tree, so every path is depth 2.
     requesterRequestsPath: requestsPath,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,

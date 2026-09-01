@@ -26,9 +26,12 @@ export interface PollSignatureResponseOptions {
    */
   readonly expectedSigner: string;
   /**
-   * The resolved ledger-tree path of the request map. Defaults to [0]
-   * (deposit/withdraw); swaps pass VAULT_SWAP_REQUESTS_PATH ([11], the
-   * swapEventMap), since a swap request is registered in that separate map.
+   * The resolved ledger-tree path of the request map. Defaults to
+   * VAULT_REQUESTS_PATH ([0, 0], the signBidirectionalEventMap the approves and
+   * withdraw share); deposits pass VAULT_DEPOSIT_REQUESTS_PATH ([1, 3], the
+   * depositEventMap), swaps VAULT_SWAP_REQUESTS_PATH ([1, 7], the swapEventMap),
+   * supply and redeem their own maps' exported paths, since each of those
+   * requests is registered in its separate map.
    */
   readonly requestsPath?: readonly number[];
 }

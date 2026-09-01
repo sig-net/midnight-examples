@@ -13,11 +13,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { VaultReleaseZkConfigProvider } from "../src/vault-release-zk-config-provider.ts";
 
-const CIRCUIT_ID = "deposit";
+const CIRCUIT_ID = "startDeposit";
 const RELEASE_VERSION = "1.2.3";
 const WORKSPACE_VERSION = "0.0.0";
 const ASSET_URL =
-  "https://github.com/sig-net/midnight-examples/releases/download/erc20-vault-v1.2.3/deposit.prover";
+  "https://github.com/sig-net/midnight-examples/releases/download/erc20-vault-v1.2.3/startDeposit.prover";
 
 const PROVER_KEY_BYTES = new Uint8Array([0x70, 0x72, 0x6f, 0x76, 0x65, 0x72]);
 const TAMPERED_BYTES = new Uint8Array([0x74, 0x61, 0x6d, 0x70, 0x65, 0x72]);
@@ -192,7 +192,7 @@ describe("VaultReleaseZkConfigProvider", () => {
 
   interface RejectCase extends HarnessOptions {
     readonly name: string;
-    readonly circuitId: "deposit" | "withdraw";
+    readonly circuitId: "startDeposit" | "startWithdraw";
     readonly expectedMessage: RegExp;
     readonly expectedFetches: readonly string[];
   }
@@ -226,7 +226,7 @@ describe("VaultReleaseZkConfigProvider", () => {
     {
       name: "rejects a circuit the manifest does not list, without asking the release",
       version: RELEASE_VERSION,
-      circuitId: "withdraw",
+      circuitId: "startWithdraw",
       expectedMessage: /not in the vault's ZK artifact manifest/,
       expectedFetches: [],
     },

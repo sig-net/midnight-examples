@@ -50,7 +50,12 @@ export class Recorder {
       observation.phase === ProofServerPhase.Prove ? BenchRecordKind.Prove : BenchRecordKind.Check;
     const seqKey = `${kind}:${observation.keyLocation}`;
     const seq = (this.seqByKey.get(seqKey) ?? 0) + 1;
-    this.seqByKey.set(seqKey, seq);
+    // Only a successful observation consumes the seq: the report drops errored
+    // records and reads `seq === 1` as the cold prove, so an errored first
+    // attempt must leave seq 1 for the prove that actually pays the key load.
+    if (observation.error === undefined) {
+      this.seqByKey.set(seqKey, seq);
+    }
     this.append({
       kind,
       ms: observation.ms,

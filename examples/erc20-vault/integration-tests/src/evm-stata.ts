@@ -1,12 +1,7 @@
 // Aave ERC-4626 (stataToken) constants for the supply/redeem flows: the pinned Aave USDC
 // pair on Sepolia, the deposit/redeem/approve ABI shapes, the supply/redeem schemas, and the
 // contract-fixed routing. Mirrors evm-swap.ts for the lending leg.
-import {
-  asciiPadded,
-  MPC_PARAMS_BYTES,
-  MPCDestination,
-  MPCSignatureAlgorithm,
-} from "@sig-net/midnight";
+import { MPC_PARAMS_BYTES, MPCDestination, MPCSignatureAlgorithm } from "@sig-net/midnight";
 import { pureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { STATA_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { ethers } from "ethers";
@@ -32,14 +27,14 @@ export const STATA_MAX_FEE_PER_GAS = 30_000_000_000n;
 /** Max priority fee per gas, wei (1 gwei). */
 export const STATA_MAX_PRIORITY_FEE_PER_GAS = 1_000_000_000n;
 
-/** MPC decodes deposit's uint256 shares return against this (byte-matches supplyOutputSchema, 36). */
-export const SUPPLY_OUTPUT_SCHEMA = '[{"name":"shares","type":"uint256"}]';
-/** MPC re-packs the decoded shares into a uint64 (byte-matches supplyRespondSchema, 35). */
-export const SUPPLY_RESPOND_SCHEMA = '[{"name":"shares","type":"uint64"}]';
-/** MPC decodes redeem's uint256 assets return against this (byte-matches redeemOutputSchema, 36). */
-export const REDEEM_OUTPUT_SCHEMA = '[{"name":"assets","type":"uint256"}]';
-/** MPC re-packs the decoded assets into a uint64 (byte-matches redeemRespondSchema, 35). */
-export const REDEEM_RESPOND_SCHEMA = '[{"name":"assets","type":"uint64"}]';
+/** MPC decodes deposit's uint256 shares return against this, read from the compiled circuit. */
+export const SUPPLY_OUTPUT_SCHEMA = pureCircuits.supplyOutputSchema();
+/** MPC re-packs the decoded shares into a uint64, read from the compiled circuit. */
+export const SUPPLY_RESPOND_SCHEMA = pureCircuits.supplyRespondSchema();
+/** MPC decodes redeem's uint256 assets return against this, read from the compiled circuit. */
+export const REDEEM_OUTPUT_SCHEMA = pureCircuits.redeemOutputSchema();
+/** MPC re-packs the decoded assets into a uint64, read from the compiled circuit. */
+export const REDEEM_RESPOND_SCHEMA = pureCircuits.redeemRespondSchema();
 
 /**
  * Whether the stataToken wrapper is deployed at `evmRpcUrl` (present on Sepolia + a fork of it).
@@ -57,8 +52,8 @@ export const SUPPLY_MPC_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
   dest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
-  outputDeserializationSchema: asciiPadded(SUPPLY_OUTPUT_SCHEMA, SUPPLY_OUTPUT_SCHEMA.length),
-  respondSerializationSchema: asciiPadded(SUPPLY_RESPOND_SCHEMA, SUPPLY_RESPOND_SCHEMA.length),
+  outputDeserializationSchema: SUPPLY_OUTPUT_SCHEMA,
+  respondSerializationSchema: SUPPLY_RESPOND_SCHEMA,
 };
 
 /** Contract-fixed routing of a redeem event. */
@@ -66,6 +61,6 @@ export const REDEEM_MPC_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
   dest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
-  outputDeserializationSchema: asciiPadded(REDEEM_OUTPUT_SCHEMA, REDEEM_OUTPUT_SCHEMA.length),
-  respondSerializationSchema: asciiPadded(REDEEM_RESPOND_SCHEMA, REDEEM_RESPOND_SCHEMA.length),
+  outputDeserializationSchema: REDEEM_OUTPUT_SCHEMA,
+  respondSerializationSchema: REDEEM_RESPOND_SCHEMA,
 };

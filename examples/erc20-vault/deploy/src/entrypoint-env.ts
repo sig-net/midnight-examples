@@ -30,7 +30,7 @@ const NETWORK_SCOPED_KEYS = [
  * targets.
  *
  * A vault deploy seals `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` into the contract as
- * a constructor argument, and `initialize` seals values derived from
+ * a constructor argument, and `initialise` seals values derived from
  * `MPC_SECP256K1_PUBKEY`. Both are permanent. When the `.env` was written for a
  * different network than this run targets (the usual case: a local e2e run
  * populated it, and the operator now points a shell at a remote network), those

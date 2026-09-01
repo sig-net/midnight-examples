@@ -21,7 +21,7 @@ The flow comprises 5 steps:
 4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: its ECDSA signature over the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))`. Both the digest and the output itself travel off chain.
 5. Client obtains the execution output off chain (see the output recovery note below: it broadcast the transaction in step 3, so it can read the result), extracts the posted attestation and submits both back to the Midnight contract, which recomputes the digest from the output bytes and verifies the MPC's signature in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
 
-> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.10.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
+> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.18.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
 ## Derived keys
 
@@ -130,8 +130,8 @@ yarn compile:erc20-vault:zk  # generates the vault contract's zk keys
 yarn test:erc20-vault        # requires at least 'yarn compile:erc20-vault'
 yarn build:erc20-vault       # requires 'yarn compile:erc20-vault'
 yarn deploy:erc20-vault             # deploy a vault, requires 'yarn compile:erc20-vault:zk'
-yarn deploy-initialize:erc20-vault  # deploy + the deployer-gated initialize (remote networks)
-yarn initialize:erc20-vault         # initialize an already-deployed vault (recovers a half-done run)
+yarn deploy-initialise:erc20-vault  # deploy + the deployer-gated initialise (remote networks)
+yarn initialise:erc20-vault         # initialise an already-deployed vault (recovers a half-done run)
 ```
 
 CI runs `yarn format:check` and `yarn lint` on every push and pull request, so a
@@ -150,7 +150,7 @@ Prettier.
 The e2e suites need the running docker stack and the fakenet MPC responder: the [Quickstart](#quickstart) walks the first run end to end, and the [erc20-vault README](examples/erc20-vault/README.md) documents every spec in the suite. From the root:
 
 ```sh
-yarn test:erc20-vault:e2e                              # the full eight-spec suite, requires 'yarn compile'
+yarn test:erc20-vault:e2e                              # the full e2e suite, requires 'yarn compile'
 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any tests/*.test.ts name works), requires 'yarn compile'
 ```
 
@@ -183,7 +183,7 @@ FAKENET_EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
 ERC20_ADDRESS=0x...
 ```
 
-Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialize.
+Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialise.
 
 What does NOT happen automatically on a real chain, by design:
 
@@ -299,7 +299,7 @@ The path shape comes from how compactc lays out state. The compiler packs a cont
 
 Do not derive the path by hand: the compiler records it in your compiled artifacts. Compile your contract, then look up your map's `"index"` in `managed/<contract>/compiler/contract-info.json` (a bare number `4` means path `[4]`). The generated `managed/<contract>/contract/index.js` accessors walk the same indices, for example `state.asArray()[1].asArray()[14]` for a map recorded at `[1, 14]`. That path packs as `requestsPathDepth = 2` and `requestsPath = [1, 14, 0, 0]`.
 
-The [erc20-vault example](examples/erc20-vault) is a worked chunked case: its 19-field ledger stores the map at field 0, which resolves to `[0, 0]`, so its notifications carry depth `2` and path `[0, 0, 0, 0]`. Its contract package exports the path as `VAULT_REQUESTS_PATH` for off-chain readers. Note that the padded path literal is unchanged from the flat case — only the depth tells them apart.
+The [erc20-vault example](examples/erc20-vault) is a worked chunked case: its 21-field ledger splits 6 + 15, so its approve/withdraw map at field 0 resolves to `[0, 0]` and its deposit map at field 9 resolves to `[1, 3]`, and their notifications carry depth `2` with paths `[0, 0, 0, 0]` and `[1, 3, 0, 0]`. Its contract package exports one `VAULT_*_REQUESTS_PATH` constant per map for off-chain readers. Note that the padded `[0, 0, 0, 0]` literal is unchanged from the flat case: only the depth tells them apart.
 
 ## Runtime
 
@@ -544,25 +544,27 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
     │   ├── deploy/             # @sig-net/midnight-examples-erc20-vault-deploy
     │   │   ├── scripts/             # Thin tsx entrypoints over src/, one per root script:
     │   │   │                        #   deploy.ts (`yarn deploy:erc20-vault`),
-    │   │   │                        #   deploy-initialize.ts (the one-shot remote bring-up), and
-    │   │   │                        #   initialize.ts (recovery when a deploy landed but init did not).
+    │   │   │                        #   deploy-initialise.ts (the one-shot remote bring-up), and
+    │   │   │                        #   initialise.ts (recovery when a deploy landed but init did not).
     │   │   ├── src/
     │   │   │   ├── deploy-vault.ts     # The split deploy (base tx + a maintenance update per
     │   │   │   │                       #   deferred circuit): constructor args & witness
     │   │   │   │                       #   integration live here, wallet & tx plumbing from lib.
-    │   │   │   ├── initialize-vault.ts # The deployer-gated post-deploy initialize.
+    │   │   │   ├── initialise-vault.ts # The deployer-gated post-deploy initialise.
     │   │   │   ├── entrypoint-env.ts   # The entrypoints' env: .env + process.env, refused when
     │   │   │   │                       #   the file's values belong to another network.
-    │   │   │   └── evm-targets.ts      # Which EVM contracts THIS deployment pins at initialize.
+    │   │   │   └── evm-targets.ts      # Which EVM contracts THIS deployment pins at initialise.
     │   │   └── tests/                  # Deploy-tx build + env-guard tests, no network.
     │   │
     │   └── integration-tests/  # @sig-net/midnight-examples-erc20-vault-integration-tests
     │       ├── src/
-    │       │   └── flows/      # Example-specific typed flow functions (deposit, withdraw, …):
-    │       │                   #   the executable documentation of the example. All generic
-    │       │                   #   setup comes from @sig-net/midnight-examples-test-harness.
-    │       ├── scripts/        # Thin tsx entrypoints over src/flows (deposit.ts, claim.ts, …)
-    │       │                   #   for hand-driving a live stack step by step.
+    │       │   └── flows/      # Example-specific typed flow functions (start-deposit,
+    │       │                   #   complete-deposit, start-withdraw, …): the executable
+    │       │                   #   documentation of the example. All generic setup comes
+    │       │                   #   from @sig-net/midnight-examples-test-harness.
+    │       ├── scripts/        # Thin tsx entrypoints: read-state.ts prints the live vault
+    │       │                   #   ledger, benchmark-static.ts and benchmark-report.ts
+    │       │                   #   collect circuit metrics and render the report.
     │       └── tests/
     │           └── happy-day-e2e.test.ts   # Runs the flows in-process against the local stack.
     │

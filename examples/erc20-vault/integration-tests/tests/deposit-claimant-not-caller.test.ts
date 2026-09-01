@@ -17,7 +17,7 @@
 // account run after run — the final step drains it back to EVM_USER_ADDRESS
 // with the fakenet-only vault key (see src/fakenet-vault-account.ts), the
 // same fund-cycling move the failure-refund flow uses. Run AFTER
-// tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives there. Recovery
+// tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives there. Recovery
 // from a run that died mid-flow (proof-server OOM): rerun this file with
 // DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID set to the id the failed
 // run printed.
@@ -45,8 +45,8 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
-import type { ShieldedTokenRecipient } from "../src/flows/claim.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import type { ShieldedTokenRecipient } from "../src/flows/complete-deposit.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -159,7 +159,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "vault-initialized preflight: the vault contract is initialized (read-only)",
+      "vault-initialised preflight: the vault contract is initialised (read-only)",
       async () => {
         const context = await session.vaultContext();
         const state = await readVaultLedger(
@@ -167,8 +167,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          state.initialized,
-          "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
+          state.initialised,
+          "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
         ).toBe(1n);
       },
       5 * MINUTE,
@@ -224,7 +224,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          ledger.signBidirectionalEventMap.member(requestIdBytes(requestId)),
+          ledger.depositEventMap.member(requestIdBytes(requestId)),
           "claim must consume the request from the ledger",
         ).toBe(false);
 

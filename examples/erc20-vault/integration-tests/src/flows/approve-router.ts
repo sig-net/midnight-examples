@@ -29,7 +29,7 @@ import {
   logSkip,
 } from "@sig-net/midnight-examples-test-harness";
 
-import { APPROVE_SELECTOR, MAX_APPROVE, uniswapAvailable } from "../evm-swap.ts";
+import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-swap.ts";
 import {
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
@@ -59,8 +59,8 @@ export async function approveRouter(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!before.initialized)
-    throw new Error("vault is not initialized, run the initialize flow first");
+  if (!before.initialised)
+    throw new Error("vault is not initialised, run the initialise flow first");
 
   // approve(router, MAX) on the ERC20, signed with the vault account (path "vault"), same
   // 2-word map + bool schema as a transfer.
@@ -122,10 +122,6 @@ export async function approveRouter(
  */
 export async function ensureRouterApproved(session: VaultSession): Promise<void> {
   const context = await session.vaultContext();
-  if (!(await uniswapAvailable(context.evmRpcUrl))) {
-    logSkip("approveRouter", "Uniswap router not deployed on this EVM chain");
-    return;
-  }
   const { ethers } = await import("ethers");
   const token = new ethers.Contract(
     context.erc20Address,

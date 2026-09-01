@@ -1,7 +1,7 @@
 // The failure-refund e2e flow: a withdraw whose EVM transfer FAILS must end
-// with the MPC attesting failure and completeWithdraw taking the REFUND
-// branch in-circuit — the escrowed shielded vault tokens re-minted to the
-// caller, the request + its pending-withdrawal marker consumed.
+// with the MPC attesting its fixed failure output and the settle routing to
+// `refundWithdraw`, which re-mints the escrowed shielded vault tokens to the
+// caller and consumes the request + its pending-withdrawal marker.
 //
 // Failure-injection strategy (deliberate, deterministic): make the withdraw
 // transfer MINE and REVERT by draining the vault's EVM ERC20 balance first.
@@ -16,8 +16,8 @@
 //
 // The arrange stage runs a full deposit round trip first (the caller must
 // hold shielded vault tokens to escrow) — that is what
-// src/flows/deposit.ts's runDepositRoundTrip exists for. Run AFTER
-// tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives there. Recovery
+// src/flows/deposit-round-trip.ts's runDepositRoundTrip exists for. Run AFTER
+// tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives there. Recovery
 // from a run that died mid-flow (proof-server OOM): rerun this file with
 // FAILURE_REFUND_DEPOSIT_REQUEST_ID / FAILURE_REFUND_WITHDRAW_REQUEST_ID set
 // to the ids the failed run printed.
@@ -42,14 +42,14 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
-import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import { settleWithdraw } from "../src/flows/complete-withdraw.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import {
   pollRespondBidirectional,
   type RespondOutcome,
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
-import { withdraw } from "../src/flows/withdraw.ts";
+import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
 // ethers types `hash` nullable for the unsigned case; a transaction that came
@@ -137,7 +137,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "vault-initialized preflight: the vault contract is initialized (read-only)",
+      "vault-initialised preflight: the vault contract is initialised (read-only)",
       async () => {
         const context = await session.vaultContext();
         const state = await readVaultLedger(
@@ -145,8 +145,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          state.initialized,
-          "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
+          state.initialised,
+          "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
         ).toBe(1n);
       },
       5 * MINUTE,
@@ -221,7 +221,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requireEnv("EVM_VAULT_ADDRESS"),
         );
 
-        withdrawRequestId = await withdraw(context, {
+        withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
           evmNonce,
@@ -333,11 +333,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "completeWithdraw: routes to refund and consumes the request + refund marker",
+      "refundWithdraw: the failure attestation routes here, consuming the request + refund marker",
       async () => {
         // Final leg: the request is on the vault ledger and the MPC's FAILURE
         // attestation is posted (previous steps). The settle flow routes the
-        // fixed 5-byte failure output to the refund circuit, which
+        // fixed 5-byte failure output to refundWithdraw, which
         // re-verifies the attestation in-circuit (digest equality + ECDSA
         // against the stored MPC response key), checks the sentinel bytes, and
         // re-mints the surrendered shielded value to the withdrawer (this
@@ -345,7 +345,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // of leaving it burned. The request + its pending-withdrawal marker
         // are consumed (double-settle protection). The refunded shielded
         // balance itself is not publicly observable; the marker consumption is
-        // (present before, absent after), and refund is the only
+        // (present before, absent after), and refundWithdraw is the only
         // circuit a failure attestation can settle through.
         expect(withdrawRequestId).toBeDefined();
         expect(withdrawAttestation).toBeDefined();
@@ -357,28 +357,28 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         // Rerun against a kept contract address: if a prior run already settled
         // this request the pending-withdrawal marker is gone and
-        // completeWithdraw would reject with "Withdrawal not found" — skip
+        // refundWithdraw would reject with "Withdrawal not found" — skip
         // cleanly instead.
         const before = await readLedger();
-        if (!before.refundCommitment.member(requestKey)) {
+        if (!before.withdrawSettleViews.member(requestKey)) {
           logSkip(
-            "completeWithdraw",
+            "refundWithdraw",
             `withdrawal ${withdrawRequestId} already settled (no pending marker on the ledger)`,
           );
           return;
         }
         expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await completeWithdraw(context, { requestId: withdrawRequestId });
+        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
 
         const after = await readLedger();
         expect(
           after.signBidirectionalEventMap.member(requestKey),
-          "refund must consume the request from the ledger",
+          "refundWithdraw must consume the request from the ledger",
         ).toBe(false);
         expect(
-          after.refundCommitment.member(requestKey),
-          "refund must consume the pending-withdrawal marker",
+          after.withdrawSettleViews.member(requestKey),
+          "refundWithdraw must consume the pending-withdrawal marker",
         ).toBe(false);
 
         banner([
