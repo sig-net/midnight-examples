@@ -21,7 +21,7 @@ The flow comprises 5 steps:
 4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: its ECDSA signature over the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))`. Both the digest and the output itself travel off chain.
 5. Client obtains the execution output off chain (see the output recovery note below: it broadcast the transaction in step 3, so it can read the result), extracts the posted attestation and submits both back to the Midnight contract, which recomputes the digest from the output bytes and verifies the MPC's signature in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
 
-> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.10.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
+> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.18.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
 ## Derived keys
 
@@ -535,11 +535,13 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
     │   │
     │   └── integration-tests/  # @midnight-examples/erc20-vault-integration-tests
     │       ├── src/
-    │       │   └── flows/      # Example-specific typed flow functions (deposit, withdraw, …):
-    │       │                   #   the executable documentation of the example. All generic
-    │       │                   #   setup comes from @midnight-examples/test-harness.
-    │       ├── scripts/        # Thin tsx entrypoints over src/flows (deposit.ts, claim.ts, …)
-    │       │                   #   for hand-driving a live stack step by step.
+    │       │   └── flows/      # Example-specific typed flow functions (start-deposit,
+    │       │                   #   complete-deposit, start-withdraw, …): the executable
+    │       │                   #   documentation of the example. All generic setup comes
+    │       │                   #   from @midnight-examples/test-harness.
+    │       ├── scripts/        # Thin tsx entrypoints: read-state.ts prints the live vault
+    │       │                   #   ledger, benchmark-static.ts and benchmark-report.ts
+    │       │                   #   collect circuit metrics and render the report.
     │       └── tests/
     │           └── happy-day-e2e.test.ts   # Runs the flows in-process against the local stack.
     │

@@ -20,7 +20,9 @@
 // is unauthenticated and never decides anything, it only gates whether a
 // success candidate can be built at all. With no digest on the event there is
 // nothing else to match on. Which candidate verified is also what routes
-// settlement (claim / completeWithdraw / completeSwap / refund). The fetched
+// settlement: the success candidate goes to `completeDeposit` for a sweep and
+// to `completeWithdraw` for a transfer, the failure candidate is unclaimable
+// on a sweep and goes to `refundWithdraw` on a transfer. The fetched
 // output is UNTRUSTED until that check: the verified bytes go into the settle
 // circuit as an argument, where `verifyRespondBidirectionalEvent<N>` re-hashes
 // them and verifies the same signature in-circuit. That in-circuit check is

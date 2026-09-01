@@ -105,9 +105,9 @@ kept contracts.
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
   **6**, `benchmark` **43**, `false-claimer` **6**, `bearer-transfer` **11**,
   `swap-e2e` **1**, `supply-redeem-e2e` **1**, `supply-refund-e2e` **1**,
-  `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**. 95 total (the swap and aave specs self-skip if
-  Uniswap / the stataUSDC wrapper is absent, e.g. an un-forked anvil; in CI
-  the aave gate specs fail instead of skipping).
+  `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**. 95 total. The setup
+  pipeline verifies Uniswap and the stataUSDC wrapper are deployed on the fork,
+  so a fork missing either fails the run at setup rather than mid-spec.
 - **Wallets are role wallets funded from ROOT at setup.** The setup's
   wallet steps resolve/generate `ROOT_SEED` plus the role seeds
   (`DEPLOYER_SEED`, `USER_SEED`, `MPC_RESPONDER_SEED`, `BEARER_SEED`),

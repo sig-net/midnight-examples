@@ -181,9 +181,10 @@ const EXPECTED_ROUTING = {
 };
 
 /**
- * The deposit circuit's flat arguments, in circuit order. The compact
+ * The `startDeposit` circuit's flat arguments, in circuit order. The compact
  * compiler inlines the `DepositRequest` struct type anonymously into the
- * generated circuit signature; the `deposit` member matches it structurally.
+ * generated circuit signature, and this interface's `deposit` member matches
+ * that anonymous type structurally.
  * There is no path argument any more: the derivation path IS the caller's
  * identity commitment, recomputed in-circuit from the secret-key witness.
  */
@@ -641,9 +642,10 @@ const vaultCoin = (value: bigint, color: Uint8Array = VAULT_TOKEN_COLOR) => ({
 });
 
 /**
- * The withdraw circuit's flat arguments, in circuit order. The compact
+ * The `startWithdraw` circuit's flat arguments, in circuit order. The compact
  * compiler inlines the `WithdrawRequest` struct type anonymously into the
- * generated circuit signature; the `withdraw` member matches it structurally.
+ * generated circuit signature, and this interface's `withdraw` member matches
+ * that anonymous type structurally.
  */
 interface WithdrawCallArgs {
   evmNonce: bigint;
@@ -896,12 +898,12 @@ describe("withdraw validation", () => {
   });
 });
 
-// ---- Response fixtures (shared by the completeWithdraw + claim settle suites) ----
+// ---- Response fixtures (shared by every settle and refund suite) ----
 
 // An MPC response secret OTHER than the one initialise pinned the key of.
 const IMPOSTER_SECRET = bytes(32, 0x43);
 
-// The caller-chosen mint nonce claim/completeWithdraw take. In production the
+// The caller-chosen mint nonce every settle and refund circuit takes. In production the
 // client draws it fresh from a CSPRNG per call (that randomness is the
 // unlinkability guarantee); the circuit only threads it through, so a fixed
 // value is fine for these deterministic simulator tests.
@@ -924,7 +926,8 @@ const OUTPUT_SUCCESS = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: 
 const OUTPUT_FALSE = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: false });
 
 // A NEVER-EXECUTED transfer/swap (reverted or replaced): the protocol's fixed
-// 5-byte failure output. Settles through refund (Bytes<5>).
+// 5-byte failure output. Settles through the per-kind refund circuits, whose
+// output argument is Bytes<5>.
 const OUTPUT_REVERTED = MPC_FAILURE_OUTPUT;
 
 /**

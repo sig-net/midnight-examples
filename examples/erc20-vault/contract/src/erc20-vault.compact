@@ -190,7 +190,7 @@ circuit assertAttestedFailureOutput(
   assert(serializedOutput == failureOutput, "Not the MPC failure output");
 }
 
-// Pins WHO may configure; everything needing the contract's own address waits for
+// Pins WHO may configure. Everything needing the contract's own address waits for
 // initialise().
 constructor(
   deployerCommitment: Bytes<32>,
@@ -489,7 +489,7 @@ struct WithdrawRequest {
 
 // Starts a withdrawal, optimistically: burns the surrendered vault coin up front and
 // records transfer(destEvmAddress, amount), signed with the VAULT's own account. The
-// coin spend IS the auth; the vault pays the gas, so the fee envelope is contract-fixed.
+// coin spend IS the auth, and the vault pays the gas, so the fee envelope is contract-fixed.
 export circuit startWithdraw(
   evmNonce: Uint<64>,
   keyVersion: Uint<8>,
@@ -779,8 +779,8 @@ export circuit completeSwap(
   const disclosedRequestId = disclose(requestId);
 
   assert(initialised >= 1, "Not initialised");
-  // The two mints need distinct nonces or their coins link; changeNonce must carry its
-  // own entropy, never derived from mintNonce.
+  // The two mints need distinct nonces or their coins link, so changeNonce must carry
+  // its own entropy, never derived from mintNonce.
   assert(changeNonce != mintNonce, "changeNonce must differ from mintNonce");
 
   assert(
@@ -807,7 +807,7 @@ export circuit completeSwap(
 
   mintShieldedToken(vaultTokenDomainSeparator(view.tokenOut), view.amountOut, disclose(mintNonce), recipient);
 
-  // change <= amountInMaximum, so it fits Uint<64>; an exact spend mints a 0-value coin.
+  // change <= amountInMaximum, so it fits Uint<64>. An exact spend mints a 0-value coin.
   const amountIn = disclose(deserialize<ExactOutputSingleReturnValue, 8>(serializedOutput).amountIn);
   const change = view.amountInMaximum - amountIn;
   mintShieldedToken(vaultTokenDomainSeparator(view.tokenIn), change as Uint<64>, disclose(changeNonce), recipient);
@@ -992,7 +992,7 @@ export circuit startRedeem(
   assert(shares > 0 as Uint<128>, "shares must be positive");
   // CAUTION: this bounds `shares`, not the assets that come back. Aave's exchange rate
   // only grows, so assets >= shares, and completeRedeem mints assets through the same
-  // Uint<64> API after the coin is already burned. Fine for USDC; an 18-decimal
+  // Uint<64> API after the coin is already burned. Fine for USDC. An 18-decimal
   // underlying caps the whole vault near 18.4 tokens. See #43 before lending anything
   // but USDC.
   assert(shares <= 18446744073709551615 as Uint<128>, "shares exceeds Uint<64> max");

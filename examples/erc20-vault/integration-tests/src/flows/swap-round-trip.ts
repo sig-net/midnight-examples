@@ -1,10 +1,10 @@
 // The full swap journey as one arrange-stage helper: approve, quote, startSwap, MPC
 // signature, broadcast, completeSwap.
 import { VAULT_SWAP_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
+import { getTransactionNonce } from "@midnight-examples/test-harness";
 import type { RequestIdHex } from "@sig-net/midnight";
 
-import { quoteExactOutputSingle, uniswapAvailable } from "../evm-swap.ts";
+import { quoteExactOutputSingle } from "../evm-swap.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { ensureRouterApproved } from "./approve-router.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
@@ -29,28 +29,25 @@ export interface SwapRoundTripOptions {
  * Full swap round trip against the live stack: ensure the router is approved for tokenIn,
  * quote maxIn, submit the swap (vault-signed), poll the MPC signature, broadcast the swap tx,
  * poll the attestation, and settle (completeSwap mints the exact amountOut of tokenOut plus
- * the unspent tokenIn as change). Gated on Uniswap being deployed on the EVM chain; logSkip
- * otherwise. Requires the caller to already HOLD amountInMaximum of the tokenIn vault coin
- * (run a deposit first). Returns amountOut (minted) and amountIn (the attested spend).
+ * the unspent tokenIn as change). The setup pipeline verifies the Uniswap router is deployed on
+ * the fork before any flow runs. Requires the caller to already HOLD amountInMaximum of the
+ * tokenIn vault coin (run a deposit first). Returns amountOut (minted) and amountIn (the attested
+ * spend).
  *
  * @param session - The vault session.
  * @param opts - Swap parameters (tokenOut, fee, exact amountOut, optional slippage/cap override).
- * @returns The request id, amountOut minted, amountIn spent, and refund flag — or undefined when skipped.
+ * @returns The request id, amountOut minted, amountIn spent, and refund flag.
  */
 export async function runSwapRoundTrip(
   session: VaultSession,
   opts: SwapRoundTripOptions,
-): Promise<
-  { requestId: RequestIdHex; amountOut: bigint; amountIn: bigint; refunded: boolean } | undefined
-> {
+): Promise<{
+  requestId: RequestIdHex;
+  amountOut: bigint;
+  amountIn: bigint;
+  refunded: boolean;
+}> {
   const context = await session.vaultContext();
-  if (!(await uniswapAvailable(context.evmRpcUrl))) {
-    logSkip(
-      "swap",
-      "Uniswap router not deployed on this EVM chain (needs Sepolia or a Sepolia fork)",
-    );
-    return undefined;
-  }
 
   await ensureRouterApproved(session);
 

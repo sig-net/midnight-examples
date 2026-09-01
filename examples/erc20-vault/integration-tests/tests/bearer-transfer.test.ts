@@ -44,7 +44,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
-import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
+import { settleWithdraw } from "../src/flows/complete-withdraw.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import {
   pollRespondBidirectional,
@@ -327,7 +327,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           ).signetRequestNonce;
         const nonceBefore = await readNonce();
 
-        // The withdraw circuit demands a surrendered coin of the full amount;
+        // The `startWithdraw` circuit demands a surrendered coin of the full amount;
         // A's wallet holds none of the color, so balancing cannot fund it and
         // the attempt dies client-side — the tx is never submitted.
         const evmNonce = await getTransactionNonce(
@@ -501,7 +501,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
         expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await completeWithdraw(context, { requestId: withdrawRequestId });
+        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
 
         const after = await readLedger();
         expect(

@@ -24,12 +24,7 @@ import {
   TxParamType,
 } from "@sig-net/midnight";
 
-import {
-  APPROVE_SELECTOR,
-  MAX_APPROVE,
-  UNISWAP_SWAP_ROUTER_02,
-  uniswapAvailable,
-} from "../evm-swap.ts";
+import { APPROVE_SELECTOR, MAX_APPROVE, UNISWAP_SWAP_ROUTER_02 } from "../evm-swap.ts";
 import {
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
@@ -124,10 +119,6 @@ export async function approveRouter(
  */
 export async function ensureRouterApproved(session: VaultSession): Promise<void> {
   const context = await session.vaultContext();
-  if (!(await uniswapAvailable(context.evmRpcUrl))) {
-    logSkip("approveRouter", "Uniswap router not deployed on this EVM chain");
-    return;
-  }
   const { ethers } = await import("ethers");
   const token = new ethers.Contract(
     context.erc20Address,

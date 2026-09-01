@@ -321,7 +321,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   const unmatched = baseCircuitIds.filter((id) => !kept.has(id));
   if (unmatched.length > 0) {
     throw new Error(
-      `baseCircuitIds ${unmatched.map((id) => `"${id}"`).join(", ")} match no compiled circuit; ` +
+      `baseCircuitIds ${unmatched.map((id) => `"${id}"`).join(", ")} match no compiled circuit. ` +
         `compiled circuits: ${[...fullState.operations()].map(operationIdToString).join(", ")}`,
     );
   }
@@ -344,8 +344,8 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
 
 /**
  * `MAINTENANCE_SIGNING_KEY` as normalized 64-digit hex, or undefined when unset. The single
- * definition of the env var's accepted format; {@link resolveMaintenanceSigningKey} and
- * {@link buildMaintenanceInsertTransaction} both parse through it.
+ * definition of the env var's accepted format, which {@link resolveMaintenanceSigningKey} and
+ * {@link buildMaintenanceInsertTransaction} both parse through.
  *
  * @returns The normalized key hex, or undefined when the env var is unset.
  * @throws {Error} If the env var is set but not 32 bytes of hex.

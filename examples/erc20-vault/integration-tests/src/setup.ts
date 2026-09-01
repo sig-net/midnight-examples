@@ -2,9 +2,9 @@
 // (environment check -> wallet seeds + root funding -> EVM chain + test token
 // -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
 // vault zk compile + deploy -> MPC response key -> derived EVM addresses ->
-// local funding -> MPC hand-off printout) from the harness's generic steps
-// plus the vault-specific steps below, and run it via `runSetupPipeline` in
-// vitest's main process. The signet contract needs no zk-compile step: its
+// fork dealing -> fork dependency check -> MPC hand-off printout) from the
+// harness's generic steps plus the vault-specific steps below, and run it via
+// `runSetupPipeline` in vitest's main process. The signet contract needs no zk-compile step: its
 // proving keys ship inside the published @sig-net/midnight-contract package
 // the deploy reads them from. The MPC response key step runs AFTER the vault
 // deploy: the key derives from the vault's own contract address, and the
@@ -36,6 +36,8 @@ import {
 import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
 import type { TestProject } from "vitest/node";
 
+import { STATA_USDC, stataAvailable } from "./evm-stata.ts";
+import { UNISWAP_SWAP_ROUTER_02, uniswapAvailable } from "./evm-swap.ts";
 import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
 import { VAULT_PATH_HEX } from "./mpc-routing.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
@@ -240,6 +242,35 @@ function ensureErc20Address(env: NodeJS.ProcessEnv): void {
   );
 }
 
+/**
+ * Verify the EVM protocols the vault's circuits call are deployed at `EVM_RPC_URL`: the Uniswap
+ * SwapRouter02 behind the swap flows, and the stataUSDC wrapper behind the supply/redeem flows.
+ * Both are pinned Sepolia addresses, so an absent one is a fork misconfiguration, and catching it
+ * here turns what would surface as an opaque revert deep inside a spec into one pointed failure.
+ * The two probes are independent reads, so they run concurrently and both report together.
+ *
+ * @param env - The suite's env accumulator (reads `EVM_RPC_URL`).
+ * @throws {Error} If either contract has no code at `EVM_RPC_URL`, naming every missing one.
+ */
+async function verifyForkDependencies(env: NodeJS.ProcessEnv): Promise<void> {
+  const rpcUrl = requireEnv(env, "EVM_RPC_URL");
+  const [uniswap, stata] = await Promise.all([uniswapAvailable(rpcUrl), stataAvailable(rpcUrl)]);
+  const missing: string[] = [];
+  if (!uniswap) missing.push(`${UNISWAP_SWAP_ROUTER_02} (Uniswap SwapRouter02)`);
+  if (!stata) missing.push(`${STATA_USDC} (stataUSDC wrapper)`);
+  if (missing.length > 0) {
+    throw new Error(
+      `no code on ${rpcUrl} at ${missing.join(" and at ")}: the suites run against a Sepolia ` +
+        `fork that deploys both, so either SEPOLIA_FORK_RPC_URL is not a Sepolia endpoint or ` +
+        `SEPOLIA_FORK_BLOCK is pinned before the contract was deployed.`,
+    );
+  }
+  console.log(
+    `fork dependencies present on ${rpcUrl}: Uniswap SwapRouter02 ${UNISWAP_SWAP_ROUTER_02}, ` +
+      `stataUSDC wrapper ${STATA_USDC}`,
+  );
+}
+
 // Step names match what the operator greps for and what STEP_THROUGH prompts show.
 const STEPS: readonly SetupStep[] = [
   [
@@ -277,6 +308,7 @@ const STEPS: readonly SetupStep[] = [
   ["setup: check/derive vault EVM address", ensureVaultEvmAddress],
   ["setup: check/derive user EVM address", ensureUserEvmAddress],
   ["setup: deal derived EVM accounts on the Sepolia fork (ETH + real USDC)", dealForkEvmAccounts],
+  ["setup: verify fork dependencies (Uniswap router + stataUSDC wrapper)", verifyForkDependencies],
   [
     "setup: print MPC server configuration",
     (env) => {

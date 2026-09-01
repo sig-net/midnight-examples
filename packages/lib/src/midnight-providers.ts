@@ -85,7 +85,11 @@ export interface ProofServerObservation {
   readonly serializedPreimage: Uint8Array;
   /** The proof returned by /prove (successful {@link ProofServerPhase.Prove} observations only). */
   readonly proof?: Uint8Array;
-  /** Error message when the round trip threw. Observed first; a connection-level failure may then be retried rather than reach the caller. */
+  /**
+   * Error message when the round trip threw. The observer sees it before any retry, so a
+   * connection-level failure recorded here can still succeed on a later attempt and never
+   * reach the caller.
+   */
   readonly error?: string;
 }
 

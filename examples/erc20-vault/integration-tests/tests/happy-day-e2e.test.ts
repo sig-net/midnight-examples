@@ -43,8 +43,8 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
-import { completeDeposit } from "../src/flows/complete-deposit.ts";
-import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
+import { settleDeposit } from "../src/flows/complete-deposit.ts";
+import { settleWithdraw } from "../src/flows/complete-withdraw.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import {
   pollRespondBidirectional,
@@ -321,7 +321,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     1 * MINUTE,
   );
 
-  // Populated by the poll step below for the claim step.
+  // Populated by the poll step below for the settle step.
   let depositSweepTransactionRespondBidirectional: RespondOutcome;
 
   it(
@@ -380,11 +380,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   it(
-    "claim [erc-vault contract method call]: verify the MPC attestation in-circuit and consume the request",
+    "completeDeposit [erc-vault contract method call]: verify the MPC attestation in-circuit and consume the request",
     async () => {
       // Final leg of the deposit round trip: the request is on the vault ledger
       // and the MPC's respond-bidirectional response is posted (previous
-      // steps). Claiming re-verifies the response IN-CIRCUIT (ECDSA signature
+      // steps). Settling re-verifies the response IN-CIRCUIT (ECDSA signature
       // against the stored MPC response key, EVM success flag) and the caller
       // identity, then mints
       // shielded vault tokens and CONSUMES the request (double-claim
@@ -406,22 +406,27 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       };
 
       // Rerun against a kept contract address: if a prior run already claimed
-      // this request the entry is gone and claim would reject with
+      // this request the entry is gone and completeDeposit would reject with
       // "Deposit not found", so skip cleanly instead.
       if (!(await isRequestOnLedger())) {
         logSkip(
-          "claim",
+          "completeDeposit",
           `request ${depositTransactionSignatureRequestId} already claimed (not on the ledger)`,
         );
         return;
       }
 
-      await completeDeposit(context, { requestId: depositTransactionSignatureRequestId });
+      await settleDeposit(
+        context,
+        depositTransactionSignatureRequestId,
+        depositSweepTransactionRespondBidirectional,
+      );
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
-      expect(await isRequestOnLedger(), "claim must consume the request from the ledger").toBe(
-        false,
-      );
+      expect(
+        await isRequestOnLedger(),
+        "completeDeposit must consume the request from the ledger",
+      ).toBe(false);
 
       banner([
         `Deposit ${depositTransactionSignatureRequestId} claimed.`,
@@ -434,7 +439,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   // ── Withdraw leg: drive the deposited 0.1 USDC back OUT of the vault to the
-  // user's derived EVM account, spending the shielded tokens the claim minted.
+  // user's derived EVM account, spending the shielded tokens completeDeposit minted.
   const WITHDRAW_AMOUNT = parseUnits("0.1", 6);
 
   it(
@@ -697,7 +702,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       }
       expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-      await completeWithdraw(context, { requestId: withdrawTransactionSignatureRequestId });
+      await settleWithdraw(
+        context,
+        withdrawTransactionSignatureRequestId,
+        withdrawRespondBidirectional,
+      );
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       const after = await readLedger();

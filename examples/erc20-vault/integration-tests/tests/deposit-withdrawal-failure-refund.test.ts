@@ -1,7 +1,7 @@
 // The failure-refund e2e flow: a withdraw whose EVM transfer FAILS must end
-// with the MPC attesting failure and completeWithdraw taking the REFUND
-// branch in-circuit — the escrowed shielded vault tokens re-minted to the
-// caller, the request + its pending-withdrawal marker consumed.
+// with the MPC attesting its fixed failure output and the settle routing to
+// `refundWithdraw`, which re-mints the escrowed shielded vault tokens to the
+// caller and consumes the request + its pending-withdrawal marker.
 //
 // Failure-injection strategy (deliberate, deterministic): make the withdraw
 // transfer MINE and REVERT by draining the vault's EVM ERC20 balance first.
@@ -41,7 +41,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
-import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
+import { settleWithdraw } from "../src/flows/complete-withdraw.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import {
   pollRespondBidirectional,
@@ -333,7 +333,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "completeWithdraw: routes to refund and consumes the request + refund marker",
+      "refundWithdraw: the failure attestation routes here, consuming the request + refund marker",
       async () => {
         // Final leg: the request is on the vault ledger and the MPC's FAILURE
         // attestation is posted (previous steps). The settle flow routes the
@@ -345,7 +345,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // of leaving it burned. The request + its pending-withdrawal marker
         // are consumed (double-settle protection). The refunded shielded
         // balance itself is not publicly observable; the marker consumption is
-        // (present before, absent after), and refund is the only
+        // (present before, absent after), and refundWithdraw is the only
         // circuit a failure attestation can settle through.
         expect(withdrawRequestId).toBeDefined();
         expect(withdrawAttestation).toBeDefined();
@@ -357,28 +357,28 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         // Rerun against a kept contract address: if a prior run already settled
         // this request the pending-withdrawal marker is gone and
-        // completeWithdraw would reject with "Withdrawal not found" — skip
+        // refundWithdraw would reject with "Withdrawal not found" — skip
         // cleanly instead.
         const before = await readLedger();
         if (!before.withdrawSettleViews.member(requestKey)) {
           logSkip(
-            "completeWithdraw",
+            "refundWithdraw",
             `withdrawal ${withdrawRequestId} already settled (no pending marker on the ledger)`,
           );
           return;
         }
         expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await completeWithdraw(context, { requestId: withdrawRequestId });
+        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
 
         const after = await readLedger();
         expect(
           after.signBidirectionalEventMap.member(requestKey),
-          "refund must consume the request from the ledger",
+          "refundWithdraw must consume the request from the ledger",
         ).toBe(false);
         expect(
           after.withdrawSettleViews.member(requestKey),
-          "refund must consume the pending-withdrawal marker",
+          "refundWithdraw must consume the pending-withdrawal marker",
         ).toBe(false);
 
         banner([

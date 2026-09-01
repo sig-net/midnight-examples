@@ -14,47 +14,49 @@ export enum BenchRecordKind {
 }
 
 /**
- * The timed legs of tests/benchmark.test.ts, dotted `<roundTrip>.<flow>` to
- * match the keys of that file's `timings` report.
+ * The timed legs of tests/benchmark.test.ts, dotted `<sequence>.<step>`. The
+ * step names the flow function the leg calls, or, where a settle flow routes
+ * between several circuits, the circuit that call proves. The values are the
+ * keys of that file's `timings` report.
  */
 export enum BenchmarkLeg {
   Initialise = "initialise.initialise",
-  ApproveRequest = "approve.approveRouter",
+  ApproveRouter = "approve.approveRouter",
   ApprovePollSignatureResponse = "approve.pollSignatureResponse",
   ApproveBroadcastEvm = "approve.broadcastEvm",
-  DepositRequest = "deposit.deposit",
+  DepositStart = "deposit.startDeposit",
   DepositPollSignatureResponse = "deposit.pollSignatureResponse",
   DepositBroadcastEvm = "deposit.broadcastEvm",
   DepositPollRespondBidirectional = "deposit.pollRespondBidirectional",
-  DepositClaim = "deposit.claim",
-  WithdrawRequest = "withdraw.withdraw",
+  DepositComplete = "deposit.completeDeposit",
+  WithdrawStart = "withdraw.startWithdraw",
   WithdrawPollSignatureResponse = "withdraw.pollSignatureResponse",
   WithdrawBroadcastEvm = "withdraw.broadcastEvm",
   WithdrawPollRespondBidirectional = "withdraw.pollRespondBidirectional",
-  WithdrawCompleteWithdraw = "withdraw.completeWithdraw",
-  SwapRequest = "swap.swap",
+  WithdrawComplete = "withdraw.completeWithdraw",
+  SwapStart = "swap.startSwap",
   SwapPollSignatureResponse = "swap.pollSignatureResponse",
   SwapBroadcastEvm = "swap.broadcastEvm",
   SwapPollOutcome = "swap.pollSwapOutcome",
-  SwapSettle = "swap.completeSwap",
-  ApproveStataRequest = "approveStata.approveStata",
+  SwapComplete = "swap.completeSwap",
+  ApproveStata = "approveStata.approveStata",
   ApproveStataPollSignatureResponse = "approveStata.pollSignatureResponse",
   ApproveStataBroadcastEvm = "approveStata.broadcastEvm",
-  SupplyRequest = "supply.supply",
+  SupplyStart = "supply.startSupply",
   SupplyPollSignatureResponse = "supply.pollSignatureResponse",
   SupplyBroadcastEvm = "supply.broadcastEvm",
   SupplyPollOutcome = "supply.pollSupplyOutcome",
-  SupplySettle = "supply.completeSupply",
-  RedeemRequest = "redeem.redeem",
+  SupplyComplete = "supply.completeSupply",
+  RedeemStart = "redeem.startRedeem",
   RedeemPollSignatureResponse = "redeem.pollSignatureResponse",
   RedeemBroadcastEvm = "redeem.broadcastEvm",
   RedeemPollOutcome = "redeem.pollRedeemOutcome",
-  RedeemSettle = "redeem.completeRedeem",
-  RefundWithdraw = "refund.withdraw",
+  RedeemComplete = "redeem.completeRedeem",
+  RefundStartWithdraw = "refund.startWithdraw",
   RefundPollSignatureResponse = "refund.pollSignatureResponse",
   RefundBroadcastEvm = "refund.broadcastEvm",
   RefundPollRespondBidirectional = "refund.pollRespondBidirectional",
-  RefundSettle = "refund.refund",
+  RefundWithdraw = "refund.refundWithdraw",
 }
 
 /**

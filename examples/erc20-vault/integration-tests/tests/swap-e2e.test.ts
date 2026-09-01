@@ -1,13 +1,12 @@
-// Swap round trip against the live stack. Uniswap only exists on Sepolia (or a Sepolia fork:
-// set SEPOLIA_FORK_RPC_URL on the compose anvil), so this suite gates on the router being
-// deployed and self-skips otherwise (incl. CI's bare anvil). The setup pipeline deals the
-// derived accounts ETH + real USDC on the fork; here we deposit to fund the vault + mint the
-// caller a shielded tokenIn coin, then swap it for tokenOut.
+// Swap round trip against the live stack, which runs on the Sepolia fork the setup pipeline
+// verifies: the Uniswap router is deployed there, and the derived accounts hold ETH + real USDC.
+// Here we deposit to fund the vault + mint the caller a shielded tokenIn coin, then swap it for
+// tokenOut.
 import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
 import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { quoteExactOutputSingle, uniswapAvailable } from "../src/evm-swap.ts";
+import { quoteExactOutputSingle } from "../src/evm-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
@@ -37,12 +36,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
     "deposits tokenIn, then swaps it for tokenOut and mints the shielded amountOut",
     async () => {
       const context = await session.vaultContext();
-      if (!(await uniswapAvailable(context.evmRpcUrl))) {
-        console.log(
-          "SKIP: Uniswap not deployed on this EVM chain (need Sepolia or a Sepolia fork)",
-        );
-        return;
-      }
 
       // The setup pipeline deploys the vault but does not initialise it (the key it pins
       // derives from the vault address), so seal the config here before any flow — unless a
@@ -85,8 +78,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
         amountOut: AMOUNT_OUT,
         amountInMaximum,
       });
-      if (!result)
-        throw new Error("swap unexpectedly skipped (router availability already checked)");
       expect(result.refunded).toBe(false);
       // exactOutput: exactly AMOUNT_OUT is minted, and less than the cap was spent (change exists).
       expect(result.amountOut).toBe(AMOUNT_OUT);

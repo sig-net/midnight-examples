@@ -55,7 +55,7 @@ runs the whole flow twice, once per direction:
 | 4 | MPC attests the execution output back to Midnight | Signed `RespondBidirectionalEvent` for the sweep | The same, for the payout |
 | 5 | Contract verifies the attestation in-circuit and settles | `completeDeposit()` mints shielded vault tokens to the depositor | `completeWithdraw()` finalises an executed transfer, or refunds the withdrawer on a false return. `refundWithdraw()` refunds the withdrawer when the transfer never executed (reverted or replaced) |
 
-> **Output recovery (between steps 4 and 5):** the attestation event carries the request id it answers and the MPC's signature, never the output, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), signature verification in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.10.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's in-circuit signature verification.
+> **Output recovery (between steps 4 and 5):** the attestation event carries the request id it answers and the MPC's signature, never the output, so the client recovers the execution output itself. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. This example fetches it from the fakenet responder's helper API at `GET /responses/{requestId}` (client in [`integration-tests/src/fakenet-responses.ts`](integration-tests/src/fakenet-responses.ts), signature verification in [`integration-tests/src/flows/respond-output.ts`](integration-tests/src/flows/respond-output.ts), server in [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.18.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
 # Derived keys and accounts
 
@@ -102,8 +102,12 @@ walkthrough below).
 Integrating the vault with the Sig Network MPC consists of 4 once-off
 **setup** steps and 5 per-request **runtime** steps. Each Compact snippet is
 abridged from
-[`contract/src/erc20-vault.compact`](contract/src/erc20-vault.compact), where
-a matching `Setup step N` / `Runtime step N` marker locates the full code.
+[`contract/src/erc20-vault.compact`](contract/src/erc20-vault.compact), which
+is laid out in banner sections: `Ledger state`, `Shared helpers`,
+`Initialisation and configuration`, then one section per request kind
+(`Deposit`, `Withdraw`, `Swap`, `Supply`, `Redeem`). Each snippet keeps the
+declaration and circuit names of the code it abridges, so searching one of
+those names reaches the full code in its section.
 Each off-chain snippet has an executable counterpart in
 [`integration-tests/src/flows/`](integration-tests/src/flows/), the example's
 executable documentation.
@@ -118,8 +122,8 @@ The contract package's dependency list is the minimal integration surface:
 // contract/package.json
 "dependencies": {
   "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-  "@sig-net/midnight": "0.18.0",
-  "@sig-net/midnight-contract": "0.18.0"
+  "@sig-net/midnight": "0.21.0-rc.2",
+  "@sig-net/midnight-contract": "0.21.0-rc.2"
 }
 ```
 
@@ -374,7 +378,7 @@ const evmUserAddress = deriveEvmAddress(
 
 ### Runtime step 1: `startDeposit()` records the request
 
-The user calls the deposit circuit on Midnight. The contract composes the
+The user calls the vault's `startDeposit` circuit on Midnight. The contract composes the
 ENTIRE transaction itself: the calldata is `transfer(vaultEvmAddress, amount)`
 built in-circuit around the initialise-pinned recipient (which is what stops
 a malicious client having the MPC sign a transfer to themselves), and the
@@ -723,7 +727,7 @@ functions: [`approve-router.ts`](integration-tests/src/flows/approve-router.ts),
 | Package | What it is |
 |---|---|
 | [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, a curated environment-agnostic export surface, simulator unit tests, and a deploy entrypoint. Its dependency list (`@sig-net/midnight`, `@sig-net/midnight-contract` and the compact tooling) is the minimal integration surface. |
-| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and eight e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
+| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
 
 # Running it
 
@@ -748,7 +752,7 @@ docker compose up -d                # node, indexer, proof server, anvil forking
                                     # Sepolia (NOT the fakenet responder: it is
                                     # behind the `fakenet` profile, the test setup
                                     # starts it mid-run)
-yarn test:erc20-vault:e2e           # the eight e2e specs, serially, bail on first failure
+yarn test:erc20-vault:e2e           # the full e2e suite, serially, bail on first failure
 ```
 
 Offline checks that need no stack and no proving keys beyond `yarn compile`:
@@ -798,10 +802,10 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `swap-refund-e2e` | 1 | A swap whose `amountInMaximum` is below the real cost reverts on-chain and the settle re-mints the surrendered tokenIn | none |
 | `redeem-refund-e2e` | 1 | A redeem whose wrapper burn reverts on-chain (drained vault stataUSDC balance) ends in an in-circuit REFUND of the surrendered shares | none |
 
-95 tests total (the swap and aave specs, and the benchmark's swap/aave legs,
-self-skip when the EVM chain lacks the Uniswap router or the stataUSDC
-wrapper, e.g. an un-forked anvil; in CI the aave gate specs fail instead of
-skipping). A rerun
+95 tests total. The suite runs against a Sepolia fork, and the setup pipeline
+verifies that the Uniswap router and the stataUSDC wrapper are deployed on it
+before any spec runs, so a fork missing either fails the run at setup with an
+error naming the missing contract. A rerun
 against kept contract addresses (a populated `.env`)
 completes in roughly 25–35 minutes on a laptop. A fresh deployment adds the
 setup pipeline's deploys (a few minutes) on top, and a cold clone adds the

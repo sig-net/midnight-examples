@@ -22,8 +22,8 @@ export * from "./witnesses.ts";
 
 /**
  * Resolved ledger-tree path of `signBidirectionalEventMap` (ledger field 0),
- * which holds the approve and withdraw requests. The same path those circuits
- * pack as depth 2 + [0, 0, 0, 0].
+ * which holds the approve and withdraw requests. The same path `approveStata`,
+ * `approveRouter` and `startWithdraw` pack as depth 2 + [0, 0, 0, 0].
  */
 export const VAULT_REQUESTS_PATH: readonly number[] = [0, 0];
 
@@ -34,7 +34,7 @@ export const VAULT_NONCE_PATH: readonly number[] = [0, 3];
  * Resolved ledger-tree path of `depositEventMap` (ledger field 9). Deposits
  * register their notification in this SEPARATE map, so the deposit flow reads
  * MPC responses from this path. Matches the depth 2 + `requestsPath`
- * [1, 3, 0, 0] the deposit circuit packs.
+ * [1, 3, 0, 0] the `startDeposit` circuit packs.
  */
 export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [1, 3];
 
@@ -42,7 +42,7 @@ export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [1, 3];
  * Resolved ledger-tree path of `swapEventMap` (ledger field 13). Swaps register
  * their notification in this SEPARATE map (sized for a 7-word exactOutputSingle),
  * so the swap flow reads MPC responses from this path. Matches the depth 2 +
- * `requestsPath` [1, 7, 0, 0] the swap circuit packs.
+ * `requestsPath` [1, 7, 0, 0] the `startSwap` circuit packs.
  */
 export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [1, 7];
 

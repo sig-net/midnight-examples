@@ -7,7 +7,7 @@ import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import { readVaultLedger } from "../vault-ledger.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
-import { completeDeposit, type ShieldedTokenRecipient } from "./complete-deposit.ts";
+import { settleDeposit, type ShieldedTokenRecipient } from "./complete-deposit.ts";
 import { pollRespondBidirectional } from "./poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
 import { startDeposit } from "./start-deposit.ts";
@@ -31,7 +31,7 @@ export interface DepositRoundTripOptions {
   readonly reuseRequestId?: RequestIdHex;
   /**
    * The wallet the claim mints the shielded vault tokens to; the caller's
-   * own wallet when omitted. Passed through to {@link completeDeposit} —
+   * own wallet when omitted. Passed through to {@link settleDeposit} —
    * only the depositor (the session wallet) may claim either way.
    */
   readonly claimRecipient?: ShieldedTokenRecipient;
@@ -60,7 +60,7 @@ export interface DepositRoundTripResult {
 /**
  * Run the full deposit round trip against the live stack: fetch the user's
  * EVM nonce, {@link startDeposit}, poll the MPC's signature, broadcast the
- * sweep, poll the MPC's attestation, and {@link completeDeposit} — leaving
+ * sweep, poll the MPC's attestation, and {@link settleDeposit} — leaving
  * the claim recipient (`opts.claimRecipient`, the caller's own wallet by
  * default) holding `opts.amount` of freshly minted shielded vault tokens.
  *
@@ -147,7 +147,7 @@ export async function runDepositRoundTrip(
   if (!ledger.depositEventMap.member(requestIdBytes(requestId))) {
     logSkip("completeDeposit", `request ${requestId} already claimed (not in the deposit map)`);
   } else {
-    await completeDeposit(context, { requestId, recipient: opts.claimRecipient });
+    await settleDeposit(context, requestId, outcome, opts.claimRecipient);
     claimed = true;
   }
 

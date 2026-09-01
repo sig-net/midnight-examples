@@ -2,15 +2,13 @@
 // drain the vault's stataUSDC EVM balance, then redeem. The wrapper's redeem burns the vault's
 // shares, which reverts (the vault holds none), so the MPC attests failure and the settle routes
 // to refundRedeem, re-minting the surrendered shares. The redeem twin of supply-refund-e2e, and
-// the one spec that proves the refundRedeem circuit. stataUSDC only exists on Sepolia (or a
-// Sepolia fork), so this suite gates on the wrapper: it self-skips on a local un-forked anvil,
-// but in CI (where the fork is mandatory) an unavailable wrapper FAILS, so a fork
-// misconfiguration cannot turn the gate green while covering nothing.
+// the one spec that proves the refundRedeem circuit. It runs against the Sepolia fork the setup
+// pipeline verifies, where the stataUSDC wrapper is deployed.
 import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
 import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { AAVE_USDC, STATA_USDC, stataAvailable } from "../src/evm-stata.ts";
+import { AAVE_USDC, STATA_USDC } from "../src/evm-stata.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
@@ -36,17 +34,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave redeem-ref
     "refunds the shares when the redeem reverts on-chain (vault holds no stataUSDC)",
     async () => {
       const context = await session.vaultContext();
-      if (!(await stataAvailable(context.evmRpcUrl))) {
-        if (env.CI) {
-          throw new Error(
-            "stataUSDC wrapper unavailable on the CI fork: the Aave gate must run in CI, not skip",
-          );
-        }
-        console.log(
-          "SKIP: stataUSDC wrapper not deployed on this EVM chain (need Sepolia or a Sepolia fork)",
-        );
-        return;
-      }
 
       // Seal the config before any flow unless a kept contract address is already initialised.
       const readLedger = () =>
@@ -62,8 +49,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave redeem-ref
       // and the vault's EVM account holds the wrapper tokens the drain below removes.
       await runDepositRoundTrip(session, { amount: SUPPLY_AMOUNT, erc20Address: AAVE_USDC });
       const supplyResult = await runSupplyRoundTrip(session, { amount: SUPPLY_AMOUNT });
-      if (!supplyResult)
-        throw new Error("supply unexpectedly skipped (wrapper availability already checked)");
       expect(supplyResult.refunded).toBe(false);
       expect(supplyResult.shares).toBeGreaterThan(0n);
 
@@ -85,8 +70,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave redeem-ref
       // The redeem's stataUSDC.redeem reverts on-chain -> the MPC attests failure -> the settle
       // re-mints the surrendered shares (tolerateRevert is the round trip's default).
       const result = await runRedeemRoundTrip(session, { shares: supplyResult.shares });
-      if (!result)
-        throw new Error("redeem unexpectedly skipped (wrapper availability already checked)");
       expect(result.refunded).toBe(true);
       expect(result.assets).toBe(0n);
 

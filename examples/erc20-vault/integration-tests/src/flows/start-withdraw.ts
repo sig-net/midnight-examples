@@ -1,4 +1,4 @@
-// `withdraw`: the first half of the withdraw flow. Surrender a shielded
+// `startWithdraw`: the first half of the withdraw flow. Surrender a shielded
 // vault coin (burned by the contract) and record a SignBidirectionalEvent
 // asking the MPC to sign an EVM `transfer(destination, amount)` on the
 // ERC20, sent from the VAULT's derived address (path = "vault"). The request
@@ -31,7 +31,7 @@ import type { VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
 
-/** Options for {@link withdraw}. */
+/** Options for {@link startWithdraw}. */
 export interface StartWithdrawOptions {
   /** Withdraw amount in ERC20 base units. */
   readonly amount: bigint;
@@ -42,7 +42,7 @@ export interface StartWithdrawOptions {
 }
 
 /**
- * Call the vault's `withdraw` circuit on the deployed contract and return
+ * Call the vault's `startWithdraw` circuit on the deployed contract and return
  * the resulting request id.
  *
  * Surrenders a shielded vault coin of exactly `amount` — the coin's color

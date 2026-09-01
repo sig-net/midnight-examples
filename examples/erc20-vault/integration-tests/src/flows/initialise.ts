@@ -24,8 +24,9 @@ export interface InitialiseOptions {
   /**
    * The MPC response key for THIS vault contract (SEC1 hex, compressed or
    * uncompressed): `f(MPC root key, vault contract address, "midnight
-   * response key")`, the setup pipeline's `MPC_RESPONSE_KEY`. claim and
-   * completeWithdraw accept only responses ECDSA-signed by it.
+   * response key")`, the setup pipeline's `MPC_RESPONSE_KEY`. Every settle and
+   * refund circuit (the five `complete*` and the four `refund*`) accepts only
+   * responses ECDSA-signed by it.
    */
   readonly mpcResponseKey: string;
 }

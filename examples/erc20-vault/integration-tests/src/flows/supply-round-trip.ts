@@ -1,10 +1,9 @@
 // The full supply journey as one arrange-stage helper: approve the wrapper, startSupply, MPC
 // signature, broadcast, completeSupply.
 import { VAULT_SUPPLY_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
+import { getTransactionNonce } from "@midnight-examples/test-harness";
 import type { RequestIdHex } from "@sig-net/midnight";
 
-import { stataAvailable } from "../evm-stata.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { ensureStataApproved } from "./approve-stata.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
@@ -23,25 +22,19 @@ export interface SupplyRoundTripOptions {
  * Full supply round trip against the live stack: ensure the wrapper is approved to pull the
  * underlying, submit the supply (vault-signed), poll the MPC signature, broadcast the deposit
  * tx, poll the attestation, and settle (completeSupply mints the attested stataUSDC shares).
- * Gated on the stataToken being deployed; logSkip otherwise. Requires the caller to already HOLD
- * `amount` of the underlying vault coin (run a deposit of the underlying first).
+ * The setup pipeline verifies the stataUSDC wrapper is deployed on the fork before any flow runs.
+ * Requires the caller to already HOLD `amount` of the underlying vault coin (run a deposit of the
+ * underlying first).
  *
  * @param session - The vault session.
  * @param opts - Supply parameters (amount of the underlying to supply).
- * @returns The request id, shares minted, and refund flag — or undefined when skipped.
+ * @returns The request id, shares minted, and refund flag.
  */
 export async function runSupplyRoundTrip(
   session: VaultSession,
   opts: SupplyRoundTripOptions,
-): Promise<{ requestId: RequestIdHex; shares: bigint; refunded: boolean } | undefined> {
+): Promise<{ requestId: RequestIdHex; shares: bigint; refunded: boolean }> {
   const context = await session.vaultContext();
-  if (!(await stataAvailable(context.evmRpcUrl))) {
-    logSkip(
-      "supply",
-      "stataToken not deployed on this EVM chain (needs Sepolia or a Sepolia fork)",
-    );
-    return undefined;
-  }
 
   await ensureStataApproved(session);
 
