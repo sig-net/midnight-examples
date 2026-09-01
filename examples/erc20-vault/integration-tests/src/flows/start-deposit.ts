@@ -1,6 +1,6 @@
-// `startDeposit`: record a deposit SignBidirectionalEvent on the vault's ledger. It asks the
-// MPC to sign an EVM `transfer(vault, amount)` on the ERC20, sent from the user's derived
-// address. The request id is recomputed off-chain with the library's TS twin of the
+// `startDeposit`: record a deposit SignBidirectionalEvent in the vault's depositEventMap. It
+// asks the MPC to sign an EVM `transfer(vault, amount)` on the ERC20, sent from the user's
+// derived address. The request id is recomputed off-chain with the library's TS twin of the
 // request-id circuit and asserted against the ledger map key before it is returned. The
 // settle side lives in complete-deposit.ts.
 
@@ -150,18 +150,18 @@ export async function startDeposit(
   );
   console.log(`deposit finalized in tx ${result.public.txId}`);
 
-  // The ledger map key IS the record's transientHash digest: recomputing it
-  // off-chain and finding it on the ledger proves both sides agree on every
+  // The depositEventMap key IS the record's transientHash digest: recomputing
+  // it off-chain and finding it on the ledger proves both sides agree on every
   // byte of the event.
   const after = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  const index = toSignBidirectionalEventIndex(after.signBidirectionalEventMap);
+  const index = toSignBidirectionalEventIndex(after.depositEventMap);
   if (!index.has(expectedIdHex)) {
     throw new Error(
-      `recomputed request id ${expectedIdHex} not found on the ledger — ` +
-        `present ids: [${[...index.keys()].join(", ")}] (was another request submitted concurrently?)`,
+      `recomputed request id ${expectedIdHex} not found in the vault's deposit map ` +
+        `(present ids: [${[...index.keys()].join(", ")}], was another request submitted concurrently?)`,
     );
   }
   console.log(`request id:        ${expectedIdHex}`);

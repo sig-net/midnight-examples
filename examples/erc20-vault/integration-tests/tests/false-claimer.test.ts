@@ -174,7 +174,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
-        requestOnLedger = ledger.signBidirectionalEventMap.member(requestIdBytes(requestId));
+        requestOnLedger = ledger.depositEventMap.member(requestIdBytes(requestId));
 
         banner([
           `Arrange deposit ${requestId} complete — attested, UNCLAIMED, on the ledger: ${String(requestOnLedger)}.`,
@@ -201,8 +201,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // Identity B presents the SAME request id and the SAME valid MPC
         // response, i.e. everything a claim needs except the right secret key.
         // The circuit recomputes B's commitment from the callerSecretKey
-        // witness, compares it to the request's recorded path (A's commitment),
-        // and rejects during local transaction building.
+        // witness, compares it to the commitment the deposit's settle view pins
+        // (A's), and rejects during local transaction building.
         const falseClaimerContext = await falseClaimerSession.vaultContext();
         await expect(
           completeDeposit(falseClaimerContext, { requestId: depositRequestId }),
@@ -216,7 +216,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
+          ledger.depositEventMap.member(requestIdBytes(depositRequestId)),
           "the rejected claim must not consume the request",
         ).toBe(true);
 
@@ -246,7 +246,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
+          ledger.depositEventMap.member(requestIdBytes(depositRequestId)),
           "the rightful claim must consume the request from the ledger",
         ).toBe(false);
 

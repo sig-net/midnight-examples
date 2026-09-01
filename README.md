@@ -296,7 +296,7 @@ The path shape comes from how compactc lays out state. The compiler packs a cont
 
 Do not derive the path by hand: the compiler records it in your compiled artifacts. Compile your contract, then look up your map's `"index"` in `managed/<contract>/compiler/contract-info.json` (a bare number `4` means path `[4]`). The generated `managed/<contract>/contract/index.js` accessors walk the same indices, for example `state.asArray()[1].asArray()[14]` for a map recorded at `[1, 14]`. That path packs as `requestsPathDepth = 2` and `requestsPath = [1, 14, 0, 0]`.
 
-The [erc20-vault example](examples/erc20-vault) is a worked chunked case: its 19-field ledger stores the map at field 0, which resolves to `[0, 0]`, so its notifications carry depth `2` and path `[0, 0, 0, 0]`. Its contract package exports the path as `VAULT_REQUESTS_PATH` for off-chain readers. Note that the padded path literal is unchanged from the flat case — only the depth tells them apart.
+The [erc20-vault example](examples/erc20-vault) is a worked chunked case: its 21-field ledger splits 6 + 15, so its approve/withdraw map at field 0 resolves to `[0, 0]` and its deposit map at field 9 resolves to `[1, 3]`, and their notifications carry depth `2` with paths `[0, 0, 0, 0]` and `[1, 3, 0, 0]`. Its contract package exports one `VAULT_*_REQUESTS_PATH` constant per map for off-chain readers. Note that the padded `[0, 0, 0, 0]` literal is unchanged from the flat case: only the depth tells them apart.
 
 ## Runtime
 

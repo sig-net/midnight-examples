@@ -35,7 +35,7 @@ without repeating the detail.
 | `startWithdraw` / `completeWithdraw` | The same flow in the other direction, plus the coin-spend-as-authorisation pattern and a settle circuit that branches on the EVM result. |
 | `refundWithdraw` / `refundSwap` / `refundSupply` / `refundRedeem` | Settling a request whose transaction never executed, routed by the 5-byte failure-output width. One refund circuit per request kind, each reading only its own kind's pending marker. |
 | `approveRouter` | A sign-only request, with no settle circuit at all. |
-| `startSwap` / `completeSwap` | A second request map at its own ledger field and calldata width, reusing the same optimistic burn-then-mint shape. exactOutputSingle: mint the exact `amountOut` of tokenOut plus the unspent tokenIn as change. |
+| `startSwap` / `completeSwap` | Its own request map, sized to a wider calldata (the width is part of the ledger type), reusing the same optimistic burn-then-mint shape. exactOutputSingle: mint the exact `amountOut` of tokenOut plus the unspent tokenIn as change. |
 | `approveStata` | `approveRouter` for the Aave leg: a sign-only approve(stataToken, MAX) on the pinned underlying USDC, so the wrapper can pull it during supply. |
 | `startSupply` / `completeSupply` | Aave lending via the pinned ERC-4626 stataUSDC wrapper: burn shielded USDC, record `deposit(amount, vault)`, then mint shielded stataUSDC for the MPC-attested shares. |
 | `startRedeem` / `completeRedeem` | The Aave exit: burn shielded stataUSDC, record `redeem(shares, vault, vault)`, then mint shielded USDC for the MPC-attested assets (principal + accrued interest). |
@@ -162,13 +162,12 @@ singleton reference, the response key) plus its own state:
 // The three protocol-required fields, kept together: the event map, the
 // Signet singleton reference, and the MPC response key.
 
-// The request map the MPC reads deposit and withdraw events back from.
+// The request map the MPC reads approve and withdraw events back from.
 // Sized for an ERC20 transfer(address,uint256): 2 calldata words, no access
-// list, and the vault's exact 34-byte response schema. This declaration is
-// ledger FIELD 0, so its resolved ledger-tree path is [0]: the request
-// circuits pack this path into their notifications and the MPC follows it
-// to locate the map, so it must stay first and never move after the first
-// deploy. No other field's position carries meaning.
+// list, and the vault's exact 34-byte response schema. Its resolved
+// ledger-tree path is what the request circuits pack into their
+// notifications, and the MPC follows that path to locate the map, so every
+// field's position is load-bearing once deployed.
 export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // The Signet singleton the request circuits notify, pinned at deploy.
@@ -184,6 +183,10 @@ export ledger vaultEvmAddress: Bytes<20>;   // the vault's derived EVM account
 export ledger evmChainId: Uint<64>;         // the pinned EVM chain, numeric...
 export ledger caip2Id: Bytes<32>;           // ...and CAIP-2 form
 sealed ledger deployer: Bytes<32>;          // only they may initialise
+// Deposits get their own map: kind isolation is structural, so completeDeposit
+// never sees an approve or withdraw request at all.
+export ledger depositEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
+export ledger depositSettleViews: Map<RequestId, DepositSettleView>;   // pending deposits: depositor commitment + typed token/amount
 export ledger withdrawSettleViews: Map<RequestId, WithdrawSettleView>; // pending withdrawals: gate commitment + typed token/amount
 
 constructor(deployerCommitment: Bytes<32>, signetContract: SignetSigner) {
@@ -194,13 +197,19 @@ constructor(deployerCommitment: Bytes<32>, signetContract: SignetSigner) {
 
 Two vault-specific points:
 
-- The contract package exports the event map's resolved ledger-tree path as
-  `VAULT_REQUESTS_PATH` so off-chain readers cannot drift from it. The vault
-  has 19 ledger fields, past the 15-field flat limit, so the map at field 0 has
-  the depth-2 path `[0, 0]`, and the request circuits pack it into their
-  notifications as `requestsPathDepth` 2 + `requestsPath` [0, 0, 0, 0]. The compiler records
-  the same path as the field's "index" in the compiled
-  `contract-info.json`.
+- The contract package exports each request map's resolved ledger-tree path
+  (`VAULT_REQUESTS_PATH`, `VAULT_DEPOSIT_REQUESTS_PATH`,
+  `VAULT_SWAP_REQUESTS_PATH`, `VAULT_SUPPLY_REQUESTS_PATH`,
+  `VAULT_REDEEM_REQUESTS_PATH`) so off-chain readers cannot drift from them.
+  The vault has 21 ledger fields, past the 15-field flat limit, so the compiler
+  chunks the state tree: chunk 0 holds fields 0-5, chunk 1 holds fields 6-20,
+  and every path is depth 2. The approve/withdraw map at field 0 has the path
+  `[0, 0]`, and its circuits pack `requestsPathDepth` 2 + `requestsPath`
+  [0, 0, 0, 0]; the deposit map at field 9 has `[1, 3]` and packs
+  [1, 3, 0, 0]. The compiler records the same paths as each field's "index" in
+  the compiled `contract-info.json`, and a ledger declaration change re-chunks
+  the tree, so re-read them there and update every notification vector in the
+  same change.
 - The deploy tooling ([`contract/deploy.ts`](contract/deploy.ts)) computes
   `deployerCommitment` off-chain by calling the compiled `userCommitment`
   circuit over the deployer's secret, never a TypeScript re-implementation.
@@ -324,7 +333,7 @@ import {
   signetEventSourceFromPublicDataProvider,
   SignetRequestResponseReader,
 } from "@sig-net/midnight";
-import { pureCircuits, VAULT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
+import { pureCircuits, VAULT_DEPOSIT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
 
 // Provider to index the Midnight blockchain.
 const publicDataProvider = indexerPublicDataProvider({
@@ -336,8 +345,8 @@ const reader = new SignetRequestResponseReader({
   // The deployed vault contract.
   requesterContractAddress: vaultContractAddress,
 
-  // signBidirectionalEventMap sits at ledger field 0, path [0, 0] (Setup step 3).
-  requesterRequestsPath: VAULT_REQUESTS_PATH,
+  // depositEventMap sits at ledger field 9, path [1, 3] (Setup step 3).
+  requesterRequestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
 
   // The Signet singleton contract.
   signetContractAddress,
@@ -415,18 +424,24 @@ export circuit startDeposit(
   );
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
 
-  // Store the request for the MPC to discover...
+  // Store the request for the MPC to discover, plus the settle view
+  // completeDeposit gates and mints from...
   signetRequestNonce.increment(1);
-  signBidirectionalEventMap.insert(requestId, disclose(request));
+  depositEventMap.insert(requestId, disclose(request));
+  depositSettleViews.insert(requestId, DepositSettleView {
+    commitment: caller,
+    erc20: disclose(depositRequest.erc20Address),
+    amount: disclose(depositRequest.amount as Uint<64>),
+  });
 
-  // ...and notify it, carrying the map's ledger-tree path ([0,0] at depth 2,
+  // ...and notify it, carrying the map's ledger-tree path ([1,3] at depth 2,
   // Setup step 3).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
       kernel.self(),
       2 as Uint<8>,                        // requestsPathDepth
-      [0, 0, 0, 0] as Vector<4, Uint<8>>,  // requestsPath, zero padded
+      [1, 3, 0, 0] as Vector<4, Uint<8>>,  // requestsPath, zero padded
     ),
   );
 }
@@ -596,17 +611,25 @@ export circuit completeDeposit(
     "Invalid attestation signature"
   );
 
-  // Double-settle protection: the request must exist and is consumed here.
-  const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
-  signBidirectionalEventMap.remove(disclosedRequestId);
+  // Kind isolation + double-settle protection: only a pending DEPOSIT is in
+  // this map, and settling consumes it.
+  assert(depositEventMap.member(disclosedRequestId), "Deposit not found");
+  depositEventMap.remove(disclosedRequestId);
 
-  // Depositor gate: the caller's recomputed commitment must match the
-  // request's derivation path, which deposit set to the depositor's commitment.
-  assert(userCommitment(callerSecretKey()) == signatureRequest.path, "Not the depositor");
+  // Depositor gate: the caller's recomputed commitment must match the one
+  // startDeposit pinned in the settle view.
+  const view = depositSettleViews.lookup(disclosedRequestId);
+  assert(userCommitment(callerSecretKey()) == view.commitment, "Not the depositor");
+  depositSettleViews.remove(disclosedRequestId);
 
-  // Mint shielded vault tokens for the deposited amount (calldata word 1),
-  // under the token colour of the deposited ERC20 (txParams.to).
-  mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), claimRecipient);
+  // Mint shielded vault tokens for the amount the settle view carries, under
+  // the token colour of the ERC20 it names. No ABI word is decoded here.
+  mintShieldedToken(
+    vaultTokenDomainSeparator(view.erc20),
+    view.amount,
+    disclose(mintNonce),
+    claimRecipient
+  );
 }
 ```
 

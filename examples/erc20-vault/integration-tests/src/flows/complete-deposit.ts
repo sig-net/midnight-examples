@@ -7,6 +7,7 @@
 // RANDOM mint nonce, so the minted coin cannot be linked back to the
 // request.
 
+import { VAULT_DEPOSIT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
 import type { EncPublicKey } from "@midnight-examples/lib";
 import { type CoinPublicKey, encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
 import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
@@ -77,7 +78,11 @@ export async function completeDeposit(
     console.log(`recipient:       ${options.recipient.coinPublicKey}`);
   }
 
-  const outcome = await fetchAttestedRespondOutcome(context, options.requestId);
+  const outcome = await fetchAttestedRespondOutcome(
+    context,
+    options.requestId,
+    VAULT_DEPOSIT_REQUESTS_PATH,
+  );
   if (outcome === undefined) {
     throw new Error(
       `no matching respond-bidirectional attestation posted for request ${options.requestId}: ` +

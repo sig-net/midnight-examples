@@ -1,5 +1,6 @@
 // The full deposit journey as one arrange-stage helper: startDeposit, MPC signature,
 // broadcast the sweep, MPC attestation, completeDeposit.
+import { VAULT_DEPOSIT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
 import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 
@@ -108,6 +109,7 @@ export async function runDepositRoundTrip(
     intervalMs: 1000,
     timeoutMs: 2 * MINUTE,
     expectedSigner: context.evmUserAddress,
+    requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
   });
 
   // Idempotent: an already-mined sweep short-circuits; a reverted or
@@ -118,6 +120,7 @@ export async function runDepositRoundTrip(
     requestId,
     intervalMs: 1000,
     timeoutMs: 2 * MINUTE,
+    requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
   });
   // This helper arranges a SUCCESSFUL deposit — a failure attestation means
   // the sweep did not land and the claim below could never mint.
@@ -141,8 +144,8 @@ export async function runDepositRoundTrip(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!ledger.signBidirectionalEventMap.member(requestIdBytes(requestId))) {
-    logSkip("completeDeposit", `request ${requestId} already claimed (not on the ledger)`);
+  if (!ledger.depositEventMap.member(requestIdBytes(requestId))) {
+    logSkip("completeDeposit", `request ${requestId} already claimed (not in the deposit map)`);
   } else {
     await completeDeposit(context, { requestId, recipient: opts.claimRecipient });
     claimed = true;

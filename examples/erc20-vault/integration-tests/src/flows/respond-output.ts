@@ -93,6 +93,9 @@ const FAKENET_FETCH_TICK_TIMEOUT_MS = 3_000;
  *
  * @param context - The flow context.
  * @param requestId - The request id to resolve.
+ * @param requestsPath - The resolved ledger-tree path of the map holding the
+ *   request: `VAULT_DEPOSIT_REQUESTS_PATH` for a deposit sweep, the default
+ *   `VAULT_REQUESTS_PATH` for a withdraw transfer.
  * @returns The verified outcome, or `undefined` when no attestation has been
  *   posted yet, none verifies over a recomputed candidate, or the fakenet's
  *   /responses API could not serve this tick.
@@ -100,8 +103,9 @@ const FAKENET_FETCH_TICK_TIMEOUT_MS = 3_000;
 export async function fetchAttestedRespondOutcome(
   context: VaultContext,
   requestId: RequestIdHex,
+  requestsPath?: readonly number[],
 ): Promise<RespondOutcome | undefined> {
-  const reader = createResponseReader(context);
+  const reader = createResponseReader(context, requestsPath);
   const events = await reader.getRespondBidirectionalEvents(requestId);
   if (events.length === 0) {
     return undefined;

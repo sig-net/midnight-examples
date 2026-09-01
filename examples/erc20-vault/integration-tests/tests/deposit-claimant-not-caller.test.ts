@@ -224,7 +224,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          ledger.signBidirectionalEventMap.member(requestIdBytes(requestId)),
+          ledger.depositEventMap.member(requestIdBytes(requestId)),
           "claim must consume the request from the ledger",
         ).toBe(false);
 

@@ -56,6 +56,7 @@
 // (src/flows/) — in-process, never a subprocess.
 
 import {
+  VAULT_DEPOSIT_REQUESTS_PATH,
   VAULT_REDEEM_REQUESTS_PATH,
   VAULT_SUPPLY_REQUESTS_PATH,
   VAULT_SWAP_REQUESTS_PATH,
@@ -417,6 +418,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           intervalMs: 1000,
           timeoutMs: 2 * MINUTE,
           expectedSigner: requireEnv("EVM_USER_ADDRESS"),
+          requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -457,6 +459,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requestId: depositRequestId,
           intervalMs: 1000,
           timeoutMs: 2 * MINUTE,
+          requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -482,9 +485,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         // Rerun against a kept contract address: if a prior run already
         // claimed this request the entry is gone and claim would reject
-        // with "Request not found" — skip cleanly instead.
+        // with "Deposit not found", so skip cleanly instead.
         const before = await readLedger();
-        if (!before.signBidirectionalEventMap.member(requestKey)) {
+        if (!before.depositEventMap.member(requestKey)) {
           logSkip(
             "completeDeposit",
             `request ${depositRequestId} already claimed (not on the ledger)`,
@@ -502,7 +505,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const after = await readLedger();
         expect(
-          after.signBidirectionalEventMap.member(requestKey),
+          after.depositEventMap.member(requestKey),
           "claim must consume the request from the ledger",
         ).toBe(false);
       },

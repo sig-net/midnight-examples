@@ -15,7 +15,7 @@ import "@sig-net/midnight/src/Signet";
 
 // ---- Ledger state -------------------------------------------------------------------
 
-// Deposit/withdraw/approve requests (2-word ERC20 transfer, 34-byte schemas).
+// Approve and withdraw requests (2-word ERC20 transfer, 34-byte schemas).
 // Compiled path for MPC notification: [0, 0] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
@@ -40,6 +40,22 @@ export ledger caip2Id: Bytes<32>;
 
 // Identity commitment of the deployer. Only they may call initialise().
 sealed ledger deployer: Bytes<32>;
+
+// Deposit requests (2-word ERC20 transfer, 34-byte schemas).
+// Compiled path for MPC notification: [1, 3] (read from managed/erc20-vault/compiler/contract-info.json).
+export ledger depositEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
+
+// depositSettleViews:
+// Map of pending deposit requestIds against the depositor commitment that gates them,
+// plus the erc20 and amount completeDeposit mints. Keeping the amount as Uint<64> prevents
+// having to decode amounts from ABI words in the SignBidirectionalEvent signature request
+// in the completeDeposit circuit.
+struct DepositSettleView {
+  commitment: Bytes<32>;
+  erc20: Bytes<20>;
+  amount: Uint<64>;
+}
+export ledger depositSettleViews: Map<RequestId, DepositSettleView>;
 
 // withdrawSettleViews:
 // Map of pending withdrawal requestIds against the refund commitment that gates them,
@@ -254,6 +270,8 @@ export circuit approveStata(
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
+
+  // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
@@ -263,9 +281,7 @@ export circuit approveStata(
 }
 
 // Permissionless per-token router allowance, signed with the VAULT account. Spender
-// and amount are contract-fixed, so the caller chooses ONLY the token. Request entries
-// of circuits that surrender no coin (the approves, startDeposit) are never consumed,
-// so the map grows unboundedly; production wants an operator-only cleanup circuit.
+// and amount are contract-fixed, so the caller chooses ONLY the token.
 export circuit approveRouter(
   erc20Address: Bytes<20>,
   evmNonce: Uint<64>,
@@ -318,6 +334,7 @@ export circuit approveRouter(
   signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
+  // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
@@ -395,17 +412,22 @@ export circuit startDeposit(
   );
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
 
-  assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
+  assert(!depositEventMap.member(requestId), "Request already exists");
   signetRequestNonce.increment(1);
-  signBidirectionalEventMap.insert(requestId, disclose(request));
+  depositEventMap.insert(requestId, disclose(request));
+  depositSettleViews.insert(requestId, DepositSettleView {
+    commitment: caller,
+    erc20: disclose(depositRequest.erc20Address),
+    amount: disclose(depositRequest.amount as Uint<64>),
+  });
 
-  // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
+  // Notify the MPC (depositEventMap's compiled ledger path, [1,3]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
       kernel.self(),
       2 as Uint<8>,
-      [0, 0, 0, 0] as Vector<4, Uint<8>>,
+      [1, 3, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -439,22 +461,22 @@ export circuit completeDeposit(
     "Invalid attestation signature"
   );
 
-  assert(signBidirectionalEventMap.member(disclosedRequestId), "Request not found");
-  const signatureRequest = signBidirectionalEventMap.lookup(disclosedRequestId);
-  signBidirectionalEventMap.remove(disclosedRequestId);
+  assert(depositEventMap.member(disclosedRequestId), "Deposit not found");
+  depositEventMap.remove(disclosedRequestId);
 
-  const caller = userCommitment(callerSecretKey());
-  assert(caller == signatureRequest.path, "Not the depositor");
+  const view = depositSettleViews.lookup(disclosedRequestId);
+  assert(userCommitment(callerSecretKey()) == view.commitment, "Not the depositor");
+  depositSettleViews.remove(disclosedRequestId);
 
-  assert(signatureRequest.txParams.calldata.is_some, "Request has no calldata");
-  const amount = abiWordToUint128(signatureRequest.txParams.calldata.value.words[1]);
-  const erc20Addr = signatureRequest.txParams.to;
-
-  const domainSep = vaultTokenDomainSeparator(erc20Addr);
   const claimRecipient = disclose(recipient).is_some
     ? disclose(recipient).value
     : left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-  mintShieldedToken(domainSep, amount as Uint<64>, disclose(mintNonce), claimRecipient);
+  mintShieldedToken(
+    vaultTokenDomainSeparator(view.erc20),
+    view.amount,
+    disclose(mintNonce),
+    claimRecipient
+  );
 }
 
 // ==== Withdraw =======================================================================
@@ -545,6 +567,7 @@ export circuit startWithdraw(
     },
   );
 
+  // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(

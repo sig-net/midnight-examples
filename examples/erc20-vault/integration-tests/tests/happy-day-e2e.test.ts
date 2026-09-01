@@ -14,6 +14,10 @@
 // (src/flows/) — in-process, never a subprocess.
 
 import {
+  VAULT_DEPOSIT_REQUESTS_PATH,
+  VAULT_REQUESTS_PATH,
+} from "@midnight-examples/erc20-vault-contract";
+import {
   banner,
   getErc20Balance,
   getEthBalance,
@@ -188,7 +192,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // contract state. getSignatureRequest throws when the id is absent, so a
       // returned record is itself proof the request landed on the vault ledger.
       const record = await session
-        .responseReader()
+        .responseReader(VAULT_DEPOSIT_REQUESTS_PATH)
         .getSignatureRequest(depositTransactionSignatureRequestId);
       expect(record.txParams.nonce).toBe(evmNonce);
       expect(record.txParams.calldata.is_some).toBe(true);
@@ -223,19 +227,19 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const decoded = await pollSignetNotification({
         env,
         callerAddress: vaultAddress,
-        requestsPath: [0, 0],
+        requestsPath: [1, 3],
         requestId: depositTransactionSignatureRequestId,
         description: `for request ${depositTransactionSignatureRequestId}`,
       });
 
       // callerAddress points at the vault (the contract whose authenticated
       // ledger holds the request); the event map's resolved ledger-tree path
-      // is [0, 0] (chunked past 15 fields). The notification is a doorbell declaring WHICH request (the
+      // is [1, 3] (chunked past 15 fields). The notification is a doorbell declaring WHICH request (the
       // disclosed id) and WHERE to look, and the MPC reads the declared
       // request from the vault's own authenticated ledger.
       expect(decoded.version).toBe(1);
       expect(decoded.callerAddress).toBe(stripHexPrefix(vaultAddress).toLowerCase());
-      expect(decoded.requestsPath).toEqual([0, 0]);
+      expect(decoded.requestsPath).toEqual([1, 3]);
 
       banner([
         "Golden SignBidirectionalEventNotification decoded from the live indexer:",
@@ -263,6 +267,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         intervalMs: 1000,
         timeoutMs: 1 * MINUTE,
         expectedSigner: requireEnv("EVM_USER_ADDRESS"),
+        requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
       });
 
       banner([
@@ -288,7 +293,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // definitive end-to-end proof that nothing between the contract write
       // and the MPC signature reordered or reinterpreted the calldata.
       const record = await session
-        .responseReader()
+        .responseReader(VAULT_DEPOSIT_REQUESTS_PATH)
         .getSignatureRequest(depositTransactionSignatureRequestId);
       const storedCalldata = record.txParams.calldata.value;
       const expectedData =
@@ -333,6 +338,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         requestId: depositTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: 1 * MINUTE,
+        requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
       });
 
       // The signature seals the round trip: it only verifies over bytes the
@@ -396,12 +402,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
-        return ledger.signBidirectionalEventMap.member(requestKey);
+        return ledger.depositEventMap.member(requestKey);
       };
 
       // Rerun against a kept contract address: if a prior run already claimed
       // this request the entry is gone and claim would reject with
-      // "Request not found" — skip cleanly instead.
+      // "Deposit not found", so skip cleanly instead.
       if (!(await isRequestOnLedger())) {
         logSkip(
           "claim",
@@ -505,7 +511,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // state through the same reader the response server uses — recorded
       // under the VAULT's derivation path, with contract-built calldata.
       const record = await session
-        .responseReader()
+        .responseReader(VAULT_REQUESTS_PATH)
         .getSignatureRequest(withdrawTransactionSignatureRequestId);
       expect(record.txParams.nonce).toBe(evmNonce);
       expect(record.txParams.calldata.is_some).toBe(true);

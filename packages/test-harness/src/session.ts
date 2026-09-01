@@ -48,8 +48,17 @@ export interface SessionWallet {
 export interface E2eSession {
   /** The shared started-and-synced user wallet; built lazily on first use. */
   wallet(): Promise<SessionWallet>;
-  /** The shared MPC-style request/response reader; built lazily on first use. */
-  responseReader(): SignetRequestResponseReader;
+  /**
+   * The shared MPC-style request/response reader for one request map, built
+   * lazily and cached per path.
+   *
+   * @param requestsPath - Resolved ledger-tree path of the requester
+   *   contract's request index, the same path the contract packs as
+   *   `requestsPath` in that map's notifications (`[0]` for a flat contract's
+   *   field 0, longer once the compiler chunks past 15 fields). A contract may
+   *   declare several request maps, so the reader cannot assume one.
+   */
+  responseReader(requestsPath: readonly number[]): SignetRequestResponseReader;
   /** Stop the wallet facade (call from afterAll); safe when never started. */
   stop(): Promise<void>;
 }
@@ -64,14 +73,6 @@ export interface E2eSessionOptions {
    * `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
    */
   requesterAddressEnvVar: string;
-  /**
-   * Resolved ledger-tree path of the requester contract's request index — the
-   * same path the contract packs as `requestsPath` in its notifications
-   * (`[0]` for a flat contract's field 0, longer once the compiler chunks
-   * past 15 fields). A contract is free to declare the index at any field, so
-   * the reader cannot assume one.
-   */
-  requesterRequestsPath: readonly number[];
 }
 
 /**
@@ -82,11 +83,11 @@ export interface E2eSessionOptions {
  * access re-awaits synced state (instant when already synced) so long tests
  * / STEP_THROUGH pauses can't hand out a stale wallet.
  *
- * The reader is likewise built lazily, over the example's requester contract
- * / signet contract pair, backed by a fresh indexerPublicDataProvider so it
- * reads RAW ledger state exactly as the response server does; it caches
- * fetched request records, so repeated lookups across tests cost one query
- * each.
+ * A reader is likewise built lazily, one per request-map path, over the
+ * example's requester contract / signet contract pair, backed by a fresh
+ * indexerPublicDataProvider so it reads RAW ledger state exactly as the
+ * response server does. Each caches its fetched request records, so repeated
+ * lookups across tests cost one query each.
  *
  * @param options - The env accumulator and the requester-address env var.
  * @returns The session lifecycle.
@@ -94,7 +95,7 @@ export interface E2eSessionOptions {
 export function createE2eSession(options: E2eSessionOptions): E2eSession {
   const { env } = options;
   let sharedWallet: SessionWallet | undefined;
-  let sharedReader: SignetRequestResponseReader | undefined;
+  const readersByPath = new Map<string, SignetRequestResponseReader>();
 
   return {
     async wallet(): Promise<SessionWallet> {
@@ -110,24 +111,28 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
       return sharedWallet;
     },
 
-    responseReader(): SignetRequestResponseReader {
-      if (!sharedReader) {
-        const nodeConfig = getMidnightNodeConfig(env);
-        const publicDataProvider = indexerPublicDataProvider({
-          queryURL: nodeConfig.indexerUrl,
-          subscriptionURL: nodeConfig.indexerWsUrl,
-        });
-        sharedReader = new SignetRequestResponseReader({
-          requesterContractAddress: requireEnv(env, options.requesterAddressEnvVar),
-          requesterRequestsPath: options.requesterRequestsPath,
-          signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
-          publicDataProvider,
-          // The MPC's responses are read from the contract events the
-          // signet contract emits, through the same provider.
-          eventSource: signetEventSourceFromPublicDataProvider(publicDataProvider),
-        });
+    responseReader(requestsPath: readonly number[]): SignetRequestResponseReader {
+      const key = requestsPath.join(",");
+      const cached = readersByPath.get(key);
+      if (cached) {
+        return cached;
       }
-      return sharedReader;
+      const nodeConfig = getMidnightNodeConfig(env);
+      const publicDataProvider = indexerPublicDataProvider({
+        queryURL: nodeConfig.indexerUrl,
+        subscriptionURL: nodeConfig.indexerWsUrl,
+      });
+      const reader = new SignetRequestResponseReader({
+        requesterContractAddress: requireEnv(env, options.requesterAddressEnvVar),
+        requesterRequestsPath: requestsPath,
+        signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
+        publicDataProvider,
+        // The MPC's responses are read from the contract events the
+        // signet contract emits, through the same provider.
+        eventSource: signetEventSourceFromPublicDataProvider(publicDataProvider),
+      });
+      readersByPath.set(key, reader);
+      return reader;
     },
 
     async stop(): Promise<void> {

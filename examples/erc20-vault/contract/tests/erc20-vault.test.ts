@@ -63,6 +63,7 @@ import {
   createVaultPrivateState,
   ledger,
   pureCircuits,
+  VAULT_DEPOSIT_REQUESTS_PATH,
   VAULT_NONCE_PATH,
   VAULT_REQUESTS_PATH,
   type VaultPrivateState,
@@ -435,11 +436,11 @@ describe("deposit round-trip", () => {
     const state = next.callContext.currentQueryContext.state;
 
     // Read 1: generated ledger().
-    const typedIndex = toSignBidirectionalEventIndex(ledger(state).signBidirectionalEventMap);
+    const typedIndex = toSignBidirectionalEventIndex(ledger(state).depositEventMap);
     // Read 2: MPC-style raw read, no compiled contract involved.
     const rawLedger = readSignetRequestsLedgerFromState(
       state,
-      VAULT_REQUESTS_PATH,
+      VAULT_DEPOSIT_REQUESTS_PATH,
       VAULT_NONCE_PATH,
     );
 
@@ -452,7 +453,7 @@ describe("deposit round-trip", () => {
 
     // The cross-contract call's observable effect: the signet contract
     // emitted the notification event, its payload declaring the stored
-    // event's id and naming THIS vault and the field-0 request map (decoded
+    // event's id and naming THIS vault and the depositEventMap (decoded
     // through the shared library's decoders, the same read the MPC's
     // discovery feed performs).
     const notificationEvents = decodeSignetLogEvents(next.events, SIGNET_ADDRESS);
@@ -467,7 +468,7 @@ describe("deposit round-trip", () => {
     expect(decodeSignBidirectionalNotification(notificationPost.event)).toEqual({
       version: 1,
       callerAddress: bytesToHex(VAULT_ADDRESS_BYTES),
-      requestsPath: [0, 0],
+      requestsPath: [1, 3],
     });
 
     // The contract-composed envelope: the deposit's token on the
@@ -518,6 +519,16 @@ describe("deposit round-trip", () => {
     // the lockstep check the twin's deviation note relies on: the id computed
     // in TS must equal the key the REAL compiled contract minted in-circuit.
     expect(idHex).toBe(requestIdHex(calculateRequestId(record)));
+
+    // The depositor's settle view is pinned under the request id: the identity
+    // commitment completeDeposit gates on plus the typed token + amount it
+    // mints, so settling never decodes an ABI word.
+    expect(ledger(state).depositSettleViews.member(requestIdBytes(idHex))).toBe(true);
+    expect(ledger(state).depositSettleViews.lookup(requestIdBytes(idHex))).toEqual({
+      commitment: DEPLOYER_COMMITMENT,
+      erc20: ERC20,
+      amount: AMOUNT,
+    });
 
     // Nonce bumped for the next request.
     expect(ledger(state).signetRequestNonce).toBe(1n);
@@ -583,7 +594,7 @@ describe("deposit validation", () => {
     const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
 
     const index = toSignBidirectionalEventIndex(
-      ledger(afterSecond.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ledger(afterSecond.callContext.currentQueryContext.state).depositEventMap,
     );
     expect(index.size).toBe(2);
     const nonces = [...index.values()].map((r) => r.requestNonce).sort();
@@ -600,7 +611,7 @@ describe("deposit validation", () => {
     const afterSecond = (await deposit(contract, stranger, VALID_DEPOSIT)).context;
 
     const index = toSignBidirectionalEventIndex(
-      ledger(afterSecond.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ledger(afterSecond.callContext.currentQueryContext.state).depositEventMap,
     );
     expect(index.size).toBe(2);
     const paths = [...index.values()].map((r) => r.path);
@@ -674,7 +685,7 @@ describe("withdraw round-trip", () => {
 
     // The cross-contract call's observable effect: the signet contract
     // emitted the notification event declaring the stored event's id and
-    // naming this vault's field-0 request map.
+    // naming this vault's signBidirectionalEventMap.
     const notificationEvent = first(
       decodeSignetLogEvents(next.events, SIGNET_ADDRESS),
       "signet notification event",
@@ -1123,7 +1134,7 @@ describe("completeWithdraw settle", () => {
     const { contract, ctx } = await deployInitialised();
     const next = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
     const index = toSignBidirectionalEventIndex(
-      ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ledger(next.callContext.currentQueryContext.state).depositEventMap,
     );
     const depositIdHex = first(index.keys(), "signBidirectional request id");
     const depositId = requestIdBytes(depositIdHex);
@@ -1226,7 +1237,7 @@ describe("refundWithdraw settle", () => {
     const { contract, ctx } = await deployInitialised();
     const next = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
     const index = toSignBidirectionalEventIndex(
-      ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ledger(next.callContext.currentQueryContext.state).depositEventMap,
     );
     const depositIdHex = first(index.keys(), "signBidirectional request id");
     const depositId = requestIdBytes(depositIdHex);
@@ -1308,7 +1319,7 @@ const depositRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const next = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
   const index = toSignBidirectionalEventIndex(
-    ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+    ledger(next.callContext.currentQueryContext.state).depositEventMap,
   );
   const idHex = first(index.keys(), "signBidirectional request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
@@ -1344,7 +1355,8 @@ describe("completeDeposit settle", () => {
     ).context;
 
     const state = ledger(next.callContext.currentQueryContext.state);
-    expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
+    expect(state.depositEventMap.isEmpty()).toBe(true);
+    expect(state.depositSettleViews.isEmpty()).toBe(true);
   });
 
   it("rejects a response signed by a key other than the stored MPC response key", async () => {
@@ -1394,7 +1406,7 @@ describe("completeDeposit settle", () => {
     ).rejects.toThrow(/Invalid attestation signature/);
   });
 
-  it("rejects a genuinely signed id that has no pending request", async () => {
+  it("rejects a genuinely signed id that has no pending deposit", async () => {
     const { contract, ctx } = await depositRequested();
     const unknownId = bytes(32, 0xab);
     await expect(
@@ -1406,7 +1418,7 @@ describe("completeDeposit settle", () => {
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
-    ).rejects.toThrow(/Request not found/);
+    ).rejects.toThrow(/Deposit not found/);
   });
 
   it("claims once: a second claim for the same request rejects", async () => {
@@ -1430,11 +1442,12 @@ describe("completeDeposit settle", () => {
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
-    ).rejects.toThrow(/Request not found/);
+      // The first claim consumed the deposit entry and its settle view.
+    ).rejects.toThrow(/Deposit not found/);
   });
 
   it("rejects a caller other than the original depositor, even one naming themselves recipient", async () => {
-    // The stored event's path is the DEPOSITOR's identity commitment; the
+    // The settle view pins the DEPOSITOR's identity commitment, and the
     // stranger's witness recomputes a different one.
     const { contract, ctx, requestId } = await depositRequested();
     await expect(
@@ -1516,7 +1529,7 @@ const swapOutput = (amountIn: bigint): Uint8Array => {
 const OUTPUT_SWAP = swapOutput(SWAP_AMOUNT_IN_SPENT);
 
 describe("approveRouter", () => {
-  it("records an approve(router, ~unlimited) on field 0 from the vault path, no coin", async () => {
+  it("records an approve(router, ~unlimited) on signBidirectionalEventMap from the vault path, no coin", async () => {
     const { contract, ctx } = await deployInitialised();
     const { context: next } = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
 
@@ -1555,7 +1568,7 @@ describe("approveRouter", () => {
 });
 
 describe("swap round-trip", () => {
-  it("burns tokenIn and stores a vault-path exactOutputSingle event on field 11", async () => {
+  it("burns tokenIn and stores a vault-path exactOutputSingle event on the swap map", async () => {
     const { contract, ctx } = await deployInitialised();
     const { context: next } = await swap(contract, ctx, VALID_SWAP);
     const state = ledger(next.callContext.currentQueryContext.state);
@@ -1802,7 +1815,7 @@ const redeem = (
 ) => contract.circuits.startRedeem(ctx, 0n, 1n, shares, coin);
 
 describe("approveStata", () => {
-  it("records approve(stataToken, MAX) on field 0 from the vault path, to = the underlying", async () => {
+  it("records approve(stataToken, MAX) on signBidirectionalEventMap from the vault path, to = the underlying", async () => {
     const { contract, ctx } = await deployInitialised();
     const { context: next } = await contract.circuits.approveStata(ctx, 0n, 1n);
 
@@ -2133,8 +2146,9 @@ describe("refundSupply / refundRedeem settle", () => {
 // exercises it: each kind's id against every OTHER kind's settle and refund
 // circuit.
 
-/** A request kind that pins a settle view, so it has a settle + refund pair. */
+/** A request kind that pins a settle view under its own event map. */
 enum SettleKind {
+  Deposit = "deposit",
   Withdraw = "withdraw",
   Swap = "swap",
   Supply = "supply",
@@ -2150,7 +2164,8 @@ interface PendingRequest {
 
 /**
  * Deploy + initialise + approveRouter(ERC20). The recorded request lands on
- * completeDeposit's own map under the vault path.
+ * signBidirectionalEventMap under the vault path, and no settle circuit
+ * consumes it.
  */
 const approveRouterRequested = async (): Promise<PendingRequest> => {
   const { contract, ctx } = await deployInitialised();
@@ -2178,6 +2193,20 @@ interface CrossKindTarget {
 }
 
 const CROSS_KIND_TARGETS: CrossKindTarget[] = [
+  {
+    kind: SettleKind.Deposit,
+    circuit: "completeDeposit",
+    settle: ({ contract, ctx, requestId }) =>
+      contract.circuits.completeDeposit(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        OUTPUT_SUCCESS,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      ),
+    throws: /Deposit not found/,
+  },
   {
     kind: SettleKind.Withdraw,
     circuit: "completeWithdraw",
@@ -2294,6 +2323,7 @@ interface CrossKindPresented {
 }
 
 const CROSS_KIND_PRESENTED: CrossKindPresented[] = [
+  { kind: SettleKind.Deposit, start: depositRequested },
   { kind: SettleKind.Withdraw, start: withdrawRequested },
   { kind: SettleKind.Swap, start: swapRequested },
   { kind: SettleKind.Supply, start: supplyRequested },
@@ -2313,24 +2343,12 @@ describe("cross-kind settle isolation", () => {
     await expect(settle(await start())).rejects.toThrow(throws);
   });
 
-  // completeDeposit shares its ledger map with withdraw and both approves, so
-  // membership cannot isolate it: the path comparison is the whole barrier.
-  // Those requests carry the vault path literal, never a caller commitment. An
-  // approve settled here mints calldata word 1, the unlimited allowance.
-  it.each([
-    { presented: SettleKind.Withdraw, start: withdrawRequested },
-    { presented: "approveRouter", start: approveRouterRequested },
-  ])("rejects a $presented request id presented to completeDeposit", async ({ start }) => {
-    const { contract, ctx, requestId } = await start();
-    await expect(
-      contract.circuits.completeDeposit(
-        ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
-        OUTPUT_SUCCESS,
-        MINT_NONCE,
-        CALLER_RECIPIENT,
-      ),
-    ).rejects.toThrow(/Not the depositor/);
-  });
+  // The approves record on signBidirectionalEventMap and pin no settle view, so
+  // no settle circuit accepts one either.
+  it.each(CROSS_KIND_TARGETS)(
+    "rejects an approveRouter request id presented to $circuit",
+    async ({ settle, throws }) => {
+      await expect(settle(await approveRouterRequested())).rejects.toThrow(throws);
+    },
+  );
 });
