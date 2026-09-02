@@ -280,23 +280,33 @@ A diagram is composed in layers, and each layer must stand on its own:
 
 ## Flow diagram membership (NEVER BREAK)
 
-An example's actor map is the ONLY diagram showing the contract's full anatomy:
-every exported circuit, every witness and every ledger field. Exported PURE
+An example's actor map is the ONLY diagram showing the contract's full anatomy
+(every exported circuit, every witness and every ledger field) and the full
+cast of actors. Exported PURE
 circuits stay off the diagrams by default (they are helpers, not protocol
 surface): a specific document may reintroduce one deliberately, case by case.
 A flow diagram's contract box
 carries ONLY the members (ledger fields, circuits, witnesses)
 that flow interacts with, so a new member dirties one diagram, not one per
-flow. Membership is read from
+flow. The same bar holds for actors, in EVERY lane: a flow diagram draws ONLY
+the actors that flow interacts with. A foreign-chain actor the flow never
+touches, a User-cluster member with no edge in the flow, and a derivation
+note whose only consumer is a deleted actor all go, and the full cast
+appears on the actor map alone. Membership, for members and actors alike, is
+read from
 the contract source and the flow's executable flow files
 (`integration-tests/src/flows/`), never from prose.
 
 A flow diagram starts as a copy of the actor map with its `<diagram>` tag
-renamed, the non-interacted contract members deleted, and the flow's step layer
-appended. Every kept cell, contract members and the rest of the background
+renamed, the non-interacted contract members and actors deleted, and the
+flow's step layer
+appended. Deletion works the same at both scales: a member row or an actor
+(with its edges, and any note that serves only it) simply goes. Every kept
+cell, contract members, actors and the rest of the background
 alike, keeps its id, value and style byte-identical to the actor map's cell of
 the same id: copy, never re-author. Only geometry may adapt, as the contract
-box tightens around the surviving members. ONE value exemption exists: the MPC
+box tightens around the surviving members and the lanes close over the
+deleted actors. ONE value exemption exists: the MPC
 lane's `n-read` note names in its `From:` section the request event map(s)
 actually present in that diagram's contract box, each name bold. With one map
 the name shares the `From:` line (`From: signBidirectionalEventMap`), and
@@ -311,7 +321,8 @@ actor map's, the `n-read` `From:` line checked against the diagram's own map
 rows instead.
 
 **Trimming reclaims the space it frees.** Deleting members shrinks the
-containers, and every lane beside or below the shrunk containers moves in to
+containers, deleting actors shrinks the lanes that held them, and every lane
+beside or below a shrunk container or lane moves in to
 restore the normal inter-lane gaps, re-placing the step circles, edge labels and
 edge runs that lived in the affected band. Tightening one box while the page
 keeps its old extents is half the job: the freed area must leave the diagram,
@@ -448,12 +459,19 @@ carries.
 | Midnight lane | Midnight logo, `diagram-assets/midnight-logo.png` | the Midnight chain's swimlane |
 | Signet lane | Sig Network logo, `diagram-assets/sig-network-logo.png` | a Signet-controlled contract's swimlane |
 | Contract / dApp | `diagram-assets/contract-app.png` | a contract or dApp actor box |
-| Wallet | `diagram-assets/wallet.png` | a wallet holding a party's keys |
+| Wallet | `diagram-assets/wallet.png` | a wallet holding a party's keys, never a mere address on a chain (that is Account) |
 | MPC server | `img/lib/allied_telesis/computer_and_terminals/Server_Desktop.svg` | one MPC server, and the cluster group built from three of them |
 | Foreign chain | `img/lib/azure2/blockchain/Consortium.svg` | a non-Midnight chain's swimlane |
+| Exchange contract | `diagram-assets/exchange-icon.svg` | a swap or exchange venue on a foreign chain (the Uniswap router) |
+| Token contract | `diagram-assets/token-contract-icon.svg` | a token contract on a foreign chain (the ERC20 token, the Aave stata token) |
+| Account | `diagram-assets/wallet-icon.svg` | an address holding a balance on a chain, never a party's key-holding wallet (that is Wallet) |
 
 The open eye and the crossed eye are a deliberate pair: the witness observes, the
 secret stays hidden.
+
+Colour marks rank: top-level actors carry the coloured icons, and supporting
+actors and contract members carry the black-and-white ones, so an icon's colour
+alone says whether its bearer leads the diagram or supports it.
 
 The table is the extension point. A new icon lands as one row here plus one entry in
 the palette card's Iconography section, and both land in the same change.
