@@ -951,8 +951,8 @@ error naming the missing contract. A rerun
 against kept contract addresses (a populated `.env`)
 completes in roughly 25–35 minutes on a laptop. A fresh deployment adds the
 setup pipeline's deploys (a few minutes) on top, and a cold clone adds the
-~10 minute zk key generation. The claim/settle proofs are the heavy legs: the
-proof server peaks above 12 GiB, so give the docker VM 16 GB.
+~10 minute zk key generation. The `completeX` settle proofs are the heavy
+legs: the proof server peaks above 12 GiB, so give the docker VM 16 GB.
 
 ### Test run recovery
 
