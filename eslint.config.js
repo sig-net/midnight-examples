@@ -99,7 +99,7 @@ export default defineConfig([
 
   {
     name: "workspace/jsdoc",
-    files: ["**/src/**/*.ts", "**/deploy.ts"],
+    files: ["**/src/**/*.ts", "**/deploy.ts", "**/record-contract-address.ts"],
     extends: [jsdoc.configs["flat/recommended-typescript-error"]],
     rules: {
       // Every export carries a block. Internal helpers are the author's call.

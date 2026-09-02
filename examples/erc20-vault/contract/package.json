@@ -20,6 +20,7 @@
     "compile": "COMPACT_PATH=../../../node_modules compact compile --skip-zk --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
     "compile:zk": "COMPACT_PATH=../../../node_modules compact compile --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
     "build": "tsc -p tsconfig.json",
+    "record-contract-address": "tsx record-contract-address.ts",
     "prepack": "ls src/managed/erc20-vault/keys/*.prover >/dev/null 2>&1 || { echo 'erc20-vault-contract prepack: no prover keys in src/managed/erc20-vault/keys, run `yarn compile:zk` first (compile uses --skip-zk)' >&2; exit 1; } && rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/managed/erc20-vault && cp -R src/managed/erc20-vault/contract src/managed/erc20-vault/compiler src/managed/erc20-vault/zkir dist/managed/erc20-vault/ && mkdir -p dist/managed/erc20-vault/keys && cp src/managed/erc20-vault/keys/*.verifier dist/managed/erc20-vault/keys/ && mkdir -p dist/managed/SignetSigner && cp -R src/managed/SignetSigner/contract dist/managed/SignetSigner/",
     "test": "vitest run"
   },
@@ -44,6 +45,7 @@
   "devDependencies": {
     "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3",
     "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }
