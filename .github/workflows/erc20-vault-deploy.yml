@@ -237,10 +237,11 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # main, not the deployed tag: the PR edits main's current source.
+      # dev, not the deployed tag: the PR edits dev's current source, where
+      # every change lands first on its way to main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: dev
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -288,7 +289,7 @@ jobs:
           Opened by the erc20-vault-deploy workflow. A PR from GITHUB_TOKEN does not trigger CI: close and reopen this PR (or push to its branch) to run the checks before merging.
           EOF
           )"
-          url="$(gh pr create --base main --head "$branch" \
+          url="$(gh pr create --base dev --head "$branch" \
             --title "record the $NETWORK erc20-vault contract address ($TAG)" \
             --body "$body")"
           {
