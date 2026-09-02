@@ -57,7 +57,10 @@ flow's own walkthrough page draws its steps (see [The flows](#the-flows)).
   the Aave stataToken wrapper (supply / redeem), the vault's own derived EVM
   account holding the pooled tokens, and the destination account a withdraw
   pays out to (`WithdrawRequest.destEvmAddress`, any EVM address the caller
-  names).
+  names). The vault's own account grants two standing allowances on those
+  token contracts: `approveRouter` lets the Uniswap router spend the bridged
+  ERC20, and `approveStata` lets the stataToken wrapper pull the underlying
+  token during a supply.
 - **Vault dApp/Relayer**: the off-chain client. It polls the singleton's
   emitted events for the MPC's signature, assembles and broadcasts the
   MPC-signed transaction to the EVM chain, then polls for the MPC's
