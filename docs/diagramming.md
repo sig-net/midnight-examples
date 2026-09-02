@@ -299,7 +299,9 @@ flow. The same bar holds for actors, in EVERY lane: a flow diagram draws ONLY
 the actors that flow interacts with. A foreign-chain actor the flow never
 touches, a User-cluster member with no edge in the flow, and a derivation
 note whose only consumer is a deleted actor all go, and the full cast
-appears on the actor map alone. Membership, for members and actors alike, is
+appears on the actor map alone. Actor-level behaviour notes and their edges
+live on the actor map alone: a flow diagram's step layer tells the same
+story per flow with its labelled step edges. Membership, for members and actors alike, is
 read from
 the contract source and the flow's executable flow files
 (`integration-tests/src/flows/`), never from prose.
