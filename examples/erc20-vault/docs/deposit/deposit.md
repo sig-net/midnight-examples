@@ -1,13 +1,5 @@
 # Deposit
 
-<!-- FIXME(docs-diagrams): this page was written against the pre-rename
-     contract. Circuit and flow names in the text are updated to the renamed
-     circuits (initialise, startX/completeX, per-kind refundX), but the
-     drawio/PNG diagram still draws the old names, ledger-field names and any
-     remaining #L line anchors predate the refactor. Re-render the diagram and
-     re-verify names and anchors against the current contract and flows. -->
-
-
 The deposit round trip moves ERC20 tokens from the user's derived EVM deposit
 address into the vault's own EVM account, and mints the user's balance on
 Midnight once the MPC has attested the transfer. It is one full pass through the
@@ -38,6 +30,12 @@ step is the user's own EVM wallet acting alone, before any contract is
 involved. The user's wallet then drives the two Midnight transactions, the Vault
 dApp/Relayer does the polling and the broadcast, and the MPC reads, signs and
 attests.
+[`runDepositRoundTrip`](../../integration-tests/src/flows/deposit-round-trip.ts)
+runs all six steps end to end as the arrange stage for every flow that needs a
+caller already holding shielded vault tokens, the [swap](../swap/swap.md),
+[supply](../supply/supply.md) and [redeem](../redeem/redeem.md) round trips
+among them. The happy-day flow file calls the six legs long-hand instead, so
+each one carries its own assertions.
 
 ![Deposit flow](deposit.drawio.png)
 
@@ -53,7 +51,7 @@ As illustrated, the flow comprises 6 steps:
   - Every later step assumes the deposit account already holds the tokens to
     sweep and the ETH to pay its own gas. On the local fork the setup pipeline
     deals both to it
-    ([`dealForkEvmAccounts`](../../integration-tests/src/fork-funding.ts#L154)),
+    ([`dealForkEvmAccounts`](../../integration-tests/src/fork-funding.ts#L152)),
     and on a real chain the user funds the printed
     `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS`.
 - **2.** startDeposit(...) records the request
@@ -79,6 +77,18 @@ As illustrated, the flow comprises 6 steps:
     then calls the singleton's
     [`signBidirectional`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-contract/src/signet-contract.compact#L31)
     to notify the MPC, carrying the map's resolved ledger-tree path.
+  - The depositor's settle view (commitment, ERC20, amount) goes into
+    [`depositSettleViews`](../../contract/src/erc20-vault.compact) under that
+    same request id. Its commitment is the caller's
+    [`userCommitment`](../../contract/src/erc20-vault.compact), and NOT the
+    unlinkable [`refundCommitment`](../../contract/src/erc20-vault.compact)
+    a [withdrawal](../withdraw/withdraw.md) pins: a deposit publishes that
+    commitment on the ledger anyway as its request's derivation path, so
+    binding the settle view to it reveals nothing the request has not already
+    said. The amount is bounded to `Uint<64>` before the request is recorded
+    and kept in the view at that width, which spares step 6 decoding it back
+    out of the request's ABI words. The entry doubles as the pending-deposit
+    marker step 6 consumes.
   - Off-chain, [`start-deposit.ts`](../../integration-tests/src/flows/start-deposit.ts)
     reconstructs that expected record byte for byte, hashes it with the
     library's
@@ -91,7 +101,7 @@ As illustrated, the flow comprises 6 steps:
     signature back through the singleton's
     [`respond`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-contract/src/signet-contract.compact#L52).
   - The dApp polls the singleton's emitted response events with
-    [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L63).
+    [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L66).
     The event log is unauthenticated (anyone may post), so enumeration and
     verification go through the SDK's
     [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-response-reader.ts#L118),
@@ -119,7 +129,7 @@ As illustrated, the flow comprises 6 steps:
     `upgradeFromTransient(transientHash([requestId, serializedOutput]))`, and
     nothing else: neither the digest nor the serialised output goes on chain.
   - The client must therefore rebuild the exact bytes the MPC hashed.
-    [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L110)
+    [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L105)
     takes the mined call's raw EVM return data (the fakenet responder caches
     each traced output before it posts, and serves it at
     `/responses/{requestId}`, while a node with tracing enabled yields the same
@@ -140,7 +150,7 @@ As illustrated, the flow comprises 6 steps:
     vault's own ledger, is the attested outcome. The success candidate is
     skipped when no output was cached, and a decode failure drops it with a
     warning instead of crashing the poll.
-  - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L47)
+  - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L54)
     owns the loop, the timeout and the reporting. Everything resolved here stays
     UNTRUSTED: the respond events are open to anyone and the helper API is
     unauthenticated, and the authoritative check is the in-circuit verification
@@ -160,16 +170,21 @@ As illustrated, the flow comprises 6 steps:
     [`complete-deposit.ts`](../../integration-tests/src/flows/complete-deposit.ts) refuses to call
     the circuit for one.
   - The stored request is looked up and removed from
-    [`depositEventMap`](../../contract/src/erc20-vault.compact),
-    which is the double-claim protection, and the caller's recomputed commitment
-    must equal that request's path, which makes claims depositor-only.
-  - The mint's amount and token colour come from the stored request itself,
-    calldata word 1 and `txParams.to`, and the shielded vault tokens go to the
-    caller or to an optional recipient's coin public key. The mint nonce is a
-    fresh RANDOM 32 bytes per claim: one derived from the (public) request id
-    would let any observer link the minted coin to the deposit. Minting to
-    another wallet needs that wallet's encryption public key mapped in, which is
-    why the flow wraps that case in a contract-scoped transaction.
+    [`depositEventMap`](../../contract/src/erc20-vault.compact), and the
+    [`depositSettleViews`](../../contract/src/erc20-vault.compact) entry pinned
+    at startDeposit time is looked up and removed with it. That single
+    resolution is the double-claim protection: a request id with no entry left,
+    or one that never had a deposit, fails with a clean "Deposit not found".
+  - The caller's recomputed
+    [`userCommitment`](../../contract/src/erc20-vault.compact) must equal the
+    commitment on the settle view, which makes claims depositor-only.
+  - The mint's amount and token colour come from that same settle view, its
+    typed amount and the vault token of its ERC20, and the shielded vault tokens
+    go to the caller or to an optional recipient's coin public key. The mint
+    nonce is a fresh RANDOM 32 bytes per claim: one derived from the (public)
+    request id would let any observer link the minted coin to the deposit.
+    Minting to another wallet needs that wallet's encryption public key mapped
+    in, which is why the flow wraps that case in a contract-scoped transaction.
 
 ## The shared vault and reader setup
 
@@ -182,7 +197,7 @@ tests by the environment variable of that name.
 
 The off-chain steps (3 to 5) share one `SignetRequestResponseReader` over the
 vault and singleton pair, built by
-[`createResponseReader`](../../integration-tests/src/vault-context.ts#L152). The
+[`createResponseReader`](../../integration-tests/src/vault-context.ts#L149). The
 expected signer of the deposit sweep is the user's deposit account, derived with
 [`deriveEvmAddress`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/epsilon-derivation.ts#L73)
 from the caller's identity commitment rendered as full-width lowercase hex, the

@@ -1,13 +1,5 @@
 # Withdraw
 
-<!-- FIXME(docs-diagrams): this page was written against the pre-rename
-     contract. Circuit and flow names in the text are updated to the renamed
-     circuits (initialise, startX/completeX, per-kind refundX), but the
-     drawio/PNG diagram still draws the old names, ledger-field names and any
-     remaining #L line anchors predate the refactor. Re-render the diagram and
-     re-verify names and anchors against the current contract and flows. -->
-
-
 The withdraw round trip moves ERC20 tokens out of the vault's own EVM account
 to any destination the caller names, against shielded vault tokens the caller
 surrenders on Midnight. It is the deposit round trip with the roles swapped:
@@ -92,7 +84,7 @@ As illustrated, the flow comprises 5 steps:
   - The MPC reads the recorded request from the vault's ledger, signs the
     transfer with the vault's derived signing key, and posts the signature back
     through the singleton's `respond(...)`.
-  - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L63)
+  - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L66)
     polls the singleton's emitted signature events through the SDK's
     [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
@@ -120,7 +112,7 @@ As illustrated, the flow comprises 5 steps:
     id and the output bytes, so the client recomputes the output bytes
     independently and checks the signature against them, exactly as a
     [deposit](../deposit/deposit.md) does.
-  - [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L110)
+  - [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L105)
     recomputes TWO candidate outputs on every tick. **The success candidate** is
     computable only when the transaction executed: the raw execution output,
     decoded per the request's `outputDeserializationSchema` and re-packed per
@@ -139,7 +131,7 @@ As illustrated, the flow comprises 5 steps:
     stays UNTRUSTED: the verified bytes go into the settle circuit as an
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
-  - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L47)
+  - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L54)
     owns the poll deadline and hands the resolved outcome to the settle step.
 - **5.** completeWithdraw(...) settles on the attested output
   - An executed transfer settles through
@@ -160,7 +152,7 @@ As illustrated, the flow comprises 5 steps:
     behind the commitment pinned at withdraw time, and the coin mints under a
     caller-chosen random `mintNonce`. A nonce derived from the public request id
     would link the refunded coin to the withdrawal.
-  - [`complete-withdraw.ts`](../../integration-tests/src/flows/complete-withdraw.ts#L53)
+  - [`complete-withdraw.ts`](../../integration-tests/src/flows/complete-withdraw.ts#L43)
     is the single settle call site: it resolves the attested outcome, picks this
     circuit or `refundWithdraw` from it, and passes a fresh random mint nonce either way.
 - **5.** refundWithdraw(...) re-mints when the transfer never executed
@@ -199,13 +191,13 @@ contract and test changes that split it from the Midnight wallet seed.
 
 The off-chain steps (2 to 4) share one `SignetRequestResponseReader` over the
 vault and singleton pair, built by
-[`createResponseReader`](../../integration-tests/src/vault-context.ts#L152).
+[`createResponseReader`](../../integration-tests/src/vault-context.ts#L149).
 The withdraw-specific piece is the expected signer: every withdraw transfer is
 signed by the vault's own account, whose derivation path is the contract-fixed
 `pad(32, "vault")`. The MPC renders a request's 32 opaque path bytes as their
 full-width lowercase hex, padding included, and `deriveEvmAddress` takes the
 same rendering, so the vault's account derives from
-[`VAULT_PATH_HEX`](../../integration-tests/src/mpc-routing.ts#L27).
+[`VAULT_PATH_HEX`](../../contract/src/index.ts#L29).
 `deriveEvmAddress` is the concrete function behind the diagram's abstract
 `keyDerivation(...)` note, and `deriveMidnightResponseKey` is the one behind the
 response key's own note. The response key takes no path: it is per-contract and

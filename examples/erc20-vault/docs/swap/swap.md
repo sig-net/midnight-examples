@@ -1,13 +1,5 @@
 # Swap
 
-<!-- FIXME(docs-diagrams): this page was written against the pre-rename
-     contract. Circuit and flow names in the text are updated to the renamed
-     circuits (initialise, startX/completeX, per-kind refundX), but the
-     drawio/PNG diagram still draws the old names, ledger-field names and any
-     remaining #L line anchors predate the refactor. Re-render the diagram and
-     re-verify names and anchors against the current contract and flows. -->
-
-
 The swap round trip has the vault trade its pooled ERC20 tokens on Uniswap V3
 as if it were an ordinary EVM user, against shielded vault tokens the swapper
 surrenders on Midnight. The swapper burns a coin of one token colour and, on
@@ -106,7 +98,7 @@ As illustrated, the flow comprises 6 steps:
     **RequestId** (the record's own hash), and the singleton's
     `signBidirectional(...)` call carries that map's own ledger-tree path,
     exported for off-chain readers as
-    [`VAULT_SWAP_REQUESTS_PATH`](../../contract/src/index.ts#L39). The map is
+    [`VAULT_SWAP_REQUESTS_PATH`](../../contract/src/index.ts#L86). The map is
     separate from the deposit and withdraw one deliberately: the calldata width
     and both schema widths are part of a request map's ledger type.
   - A swap needs TWO schemas where a transfer needs one.
@@ -139,7 +131,7 @@ As illustrated, the flow comprises 6 steps:
   - The MPC reads the recorded request from the vault's swap map, signs the
     `exactOutputSingle` call with the vault's derived signing key, and posts
     the signature back through the singleton's `respond(...)`.
-  - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L63)
+  - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L66)
     polls the singleton's emitted signature events through the SDK's
     [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
@@ -257,10 +249,10 @@ surrenders.
 
 The off-chain steps (3 to 5) share one `SignetRequestResponseReader` over the
 vault and singleton pair, built by
-[`createResponseReader`](../../integration-tests/src/vault-context.ts#L152).
+[`createResponseReader`](../../integration-tests/src/vault-context.ts#L149).
 The swap-specific piece is the path: the reader defaults to the deposit and
 withdraw request map, and a swap passes
-[`VAULT_SWAP_REQUESTS_PATH`](../../contract/src/index.ts#L39) so it reads the
+[`VAULT_SWAP_REQUESTS_PATH`](../../contract/src/index.ts#L86) so it reads the
 records the swap circuit wrote. Step 1's allowance request keeps the default
 path, its record living in the shared map. The expected signer is the same for
 both: every request in this flow is signed by the vault's own account, whose
@@ -268,7 +260,7 @@ derivation path is the contract-fixed `pad(32, "vault")`. The MPC renders a
 request's 32 opaque path bytes as their full-width lowercase hex, padding
 included, and `deriveEvmAddress` takes the same rendering, so the vault's
 account derives from
-[`VAULT_PATH_HEX`](../../integration-tests/src/mpc-routing.ts#L27).
+[`VAULT_PATH_HEX`](../../contract/src/index.ts#L29).
 `deriveEvmAddress` is the concrete function behind the diagram's abstract
 `keyDerivation(...)` note, and `deriveMidnightResponseKey` is the one behind the
 response key's own note. The response key takes no path: it is per-contract and

@@ -18,12 +18,6 @@ the MPC's attestation. The [deposit walkthrough](docs/deposit/deposit.md)
 documents that shape in full for **`startDeposit` → `completeDeposit`**, and
 every circuit below links to the page for its own flow.
 
-<!-- FIXME(docs-diagrams): the flow pages and their drawio/PNG diagrams still
-     use the pre-rename circuit names (deposit/claim, withdraw, swap, supply,
-     redeem, the shared refund, initialize). The contract now names them
-     initialise, startX/completeX and one refundX per kind. Re-render the
-     diagrams and re-sweep the pages. -->
-
 | Circuit(s) | What it does |
 |---|---|
 | [`initialise`](#setup-step-4-pin-the-derived-addresses-and-the-response-key) | Deployment setup rather than an MPC flow: the deployer-gated one-shot that pins the vault's derived EVM address, the EVM chain, the Uniswap router, the Aave stataToken pair and the MPC response key. |
@@ -43,14 +37,12 @@ every circuit below links to the page for its own flow.
 The actor map lays out every actor in the example and the vault's seventeen
 exported circuits.
 
-<!-- FIXME(docs-diagrams): actor-map.drawio(.png) still draws the fourteen
-     pre-rename circuits; the contract now exports seventeen (initialise,
-     startX/completeX, per-kind refundX). Re-render. -->
-
-The only edges it draws are the dashed key derivations:
-every runtime interaction between these actors belongs to a specific MPC flow,
-and each flow's own walkthrough page draws its steps (see
-[The flows](#the-flows)).
+The edges it draws are the dashed key derivations plus the three standing
+responsibilities of the dApp/relayer: picking up the singleton's
+`SignatureRespondedEvent`s and `RespondBidirectionalEvent`s, and broadcasting
+the MPC-signed transactions. Everything else is per-flow: every other runtime
+interaction between these actors belongs to a specific MPC flow, and each
+flow's own walkthrough page draws its steps (see [The flows](#the-flows)).
 
 - **Sig Network Distributed MPC**: signs requested transactions with keys
   derived for the requesting contract, and attests their execution outcomes.
@@ -62,8 +54,10 @@ and each flow's own walkthrough page draws its steps (see
   circuits appear on the map.
 - **EVM Blockchain (destination chain)** hosts what the vault transacts with:
   the ERC20 token contract being bridged, the Uniswap V3 router (swap) and
-  the Aave stataToken wrapper (supply / redeem), plus the vault's own
-  derived EVM account holding the pooled tokens.
+  the Aave stataToken wrapper (supply / redeem), the vault's own derived EVM
+  account holding the pooled tokens, and the destination account a withdraw
+  pays out to (`WithdrawRequest.destEvmAddress`, any EVM address the caller
+  names).
 - **Vault dApp/Relayer**: the off-chain client. It polls the singleton's
   emitted events for the MPC's signature, assembles and broadcasts the
   MPC-signed transaction to the EVM chain, then polls for the MPC's
@@ -360,8 +354,9 @@ const vault = await findDeployedContract(providers, {
 ```
 
 From here, each flow's per-request steps live on its own walkthrough page:
-the deposit round trip, from funding the deposit account through `claim()`,
-is described step by step in [docs/deposit/deposit.md](docs/deposit/deposit.md).
+the deposit round trip, from funding the deposit account through
+`completeDeposit`, is described step by step in
+[docs/deposit/deposit.md](docs/deposit/deposit.md).
 
 ## Package layout
 
@@ -550,8 +545,8 @@ error naming the missing contract. A rerun
 against kept contract addresses (a populated `.env`)
 completes in roughly 25–35 minutes on a laptop. A fresh deployment adds the
 setup pipeline's deploys (a few minutes) on top, and a cold clone adds the
-~10 minute zk key generation. The claim/settle proofs are the heavy legs: the
-proof server peaks above 12 GiB, so give the docker VM 16 GB.
+~10 minute zk key generation. The `completeX` settle proofs are the heavy
+legs: the proof server peaks above 12 GiB, so give the docker VM 16 GB.
 
 ### Test run recovery
 
@@ -644,7 +639,7 @@ prefix. The tag carries the example name, the npm version does not:
    artifacts to it: the 17 prover keys, one asset per circuit, plus
    `zk-config.tar.gz` (the zkir, the verifier keys and the integrity manifest,
    for an app that serves them from its own origin) and a `SHA256SUMS` file
-   covering all 15. The assets go up **before** anything reaches npm, so a
+   covering all 18. The assets go up **before** anything reaches npm, so a
    published package never points at a release whose keys are missing. Re-running the workflow for a
    version that is already on npm leaves those assets untouched: the published
    package's manifest pins their hashes, and keygen is not byte-reproducible.
@@ -707,7 +702,7 @@ base=https://github.com/sig-net/midnight-examples/releases/download/$tag
 
 mkdir -p public/zk-config
 curl -fsSL "$base/zk-config.tar.gz" | tar -xz -C public/zk-config
-curl -fsSL -o public/zk-config/keys/deposit.prover "$base/deposit.prover"
+curl -fsSL -o public/zk-config/keys/startDeposit.prover "$base/startDeposit.prover"
 ```
 
 Point [`@midnight-ntwrk/midnight-js-fetch-zk-config-provider`](https://www.npmjs.com/package/@midnight-ntwrk/midnight-js-fetch-zk-config-provider)

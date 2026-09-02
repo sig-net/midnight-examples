@@ -1,13 +1,5 @@
 # Redeem
 
-<!-- FIXME(docs-diagrams): this page was written against the pre-rename
-     contract. Circuit and flow names in the text are updated to the renamed
-     circuits (initialise, startX/completeX, per-kind refundX), but the
-     drawio/PNG diagram still draws the old names, ledger-field names and any
-     remaining #L line anchors predate the refactor. Re-render the diagram and
-     re-verify names and anchors against the current contract and flows. -->
-
-
 The redeem round trip exits the vault's Aave position through the non-rebasing
 ERC-4626 wrapper (stataUSDC), against shielded vault tokens of the wrapper that
 the caller surrenders on Midnight. It is the [supply](../supply/supply.md) round
@@ -75,9 +67,9 @@ As illustrated, the flow comprises 5 steps:
     ([`redeemOutputSchema`](../../contract/src/erc20-vault.compact) and
     [`redeemRespondSchema`](../../contract/src/erc20-vault.compact), 36 and
     35 bytes) say the wrapper returns a `uint256 assets` the MPC repacks to
-    `uint64`. It is ledger field 17, and the notification carries its resolved
+    `uint64`. It is ledger field 19, and the notification carries its resolved
     ledger-tree path `[1, 13]` at depth 2, mirrored off chain by
-    [`VAULT_REDEEM_REQUESTS_PATH`](../../contract/src/index.ts#L45).
+    [`VAULT_REDEEM_REQUESTS_PATH`](../../contract/src/index.ts#L92).
   - The derivation path is the contract-fixed literal `pad(32, "vault")`, so the
     MPC signs with the vault's own account and never with a caller's (see
     [Derived keys and accounts](../../README.md#derived-keys-and-accounts)). The
@@ -104,7 +96,7 @@ As illustrated, the flow comprises 5 steps:
   - The MPC reads the recorded request from the vault's redeem map, signs the
     wrapper redemption with the vault's derived signing key, and posts the
     signature back through the singleton's `respond(...)`.
-  - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L63)
+  - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L66)
     polls the singleton's emitted signature events through the SDK's
     [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
@@ -227,13 +219,13 @@ tests take it from the environment variable of that name.
 
 The off-chain steps (2 to 4) share one `SignetRequestResponseReader` over the
 vault and singleton pair, built by
-[`createResponseReader`](../../integration-tests/src/vault-context.ts#L152) and
+[`createResponseReader`](../../integration-tests/src/vault-context.ts#L149) and
 pointed at the redeem map's ledger-tree path. The expected signer of the EVM
 transaction is the vault's own account, whose derivation path is the
 contract-fixed `pad(32, "vault")`. The MPC renders a request's 32 opaque path
 bytes as their full-width lowercase hex, padding included, and `deriveEvmAddress`
 takes the same rendering, so the vault's account derives from
-[`VAULT_PATH_HEX`](../../integration-tests/src/mpc-routing.ts#L27).
+[`VAULT_PATH_HEX`](../../contract/src/index.ts#L29).
 `deriveEvmAddress` is the concrete function behind the diagram's abstract
 `keyDerivation(...)` note, and `deriveMidnightResponseKey` is the one behind the
 response key's own note. The response key takes no path: it is per-contract and
@@ -244,7 +236,7 @@ The flow needs the wrapper to exist on the chain the vault is pinned to, which
 means Sepolia or a fork of it.
 [`runRedeemRoundTrip`](../../integration-tests/src/flows/redeem-round-trip.ts) probes
 for the wrapper's code with
-[`stataAvailable`](../../integration-tests/src/evm-stata.ts#L55) and logs a skip
+[`stataAvailable`](../../integration-tests/src/evm-stata.ts#L45) and logs a skip
 where it is absent. It also needs the caller to already HOLD the shares it
 redeems, so a [supply](../supply/supply.md) round trip runs first and its minted
 wrapper vault coin is what this flow burns.

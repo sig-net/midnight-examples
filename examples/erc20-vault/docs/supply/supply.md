@@ -1,13 +1,5 @@
 # Supply
 
-<!-- FIXME(docs-diagrams): this page was written against the pre-rename
-     contract. Circuit and flow names in the text are updated to the renamed
-     circuits (initialise, startX/completeX, per-kind refundX), but the
-     drawio/PNG diagram still draws the old names, ledger-field names and any
-     remaining #L line anchors predate the refactor. Re-render the diagram and
-     re-verify names and anchors against the current contract and flows. -->
-
-
 The supply round trip lends the vault's pooled USDC on Aave through the
 non-rebasing ERC-4626 wrapper (stataUSDC), against shielded vault tokens of the
 underlying that the caller surrenders on Midnight. The value never leaves the
@@ -69,11 +61,11 @@ As illustrated, the flow comprises 6 steps:
   - This leg is **sign-only**: it mints nothing and has no settle circuit at
     all, so the round trip ends at the broadcast and no attestation is ever
     polled.
-    [`approveStata`](../../integration-tests/src/flows/approve-stata.ts#L56)
+    [`approveStata`](../../integration-tests/src/flows/approve-stata.ts#L54)
     records the request, and the same signature poll and broadcast as steps 3
     and 4 carry it to the chain.
   - The allowance is global and permanent, so the step is idempotent:
-    [`ensureStataApproved`](../../integration-tests/src/flows/approve-stata.ts#L115)
+    [`ensureStataApproved`](../../integration-tests/src/flows/approve-stata.ts#L113)
     reads the live `allowance(vault, stataToken)` off the underlying and runs
     the leg only when it is zero.
     [`runSupplyRoundTrip`](../../integration-tests/src/flows/supply-round-trip.ts)
@@ -98,10 +90,10 @@ As illustrated, the flow comprises 6 steps:
     a `uint256 shares` the MPC repacks to `uint64`, and those schema widths
     ([`supplyOutputSchema`](../../contract/src/erc20-vault.compact) and
     [`supplyRespondSchema`](../../contract/src/erc20-vault.compact), 36 and
-    35 bytes) are part of the ledger type. It is ledger field 15, and the
+    35 bytes) are part of the ledger type. It is ledger field 17, and the
     notification carries its resolved ledger-tree path `[1, 11]` at depth 2,
     mirrored off chain by
-    [`VAULT_SUPPLY_REQUESTS_PATH`](../../contract/src/index.ts#L42).
+    [`VAULT_SUPPLY_REQUESTS_PATH`](../../contract/src/index.ts#L89).
   - The derivation path is `pad(32, "vault")` again, so the MPC signs with the
     vault's own account and never with a caller's (see
     [Derived keys and accounts](../../README.md#derived-keys-and-accounts)). The
@@ -129,7 +121,7 @@ As illustrated, the flow comprises 6 steps:
   - The MPC reads the recorded request from the vault's supply map, signs the
     wrapper deposit with the vault's derived signing key, and posts the
     signature back through the singleton's `respond(...)`.
-  - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L63)
+  - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L66)
     polls the singleton's emitted signature events through the SDK's
     [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
@@ -249,13 +241,13 @@ tests take it from the environment variable of that name.
 
 The off-chain steps (3 to 5) share one `SignetRequestResponseReader` over the
 vault and singleton pair, built by
-[`createResponseReader`](../../integration-tests/src/vault-context.ts#L152) and
+[`createResponseReader`](../../integration-tests/src/vault-context.ts#L149) and
 pointed at the supply map's ledger-tree path. The expected signer of both EVM
 transactions is the vault's own account, whose derivation path is the
 contract-fixed `pad(32, "vault")`. The MPC renders a request's 32 opaque path
 bytes as their full-width lowercase hex, padding included, and
 `deriveEvmAddress` takes the same rendering, so the vault's account derives from
-[`VAULT_PATH_HEX`](../../integration-tests/src/mpc-routing.ts#L27).
+[`VAULT_PATH_HEX`](../../contract/src/index.ts#L29).
 `deriveEvmAddress` is the concrete function behind the diagram's abstract
 `keyDerivation(...)` note, and `deriveMidnightResponseKey` is the one behind the
 response key's own note. The response key takes no path: it is per-contract and
@@ -264,10 +256,10 @@ MPC's attestation against it.
 
 The flow needs the wrapper to exist on the chain the vault is pinned to, which
 means Sepolia or a fork of it. Both
-[`ensureStataApproved`](../../integration-tests/src/flows/approve-stata.ts#L115)
+[`ensureStataApproved`](../../integration-tests/src/flows/approve-stata.ts#L113)
 and [`runSupplyRoundTrip`](../../integration-tests/src/flows/supply-round-trip.ts)
 probe for the wrapper's code with
-[`stataAvailable`](../../integration-tests/src/evm-stata.ts#L55) and log a skip
+[`stataAvailable`](../../integration-tests/src/evm-stata.ts#L45) and log a skip
 where it is absent.
 
 ## Sequence
