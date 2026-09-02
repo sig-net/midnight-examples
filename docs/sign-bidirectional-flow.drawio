@@ -155,7 +155,7 @@
                     <mxGeometry x="274" y="608" width="198" height="38" as="geometry"/>
                 </mxCell>
                 <mxCell id="c2" value="2." style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fontStyle=1;fontSize=20;spacing=0;spacingTop=-2;spacingLeft=3;fontColor=#3969AC;strokeWidth=2;strokeColor=#3969AC;align=center;" parent="ml" vertex="1">
-                    <mxGeometry x="710" y="393" width="31" height="31" as="geometry"/>
+                    <mxGeometry x="801" y="319" width="31" height="31" as="geometry"/>
                 </mxCell>
                 <mxCell id="hex-resp" value="Event&lt;br&gt;&lt;b&gt;SignatureRespondedEvent&lt;/b&gt;" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;size=19;spacingBottom=2;align=center;" parent="ml" vertex="1">
                     <mxGeometry x="23" y="611" width="196" height="38" as="geometry"/>
