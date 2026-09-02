@@ -1,40 +1,50 @@
-# Deploys the erc20-vault example contract to one Midnight network, at a
-# chosen release tag, from a wallet whose seed is the target environment's
-# DEPLOYER_SEED secret, then runs the deployer-gated one-shot initialise.
+# Deploys the erc20-vault contract to one Midnight network at a chosen
+# release tag, then runs the deployer-gated one-shot initialise. The deploy
+# step is `yarn deploy-initialise:erc20-vault` from the tag's own checkout,
+# the same deployVault + initialiseVault functions every local e2e run
+# exercises. The record-address job then opens a PR recording the new
+# address in the contract package's vaultContractAddresses table.
 #
-# The single deploy step runs `yarn deploy-initialise:erc20-vault`, a thin
-# shell over the same deployVault + initialiseVault functions the e2e setup
-# pipeline runs in-process on every local run. There is no CI-only deploy
-# path: what this workflow exercises is exactly what the integration tests
-# exercise.
-#
-# The vault's 17 circuits do not fit one block, so the deploy is a base
-# transaction plus one maintenance update per remaining circuit, signed by
-# MAINTENANCE_SIGNING_KEY. That key is the contract's sealed maintenance
-# authority and the only way to add or replace a circuit later: KEEP it.
-# If a run fails after "deployed erc20-vault base at ..." was printed, the
-# contract exists: do not rerun this workflow (that deploys a second
-# contract). Recover with `yarn deploy-initialise` semantics by hand: the
-# maintenance adds and `yarn initialise:erc20-vault` are idempotent against a
-# kept MIDNIGHT_VAULT_CONTRACT_ADDRESS.
-#
-# The record-address job then opens a PR writing the new address into the
-# contract package's vaultContractAddresses table, so a human reviews the
-# address before it reaches npm consumers.
+# The 17 circuits do not fit one block: a base transaction registers one
+# and a maintenance update adds each of the rest. A run that fails AFTER
+# printing "deployed erc20-vault base at ..." has a live contract: do not
+# re-dispatch (that deploys a second one), finish by hand with
+# `yarn initialise:erc20-vault` against the printed address.
 #
 # Each `network` choice option is a GitHub environment of the same name
-# carrying the per-network configuration:
-#   secrets: DEPLOYER_SEED (faucet-funded), MAINTENANCE_SIGNING_KEY
-#   vars:    MIDNIGHT_SIGNET_CONTRACT_ADDRESS (the deployed signet singleton
-#            the vault seals as its cross-contract signer),
-#            MPC_SECP256K1_PUBKEY (the network's MPC root public key),
-#            EVM_CHAIN_ID (the EVM chain this vault operates on),
-#            and optionally ROUTER / STATA_UNDERLYING / STATA_TOKEN (default
-#            to the Sepolia canonicals) plus MIDNIGHT_NODE_URL /
-#            MIDNIGHT_NODE_INDEXER_URL (default to the committed endpoints).
-# The choice options and the environment names are one set: an option with no
-# matching environment runs with no protection rules and an empty
-# DEPLOYER_SEED, and fails at the deploy step. Keep them in lockstep.
+# (keep the two lists in lockstep) carrying:
+#
+# secrets:
+# - DEPLOYER_SEED
+#   - wallet seed paying the fees, faucet-funded with NIGHT
+#   - example: c0ffee...c0ffee (32 or 64 bytes of hex) or a 24-word mnemonic
+# - VAULT_DEPLOYER_SECRET_KEY
+#   - identity sealed as `deployer`, the only one initialise accepts: KEEP
+#     it. Optional when DEPLOYER_SEED is itself 32 bytes of hex, which then
+#     doubles as the identity
+#   - example: facade...facade (exactly 64 hex chars, 0x optional)
+# - MAINTENANCE_SIGNING_KEY
+#   - signs the maintenance adds, sealed as the contract's only
+#     circuit-upgrade authority forever: KEEP it
+#   - example: decade...decade (exactly 64 hex chars, 0x optional)
+#
+# vars:
+# - MIDNIGHT_SIGNET_CONTRACT_ADDRESS
+#   - the network's deployed signet singleton, sealed as the vault's
+#     cross-contract signer
+#   - example: 0badf00d...1dea (64 hex chars, 0x optional)
+# - MPC_SECP256K1_PUBKEY
+#   - the network's MPC root public key
+#   - example: 04 followed by 128 hex chars (uncompressed SEC1)
+# - EVM_CHAIN_ID
+#   - the EVM chain the vault operates on
+#   - example: 11155111 (Sepolia)
+# - ROUTER / STATA_UNDERLYING / STATA_TOKEN (optional)
+#   - EVM target overrides, defaulting to the Sepolia canonicals
+#   - example: 0x followed by 40 hex chars
+# - MIDNIGHT_NODE_URL / MIDNIGHT_NODE_INDEXER_URL (optional)
+#   - endpoint overrides, defaulting to the committed per-network endpoints
+#   - example: https://rpc.stagenet.shielded.tools
 
 name: erc20-vault-deploy
 
@@ -179,6 +189,7 @@ jobs:
         env:
           NETWORK_ID: ${{ inputs.network }}
           DEPLOYER_SEED: ${{ secrets.DEPLOYER_SEED }}
+          VAULT_DEPLOYER_SECRET_KEY: ${{ secrets.VAULT_DEPLOYER_SECRET_KEY }}
           MAINTENANCE_SIGNING_KEY: ${{ secrets.MAINTENANCE_SIGNING_KEY }}
           MIDNIGHT_SIGNET_CONTRACT_ADDRESS: ${{ vars.MIDNIGHT_SIGNET_CONTRACT_ADDRESS }}
           MPC_SECP256K1_PUBKEY: ${{ vars.MPC_SECP256K1_PUBKEY }}
