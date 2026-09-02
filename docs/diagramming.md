@@ -195,7 +195,14 @@ its first label, keeping one verb one meaning.
     line with `spacingTop` dropping the text clear beneath it.
 
   Either way the icon and text read as ONE unit centred on both axes, and the unit
-  is what gets centred, never the icon and the text apart. Two cautions when
+  is what gets centred, never the icon and the text apart. Whatever the cell
+  constants give, at least 8 model units of clear space separate the icon's
+  rendered ink from the first text glyph, judged on the RENDER and never on cell
+  geometry alone, since icons fill their cells unevenly. A gap that comes up
+  short is fixed by widening the box, as width is what buys the gap under
+  centred text: the icon never shrinks and the text never slides off its
+  centring. The reference look is the lane header unit's gap between icon and
+  title. Two cautions when
   placing it: centre the icon on its rendered INK, not on its cell box, since an
   embedded PNG usually carries uneven transparent padding (the contract/dApp icon
   runs about 5 units light on the right, so its cell sits 1 unit right of centre);
@@ -436,7 +443,7 @@ with enough space and clarity on its own.
 
 An overrun the binding rules force is accepted as it stands: the actor map's
 full-anatomy mandate (every circuit, witness and ledger field on one diagram) pushes
-the erc20-vault actor map to 1695 x 1260, and that size is sanctioned. An overrun
+the erc20-vault actor map to 1825 x 1648, and that size is sanctioned. An overrun
 nothing forces is slack, and slack has three exits: tighten the layout, split the
 content into more diagrams, or move sequencing to a mermaid diagram in the README.
 
