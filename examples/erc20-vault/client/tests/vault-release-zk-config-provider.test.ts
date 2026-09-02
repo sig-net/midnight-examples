@@ -193,7 +193,8 @@ describe("VaultReleaseZkConfigProvider", () => {
   interface RejectCase extends HarnessOptions {
     readonly name: string;
     readonly circuitId: "startDeposit" | "startWithdraw";
-    readonly expectedMessage: RegExp;
+    /** A string matches as a literal substring of the error message. */
+    readonly expectedMessage: RegExp | string;
     readonly expectedFetches: readonly string[];
   }
 
@@ -213,7 +214,7 @@ describe("VaultReleaseZkConfigProvider", () => {
       version: RELEASE_VERSION,
       circuitId: CIRCUIT_ID,
       asset: { status: 404 },
-      expectedMessage: new RegExp(ASSET_URL.replace(/[.]/g, "\\.")),
+      expectedMessage: ASSET_URL,
       expectedFetches: [ASSET_URL],
     },
     {
