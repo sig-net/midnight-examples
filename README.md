@@ -78,7 +78,7 @@ Every change must also pass the linter and the formatter, which CI enforces on e
 
 ## Compiling, Building and Running Unit Tests
 
-Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only the packages with contracts that run in integration tests have a zk compile option. Unit tests run offline against a simulated Midnight runtime, so zk keys are not needed before running them. 
+Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only contract packages have a compile step, and only they have a zk compile option. Unit tests run offline against a simulated Midnight runtime, so zk keys are not needed before running them.
 
 From the root of the repository:
 
@@ -146,7 +146,7 @@ zk keys, bringing the stack up, what a green first run looks like, and recoverin
 a run the proof server was OOM-killed in) is walked end to end in the example's
 own README: [examples/erc20-vault/README.md](examples/erc20-vault/README.md).
 
-## Prerequisites
+# Prerequisites
 
 | Prerequisite | Version | Check With | Where to Get It |
 | ------- | ------| ------  |----------- |
