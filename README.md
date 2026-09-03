@@ -15,14 +15,14 @@ The examples demonstrate how to integrate using the following packages:
 
 ## Reading Guide
 - Start by reading the [Sign Bidirectional Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
-- Then go through the [Integration guide](#integration-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
+- Then go through the [Integration guide](#integrator-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
 - Or jump straight into complete [examples](#examples) to see applications of the protocol.
 
 If you are looking for the parts of the Sig Network stack that these examples are built upon, visit:
 - [Midnight Integration Protocol and SDK Repository](https://github.com/sig-net/midnight-integration)
 - [Sig Network Distributed MPC Repository](https://github.com/sig-net/mpc)
 
-## Examples
+# Examples
 
 Each example is a directory under [`examples/`](examples/) holding up to four packages, split by what the code is: `contract` (required), plus `client`, `deploy` and `integration-tests` as warranted.
 
@@ -35,13 +35,13 @@ Each example is a directory under [`examples/`](examples/) holding up to four pa
 |---|---|---|
 | [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding, swapping (Uniswap) and lending (Aave) ERC20 tokens on an EVM chain. | [deposit](examples/erc20-vault/docs/deposit/deposit.md), [withdraw](examples/erc20-vault/docs/withdraw/withdraw.md), [swap](examples/erc20-vault/docs/swap/swap.md), [supply](examples/erc20-vault/docs/supply/supply.md), [redeem](examples/erc20-vault/docs/redeem/redeem.md) |
 
-## Sign Bidirectional Protocol Flow
+# Sign Bidirectional Protocol Flow
 
 This Sig Network Protocol Flow brings foreign blockchain assets and functionality to contracts on Midnight. Contracts record signature requests that the Sig Network MPC signs. dApps relay signed transactions to foreign chains and the MPC attests their execution outcomes back to Midnight. Then contracts complete cross chain interactions with in-circuit validation of the MPC foreign execution attestation.
 
 Illustrated below, the protocol is best understood in 5 steps:
 
-![Sign bidirectional flow](docs/sign-bidirectional-flow.drawio.png)
+<img src="./docs/sign-bidirectional-flow.drawio.png">
 
 1. A user interacts with a dApp, which starts a cross chain interaction by calling a circuit (`startCrossChain(...)` in the diagram) on a contract on Midnight that has integrated with Sig Network.
 2. The MPC network, watching for events on the Singleton contract, picks up the emitted **SignBidirectionalEventNotification** and honours the signature request it points to.
@@ -54,8 +54,9 @@ Consult the [protocol documentation in the Midnight integration repository](http
   - MPC discovery and verification of the Sign Bidirectional Event signature requests
   - MPC & Client foreign transaction execution output recovery (including failed transaction flow)
   - MPC foreign transaction execution & failure attestation
+  - Handling foriegn transaction exeuction failure
 
-## Integration guide
+# Integrator Guide
 
 Integrating a contract on Midnight with the Sig Network MPC requires 4 once-off setup
 steps and 5 per-request runtime steps.
@@ -63,7 +64,7 @@ steps and 5 per-request runtime steps.
 Setup entails:
 1. Installing `@sig-net/midnight` into your project.
 2. Importing the Signet Compact module into your contract.
-3. Declaring the required protocol state in your ledger (the `signBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits call to notify the MPC of requests).
+3. Declaring the required protocol state in your ledger (the `SignBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits call cross contract to notify the MPC of requests).
 4. Setting the contract's own `mpcResponseKey` with an initialisation circuit call after deploy (its derivation takes the contract's address as input, which exists only once the contract is deployed).
 
 At runtime you integrate the [Sign Bidirectional Flow above](#sign-bidirectional-protocol-flow):
@@ -72,26 +73,63 @@ At runtime you integrate the [Sign Bidirectional Flow above](#sign-bidirectional
 
 Consult the [Integrator Guide documentation](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide) in the Midnight integration repository for a more detailed description of how to integrate.
 
-## Contributor guide
+# Contributor Guide
 
-There are two test layers. Unit tests run offline against a simulated Midnight
-runtime: no docker stack, no zk keys, seconds not minutes. The end to end
-integration suites drive the full protocol against the local docker stack and
-the fakenet MPC responder, and take minutes.
+First install the [Prerequisites](#prerequisites), then get set up for contributing by getting both test layers green: the offline unit tests, then the end to end integration suites.
 
-Everything runs from the repository root, with the
-[Prerequisites](#prerequisites) below installed. Only contract packages have a compile
-step, and `build`, `test` and `lint` all read the compiler's generated
-`src/managed/` output, so compile first:
+Every change must also pass the linter and the formatter, which CI enforces on every pull request. One ESLint flat config (`eslint.config.js`) and one Prettier config (`.prettierrc.json`) at the repo root cover all packages, so there is nothing to configure per package. In VS Code, install the two recommended extensions the editor offers on first open (`dbaeumer.vscode-eslint` and `esbenp.prettier-vscode`) and both run on save.
+
+## Compiling, Building and Running Unit Tests
+
+Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only the packages with contracts that run in integration tests have a zk compile option. Unit tests run offline against a simulated Midnight runtime, so zk keys are not needed before running them. 
+
+From the root of the repository:
 
 ```sh
-yarn install         # from the root, never from inside a workspace member
-yarn compile         # compact compiler per contract package, without zk keys
-yarn compile:zk      # with zk keys: needed for deploys and the e2e suites only
-yarn build           # typecheck every package
-yarn test            # unit tests: offline, simulator only
-yarn format:check    # prettier check. `yarn format` rewrites
-yarn lint            # eslint, type-aware. `yarn lint:fix` applies the autofixes
+# Install all dependencies for all workspace members once to start.
+# Run this from the repository root.
+yarn install
+
+## --- Compile, build or test: All Packages (whole workspace, from repository root) ---
+
+# Quick compile: all packages (checks syntax and generates circuits)
+# Runs the compact compiler for each package without generating zk keys (compiler output in the package's src/managed/)
+yarn compile
+
+# Longer compile: all packages that require zk keys (checks syntax, generates circuits and zk keys)
+# Runs the compact compiler with zk keys for each package that has a :zk option (compiler output in the package's src/managed/)
+yarn compile:zk
+
+# Test: all packages (typecheck + unit tests: offline simulator-only)
+# Requires 'yarn compile' to have been run (zk keys not required for unit testing).
+yarn test
+
+# Build: all packages
+# Requires both 'yarn compile' and 'yarn compile:zk': packages that ship
+# zk keys refuse to build without them.
+yarn build
+
+## --- Linting and formatting: All packages (whole workspace, from repository root) ---
+
+# Check formatting (Prettier). Needs nothing compiled.
+yarn format:check
+yarn format        # rewrite files in place
+
+# Lint (ESLint + typescript-eslint, type-aware).
+# Requires 'yarn compile': the rules read the generated src/managed/ types,
+# the same reason 'yarn build' needs it.
+yarn lint
+yarn lint:fix      # apply every autofix
+
+## --- Compile, build or test a single package independently ---
+
+# The @sig-net/midnight-examples-erc20-vault-contract package:
+
+yarn compile:erc20-vault
+yarn compile:erc20-vault:zk # generates zk keys
+yarn test:erc20-vault       # requires at least 'yarn compile:erc20-vault'
+yarn build:erc20-vault      # requires 'yarn compile:erc20-vault:zk'
+# The erc20-vault can also be deployed and initialised:
 yarn deploy:erc20-vault             # deploy a vault. Needs `yarn compile:zk` first
 yarn deploy-initialise:erc20-vault  # deploy + the deployer-gated initialise (remote networks)
 yarn initialise:erc20-vault         # initialise an already-deployed vault (recovers a half-done run)
