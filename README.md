@@ -54,7 +54,7 @@ Consult the [protocol documentation in the Midnight integration repository](http
   - MPC discovery and verification of the Sign Bidirectional Event signature requests
   - MPC & Client foreign transaction execution output recovery (including failed transaction flow)
   - MPC foreign transaction execution & failure attestation
-  - Handling foriegn transaction exeuction failure
+  - Handling foreign transaction execution failure
 
 # Integrator Guide
 
@@ -81,7 +81,7 @@ Every change must also pass the linter and the formatter, which CI enforces on e
 
 ## Compiling, Building and Running Unit Tests
 
-Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only the packages with contracts that run in integration tests have a zk compile option. Unit tests run offline against a simulated Midnight runtime, so zk keys are not needed before running them. 
+Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only contract packages have a compile step, and only they have a zk compile option. Unit tests run offline against a simulated Midnight runtime, so zk keys are not needed before running them.
 
 From the root of the repository:
 
@@ -104,9 +104,9 @@ yarn compile:zk
 # Requires 'yarn compile' to have been run (zk keys not required for unit testing).
 yarn test
 
-# Build: all packages
-# Requires both 'yarn compile' and 'yarn compile:zk': packages that ship
-# zk keys refuse to build without them.
+# Build: all packages (typecheck)
+# Requires 'yarn compile' to have been run (packages typecheck against the
+# compiler's generated src/managed/ output, no zk keys required).
 yarn build
 
 ## --- Linting and formatting: All packages (whole workspace, from repository root) ---
@@ -121,30 +121,28 @@ yarn format        # rewrite files in place
 yarn lint
 yarn lint:fix      # apply every autofix
 
-## --- Compile, build or test a single package independently ---
+## --- Compile, build or test a single example independently ---
 
-# The @sig-net/midnight-examples-erc20-vault-contract package:
-
+# The erc20-vault example (contract + client + deploy + integration-tests packages):
 yarn compile:erc20-vault
-yarn compile:erc20-vault:zk # generates zk keys
-yarn test:erc20-vault       # requires at least 'yarn compile:erc20-vault'
-yarn build:erc20-vault      # requires 'yarn compile:erc20-vault:zk'
-# The erc20-vault can also be deployed and initialised:
-yarn deploy:erc20-vault             # deploy a vault. Needs `yarn compile:zk` first
+yarn compile:erc20-vault:zk  # generates the vault contract's zk keys
+yarn test:erc20-vault        # requires at least 'yarn compile:erc20-vault'
+yarn build:erc20-vault       # requires 'yarn compile:erc20-vault'
+
+# The erc20-vault example can also be deployed and initialised:
+yarn deploy:erc20-vault             # deploy a vault, requires 'yarn compile:erc20-vault:zk'
 yarn deploy-initialise:erc20-vault  # deploy + the deployer-gated initialise (remote networks)
 yarn initialise:erc20-vault         # initialise an already-deployed vault (recovers a half-done run)
 ```
 
-Scripts targeting one example carry that example's directory name:
-`yarn compile:erc20-vault`, `yarn compile:erc20-vault:zk`,
-`yarn test:erc20-vault` and `yarn build:erc20-vault`. Deploying a vault is
-`yarn deploy:erc20-vault` (needing `yarn compile:erc20-vault:zk` first), with
-`yarn deploy-initialise:erc20-vault` for the one-shot remote bring-up and
-`yarn initialise:erc20-vault` to recover a run whose deploy landed but whose
-initialise did not. ESLint and Prettier are
-configured once at the repo root and cover every member, and each example's CI
-workflow runs `yarn format:check` and `yarn lint` before its tests, so
-formatting drift or a lint finding fails the build.
+Scripts targeting one example carry that example's directory name in full
+(`compile:erc20-vault`, never a shorthand), so every example gains the same
+family of scripts. The task prefix decides which of the example's packages
+run: `test:` and `build:` fan out over every package the example has,
+`compile:` reaches only its contract package, and `deploy:` only its deploy
+package.
+
+## Integration Tests
 
 The e2e suites need the docker stack running and the fakenet MPC responder, and
 they also run from the root:
@@ -159,7 +157,7 @@ zk keys, bringing the stack up, what a green first run looks like, and recoverin
 a run the proof server was OOM-killed in) is walked end to end in the example's
 own README: [examples/erc20-vault/README.md](examples/erc20-vault/README.md).
 
-## Prerequisites
+# Prerequisites
 
 | Prerequisite | Version | Check With | Where to Get It |
 | ------- | ------| ------  |----------- |
