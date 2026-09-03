@@ -1,6 +1,7 @@
 // Curated export surface: the "sdk" face of the package.
 // Everything the compiler emitted, the handwritten witnesses, the typed client
-// surface, the ledger reads and the contract's EVM-side constants. Nothing here
+// surface, the ledger reads, the contract's EVM-side constants and the
+// published per-network vault addresses. Nothing here
 // may touch environment-specific APIs: this surface runs unchanged in a browser
 // or a backend. Anything that cannot (the Node compiled-contract binding, a
 // live provider set, deploy tooling) lives in a sibling package.
@@ -10,6 +11,7 @@ import { asciiPadded, bytesToHex, deriveEvmAddress, PATH_BYTES } from "@sig-net/
 export * from "./contract-surface.ts";
 export * from "./evm.ts";
 export * from "./managed/erc20-vault/contract/index.js";
+export * from "./vault-addresses.ts";
 export * from "./vault-ledger.ts";
 export * from "./witnesses.ts";
 

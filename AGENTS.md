@@ -126,8 +126,9 @@ exception for that specific case.
   pinned: install it with `compact update 0.33.0-rc.2` (the exact version named
   in the README's prerequisites), and CI installs exactly that version. The
   toolchain pin lives in several places that move TOGETHER, in EVERY workflow
-  that installs the toolchain (`example-test.yaml` and `publish-erc20-vault.yml`
-  both do): each workflow's launcher URL (`compact-v0.5.1`) and compiler zip
+  that installs the toolchain (`example-test.yaml`, `publish-erc20-vault.yml`
+  and `erc20-vault-deploy.yml` all do): each workflow's launcher URL
+  (`compact-v0.5.1`) and compiler zip
   URL, the SHA-256 checksums it verifies for those two downloads (recompute
   each from a fresh download of the new URL), the workflow cache keys, and the
   README's Prerequisites table. This trigger is bidirectional: a request to

@@ -1,0 +1,310 @@
+# Deploys the erc20-vault contract to one Midnight network at a chosen
+# release tag, then runs the deployer-gated one-shot initialise. The deploy
+# step is `yarn deploy-initialise:erc20-vault` from the tag's own checkout,
+# the same deployVault + initialiseVault functions every local e2e run
+# exercises. The record-address job then opens a PR recording the new
+# address in the contract package's vaultContractAddresses table.
+#
+# The 17 circuits do not fit one block: a base transaction registers one
+# and a maintenance update adds each of the rest. A run that fails AFTER
+# printing "deployed erc20-vault base at ..." has a live contract: do not
+# re-dispatch (that deploys a second one), finish by hand with
+# `yarn initialise:erc20-vault` against the printed address.
+#
+# Each `network` choice option is a GitHub environment of the same name
+# (keep the two lists in lockstep) carrying:
+#
+# secrets:
+# - MIDNIGHT_DEPLOYER_WALLET_SEED
+#   - wallet seed paying the fees, faucet-funded with NIGHT
+#   - example: c0ffee...c0ffee (32 or 64 bytes of hex) or a 24-word mnemonic
+# - VAULT_DEPLOYER_SECRET
+#   - identity sealed as `deployer`, the only one initialise accepts: KEEP
+#     it. Optional when MIDNIGHT_DEPLOYER_WALLET_SEED is itself 32 bytes of hex, which then
+#     doubles as the identity
+#   - example: facade...facade (exactly 64 hex chars, 0x optional)
+# - MIDNIGHT_MAINTENANCE_PRIVATE_KEY
+#   - signs the maintenance adds, sealed as the contract's only
+#     circuit-upgrade authority forever: KEEP it
+#   - example: decade...decade (exactly 64 hex chars, 0x optional)
+#
+# vars:
+# - MIDNIGHT_SIGNET_CONTRACT_ADDRESS
+#   - the network's deployed signet singleton, sealed as the vault's
+#     cross-contract signer
+#   - example: 0badf00d...1dea (64 hex chars, 0x optional)
+# - MPC_ROOT_PUBLIC_KEY
+#   - the network's MPC root public key
+#   - example: 04 followed by 128 hex chars (uncompressed SEC1)
+# - EVM_CHAIN_ID
+#   - the EVM chain the vault operates on
+#   - example: 11155111 (Sepolia)
+# - UNISWAP_ROUTER_CONTRACT_ADDRESS / AAVE_STATA_UNDERLYING_TOKEN_CONTRACT_ADDRESS / AAVE_STATA_TOKEN_CONTRACT_ADDRESS (optional)
+#   - EVM target overrides, defaulting to the Sepolia canonicals
+#   - example: 0x followed by 40 hex chars
+# - MIDNIGHT_NODE_URL / MIDNIGHT_INDEXER_URL (optional)
+#   - endpoint overrides, defaulting to the committed per-network endpoints
+#   - example: https://rpc.stagenet.shielded.tools
+
+name: erc20-vault-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: "Midnight network to deploy to (must match a GitHub environment name)"
+        required: true
+        type: choice
+        options:
+          - stagenet
+          - preview
+          - preprod
+          - mainnet
+      tag:
+        description: "Release tag to deploy, erc20-vault-vX.Y.Z (mainnet takes stable tags only)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize deploys per network. No cancel-in-progress: a cancelled run can
+# leave a submitted deploy transaction whose address nothing records.
+concurrency:
+  group: erc20-vault-deploy-${{ inputs.network }}
+
+jobs:
+  deploy:
+    name: deploy and initialise the vault contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # Per-network secrets + reviewer gating.
+    environment: ${{ inputs.network }}
+    permissions:
+      contents: read
+    outputs:
+      contract-address: ${{ steps.deploy.outputs.contract-address }}
+    steps:
+      - name: Refuse an input that is not a release tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if ! printf '%s' "$TAG" |
+            grep -Eq '^erc20-vault-v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
+            echo "::error::deploy runs on an erc20-vault-vX.Y.Z or erc20-vault-vX.Y.Z-rc.N tag only, got $TAG"
+            exit 1
+          fi
+      # An -rc. suffix marks a prerelease, the same test publish-erc20-vault.yml
+      # uses to pick the npm dist-tag. Mainnet takes released versions only.
+      - name: Mainnet deploys a stable tag only
+        if: ${{ inputs.network == 'mainnet' && contains(inputs.tag, '-rc.') }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          echo "::error::mainnet deploys a stable erc20-vault-vX.Y.Z tag only, got the prerelease $TAG"
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # refs/tags/ prefixed: a ref that is not a tag fails the checkout
+          # rather than silently deploying a branch head.
+          ref: refs/tags/${{ inputs.tag }}
+          # Full history: the stable-tag guard below asks whether the tagged
+          # commit is an ancestor of main.
+          fetch-depth: 0
+          persist-credentials: false
+      # Tag rulesets gate WHO may create a stable tag; this guards WHERE it
+      # points. Prereleases may come from any branch.
+      - name: Stable tags must point at a commit on main
+        if: ${{ !contains(inputs.tag, '-rc.') }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "::error::stable tag $TAG is not on main; only prerelease (-rc.N) tags may come from other branches"
+            exit 1
+          }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          # corepack owns yarn: the action's yarn-1 cache probe would die here
+          package-manager-cache: false
+      - name: Enable corepack (yarn 4 via the packageManager field)
+        run: corepack enable
+      # The toolchain installs fresh here, no compact-* cache: its downloads
+      # are checksum-verified and cost seconds, so caching them in a deploy
+      # job would trade nothing for a cache-poisoning surface.
+      - name: Install the compact toolchain (pinned launcher + compiler, per AGENTS.md)
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.compact/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.compact/bin" >> "$GITHUB_PATH"
+          # Launcher pinned to compact-v0.5.1 (never releases/latest): the
+          # toolchain is frozen, so bump this tag deliberately.
+          if ! command -v compact >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -LsSf --retry 4 -o /tmp/compact-installer.sh \
+              https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.1/compact-installer.sh
+            echo "85e74a53ae4a67b31fa4d854f3b6ffb4c29f7c53e3372c5008b6a4729a8b4a73  /tmp/compact-installer.sh" | sha256sum -c
+            sh /tmp/compact-installer.sh
+          fi
+          # compactc 0.33.0-rc.2 is the PINNED compiler, part of the ledger-9
+          # MATCHED SET. It is a prerelease published on the toolchain's LF
+          # home (LFDT-Minokawa/compact), which the launcher's channel does not
+          # list: download it directly and let the launcher adopt it. A bare
+          # `compact update` would install latest stable and break the pin, so
+          # it is never run here.
+          RC_DIR="$HOME/.compact/versions/0.33.0-rc.2/x86_64-unknown-linux-musl"
+          if [ ! -x "$RC_DIR/compactc" ]; then
+            mkdir -p "$RC_DIR"
+            curl -fsSL --retry 4 -o /tmp/compactc-rc.zip \
+              https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.33.0-rc.2/compactc_v0.33.0-rc.2_x86_64-unknown-linux-musl.zip
+            echo "3055ab92bbc8d5bb0d6282b661b83761d2a0de2ee37e21cf7107e25aaf2a9aad  /tmp/compactc-rc.zip" | sha256sum -c
+            unzip -qo /tmp/compactc-rc.zip -d "$RC_DIR"
+            chmod +x "$RC_DIR"/*
+          fi
+          # `compact update <ver>` adopts an already-on-disk version without
+          # downloading; if the launcher refuses (version not in its channel),
+          # wire the default symlinks it would have created.
+          mkdir -p "$HOME/.compact/bin"
+          compact update 0.33.0-rc.2 || ln -sfn "$RC_DIR"/* "$HOME/.compact/bin/"
+          compact compile --version
+      - name: Install dependencies (frozen, from the committed yarn.lock)
+        run: yarn install --immutable
+      # Keygen runs here every time, with NO cache, for the same reason
+      # publish-erc20-vault.yml refuses one: the verifier keys this compile
+      # emits are sealed into the deployed contract, and a cache is written by
+      # other workflows, so restoring it would deploy bytes this job did not
+      # build. The ~10 minutes it costs buys a contract built entirely from
+      # the tagged source.
+      - name: Generate the vault's zk keys (the deploy transaction seals the verifier keys)
+        run: yarn compile:erc20-vault:zk
+      # The proof server sees private witness data, so it runs locally on the
+      # runner for every network, never as a remote host.
+      - name: Start the local proof server
+        run: docker compose up -d proof-server
+      - name: Wait for the proof server
+        run: |
+          timeout 120 bash -c 'until curl -s -o /dev/null http://127.0.0.1:6300; do sleep 3; done'
+      - name: Deploy and initialise the vault contract
+        id: deploy
+        env:
+          MIDNIGHT_NETWORK_ID: ${{ inputs.network }}
+          MIDNIGHT_DEPLOYER_WALLET_SEED: ${{ secrets.MIDNIGHT_DEPLOYER_WALLET_SEED }}
+          VAULT_DEPLOYER_SECRET: ${{ secrets.VAULT_DEPLOYER_SECRET }}
+          MIDNIGHT_MAINTENANCE_PRIVATE_KEY: ${{ secrets.MIDNIGHT_MAINTENANCE_PRIVATE_KEY }}
+          MIDNIGHT_SIGNET_CONTRACT_ADDRESS: ${{ vars.MIDNIGHT_SIGNET_CONTRACT_ADDRESS }}
+          MPC_ROOT_PUBLIC_KEY: ${{ vars.MPC_ROOT_PUBLIC_KEY }}
+          EVM_CHAIN_ID: ${{ vars.EVM_CHAIN_ID }}
+          # Optional per-environment EVM target overrides. Blank falls through
+          # to the Sepolia canonicals the contract package publishes.
+          UNISWAP_ROUTER_CONTRACT_ADDRESS: ${{ vars.UNISWAP_ROUTER_CONTRACT_ADDRESS }}
+          AAVE_STATA_UNDERLYING_TOKEN_CONTRACT_ADDRESS: ${{ vars.AAVE_STATA_UNDERLYING_TOKEN_CONTRACT_ADDRESS }}
+          AAVE_STATA_TOKEN_CONTRACT_ADDRESS: ${{ vars.AAVE_STATA_TOKEN_CONTRACT_ADDRESS }}
+          # Optional per-environment endpoint overrides. Every network has
+          # committed defaults, and a blank var falls through to them.
+          MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}
+          MIDNIGHT_INDEXER_URL: ${{ vars.MIDNIGHT_INDEXER_URL }}
+          MIDNIGHT_PROOF_SERVER_URL: http://127.0.0.1:6300
+          # $GITHUB_REF_NAME is the dispatching branch, so carry the tag over.
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          yarn deploy-initialise:erc20-vault 2>&1 | tee deploy.log
+          address="$(sed -n 's/^NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS=//p' deploy.log | tail -n 1)"
+          if [ -z "$address" ]; then
+            echo "::error::the deploy printed no contract address"
+            exit 1
+          fi
+          echo "contract-address=$address" >> "$GITHUB_OUTPUT"
+          {
+            echo "### erc20-vault deployed and initialised"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| network | $MIDNIGHT_NETWORK_ID |"
+            echo "| tag | $TAG |"
+            echo "| address | \`$address\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Collect deploy logs
+        if: failure()
+        run: |
+          mkdir -p deploy-logs
+          docker compose logs --no-color proof-server > deploy-logs/proof-server.log 2>&1 || true
+          cp deploy.log deploy-logs/deploy.log 2>/dev/null || true
+      - name: Upload deploy logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deploy-logs
+          path: deploy-logs/
+
+  record-address:
+    name: open the address-recording PR
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The write token lives HERE, in the job that has no deployer seed; the
+    # deploy job keeps contents: read.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # dev, not the deployed tag: the PR edits dev's current source, where
+      # every change lands first on its way to main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          # corepack owns yarn: the action's yarn-1 cache probe would die here
+          package-manager-cache: false
+      - name: Enable corepack (yarn 4 via the packageManager field)
+        run: corepack enable
+      - name: Install dependencies (frozen, from the committed yarn.lock)
+        run: yarn install --immutable
+      # The script reads the network and address from argv and rewrites one
+      # string literal, so it needs no compiled contract output.
+      - name: Record the address in the contract package's vault-addresses table
+        env:
+          NETWORK: ${{ inputs.network }}
+          ADDRESS: ${{ needs.deploy.outputs.contract-address }}
+        run: |
+          set -euo pipefail
+          yarn record-contract-address:erc20-vault --network "$NETWORK" --address "$ADDRESS"
+      # Known GitHub limitation: a PR opened with GITHUB_TOKEN does NOT
+      # trigger this repo's own workflows. A reviewer close/reopens the PR (or
+      # pushes to its branch) to run CI on it before merging.
+      - name: Commit, push and open the PR
+        env:
+          NETWORK: ${{ inputs.network }}
+          TAG: ${{ inputs.tag }}
+          ADDRESS: ${{ needs.deploy.outputs.contract-address }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          branch="deploy/record-$NETWORK-$TAG"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add examples/erc20-vault/contract/src/vault-addresses.ts
+          git commit -m "record the $NETWORK erc20-vault contract address from $TAG"
+          git push "https://x-access-token:$GITHUB_TOKEN@github.com/$REPOSITORY.git" "$branch"
+          body="$(cat <<EOF
+          Deployed and initialised the erc20-vault on \`$NETWORK\` at \`$TAG\`.
+
+          Address: \`$ADDRESS\`
+
+          Opened by the erc20-vault-deploy workflow. A PR from GITHUB_TOKEN does not trigger CI: close and reopen this PR (or push to its branch) to run the checks before merging.
+          EOF
+          )"
+          url="$(gh pr create --base dev --head "$branch" \
+            --title "record the $NETWORK erc20-vault contract address ($TAG)" \
+            --body "$body")"
+          {
+            echo "### address-recording PR"
+            echo ""
+            echo "$url"
+          } >> "$GITHUB_STEP_SUMMARY"

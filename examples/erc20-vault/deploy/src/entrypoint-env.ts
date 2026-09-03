@@ -61,9 +61,8 @@ export function assertEnvFileMatchesNetwork(
   processEnv: Record<string, string | undefined>,
   networkId: NetworkId,
 ): void {
-  // Read the file's own MIDNIGHT_NETWORK_ID rather than resolving a whole config from
-  // it: a network whose endpoints this repo does not ship (stagenet) has none
-  // to resolve, and the network name is the only thing being compared.
+  // Read the file's own MIDNIGHT_NETWORK_ID rather than resolving a whole config
+  // from it: the network name is the only thing being compared.
   const fileNetworkId = envOrUndefined(fileEnv, "MIDNIGHT_NETWORK_ID") ?? "undeployed";
   if (fileNetworkId === networkId) return;
 

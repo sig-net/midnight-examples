@@ -1979,6 +1979,7 @@ __metadata:
     "@sig-net/midnight": "npm:0.21.0-rc.2"
     "@sig-net/midnight-contract": "npm:0.21.0-rc.2"
     "@types/node": "npm:^26.1.1"
+    tsx: "npm:^4.23.1"
     typescript: "npm:^7.0.2"
     vitest: "npm:^4.1.10"
   languageName: unknown

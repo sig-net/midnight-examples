@@ -519,6 +519,17 @@ circuit later, so a deploy to any network other than the local standalone chain
 REQUIRES it and fails fast when it is unset. On the local chain, which is
 throwaway, an unset key makes the deploy generate an ephemeral one and say so.
 
+### Deploying from CI
+
+The manually dispatched
+[`erc20-vault-deploy` workflow](../../.github/workflows/erc20-vault-deploy.yml)
+runs that same `yarn deploy-initialise:erc20-vault` against a chosen network at
+a chosen `erc20-vault-v*` release tag. Each network is a GitHub environment of
+the same name carrying the per-network secrets and variables (the workflow's
+header comment lists them), and a successful run opens a PR recording the new
+address in the contract package's per-network table, served to consumers by
+`getVaultContractAddress`.
+
 ## The e2e suite
 
 Eleven specs run serially in a pinned order (see
