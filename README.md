@@ -1,6 +1,6 @@
 # Midnight Contracts Calling Foreign Chains with Sig Network
 
-This monorepo holds experimental example Midnight contracts that leverage the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains through integration of the [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow).
+This monorepo holds experimental example contracts for Midnight. They use the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains, through the [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow).
 
 The examples demonstrate how to integrate using the following packages:
 - [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight): the
@@ -14,9 +14,9 @@ The examples demonstrate how to integrate using the following packages:
   local e2e stack.
 
 ## Reading Guide
-- Start by reading the [Sign Bidirectional Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
-- Then go through the [Integration guide](#integrator-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
-- Or jump straight into complete [examples](#examples) to see applications of the protocol.
+- Start by reading the [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
+- Then go through the [Integrator Guide](#integrator-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
+- Or jump straight into complete [Examples](#examples) to see applications of the protocol.
 
 If you are looking for the parts of the Sig Network stack that these examples are built upon, visit:
 - [Midnight Integration Protocol and SDK Repository](https://github.com/sig-net/midnight-integration)
@@ -25,6 +25,8 @@ If you are looking for the parts of the Sig Network stack that these examples ar
 # Examples
 
 Each example is a directory under [`examples/`](examples/) holding up to four packages, split by what the code is: `contract` (required), plus `client`, `deploy` and `integration-tests` as warranted.
+
+The examples are what integrators read and copy. Shared repo-private plumbing lives under [`packages/`](packages/): `lib` holds the runtime helpers the examples import (wallets, providers, transaction build and submit), and `test-harness` the test-only utilities behind the e2e suites (stack bring-up, wallet funding, the setup pipeline).
 
 > ## ⚠️ CAUTION ⚠️
 >
@@ -41,7 +43,7 @@ This Sig Network Protocol Flow brings foreign blockchain assets and functionalit
 
 Illustrated below, the protocol is best understood in 5 steps:
 
-<img src="./docs/sign-bidirectional-flow.drawio.png">
+![The sign bidirectional protocol flow: five steps between a dApp, contracts on Midnight, the Sig Network MPC and a foreign blockchain](./docs/sign-bidirectional-flow.drawio.png)
 
 1. A user interacts with a dApp, which starts a cross chain interaction by calling a circuit (`startCrossChain(...)` in the diagram) on a contract on Midnight that has integrated with Sig Network.
 2. The MPC network, watching for events on the Singleton contract, picks up the emitted **SignBidirectionalEventNotification** and honours the signature request it points to.
@@ -129,33 +131,34 @@ yarn compile:erc20-vault:zk  # generates the vault contract's zk keys
 yarn test:erc20-vault        # requires at least 'yarn compile:erc20-vault'
 yarn build:erc20-vault       # requires 'yarn compile:erc20-vault'
 
-# The erc20-vault example can also be deployed and initialised:
+# The erc20-vault example can also be deployed and initialised. Unlike the
+# offline commands above, these need a full local stack running and a
+# populated .env: see the 'Integration Tests' section below for that setup.
 yarn deploy:erc20-vault             # deploy a vault, requires 'yarn compile:erc20-vault:zk'
 yarn deploy-initialise:erc20-vault  # deploy + the deployer-gated initialise (remote networks)
 yarn initialise:erc20-vault         # initialise an already-deployed vault (recovers a half-done run)
 ```
 
-Scripts targeting one example carry that example's directory name in full
-(`compile:erc20-vault`, never a shorthand), so every example gains the same
-family of scripts. The task prefix decides which of the example's packages
-run: `test:` and `build:` fan out over every package the example has,
-`compile:` reaches only its contract package, and `deploy:` only its deploy
-package.
+Scripts targeting a particular example carry that example's directory name in full (e.g. `compile:erc20-vault`), so every example gains the same family of scripts. The task prefix decides which of the example's packages run: `test:` and `build:` fan out over every package the example has, `compile:` reaches only its contract package, and `deploy:` or `deploy-initialise` only its deploy package.
 
 ## Integration Tests
 
-The e2e suites need the docker stack running and the fakenet MPC responder, and
-they also run from the root:
+The e2e integration test suites need a local stack of services. To bring it up:
+
+1. Populate a minimal `.env` file at the root of the repository with at least the `SEPOLIA_FORK_RPC_URL` variable (see [`.env.example`](.env.example)).
+2. Run `docker compose up -d` from the root of the repository.
+
+With the stack running, each example's e2e suite runs from the root:
 
 ```sh
+# --- The erc20-vault example ---
+# The first run's setup pipeline generates the vault's zk proving keys itself
+# (~10 min), so there is no need to run 'yarn compile:erc20-vault:zk' first.
 yarn test:erc20-vault:e2e                              # every spec in the suite
 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file
 ```
 
-Getting there from a fresh clone (the `.env` file and its Sepolia fork RPC, the
-zk keys, bringing the stack up, what a green first run looks like, and recovering
-a run the proof server was OOM-killed in) is walked end to end in the example's
-own README: [examples/erc20-vault/README.md](examples/erc20-vault/README.md).
+For more detail on the ERC20 vault example and on running its e2e suite (a fresh-clone walkthrough, expected timings and failure recovery), see the [ERC20 Vault README](examples/erc20-vault/README.md).
 
 # Prerequisites
 
