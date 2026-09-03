@@ -171,6 +171,10 @@ export pure circuit refundCommitment(sk: Bytes<32>, requestId: RequestId): Bytes
 // The gate every refund circuit runs first: the fixed 5-byte failure output
 // (MPC_FAILURE_OUTPUT) is attested only for a transaction that NEVER EXECUTED, and its
 // width routes it here (an executed result only type-fits its complete* circuit).
+// CRITICAL: sound only while every respond schema in this contract packs to a width
+// other than 5 (they pack to 1 or 8). The MPC does not reserve the payload, so a
+// 5-byte schema could serialise a SUCCESS to exactly these bytes, indistinguishable
+// from a failure and refundable as one.
 circuit assertAttestedFailureOutput(
   disclosedRequestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
