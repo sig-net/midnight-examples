@@ -15,14 +15,14 @@ The examples demonstrate how to integrate using the following packages:
 
 ## Reading Guide
 - Start by reading the [Sign Bidirectional Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
-- Then go through the [Integration guide](#integration-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
+- Then go through the [Integration guide](#integrator-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
 - Or jump straight into complete [examples](#examples) to see applications of the protocol.
 
 If you are looking for the parts of the Sig Network stack that these examples are built upon, visit:
 - [Midnight Integration Protocol and SDK Repository](https://github.com/sig-net/midnight-integration)
 - [Sig Network Distributed MPC Repository](https://github.com/sig-net/mpc)
 
-## Examples
+# Examples
 
 Each example is a directory under [`examples/`](examples/) holding a `contract` package and an `integration-tests` package.
 
@@ -35,13 +35,13 @@ Each example is a directory under [`examples/`](examples/) holding a `contract` 
 |---|---|---|
 | [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding, swapping (Uniswap) and lending (Aave) ERC20 tokens on an EVM chain. | [deposit](examples/erc20-vault/docs/deposit/deposit.md), [withdraw](examples/erc20-vault/docs/withdraw/withdraw.md), [swap](examples/erc20-vault/docs/swap/swap.md), [supply](examples/erc20-vault/docs/supply/supply.md), [redeem](examples/erc20-vault/docs/redeem/redeem.md) |
 
-## Sign Bidirectional Protocol Flow
+# Sign Bidirectional Protocol Flow
 
 This Sig Network Protocol Flow brings foreign blockchain assets and functionality to contracts on Midnight. Contracts record signature requests that the Sig Network MPC signs. dApps relay signed transactions to foreign chains and the MPC attests their execution outcomes back to Midnight. Then contracts complete cross chain interactions with in-circuit validation of the MPC foreign execution attestation.
 
 Illustrated below, the protocol is best understood in 5 steps:
 
-![Sign bidirectional flow](docs/sign-bidirectional-flow.drawio.png)
+<img src="./docs/sign-bidirectional-flow.drawio.png">
 
 The diagram numbers the five steps:
 
@@ -53,7 +53,7 @@ The diagram numbers the five steps:
 
 > **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.18.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
-## Integration guide
+# Integrator Guide
 
 Integrating a contract on Midnight with the Sig Network MPC requires 4 once-off setup
 steps and 5 per-request runtime steps.
@@ -61,7 +61,7 @@ steps and 5 per-request runtime steps.
 Setup entails:
 1. Installing `@sig-net/midnight` into your project.
 2. Importing the Signet Compact module into your contract.
-3. Declaring the required protocol state in your ledger (the `signBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits call to notify the MPC of requests).
+3. Declaring the required protocol state in your ledger (the `SignBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits call cross contract to notify the MPC of requests).
 4. Setting the contract's own `mpcResponseKey` with an initialisation circuit call after deploy (its derivation takes the contract's address as input, which exists only once the contract is deployed).
 
 At runtime you integrate the [Sign Bidirectional Flow above](#sign-bidirectional-protocol-flow):
@@ -70,17 +70,17 @@ At runtime you integrate the [Sign Bidirectional Flow above](#sign-bidirectional
 
 Consult the [Integrator Guide documentation](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide) in the Midnight integration repository for a more detailed description of how to integrate.
 
-## Contributor guide
+# Contributor Guide
 
-There are two test layers. Unit tests run offline against a simulated Midnight
-runtime: no docker stack, no zk keys, seconds not minutes. The end to end
-integration suites drive the full protocol against the local docker stack and
-the fakenet MPC responder, and take minutes.
+First install the [Prerequisites](#prerequisites), then get set up for contributing by getting both test layers green: the offline unit tests, then the end to end integration suites.
 
-Everything runs from the repository root, with the
-[Prerequisites](#prerequisites) below installed. Only contract packages have a compile
-step, and `build`, `test` and `lint` all read the compiler's generated
-`src/managed/` output, so compile first:
+Every change must also pass the linter and the formatter, which CI enforces on every pull request. One ESLint flat config (`eslint.config.js`) and one Prettier config (`.prettierrc.json`) at the repo root cover all packages, so there is nothing to configure per package. In VS Code, install the two recommended extensions the editor offers on first open (`dbaeumer.vscode-eslint` and `esbenp.prettier-vscode`) and both run on save.
+
+## Compiling, Building and Running Unit Tests
+
+Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only the packages with contracts that run in integration tests have a zk compile option. Unit tests run offline against a simulated Midnight runtime, so zk keys are not needed before running them. 
+
+From the root of the repository:
 
 ```sh
 ## --- All packages ---
