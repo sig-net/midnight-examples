@@ -4,6 +4,7 @@
             <root>
                 <mxCell id="0" />
                 <mxCell id="1" parent="0" />
+                <mxCell id="curated" value="CURATED: hand-tidied layout. Change only the cells the task names. Geometry, routing, label seats and spacing you were not asked to touch are the curator's decisions, never defects to fix." parent="1" />
                 <mxCell id="user-cluster" value="" style="rounded=0;html=1;dashed=1;fillColor=none;container=1;collapsible=0;" parent="1" vertex="1">
                     <mxGeometry x="-310" y="102" width="261" height="344" as="geometry" />
                 </mxCell>
