@@ -52,11 +52,12 @@ Illustrated below, the protocol is best understood in 5 steps:
 5. The integrating dApp collects the execution output and its attestation and submits both back to the integrating contract, completing the cross chain interaction.
 
 Consult the [protocol documentation in the Midnight integration repository](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-protocol-flow) for a more detailed description of the protocol including:
-  - MPC key derivation and signing
-  - MPC discovery and verification of the Sign Bidirectional Event signature requests
-  - MPC & Client foreign transaction execution output recovery (including failed transaction flow)
-  - MPC foreign transaction execution & failure attestation
-  - Handling foreign transaction execution failure
+
+- MPC key derivation and signing
+- MPC discovery and verification of the Sign Bidirectional Event signature requests
+- MPC & Client foreign transaction execution output recovery (including failed transaction flow)
+- MPC foreign transaction execution attestation
+- Handling foreign transaction execution failure
 
 # Integrator Guide
 
@@ -66,10 +67,10 @@ steps and 5 per-request runtime steps.
 Setup entails:
 1. Installing `@sig-net/midnight` into your project.
 2. Importing the Signet Compact module into your contract.
-3. Declaring the required protocol state in your ledger (the `SignBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits call cross contract to notify the MPC of requests).
+3. Declaring the required protocol state in your ledger (the `SignBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits invoke via cross contract call to notify the MPC of requests).
 4. Setting the contract's own `mpcResponseKey` with an initialisation circuit call after deploy (its derivation takes the contract's address as input, which exists only once the contract is deployed).
 
-At runtime you integrate the [Sign Bidirectional Flow above](#sign-bidirectional-protocol-flow):
+At runtime you integrate the [Sign Bidirectional Protocol Flow above](#sign-bidirectional-protocol-flow):
 - **Steps 1** and **5** are circuits on your contract.
 - **Steps 2**, **3** and **4** are off-chain client/dApp/relayer code built on the readers and helpers in `@sig-net/midnight`.
 
@@ -92,7 +93,7 @@ From the root of the repository:
 # Run this from the repository root.
 yarn install
 
-## --- Compile, build or test: All Packages (whole workspace, from repository root) ---
+## --- Compile, build or test: All packages (whole workspace, from repository root) ---
 
 # Quick compile: all packages (checks syntax and generates circuits)
 # Runs the compact compiler for each package without generating zk keys (compiler output in the package's src/managed/)
@@ -139,7 +140,7 @@ yarn deploy-initialise:erc20-vault  # deploy + the deployer-gated initialise (re
 yarn initialise:erc20-vault         # initialise an already-deployed vault (recovers a half-done run)
 ```
 
-Scripts targeting a particular example carry that example's directory name in full (e.g. `compile:erc20-vault`), so every example gains the same family of scripts. The task prefix decides which of the example's packages run: `test:` and `build:` fan out over every package the example has, `compile:` reaches only its contract package, and `deploy:` or `deploy-initialise` only its deploy package.
+Scripts targeting a particular example carry that example's directory name in full (e.g. `compile:erc20-vault`), so every example gains the same family of scripts. The task prefix decides which of the example's packages run: `test:` and `build:` fan out over every package the example has, `compile:` reaches only its contract package, and `deploy:` or `deploy-initialise:` only its deploy package.
 
 ## Integration Tests
 
@@ -177,6 +178,6 @@ compatible with that stack. This repository's compile scripts already pass it.
 Integrators compiling their own contracts must pass it themselves, as shown in
 the [Integrator Guide](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide).
 
-**NOTE:** the midnight proof server is quite heavy. Allocate at least 16 GB of
+**NOTE:** the Midnight proof server is quite heavy. Allocate at least 16 GB of
 RAM to your docker environment, otherwise expect to restart the tests multiple
 times as the proof server hangs.
