@@ -5,7 +5,7 @@
 // witnesses, and the private state. Requires `yarn compile:zk` output
 // (verifier keys) in src/managed. The MPC response key is NOT a deploy input:
 // it derives from the new contract's own address, so the deployer-gated
-// initialize circuit pins it right after deploy (see the initialize flow).
+// initialise circuit pins it right after deploy (see the initialise flow).
 //
 // This file sits OUTSIDE src/ deliberately: it is a Node entrypoint (env
 // access, lib imports), while everything under src/ stays environment-agnostic.
@@ -24,6 +24,7 @@ import {
   type MidnightNodeConfig,
   type NetworkId,
   parseIdentitySecretKey,
+  SPLIT_DEPLOY_BASE_SUBMITTED_MARKER,
   submitUnprovenTransaction,
   type TransactionIdentifier,
   withSyncedWalletFacade,
@@ -38,7 +39,7 @@ import { hexToBytes } from "@sig-net/midnight";
 import { Contract, pureCircuits } from "./src/managed/erc20-vault/contract/index.js";
 import { createVaultPrivateState, type VaultPrivateState, witnesses } from "./src/witnesses.ts";
 
-// The full 14-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
+// The full 17-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
 // post-burn keys are large), so the base registers just ONE small circuit and every other
 // circuit is added by a maintenance update right after (each a tiny, fitting tx).
 const BASE_DEPLOY_CIRCUITS = ["approveRouter"] as const;
@@ -167,7 +168,7 @@ interface VaultDeployment {
  * The deployer identity comes from `VAULT_DEPLOYER_SECRET_KEY` (falling back
  * to the `DEPLOYER_SEED` bytes): its commitment is sealed into the contract
  * as `deployer`, and the same secret must later answer the `callerSecretKey`
- * witness to pass `initialize`'s gate. That gate is what protects the
+ * witness to pass `initialise`'s gate. That gate is what protects the
  * post-deploy configuration (vault EVM address, chain, MPC response key)
  * from front-running.
  *
@@ -186,10 +187,14 @@ async function deployVault(
   // authority to sign. Generate an ephemeral one when unset (the deploy and the adds run in this
   // one process, so it need not persist). A real deploy sets MAINTENANCE_SIGNING_KEY to keep the
   // contract maintainable afterwards; the deploy uses whatever is set as the sealed authority.
-  if (!process.env.MAINTENANCE_SIGNING_KEY?.trim()) {
-    process.env.MAINTENANCE_SIGNING_KEY = randomBytes(32).toString("hex");
+  // Read from `env` like every other input, then mirrored into process.env, which is where lib's
+  // maintenance-key resolution reads it.
+  let maintenanceSigningKey = env.MAINTENANCE_SIGNING_KEY?.trim();
+  if (!maintenanceSigningKey) {
+    maintenanceSigningKey = randomBytes(32).toString("hex");
     console.log("generated an ephemeral MAINTENANCE_SIGNING_KEY for the split deploy");
   }
+  process.env.MAINTENANCE_SIGNING_KEY = maintenanceSigningKey;
 
   const deployConfig = getDeployConfig(env);
   const { networkId } = deployConfig.midnightNodeConfig;
@@ -223,7 +228,7 @@ async function deployVault(
 
   console.log(`deploying erc20-vault to ${networkId} (${deployConfig.midnightNodeConfig.nodeUrl})`);
 
-  // The full 14-circuit deploy overflows a block, so register one small circuit in the base deploy
+  // The full 17-circuit deploy overflows a block, so register one small circuit in the base deploy
   // and add every other circuit via maintenance updates (needs MAINTENANCE_SIGNING_KEY).
   const deployTransaction = await buildDeployTransactionDeferring(
     compiledContract,
@@ -253,6 +258,10 @@ async function deployVault(
       );
     },
   );
+  // First line printed once submission returns: a driver watching this
+  // entrypoint's output stops retrying here, and the maintenance adds below
+  // are what it must not restart from the top.
+  console.log(SPLIT_DEPLOY_BASE_SUBMITTED_MARKER);
   console.log(`submitted base deploy tx ${txId}`);
   console.log(`deployed erc20-vault base at ${contractAddress}`);
 

@@ -18,10 +18,10 @@ The flow comprises 5 steps:
 1. Client calls a contract on Midnight which requests a signature for a transaction destined for a foreign chain. The signature is made with a key derived for the requesting contract (see [Derived keys](#derived-keys)).
 2. Sig Network MPC honours the request, generating the transaction signature and posting it back to Midnight.
 3. Client extracts the signature, using it to submit the signed transaction to the foreign chain.
-4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: its ECDSA signature over the attestation digest `keccak256(requestId || serializedOutput)`. Both the digest and the output itself travel off chain.
+4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: its ECDSA signature over the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))`. Both the digest and the output itself travel off chain.
 5. Client obtains the execution output off chain (see the output recovery note below: it broadcast the transaction in step 3, so it can read the result), extracts the posted attestation and submits both back to the Midnight contract, which recomputes the digest from the output bytes and verifies the MPC's signature in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
 
-> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.10.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
+> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.18.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
 
 ## Derived keys
 
@@ -147,7 +147,7 @@ Prettier.
 The e2e suites need the running docker stack and the fakenet MPC responder: the [Quickstart](#quickstart) walks the first run end to end, and the [erc20-vault README](examples/erc20-vault/README.md) documents every spec in the suite. From the root:
 
 ```sh
-yarn test:erc20-vault:e2e                              # the full eight-spec suite, requires 'yarn compile'
+yarn test:erc20-vault:e2e                              # the full e2e suite, requires 'yarn compile'
 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any tests/*.test.ts name works), requires 'yarn compile'
 ```
 
@@ -180,7 +180,7 @@ FAKENET_EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
 ERC20_ADDRESS=0x...
 ```
 
-Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialize.
+Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialise.
 
 What does NOT happen automatically on a real chain, by design:
 
@@ -261,7 +261,7 @@ Integrating a contract on Midnight with the Sig Network MPC consists of:
    // Recommended: the deployer identity commitment scheme. Exported so deploy
    // tooling can compute the constructor argument by calling the compiled circuit.
    export pure circuit calculateDeployerCommitment(sk: Bytes<32>): Bytes<32> {
-     return persistentHash<Vector<2, Bytes<32>>>([pad(32, "my-contract:deployer:"), sk]);
+     return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([pad(32, "my-contract:deployer:"), sk]));
    }
 
    // Required: set signet contract and (recommended) deployer commitment on deployment.
@@ -296,7 +296,7 @@ The path shape comes from how compactc lays out state. The compiler packs a cont
 
 Do not derive the path by hand: the compiler records it in your compiled artifacts. Compile your contract, then look up your map's `"index"` in `managed/<contract>/compiler/contract-info.json` (a bare number `4` means path `[4]`). The generated `managed/<contract>/contract/index.js` accessors walk the same indices, for example `state.asArray()[1].asArray()[14]` for a map recorded at `[1, 14]`. That path packs as `requestsPathDepth = 2` and `requestsPath = [1, 14, 0, 0]`.
 
-The [erc20-vault example](examples/erc20-vault) is a worked chunked case: its 19-field ledger stores the map at field 0, which resolves to `[0, 0]`, so its notifications carry depth `2` and path `[0, 0, 0, 0]`. Its contract package exports the path as `VAULT_REQUESTS_PATH` for off-chain readers. Note that the padded path literal is unchanged from the flat case — only the depth tells them apart.
+The [erc20-vault example](examples/erc20-vault) is a worked chunked case: its 21-field ledger splits 6 + 15, so its approve/withdraw map at field 0 resolves to `[0, 0]` and its deposit map at field 9 resolves to `[1, 3]`, and their notifications carry depth `2` with paths `[0, 0, 0, 0]` and `[1, 3, 0, 0]`. Its contract package exports one `VAULT_*_REQUESTS_PATH` constant per map for off-chain readers. Note that the padded `[0, 0, 0, 0]` literal is unchanged from the flat case: only the depth tells them apart.
 
 ## Runtime
 
@@ -385,7 +385,7 @@ const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my
    await new JsonRpcProvider(foreignChainRpcUrl).broadcastTransaction(signedTx.serialized);
    ```
 
-4. Poll the Signet singleton for the MPC's remote execution attestation (emitted once the MPC observes the transaction execute on the foreign chain). The event carries the request id it answers plus the MPC's ECDSA signature over the attestation digest `keccak256(requestId || serializedOutput)`: neither the digest nor the serialized output goes on chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and select the posted event whose signature verifies over those bytes against your contract's response key. Posts are emitted unverified, so that signature check is what makes a candidate meaningful off chain. The authoritative check is your contract's verify circuit in step 5:
+4. Poll the Signet singleton for the MPC's remote execution attestation (emitted once the MPC observes the transaction execute on the foreign chain). The event carries the request id it answers plus the MPC's ECDSA signature over the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))`: neither the digest nor the serialized output goes on chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and select the posted event whose signature verifies over those bytes against your contract's response key. Posts are emitted unverified, so that signature check is what makes a candidate meaningful off chain. The authoritative check is your contract's verify circuit in step 5:
 
    ```ts
    import { deserializeEvmOutput, serializeRespondOutput } from "@sig-net/midnight";
@@ -535,11 +535,13 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
     │   │
     │   └── integration-tests/  # @midnight-examples/erc20-vault-integration-tests
     │       ├── src/
-    │       │   └── flows/      # Example-specific typed flow functions (deposit, withdraw, …):
-    │       │                   #   the executable documentation of the example. All generic
-    │       │                   #   setup comes from @midnight-examples/test-harness.
-    │       ├── scripts/        # Thin tsx entrypoints over src/flows (deposit.ts, claim.ts, …)
-    │       │                   #   for hand-driving a live stack step by step.
+    │       │   └── flows/      # Example-specific typed flow functions (start-deposit,
+    │       │                   #   complete-deposit, start-withdraw, …): the executable
+    │       │                   #   documentation of the example. All generic setup comes
+    │       │                   #   from @midnight-examples/test-harness.
+    │       ├── scripts/        # Thin tsx entrypoints: read-state.ts prints the live vault
+    │       │                   #   ledger, benchmark-static.ts and benchmark-report.ts
+    │       │                   #   collect circuit metrics and render the report.
     │       └── tests/
     │           └── happy-day-e2e.test.ts   # Runs the flows in-process against the local stack.
     │

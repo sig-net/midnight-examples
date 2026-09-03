@@ -6,7 +6,7 @@
 // success attestation posted.
 //
 // Arrange: a deposit round trip up to but NOT including the claim
-// (src/flows/deposit.ts with skipClaim). Act: attempt claim through a
+// (src/flows/deposit-round-trip.ts with skipClaim). Act: attempt claim through a
 // SECOND session whose USER_SEED and VAULT_USER_SECRET_KEY both differ from
 // the depositor's — both must be overridden together: a changed secret under
 // the SAME seed would hit midnight-js's persisted private state
@@ -19,7 +19,7 @@
 // stranded deposit), and the fakenet-only drain returns the deposited ERC20
 // to EVM_USER_ADDRESS, so the suite's EVM funds keep cycling.
 //
-// Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives
+// Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives
 // there. Recovery from a run that died mid-flow (proof-server OOM): rerun
 // this file with FALSE_CLAIMER_DEPOSIT_REQUEST_ID set to the id the failed
 // run printed.
@@ -41,8 +41,8 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
-import { claim } from "../src/flows/claim.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import { completeDeposit } from "../src/flows/complete-deposit.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
@@ -135,7 +135,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "vault-initialized preflight: the vault contract is initialized (read-only)",
+      "vault-initialised preflight: the vault contract is initialised (read-only)",
       async () => {
         const context = await session.vaultContext();
         const state = await readVaultLedger(
@@ -143,8 +143,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          state.initialized,
-          "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
+          state.initialised,
+          "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
         ).toBe(1n);
       },
       5 * MINUTE,
@@ -174,7 +174,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
-        requestOnLedger = ledger.signBidirectionalEventMap.member(requestIdBytes(requestId));
+        requestOnLedger = ledger.depositEventMap.member(requestIdBytes(requestId));
 
         banner([
           `Arrange deposit ${requestId} complete — attested, UNCLAIMED, on the ledger: ${String(requestOnLedger)}.`,
@@ -201,12 +201,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // Identity B presents the SAME request id and the SAME valid MPC
         // response, i.e. everything a claim needs except the right secret key.
         // The circuit recomputes B's commitment from the callerSecretKey
-        // witness, compares it to the request's recorded path (A's commitment),
-        // and rejects during local transaction building.
+        // witness, compares it to the commitment the deposit's settle view pins
+        // (A's), and rejects during local transaction building.
         const falseClaimerContext = await falseClaimerSession.vaultContext();
-        await expect(claim(falseClaimerContext, { requestId: depositRequestId })).rejects.toThrow(
-          /Not the depositor/,
-        );
+        await expect(
+          completeDeposit(falseClaimerContext, { requestId: depositRequestId }),
+        ).rejects.toThrow(/Not the depositor/);
 
         // The rejection happened client-side, so nothing was consumed: the
         // request must still sit on the ledger, claimable by identity A.
@@ -216,7 +216,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
+          ledger.depositEventMap.member(requestIdBytes(depositRequestId)),
           "the rejected claim must not consume the request",
         ).toBe(true);
 
@@ -239,14 +239,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
 
         const context = await session.vaultContext();
-        await claim(context, { requestId: depositRequestId });
+        await completeDeposit(context, { requestId: depositRequestId });
 
         const ledger = await readVaultLedger(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
         expect(
-          ledger.signBidirectionalEventMap.member(requestIdBytes(depositRequestId)),
+          ledger.depositEventMap.member(requestIdBytes(depositRequestId)),
           "the rightful claim must consume the request from the ledger",
         ).toBe(false);
 

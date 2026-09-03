@@ -1,6 +1,6 @@
 // Respond-output recomputation: the client half of the signature-only
 // attestation protocol. The MPC's RespondBidirectionalEvent carries only the
-// ECDSA signature over the attestation digest (keccak256 of requestId ++
+// ECDSA signature over the attestation digest (binding requestId and
 // serializedOutput), never the digest and never the output itself, so the
 // client obtains the output bytes independently and checks the signature
 // against them. Every call recomputes BOTH candidate outputs the protocol
@@ -16,11 +16,13 @@
 //                        always a candidate.
 //
 // Candidate selection is by SIGNATURE VERIFICATION alone, against the
-// response key the vault pinned at initialize: the cache's own success flag
+// response key the vault pinned at initialise: the cache's own success flag
 // is unauthenticated and never decides anything, it only gates whether a
 // success candidate can be built at all. With no digest on the event there is
 // nothing else to match on. Which candidate verified is also what routes
-// settlement (claim / completeWithdraw / completeSwap / refund). The fetched
+// settlement: the success candidate goes to `completeDeposit` for a sweep and
+// to `completeWithdraw` for a transfer, the failure candidate is unclaimable
+// on a sweep and goes to `refundWithdraw` on a transfer. The fetched
 // output is UNTRUSTED until that check: the verified bytes go into the settle
 // circuit as an argument, where `verifyRespondBidirectionalEvent<N>` re-hashes
 // them and verifies the same signature in-circuit. That in-circuit check is
@@ -41,6 +43,7 @@ import { fetchFakenetResponse } from "../fakenet-responses.ts";
 import { ERC20_TRANSFER_RESULT_SCHEMA } from "../mpc-routing.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import { readVaultLedger } from "../vault-ledger.ts";
+import { warnOnce } from "../warn-once.ts";
 
 /** What the MPC attested for a request, resolved by signature verification. */
 export interface RespondOutcome {
@@ -69,22 +72,11 @@ export interface RespondOutcome {
 // and lets the next tick retry.
 const FAKENET_FETCH_TICK_TIMEOUT_MS = 3_000;
 
-// One warning per distinct condition per request, so a poll loop retrying
-// every second does not repeat the same message every tick.
-const warnedKeys = new Set<string>();
-function warnOnce(key: string, message: string): void {
-  if (warnedKeys.has(key)) {
-    return;
-  }
-  warnedKeys.add(key);
-  console.warn(message);
-}
-
 /**
  * Resolve the attested outcome for `requestId`: fetch the posted
  * RespondBidirectionalEvents, recompute both candidate serialized outputs,
  * and return the first event whose signature verifies over one of the
- * candidates against the response key the vault pinned at initialize.
+ * candidates against the response key the vault pinned at initialise.
  *
  * The failure candidate (the protocol's fixed 5-byte failure output) is
  * always computed. The success candidate (the fakenet's cached raw output,
@@ -103,6 +95,9 @@ function warnOnce(key: string, message: string): void {
  *
  * @param context - The flow context.
  * @param requestId - The request id to resolve.
+ * @param requestsPath - The resolved ledger-tree path of the map holding the
+ *   request: `VAULT_DEPOSIT_REQUESTS_PATH` for a deposit sweep, the default
+ *   `VAULT_REQUESTS_PATH` for a withdraw transfer.
  * @returns The verified outcome, or `undefined` when no attestation has been
  *   posted yet, none verifies over a recomputed candidate, or the fakenet's
  *   /responses API could not serve this tick.
@@ -110,8 +105,9 @@ function warnOnce(key: string, message: string): void {
 export async function fetchAttestedRespondOutcome(
   context: VaultContext,
   requestId: RequestIdHex,
+  requestsPath?: readonly number[],
 ): Promise<RespondOutcome | undefined> {
-  const reader = createResponseReader(context);
+  const reader = createResponseReader(context, requestsPath);
   const events = await reader.getRespondBidirectionalEvents(requestId);
   if (events.length === 0) {
     return undefined;

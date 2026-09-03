@@ -5,7 +5,6 @@
 // keeps the offline path (RUN_INTEGRATION_TESTS unset) from ever touching
 // the network.
 
-import { VAULT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
 import type { ProofServerObserver } from "@midnight-examples/lib";
 import {
   createE2eSession,
@@ -26,8 +25,14 @@ export interface VaultSession {
    * wallet-to-wallet transfers) rather than the vault contract.
    */
   wallet(): Promise<SessionWallet>;
-  /** The shared MPC-style request/response reader; see the harness's `createE2eSession`. */
-  responseReader(): SignetRequestResponseReader;
+  /**
+   * The shared MPC-style request/response reader for one of the vault's
+   * request maps. See the harness's `createE2eSession`.
+   *
+   * @param requestsPath - The map's resolved ledger-tree path, from the
+   *   contract package's exported `VAULT_*_REQUESTS_PATH` constants.
+   */
+  responseReader(requestsPath: readonly number[]): SignetRequestResponseReader;
   /** Stop the wallet facade (call from afterAll); safe when never started. */
   stop(): Promise<void>;
 }
@@ -50,7 +55,6 @@ export function createVaultSession(
   const session: E2eSession = createE2eSession({
     env,
     requesterAddressEnvVar: "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
-    requesterRequestsPath: VAULT_REQUESTS_PATH,
   });
   let sharedContext: VaultContext | undefined;
 
@@ -67,8 +71,8 @@ export function createVaultSession(
       return session.wallet();
     },
 
-    responseReader(): SignetRequestResponseReader {
-      return session.responseReader();
+    responseReader(requestsPath: readonly number[]): SignetRequestResponseReader {
+      return session.responseReader(requestsPath);
     },
 
     async stop(): Promise<void> {

@@ -30,9 +30,10 @@ export async function readVaultLedger(
 }
 
 /**
- * Read and print the vault's public ledger state: initialization status, the
+ * Read and print the vault's public ledger state: initialisation status, the
  * configured vault EVM address, the pinned EVM chain, and the pending signet
- * signature requests. No proving keys or transactions involved.
+ * signature requests of the deposit and approve/withdraw maps. No proving keys
+ * or transactions involved.
  *
  * @param publicDataProvider - The provider to query raw contract state through.
  * @param vaultContractAddress - The deployed vault contract address, as bare hex.
@@ -49,15 +50,30 @@ export async function printVaultState(
   const address = bytesToHex(hexToBytes(vaultContractAddress));
   const state = await readVaultLedger(publicDataProvider, address);
   console.log(`vault contract:    ${address}`);
-  console.log(`initialized:       ${String(state.initialized)}`);
+  console.log(`initialised:       ${String(state.initialised)}`);
   console.log(`vault EVM address: 0x${bytesToHex(state.vaultEvmAddress)}`);
   // caip2Id is zero-padded ASCII; NUL-trim for display.
   console.log(
     `EVM chain:         ${String(state.evmChainId)} (${new TextDecoder().decode(state.caip2Id).replace(/\0+$/u, "")})`,
   );
 
-  const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
-  console.log(`pending signature requests: ${String(index.size)}`);
+  printRequestMap("deposit", state.depositEventMap);
+  printRequestMap("approve/withdraw", state.signBidirectionalEventMap);
+}
+
+/**
+ * Print one request map's pending entries under a heading naming the kinds it
+ * holds.
+ *
+ * @param kinds - The request kinds recorded in this map.
+ * @param map - The map to enumerate.
+ */
+function printRequestMap(
+  kinds: string,
+  map: Parameters<typeof toSignBidirectionalEventIndex>[0],
+): void {
+  const index = toSignBidirectionalEventIndex(map);
+  console.log(`pending ${kinds} signature requests: ${String(index.size)}`);
   for (const [requestIdHex, request] of index) {
     console.log(`- ${requestIdHex} (requestNonce ${String(request.requestNonce)})`);
   }
