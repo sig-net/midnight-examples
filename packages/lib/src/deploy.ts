@@ -43,25 +43,36 @@ const operationIdToString = (id: string | Uint8Array): string =>
   typeof id === "string" ? id : new TextDecoder().decode(id);
 
 /**
- * Machine-readable phase marker a split-deploy entrypoint prints, on a line of
- * its own, the instant its base deploy transaction is submitted. Everything
- * after that line installs circuits INTO the deployed contract, so a driver
- * that reruns the entrypoint past this point deploys a SECOND contract and
- * orphans the first. A caller running such an entrypoint as a subprocess scans
- * its output for this exact string and refuses to retry once it appears.
+ * Phase marker a split-deploy entrypoint prints, on a line of its own, the
+ * instant its base deploy transaction is submitted. Everything after that
+ * line installs circuits INTO the deployed contract, so a log showing this
+ * line and then a failure describes a LIVE contract: rerunning the entrypoint
+ * from the top deploys a second one, and the recovery is the example's
+ * resume entrypoint against the address printed right after the marker.
  */
 export const SPLIT_DEPLOY_BASE_SUBMITTED_MARKER = "[split-deploy] base deploy tx submitted";
 
 /**
  * Thrown by a split-deploy flow that fails AFTER its base deploy transaction
- * was submitted. The split deploy has no resume path, so rerunning the flow
- * from the top would deploy a SECOND contract and orphan the half-installed
- * first one: a caller wrapping the flow in a retry loop must rethrow this
- * error instead of reattempting, whatever transient failure it carries as its
- * `cause`. The in-process counterpart of
- * {@link SPLIT_DEPLOY_BASE_SUBMITTED_MARKER}.
+ * was submitted, so the caller knows a contract is live and a rerun from the
+ * top would deploy a second one: recovery is the example's resume entrypoint
+ * against the live address, never a retry of the flow. The in-process
+ * counterpart of {@link SPLIT_DEPLOY_BASE_SUBMITTED_MARKER}.
  */
 export class SplitDeployAfterBaseSubmitError extends Error {}
+
+/**
+ * The circuit ids a live contract state carries operations for: the base
+ * deploy's circuits plus every maintenance add that landed, so a resume can
+ * tell which deferred circuits are still missing.
+ *
+ * @param contractStateBytes - Serialized live contract state (from queryContractState).
+ * @returns The installed circuit ids, in the ledger's order.
+ */
+export function installedCircuitIds(contractStateBytes: Uint8Array): string[] {
+  const state = ledger.ContractState.deserialize(contractStateBytes);
+  return [...state.operations()].map(operationIdToString);
+}
 
 /**
  * Build an UNPROVEN contract-deploy transaction (run the Compact constructor,

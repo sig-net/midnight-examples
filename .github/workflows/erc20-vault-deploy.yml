@@ -7,9 +7,11 @@
 #
 # The 17 circuits do not fit one block: a base transaction registers one
 # and a maintenance update adds each of the rest. A run that fails AFTER
-# printing "deployed erc20-vault base at ..." has a live contract: do not
-# re-dispatch (that deploys a second one), finish by hand with
-# `yarn initialise:erc20-vault` against the printed address.
+# printing "deployed erc20-vault base at ..." has a live contract (the
+# failure step below repeats that address in the step summary): do not
+# re-dispatch (that deploys a second one), finish by hand from the same
+# tag's checkout with `yarn resume-deploy:erc20-vault` and then
+# `yarn initialise:erc20-vault` against that address.
 #
 # Each `network` choice option is a GitHub environment of the same name
 # (keep the two lists in lockstep) carrying:
@@ -224,6 +226,30 @@ jobs:
             echo "| tag | $TAG |"
             echo "| address | \`$address\` |"
           } >> "$GITHUB_STEP_SUMMARY"
+      # A failure after the base deploy landed leaves a LIVE contract whose
+      # address is otherwise only in the raw log: surface it where a reader
+      # looks first, with the recovery that does not deploy a second one.
+      - name: Report a live contract left by a failed run
+        if: failure()
+        env:
+          NETWORK_ID: ${{ inputs.network }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          address="$(sed -n 's/^deployed erc20-vault base at //p' deploy.log 2>/dev/null | tail -n 1)"
+          if [ -n "$address" ]; then
+            echo "::warning::a live erc20-vault exists at $address on $NETWORK_ID; do not re-dispatch, resume it"
+            {
+              echo "### live contract left by the failed run"
+              echo ""
+              echo "The base deploy landed at \`$address\` on \`$NETWORK_ID\` (tag \`$TAG\`) and a later step failed."
+              echo "Do NOT re-dispatch: that deploys a second contract. From a checkout of the same tag with \`yarn compile:erc20-vault:zk\` run:"
+              echo ""
+              echo '```sh'
+              echo "MIDNIGHT_VAULT_CONTRACT_ADDRESS=$address yarn resume-deploy:erc20-vault"
+              echo "MIDNIGHT_VAULT_CONTRACT_ADDRESS=$address yarn initialise:erc20-vault"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Collect deploy logs
         if: failure()
         run: |

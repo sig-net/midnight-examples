@@ -13,6 +13,7 @@
     "deploy": "tsx scripts/deploy.ts",
     "deploy-initialise": "tsx scripts/deploy-initialise.ts",
     "initialise": "tsx scripts/initialise.ts",
+    "resume-deploy": "tsx scripts/resume-deploy.ts",
     "record-contract-address": "tsx scripts/record-contract-address.ts"
   },
   "dependencies": {

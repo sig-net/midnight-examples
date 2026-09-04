@@ -8,7 +8,9 @@
 // contract's own address, so the deployer-gated initialise circuit pins it
 // right after deploy (see {@link file://./initialise-vault.ts}).
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   type IndexerPublicDataProvider,
@@ -33,17 +35,19 @@ import {
 } from "@sig-net/midnight-contract-deploy";
 import {
   createVaultPrivateState,
+  expectedVk,
   pureCircuits,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   buildDeployTransactionDeferring,
   buildMaintenanceInsertTransaction,
   type DeferredCircuit,
+  installedCircuitIds,
   SPLIT_DEPLOY_BASE_SUBMITTED_MARKER,
   SplitDeployAfterBaseSubmitError,
 } from "@sig-net/midnight-examples-lib";
 
-import { vaultCompiledContract } from "./vault-contract-binding.ts";
+import { VAULT_MANAGED_PATH, vaultCompiledContract } from "./vault-contract-binding.ts";
 
 // The full 17-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
 // post-burn keys are large), so the base registers just ONE small circuit and every other
@@ -73,17 +77,41 @@ async function readContractState(
 }
 
 /**
- * Install the circuits deferred from the base deploy via one maintenance update each, waiting for
- * the authority counter to advance between them so every update binds to the current counter. Each
- * update re-syncs the wallet (fresh fee coins) and is signed by the `MAINTENANCE_SIGNING_KEY`
- * authority sealed at deploy time.
+ * The circuits to install before any other deferred one. `initialise` first:
+ * a run that dies after that add leaves a contract `yarn initialise:erc20-vault`
+ * can already initialise while the resume installs the rest.
+ */
+const FIRST_DEFERRED_CIRCUITS: readonly string[] = ["initialise"];
+
+/**
+ * The order the deferred circuits are installed in: {@link FIRST_DEFERRED_CIRCUITS}
+ * first, in their listed order, then the rest in the order given.
+ *
+ * @param deferred - The circuits held back from the base deploy, in ledger order.
+ * @returns The same circuits, reordered.
+ */
+export function orderDeferredCircuits(deferred: readonly DeferredCircuit[]): DeferredCircuit[] {
+  const first = FIRST_DEFERRED_CIRCUITS.flatMap((id) =>
+    deferred.filter((circuit) => circuit.circuitId === id),
+  );
+  return [
+    ...first,
+    ...deferred.filter((circuit) => !FIRST_DEFERRED_CIRCUITS.includes(circuit.circuitId)),
+  ];
+}
+
+/**
+ * Install the circuits deferred from the base deploy via one maintenance update each, in
+ * {@link orderDeferredCircuits} order, waiting for the authority counter to advance between them
+ * so every update binds to the current counter. Each update re-syncs the wallet (fresh fee coins)
+ * and is signed by the `MAINTENANCE_SIGNING_KEY` authority sealed at deploy time.
  *
  * @param nodeConfig - The Midnight stack config (node/indexer endpoints + network id).
  * @param env - The environment carrying the `MAINTENANCE_SIGNING_KEY` that signs each update.
  * @param accountKeys - The deployer's derived account keys (pays the update fees).
  * @param networkId - The network the updates target.
  * @param contractAddress - The deployed base contract's address.
- * @param deferred - The circuits to add, in order.
+ * @param deferred - The circuits to add.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor DUST before an add.
  * @throws {Error} If the base deploy never indexes, no spendable DUST appears after registering
  *   the wallet's NIGHT, or an add's counter never advances.
@@ -101,7 +129,32 @@ async function addDeferredCircuits(
     queryURL: nodeConfig.indexerUrl,
     subscriptionURL: nodeConfig.indexerWsUrl,
   });
+  try {
+    await addDeferredCircuitsThrough(
+      pdp,
+      nodeConfig,
+      env,
+      accountKeys,
+      networkId,
+      contractAddress,
+      deferred,
+    );
+  } finally {
+    // The provider holds a WebSocket that would otherwise keep the entrypoint alive.
+    await pdp.dispose();
+  }
+}
 
+// The body of {@link addDeferredCircuits}, against a provider the caller disposes.
+async function addDeferredCircuitsThrough(
+  pdp: IndexerPublicDataProvider,
+  nodeConfig: MidnightNodeConfig,
+  env: Record<string, string | undefined>,
+  accountKeys: AccountKeys,
+  networkId: NetworkId,
+  contractAddress: string,
+  deferred: readonly DeferredCircuit[],
+): Promise<void> {
   // Wait for the base deploy to be indexed before the first maintenance query.
   const indexDeadline = Date.now() + 5 * MINUTE_MS;
   while (!(await readContractState(pdp, contractAddress))) {
@@ -111,7 +164,7 @@ async function addDeferredCircuits(
     await sleep(3000);
   }
 
-  for (const { circuitId, verifierKey } of deferred) {
+  for (const { circuitId, verifierKey } of orderDeferredCircuits(deferred)) {
     const current = await readContractState(pdp, contractAddress);
     if (!current) throw new Error(`contract state for ${contractAddress} vanished mid-deploy`);
     console.log(`[${circuitId}] maintenance-add at counter ${current.counter.toString()}`);
@@ -300,4 +353,137 @@ export async function deployVault(
   );
 
   return { contractAddress, txId };
+}
+
+/** The outcome of {@link resumeVaultDeploy}. */
+export interface ResumedVaultDeploy {
+  /** Address of the vault the resume ran against. */
+  readonly contractAddress: string;
+  /** The circuit ids this call installed, in the order they were added. */
+  readonly installed: readonly string[];
+}
+
+/**
+ * The deferred-circuit records for `circuitIds`, read from the contract package's compiled
+ * verifier keys, each checked against the generated module's `expectedVk` digest so a checkout
+ * whose keys differ from its module cannot install a key the module's proofs will not verify
+ * against.
+ *
+ * @param circuitIds - The circuits to read keys for.
+ * @returns One record per circuit, in the given order.
+ * @throws {Error} If a key file is missing (run `yarn compile:erc20-vault:zk`) or its digest is not
+ *   the module's expected one.
+ */
+export function readDeferredCircuits(circuitIds: readonly string[]): DeferredCircuit[] {
+  return circuitIds.map((circuitId) => {
+    const path = join(VAULT_MANAGED_PATH, "keys", `${circuitId}.verifier`);
+    let verifierKey: Uint8Array;
+    try {
+      verifierKey = new Uint8Array(readFileSync(path));
+    } catch (error) {
+      throw new Error(
+        `no verifier key for ${circuitId} at ${path}: run \`yarn compile:erc20-vault:zk\``,
+        {
+          cause: error,
+        },
+      );
+    }
+    const digest = createHash("sha256").update(verifierKey).digest("hex");
+    const expected = expectedVk[circuitId];
+    if (digest !== expected) {
+      throw new Error(
+        `verifier key ${path} has digest ${digest}, but the generated module expects ${String(expected)}: ` +
+          "the keys and the module come from different compiles",
+      );
+    }
+    return { circuitId, verifierKey };
+  });
+}
+
+/**
+ * Finish a split deploy that died after its base deploy landed: read the live contract, install
+ * every provable circuit it lacks by a maintenance update each (same order, same authority and
+ * same fee wallet as {@link deployVault}), and leave the contract ready for
+ * `yarn initialise:erc20-vault`. Idempotent: a contract with every circuit installed is a no-op.
+ * The verifier keys come from the checkout's compiled output, checked against the generated
+ * module, so the checkout must be the one the contract was deployed from (same tag, `compile:zk`
+ * run).
+ *
+ * @param env - Environment providing `DEPLOYER_SEED`, `MAINTENANCE_SIGNING_KEY` (the authority
+ *   sealed at deploy, without which a resume cannot work) and the deploy SDK's Midnight node
+ *   configuration. Defaults to `process.env`.
+ * @param contractAddress - The vault to resume. Defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
+ * @returns The address and the circuits this call installed.
+ * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor DUST before an add.
+ * @throws {Error} If no address is available, `MAINTENANCE_SIGNING_KEY` is unset, no contract
+ *   answers at the address, a verifier key is missing or mismatched, or an add fails.
+ */
+export async function resumeVaultDeploy(
+  env: Record<string, string | undefined> = process.env,
+  contractAddress?: string,
+): Promise<ResumedVaultDeploy> {
+  const explicitAddress = contractAddress?.trim();
+  const vaultContractAddress =
+    explicitAddress === undefined || explicitAddress === ""
+      ? envOrUndefined(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS")
+      : explicitAddress;
+  if (!vaultContractAddress) {
+    throw new Error(
+      "MIDNIGHT_VAULT_CONTRACT_ADDRESS is required to resume a deploy: the interrupted run printed " +
+        `it after "${SPLIT_DEPLOY_BASE_SUBMITTED_MARKER}"`,
+    );
+  }
+  if (!envOrUndefined(env, "MAINTENANCE_SIGNING_KEY")) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY is required to resume a deploy: the maintenance adds must be signed " +
+        "by the authority sealed at the base deploy.",
+    );
+  }
+
+  const deployConfig = getDeployConfig(env);
+  const nodeConfig = deployConfig.midnightNodeConfig;
+  const { networkId } = nodeConfig;
+  const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, networkId);
+
+  const pdp = indexerPublicDataProvider({
+    queryURL: nodeConfig.indexerUrl,
+    subscriptionURL: nodeConfig.indexerWsUrl,
+  });
+  let installed: string[];
+  try {
+    const live = await readContractState(pdp, vaultContractAddress);
+    if (!live) {
+      throw new Error(
+        `no contract at ${vaultContractAddress} on ${networkId} (${nodeConfig.indexerUrl})`,
+      );
+    }
+    installed = installedCircuitIds(live.serialized);
+  } finally {
+    await pdp.dispose();
+  }
+
+  const missing = Object.keys(expectedVk).filter((circuitId) => !installed.includes(circuitId));
+  console.log(
+    `resuming erc20-vault ${vaultContractAddress} on ${networkId}: ` +
+      `${String(installed.length)} circuit(s) installed, ${String(missing.length)} missing` +
+      (missing.length > 0 ? ` (${missing.join(", ")})` : ""),
+  );
+  if (missing.length === 0) {
+    return { contractAddress: vaultContractAddress, installed: [] };
+  }
+
+  const deferred = orderDeferredCircuits(readDeferredCircuits(missing));
+  await addDeferredCircuits(
+    nodeConfig,
+    env,
+    accountKeys,
+    networkId,
+    vaultContractAddress,
+    deferred,
+  );
+  console.log(
+    `resumed erc20-vault at ${vaultContractAddress} ` +
+      `(all ${String(Object.keys(expectedVk).length)} circuits installed)`,
+  );
+  return { contractAddress: vaultContractAddress, installed: deferred.map((c) => c.circuitId) };
 }

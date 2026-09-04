@@ -289,9 +289,14 @@ yarn deploy-initialise:erc20-vault
 # initialise a vault that already exists (recovers a run whose deploy landed
 # but whose initialise did not: initialise is one-shot and idempotent)
 yarn initialise:erc20-vault
+
+# install the circuits a split deploy left missing (recovers a run that died
+# after its base deploy landed, named by MIDNIGHT_VAULT_CONTRACT_ADDRESS, and
+# is a no-op on a vault with every circuit), then initialise as above
+yarn resume-deploy:erc20-vault
 ```
 
-All three read the repo-root `.env` overlaid with the real environment, the same
+All four read the repo-root `.env` overlaid with the real environment, the same
 way the e2e setup does, so one set of variables drives every path. They refuse to
 run when that `.env` names a different `NETWORK_ID` than the run targets and
 still supplies a network-scoped value (a signet address, an MPC key): those are
