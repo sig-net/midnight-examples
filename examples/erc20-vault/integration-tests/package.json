@@ -18,10 +18,10 @@
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.6",
     "@sig-net/midnight": "0.21.0-rc.6",
     "@sig-net/midnight-contract-deploy": "0.21.0-rc.6",
-    "@sig-net/midnight-examples-erc20-vault-contract": "*",
-    "@sig-net/midnight-examples-erc20-vault-deploy": "*",
-    "@sig-net/midnight-examples-lib": "*",
-    "@sig-net/midnight-examples-test-harness": "*",
+    "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
+    "@sig-net/midnight-examples-erc20-vault-deploy": "workspace:*",
+    "@sig-net/midnight-examples-lib": "workspace:*",
+    "@sig-net/midnight-examples-test-harness": "workspace:*",
     "ethers": "^6.17.0"
   },
   "devDependencies": {

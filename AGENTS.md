@@ -82,12 +82,15 @@ any instinct carried in from product-repo conventions.
   source with the pinned compiler, refuses anything that does not match the
   manifest, and lays the vault's and the signet callee's trees out for a
   fetch-based zk config provider.
-- **Intra-workspace deps are `"*"`, SDK deps a fixed npm version.** A private
-  member names its siblings with `"*"`, which yarn resolves to the workspace
-  copy, and it names `@sig-net/midnight` / `@sig-net/midnight-contract` as a
-  plain npm version: never a `workspace:`, `link:`, `portal:` or `file:`
-  reference back to the protocol repo. The published contract package has no
-  intra-workspace deps at all (see the corollary below).
+- **Intra-workspace deps are `"workspace:*"`, SDK deps a fixed npm version.** A
+  private member names its siblings with `"workspace:*"`, which yarn resolves to
+  the workspace copy whatever version the sibling carries (a bare `"*"` is a
+  semver range, which a prerelease version such as `0.1.0-rc.3` does not
+  satisfy, so yarn would fall through to npm and fail the install). It names
+  `@sig-net/midnight` / `@sig-net/midnight-contract` as a plain npm version:
+  never a `workspace:`, `link:`, `portal:` or `file:` reference back to the
+  protocol repo. The published contract package has no intra-workspace deps at
+  all (see the corollary below).
 - **The published package's version moves in lockstep with its example's release
   tag.** A release is tagged `<example-dir>-vX.Y.Z` (or `-vX.Y.Z-rc.N`) and the
   publish workflow refuses to run unless the package it publishes is already at

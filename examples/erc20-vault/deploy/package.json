@@ -25,8 +25,8 @@
     "@sig-net/midnight": "0.21.0-rc.6",
     "@sig-net/midnight-contract": "0.21.0-rc.6",
     "@sig-net/midnight-contract-deploy": "0.21.0-rc.6",
-    "@sig-net/midnight-examples-erc20-vault-contract": "*",
-    "@sig-net/midnight-examples-lib": "*"
+    "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
+    "@sig-net/midnight-examples-lib": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
