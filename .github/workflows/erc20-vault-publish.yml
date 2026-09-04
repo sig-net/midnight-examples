@@ -16,7 +16,7 @@
 # which pins every artefact's size and sha256. The prover keys themselves are
 # published nowhere.
 
-name: publish-erc20-vault
+name: erc20-vault-publish
 
 on:
   push:
