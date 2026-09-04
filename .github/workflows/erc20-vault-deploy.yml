@@ -103,7 +103,7 @@ jobs:
             echo "::error::deploy runs on an erc20-vault-vX.Y.Z or erc20-vault-vX.Y.Z-rc.N tag only, got $TAG"
             exit 1
           fi
-      # An -rc. suffix marks a prerelease, the same test publish-erc20-vault.yml
+      # An -rc. suffix marks a prerelease, the same test erc20-vault-publish.yml
       # uses to pick the npm dist-tag. Mainnet takes released versions only.
       - name: Mainnet deploys a stable tag only
         if: ${{ inputs.network == 'mainnet' && contains(inputs.tag, '-rc.') }}
@@ -179,7 +179,7 @@ jobs:
       - name: Install dependencies (frozen, from the committed yarn.lock)
         run: yarn install --immutable
       # Keygen runs here every time, with NO cache, for the same reason
-      # publish-erc20-vault.yml refuses one: the verifier keys this compile
+      # erc20-vault-publish.yml refuses one: the verifier keys this compile
       # emits are sealed into the deployed contract, and a cache is written by
       # other workflows, so restoring it would deploy bytes this job did not
       # build. The ~10 minutes it costs buys a contract built entirely from
