@@ -921,7 +921,7 @@ prefix. The tag carries the example name, the npm version does not:
    ```
 
 3. The tag starts the
-   [`publish-erc20-vault`](../../.github/workflows/publish-erc20-vault.yml)
+   [`erc20-vault-publish`](../../.github/workflows/erc20-vault-publish.yml)
    workflow under the `npm-publish` environment. Give that environment
    required reviewers in the repository settings and nothing reaches npm
    until someone approves the run.
