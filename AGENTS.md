@@ -74,7 +74,12 @@ any instinct carried in from product-repo conventions.
   under the pinned toolchain (independent runs produce byte-identical keys), so
   a consumer regenerates the prover keys locally and verifies them against the
   `compiler/contract-manifest.json` the package ships, which pins every
-  artefact's size and sha256.
+  artefact's size and sha256. The package ships that regeneration as its
+  `erc20-vault-zk-assets` bin (`src/bin/`, logic in `src/zk-assets/`, neither
+  reachable from the export surface): it compiles the shipped `.compact`
+  source with the pinned compiler, refuses anything that does not match the
+  manifest, and lays the vault's and the signet callee's trees out for a
+  fetch-based zk config provider.
 - **Intra-workspace deps are `"*"`, SDK deps a fixed npm version.** A private
   member names its siblings with `"*"`, which yarn resolves to the workspace
   copy, and it names `@sig-net/midnight` / `@sig-net/midnight-contract` as a
@@ -128,7 +133,9 @@ exception for that specific case.
   (`compact-v0.5.1`) and compiler zip
   URL, the SHA-256 checksums it verifies for those two downloads (recompute
   each from a fresh download of the new URL), the workflow cache keys, and the
-  README's Prerequisites table. This trigger is bidirectional: a request to
+  README's Prerequisites table, and `COMPACT_COMPILER_VERSION` in
+  `examples/erc20-vault/contract/src/zk-assets/compact-toolchain.ts` (the
+  release the shipped bin regenerates keys with). This trigger is bidirectional: a request to
   "update the compact version" AND a request to edit the version in the README's
   table both mean updating every one of these sites in the same change. Grep
   `.github/workflows/` for the old version rather than editing the workflows you
@@ -203,10 +210,12 @@ exception for that specific case.
   compile is `--skip-zk` (fast; enough for typecheck + simulator tests); run
   `compile:zk` only when proving keys are actually needed (real deploys,
   integration tests).
-- **Unit tests are simulator-only.** A contract package's `tests/` run entirely
-  in-process via `@midnight-ntwrk/compact-runtime` — no network, no docker, no
-  proof server. Anything that needs a running stack belongs in that example's
-  `integration-tests` package, nowhere else.
+- **Unit tests are offline and in-process.** A contract package's `tests/` are
+  simulator tests via `@midnight-ntwrk/compact-runtime` plus pure tests of the
+  package's own tooling (the zk-assets logic over in-memory manifests) — no
+  network, no docker, no proof server, no compact toolchain. Anything that
+  needs a running stack belongs in that example's `integration-tests` package,
+  nowhere else.
 - **Tests must read at a glance — table-driven over helper-driven.** A reader must
   see a test's inputs and expected outcome in the test itself (or its table row)
   without tracing helper functions. Concretely:
