@@ -2,7 +2,7 @@
 # example-test workflow. PRs/pushes run the gate specs listed below, and the
 # full e2e suite is opt-in via workflow_dispatch.
 
-name: erc20-vault
+name: erc20-vault-test
 
 on:
   push:
