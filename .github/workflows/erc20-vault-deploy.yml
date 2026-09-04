@@ -3,7 +3,10 @@
 # step is `yarn deploy-initialise:erc20-vault` from the tag's own checkout,
 # the same deployVault + initialiseVault functions every local e2e run
 # exercises. The record-address job then opens a PR recording the new
-# address in the contract package's vaultContractAddresses table.
+# address in the contract package's vaultContractAddresses table. It runs
+# whenever the deploy itself landed every circuit, an initialise failure
+# included: the address is final at that point, and the PR says when the
+# initialise is still to be run by hand.
 #
 # The 17 circuits do not fit one block: a base transaction registers one
 # and a maintenance update adds each of the rest. A run that fails AFTER
@@ -85,7 +88,11 @@ jobs:
     permissions:
       contents: read
     outputs:
+      # Set as soon as the deploy has installed every circuit, whether or not
+      # the initialise that follows succeeds: the address is final then.
       contract-address: ${{ steps.deploy.outputs.contract-address }}
+      # "true" once the initialise finished too.
+      initialised: ${{ steps.deploy.outputs.initialised }}
     steps:
       - name: Refuse an input that is not a release tag
         env:
@@ -210,22 +217,50 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          yarn deploy-initialise:erc20-vault 2>&1 | tee deploy.log
-          address="$(sed -n 's/^NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS=//p' deploy.log | tail -n 1)"
+          status=0
+          yarn deploy-initialise:erc20-vault 2>&1 | tee deploy.log || status=$?
+          # The deploy prints this line once every circuit is installed, before
+          # the initialise runs, so it is the address to record even when the
+          # initialise then fails. The NEXT_PUBLIC line prints only after it.
+          address="$(sed -n 's/^deployed erc20-vault at \([^ ]*\) .*/\1/p' deploy.log | tail -n 1)"
+          initialised=false
+          if grep -q '^NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS=' deploy.log; then
+            initialised=true
+          fi
+          if [ -n "$address" ]; then
+            echo "contract-address=$address" >> "$GITHUB_OUTPUT"
+            echo "initialised=$initialised" >> "$GITHUB_OUTPUT"
+            {
+              if [ "$initialised" = true ]; then
+                echo "### erc20-vault deployed and initialised"
+              else
+                echo "### erc20-vault deployed, initialise FAILED"
+              fi
+              echo ""
+              echo "| field | value |"
+              echo "| --- | --- |"
+              echo "| network | $NETWORK_ID |"
+              echo "| tag | $TAG |"
+              echo "| address | \`$address\` |"
+              echo "| initialised | $initialised |"
+              if [ "$initialised" != true ]; then
+                echo ""
+                echo "Every circuit is installed, so the address above is final and the record job opens its PR. Finish by hand from a checkout of the same tag:"
+                echo ""
+                echo '```sh'
+                echo "MIDNIGHT_VAULT_CONTRACT_ADDRESS=$address yarn initialise:erc20-vault"
+                echo '```'
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "::error::deploy-initialise exited with status $status"
+            exit "$status"
+          fi
           if [ -z "$address" ]; then
             echo "::error::the deploy printed no contract address"
             exit 1
           fi
-          echo "contract-address=$address" >> "$GITHUB_OUTPUT"
-          {
-            echo "### erc20-vault deployed and initialised"
-            echo ""
-            echo "| field | value |"
-            echo "| --- | --- |"
-            echo "| network | $NETWORK_ID |"
-            echo "| tag | $TAG |"
-            echo "| address | \`$address\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
       # A failure after the base deploy landed leaves a LIVE contract whose
       # address is otherwise only in the raw log: surface it where a reader
       # looks first, with the recovery that does not deploy a second one.
@@ -266,6 +301,10 @@ jobs:
   record-address:
     name: open the address-recording PR
     needs: deploy
+    # Also after a FAILED deploy job, as long as it printed a fully installed
+    # vault's address (an initialise failure past that point): the address is
+    # final and the PR carries the by-hand initialise instruction.
+    if: ${{ !cancelled() && needs.deploy.outputs.contract-address != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # The write token lives HERE, in the job that has no deployer seed; the
@@ -306,6 +345,7 @@ jobs:
           NETWORK: ${{ inputs.network }}
           TAG: ${{ inputs.tag }}
           ADDRESS: ${{ needs.deploy.outputs.contract-address }}
+          INITIALISED: ${{ needs.deploy.outputs.initialised }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -318,8 +358,13 @@ jobs:
           git add examples/erc20-vault/contract/src/vault-addresses.ts
           git commit -m "record the $NETWORK erc20-vault contract address from $TAG"
           git push "https://x-access-token:$GITHUB_TOKEN@github.com/$REPOSITORY.git" "$branch"
+          if [ "$INITIALISED" = true ]; then
+            outcome="Deployed and initialised the erc20-vault on \`$NETWORK\` at \`$TAG\`."
+          else
+            outcome="Deployed the erc20-vault on \`$NETWORK\` at \`$TAG\` with every circuit installed, but its initialise FAILED (see the deploy job). Before merging, finish it from a checkout of the same tag: \`MIDNIGHT_VAULT_CONTRACT_ADDRESS=$ADDRESS yarn initialise:erc20-vault\`."
+          fi
           body="$(cat <<EOF
-          Deployed and initialised the erc20-vault on \`$NETWORK\` at \`$TAG\`.
+          $outcome
 
           Address: \`$ADDRESS\`
 

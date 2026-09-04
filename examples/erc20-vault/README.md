@@ -325,9 +325,10 @@ The manually dispatched
 runs that same `yarn deploy-initialise:erc20-vault` against a chosen network at
 a chosen `erc20-vault-v*` release tag. Each network is a GitHub environment of
 the same name carrying the per-network secrets and variables (the workflow's
-header comment lists them), and a successful run opens a PR recording the new
-address in the contract package's per-network table, served to consumers by
-`getVaultContractAddress`.
+header comment lists them), and a run whose deploy installed every circuit
+opens a PR recording the new address in the contract package's per-network
+table, served to consumers by `getVaultContractAddress` (when the initialise
+failed after that point, the PR says to run it by hand before merging).
 
 ## Runtime: the deposit round trip
 
