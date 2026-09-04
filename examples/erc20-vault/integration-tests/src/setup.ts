@@ -17,7 +17,6 @@ import {
   UNISWAP_SWAP_ROUTER_02,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { deployVault } from "@sig-net/midnight-examples-erc20-vault-deploy";
-import { SplitDeployAfterBaseSubmitError } from "@sig-net/midnight-examples-lib";
 import {
   assertEnvironment,
   compileContractZk,
@@ -27,13 +26,12 @@ import {
   ensureMpcSecp256k1Pubkey,
   ensureWalletSeeds,
   ensureWalletsFunded,
+  explainDustSpendRejection,
   logSkip,
-  NonRetryableError,
   persistFakenetHandoffToDotEnv,
   printMpcServerConfig,
   requireEnv,
   resolveEvmChain,
-  retryWhileDustGenerates,
   runSetupPipeline,
   type SetupStep,
   startFakenetResponder,
@@ -65,16 +63,15 @@ const PIPELINE_KEYS = [
  * entrypoints run, so the split deploy (base deploy plus one maintenance
  * update per deferred circuit) this suite exercises is the one a remote
  * bring-up performs. Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already
- * set. Retries while the deployer wallet's dust is still generating on a
- * young chain, but ONLY while the base deploy has not been submitted: the
- * split deploy has no resume path, so a rerun past that point would deploy a
- * SECOND contract and orphan the half-installed first one.
+ * set.
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
  *   config from it).
- * @throws {NonRetryableError} If the deploy failed after its base deploy was submitted.
- * @throws {Error} If the deploy fails otherwise, after the dust-generation retries.
+ * @throws {SplitDeployAfterBaseSubmitError} If the deploy failed after its base
+ *   deploy was submitted: the split deploy has no resume path, so a rerun would
+ *   deploy a SECOND contract and orphan the half-installed first one.
+ * @throws {Error} If the deploy fails otherwise.
  */
 async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.MIDNIGHT_VAULT_CONTRACT_ADDRESS) {
@@ -96,22 +93,9 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
       "defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialise is deployer-gated)",
     );
   }
-  const { contractAddress } = await retryWhileDustGenerates("deploy vault contract", async () => {
-    try {
-      return await deployVault(env);
-    } catch (error) {
-      // Past base submission a rerun costs a second contract. Everything else
-      // stays retryable and keeps its original error.
-      if (error instanceof SplitDeployAfterBaseSubmitError) {
-        throw new NonRetryableError(
-          "vault deploy failed after its base deploy was submitted, not retrying: " +
-            "a retry would deploy a second contract and orphan the first",
-          { cause: error },
-        );
-      }
-      throw error;
-    }
-  });
+  const { contractAddress } = await explainDustSpendRejection("deploy vault contract", () =>
+    deployVault(env),
+  );
   env.MIDNIGHT_VAULT_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_VAULT_CONTRACT_ADDRESS=${contractAddress}`);
   console.log(` ➜ the vault contract on Midnight — holds deposits and authorizes withdrawals`);
