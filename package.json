@@ -16,7 +16,7 @@
     "deploy:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy deploy",
     "deploy-initialise:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy deploy-initialise",
     "initialise:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy initialise",
-    "record-contract-address:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-contract record-contract-address",
+    "record-contract-address:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy record-contract-address",
     "zk-assets:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-contract zk-assets",
     "test:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-contract test && yarn workspace @sig-net/midnight-examples-erc20-vault-deploy test && yarn workspace @sig-net/midnight-examples-erc20-vault-integration-tests test",
     "test:erc20-vault:e2e": "yarn workspace @sig-net/midnight-examples-erc20-vault-integration-tests test:e2e",

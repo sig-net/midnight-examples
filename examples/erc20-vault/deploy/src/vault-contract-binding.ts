@@ -13,19 +13,16 @@ import {
   witnesses,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
-// Both resolved through the PACKAGE SPECIFIER: each package's entry module
-// sits beside its own managed/ output, so the paths follow whatever layout
-// the package's `exports` entry names (`src/` in the workspace, `dist/` when
-// installed). `createRequire` because vitest's module runner does not
-// implement `import.meta.resolve`.
-const resolveFromHere = createRequire(import.meta.url);
-const vaultContractEntryDir = dirname(
-  resolveFromHere.resolve("@sig-net/midnight-examples-erc20-vault-contract"),
+import { VAULT_CONTRACT_ENTRY_DIR } from "./vault-contract-package.ts";
+
+// Resolved through the PACKAGE SPECIFIER like {@link VAULT_CONTRACT_ENTRY_DIR}:
+// the entry module sits beside the package's own managed/ output.
+const signetContractEntryDir = dirname(
+  createRequire(import.meta.url).resolve("@sig-net/midnight-contract"),
 );
-const signetContractEntryDir = dirname(resolveFromHere.resolve("@sig-net/midnight-contract"));
 
 /** Absolute path of the vault contract's compiler output dir (`contract/`, `zkir/`, `keys/`). */
-export const VAULT_MANAGED_PATH = join(vaultContractEntryDir, "managed/erc20-vault");
+export const VAULT_MANAGED_PATH = join(VAULT_CONTRACT_ENTRY_DIR, "managed/erc20-vault");
 
 /**
  * Absolute path of the signet callee contract's compiler output dir. The vault's

@@ -15,7 +15,7 @@ import {
   indexerPublicDataProvider,
 } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import * as ledger from "@midnightntwrk/ledger-v9";
-import { hexToBytes } from "@sig-net/midnight";
+import { contractAddressFromHex } from "@sig-net/midnight";
 import {
   type AccountKeys,
   deriveAccountKeys,
@@ -147,22 +147,6 @@ async function addDeferredCircuits(
 }
 
 /**
- * Convert a contract address (hex, optional `0x`) into the reference shape a
- * Compact contract-typed constructor arg expects: `{ bytes: Uint8Array(32) }`.
- *
- * @param contractAddress - The 32-byte contract address in hex.
- * @returns The `{ bytes }` reference.
- * @throws {Error} If the address is not 32 bytes of hex.
- */
-function contractAddressToReference(contractAddress: string): { bytes: Uint8Array } {
-  const hex = contractAddress.startsWith("0x") ? contractAddress.slice(2) : contractAddress;
-  if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
-    throw new Error(`not a 32-byte contract address in hex: "${contractAddress}"`);
-  }
-  return { bytes: hexToBytes(hex) };
-}
-
-/**
  * Resolve the environment the deploy signs its maintenance updates with. The split deploy adds the
  * deferred circuits via maintenance updates, so the contract needs a maintenance authority: on a
  * deployed network `MAINTENANCE_SIGNING_KEY` is REQUIRED, since it is the only way to add or
@@ -252,7 +236,7 @@ export async function deployVault(
       "MIDNIGHT_SIGNET_CONTRACT_ADDRESS is required (deploy the signet contract first)",
     );
   }
-  const signetSigner = contractAddressToReference(signetContractAddress);
+  const signetSigner = contractAddressFromHex(signetContractAddress);
 
   const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, networkId);
 

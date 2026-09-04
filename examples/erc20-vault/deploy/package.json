@@ -12,7 +12,8 @@
     "test": "vitest run",
     "deploy": "tsx scripts/deploy.ts",
     "deploy-initialise": "tsx scripts/deploy-initialise.ts",
-    "initialise": "tsx scripts/initialise.ts"
+    "initialise": "tsx scripts/initialise.ts",
+    "record-contract-address": "tsx scripts/record-contract-address.ts"
   },
   "dependencies": {
     "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",

@@ -8,9 +8,9 @@
 import { type DeployedNetwork, MidnightNetwork } from "@sig-net/midnight";
 
 // Filled in per network by the erc20-vault-deploy workflow's record-address
-// PR (record-contract-address.ts rewrites one entry). An empty string means
-// "not yet deployed or published" and makes getVaultContractAddress throw for
-// that network.
+// PR (the deploy package's record-contract-address entrypoint rewrites one
+// entry). An empty string means "not yet deployed or published" and makes
+// getVaultContractAddress throw for that network.
 const vaultContractAddresses: Record<DeployedNetwork, string> = {
   [MidnightNetwork.Stagenet]: "",
   [MidnightNetwork.Preview]: "",
