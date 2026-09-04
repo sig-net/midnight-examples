@@ -29,7 +29,15 @@ function parseDotEnvValue(raw: string): string {
   const trimmed = raw.trim();
   const quoted = /^(["'])(.*?)\1/.exec(trimmed)?.[2];
   if (quoted !== undefined) return quoted;
-  return trimmed.replace(/\s+#.*$/, "").trimEnd();
+  // A single left-to-right scan for the first `#` preceded by whitespace: the
+  // equivalent `\s+#` regex backtracks over every run of spaces on a line
+  // without a comment, which is quadratic in the line's length.
+  for (let index = 1; index < trimmed.length; index++) {
+    if (trimmed[index] === "#" && /\s/.test(trimmed.charAt(index - 1))) {
+      return trimmed.slice(0, index).trimEnd();
+    }
+  }
+  return trimmed;
 }
 
 /**

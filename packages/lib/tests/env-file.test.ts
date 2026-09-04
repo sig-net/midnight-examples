@@ -50,6 +50,16 @@ const CASES: Case[] = [
     expected: { KEY: "b" },
   },
   { name: "a line that is not an assignment", text: "not an assignment\n", expected: {} },
+  {
+    name: "a value ending in a long run of spaces and no hash",
+    text: `KEY=abc${" ".repeat(10_000)}\n`,
+    expected: { KEY: "abc" },
+  },
+  {
+    name: "a value of many space-hash repeats, cut at the first",
+    text: `KEY=a${" #".repeat(10_000)}\n`,
+    expected: { KEY: "a" },
+  },
 ];
 
 describe("parseDotEnv", () => {
