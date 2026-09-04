@@ -886,13 +886,10 @@ erc20-vault example:
 | Package | Directory | What a consumer gets |
 | ------- | --------- | -------------------- |
 | `@sig-net/midnight-examples-erc20-vault-contract` | [`contract/`](contract/) | The contract's export surface plus its compiled `managed/` assets: the generated module, the zkir, the verifier keys and the integrity manifest. The prover keys are release assets, fetched on demand (see [A note on package size](#a-note-on-package-size)) |
-| `@sig-net/midnight-examples-erc20-vault-deploy` | [`deploy/`](deploy/) | The deploy and initialise flows, the Node compiled-contract binding and the midnight-js provider set |
-| `@sig-net/midnight-examples-lib` | [`packages/lib`](../../packages/lib/) | The wallet, provider and deploy-transaction plumbing the deploy package runs on |
 
-[`packages/lib`](../../packages/lib/) is shared by every example rather than
-owned by this one, but the deploy package imports it at runtime, so
-it releases on this tag and moves in lockstep with it. A second example that
-starts publishing needs lib moved to a release line of its own first.
+The deploy package and [`packages/lib`](../../packages/lib/) it runs on stay
+private: they are consumed only inside this workspace, by the entrypoints and
+the integration tests.
 
 ## Cutting a release
 

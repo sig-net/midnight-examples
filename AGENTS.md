@@ -65,28 +65,26 @@ any instinct carried in from product-repo conventions.
   thing separating an example from a product package: never drop it, and never
   clear `"private"` without meaning to publish into the SDK's scope. Anything
   else worth publishing graduates to the protocol repo's SDK packages.
-  The packages that ARE published today are the erc20-vault trio plus the lib
-  they run on: `@sig-net/midnight-examples-lib`,
-  `@sig-net/midnight-examples-erc20-vault-{contract,client,deploy}`. They exist
-  for downstream example applications that combine many chains. Each drops
-  `"private"` and carries `files`, `publishConfig` and a `prepack`; the rest of
-  the workspace stays private. A contract package ships no `*.prover`: prover
-  keys publish as assets on the example's release tag, the client downloads the
-  one circuit it needs and verifies it against the manifest the npm package
-  ships, and the assets of a version already on npm are frozen (that manifest
-  pins their hashes, and keygen is not byte-reproducible).
-- **A published package's intra-workspace deps use `workspace:*`; its SDK deps
-  use a fixed npm version.** `workspace:*` resolves to the sibling during
-  development and yarn rewrites it to that sibling's EXACT version at pack time,
-  which is what keeps a release's packages pinned to each other rather than to
-  whatever the registry serves later. This does not soften the rule above that
-  an example names `@sig-net/midnight` / `@sig-net/midnight-contract` as a plain
-  npm semver range: `workspace:` is only ever for members of THIS repo, never a
-  reference back to the protocol repo.
-- **Every published package version moves in lockstep with its example's release
+  The one package published today is
+  `@sig-net/midnight-examples-erc20-vault-contract`, for downstream applications
+  that combine many chains. It alone drops `"private"` and carries `files`,
+  `publishConfig` and a `prepack`; every other member, `packages/lib` and the
+  example's `deploy` included, stays private and is consumed only inside this
+  workspace. A contract package ships no `*.prover`: keygen is deterministic
+  under the pinned toolchain (independent runs produce byte-identical keys), so
+  a consumer regenerates the prover keys locally and verifies them against the
+  `compiler/contract-manifest.json` the package ships, which pins every
+  artefact's size and sha256.
+- **Intra-workspace deps are `"*"`, SDK deps a fixed npm version.** A private
+  member names its siblings with `"*"`, which yarn resolves to the workspace
+  copy, and it names `@sig-net/midnight` / `@sig-net/midnight-contract` as a
+  plain npm version: never a `workspace:`, `link:`, `portal:` or `file:`
+  reference back to the protocol repo. The published contract package has no
+  intra-workspace deps at all (see the corollary below).
+- **The published package's version moves in lockstep with its example's release
   tag.** A release is tagged `<example-dir>-vX.Y.Z` (or `-vX.Y.Z-rc.N`) and the
-  publish workflow refuses to run unless every package it publishes is already
-  at exactly `X.Y.Z`. Bump them together in the commit that precedes the tag.
+  publish workflow refuses to run unless the package it publishes is already at
+  exactly `X.Y.Z`. Bump it in the commit that precedes the tag.
 
 Corollary: an example's `contract` package depends on the Signature Network SDK +
 compact tooling and **nothing else** — its dependency list is itself documentation
@@ -145,12 +143,12 @@ exception for that specific case.
   No `dist/`, no `tsc --outDir`, no ts-node loaders, no copy steps. Tests run under
   vitest; entrypoints run under `tsx`. If you think you need a build step, stop and
   ask — a build step is a defect in this workspace, not a missing feature.
-  **The one exception is publishing:** each npm-published package additionally
-  emits `dist/` via a `tsconfig.build.json`, ships ONLY `dist/`
-  (`files: ["dist"]`), and swaps its entry to it through `publishConfig.exports`
-  at pack time. The emit belongs to `prepack`, never to `build`, so `yarn build`
-  keeps meaning "typecheck, no emit" everywhere and the workspace itself always
-  resolves raw `src/index.ts`, never `dist/`.
+  **The one exception is publishing:** the npm-published contract package
+  additionally emits `dist/` via a `tsconfig.build.json`, ships `dist/` plus its
+  `.compact` source (`files`), and swaps its entry to `dist/` through
+  `publishConfig.exports` at pack time. The emit belongs to `prepack`, never to
+  `build`, so `yarn build` keeps meaning "typecheck, no emit" everywhere and the
+  workspace itself always resolves raw `src/index.ts`, never `dist/`.
 - **ALWAYS finish a change with `yarn format:check && yarn lint && yarn build && yarn test`**
   in the member you touched (or from the root). `tsx` and vitest execute without
   typechecking — "it runs" is NOT verification. If you add a new top-level TS
