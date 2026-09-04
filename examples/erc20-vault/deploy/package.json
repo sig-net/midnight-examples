@@ -20,8 +20,8 @@
     "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.6",
     "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.6",
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
-    "@sig-net/midnight": "0.21.0-rc.2",
-    "@sig-net/midnight-contract": "0.21.0-rc.2",
+    "@sig-net/midnight": "0.21.0-rc.6",
+    "@sig-net/midnight-contract": "0.21.0-rc.6",
     "@sig-net/midnight-examples-erc20-vault-contract": "*",
     "@sig-net/midnight-examples-lib": "*"
   },
