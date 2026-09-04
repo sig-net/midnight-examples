@@ -7,7 +7,7 @@
     "directory": "examples/erc20-vault/deploy"
   },
   "type": "module",
-  "description": "Deploy + initialise flows for the ERC20 vault contract: the split base deploy plus per-circuit maintenance adds, and the deployer-gated initialise. Typed functions taking an env map, so the CLI entrypoints and the e2e setup run exactly the same code.",
+  "description": "The ERC20 vault's deploy flows (the split base deploy plus per-circuit maintenance adds, and the deployer-gated initialise), their entrypoint environment, and the Node pieces those flows and the integration tests share: the compiled-contract binding over the contract package's managed/ output and the midnight-js provider set. Typed functions taking an env map, so the CLI entrypoints and the e2e setup run exactly the same code.",
   "//exports": "Local dev consumes raw TS source. `publishConfig.exports` below swaps this to the emitted ./dist at publish time, so npm consumers get JS + .d.ts while the workspace keeps resolving to src.",
   "exports": {
     ".": "./src/index.ts"
@@ -37,9 +37,11 @@
   "dependencies": {
     "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.6",
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
     "@sig-net/midnight": "0.21.0-rc.2",
-    "@sig-net/midnight-examples-erc20-vault-client": "workspace:*",
+    "@sig-net/midnight-contract": "0.21.0-rc.2",
     "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
     "@sig-net/midnight-examples-lib": "workspace:*"
   },

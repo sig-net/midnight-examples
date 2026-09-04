@@ -480,7 +480,7 @@ The same builders and readers exist in `@sig-net/midnight` as TypeScript twins u
 
 This repository is structured as a yarn monorepo, split at the top level between shared utilities (`packages/`) and examples for integrators (`examples/`).
 
-Each example is a directory under `examples/` containing up to four workspace packages: `contract` is **required**, and `client`, `deploy` and `integration-tests` are added as required. The split is by what the code IS: the contract package holds the contract plus its browser-safe client surface, `client` holds the Node half of that surface (the compiled-contract binding, a live provider set), and `deploy` holds only deploying and post-deploy initialisation.
+Each example is a directory under `examples/` containing up to three workspace packages: `contract` is **required**, and `deploy` and `integration-tests` are added as required. The split is by what the code IS: the contract package holds the contract plus its browser-safe client surface, and `deploy` holds deploying and post-deploy initialisation plus the Node half of that surface (the compiled-contract binding, a live provider set).
 
 The `contract` package's dependency list demonstrates minimal Signature Network SDK & compact tooling dependencies that an integrator requires.
 
@@ -536,11 +536,6 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
     │   │   └── tests/
     │   │       └── erc20-vault.test.ts # Simulator-level unit tests that require no network.
     │   │
-    │   ├── client/             # @sig-net/midnight-examples-erc20-vault-client
-    │   │   └── src/            # The Node half of the vault's client surface: the compiled-contract
-    │   │                       #   binding over the contract package's managed/ output, and the
-    │   │                       #   midnight-js provider set. Used by deploy AND integration-tests.
-    │   │
     │   ├── deploy/             # @sig-net/midnight-examples-erc20-vault-deploy
     │   │   ├── scripts/             # Thin tsx entrypoints over src/, one per root script:
     │   │   │                        #   deploy.ts (`yarn deploy:erc20-vault`),
@@ -553,7 +548,10 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
     │   │   │   ├── initialise-vault.ts # The deployer-gated post-deploy initialise.
     │   │   │   ├── entrypoint-env.ts   # The entrypoints' env: .env + process.env, refused when
     │   │   │   │                       #   the file's values belong to another network.
-    │   │   │   └── evm-targets.ts      # Which EVM contracts THIS deployment pins at initialise.
+    │   │   │   ├── evm-targets.ts      # Which EVM contracts THIS deployment pins at initialise.
+    │   │   │   ├── vault-contract-binding.ts # The compiled-contract binding over the contract
+    │   │   │   │                       #   package's managed/ output. Used by integration-tests too.
+    │   │   │   └── vault-providers.ts  # The midnight-js provider set built around a wallet.
     │   │   └── tests/                  # Deploy-tx build + env-guard tests, no network.
     │   │
     │   └── integration-tests/  # @sig-net/midnight-examples-erc20-vault-integration-tests

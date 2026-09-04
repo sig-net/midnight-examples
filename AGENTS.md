@@ -8,20 +8,19 @@ node-modules`), split between shared machinery and the examples integrators copy
 - **`packages/test-harness`** — test-only machinery (stack bring-up/teardown,
   mpc-keys setup, wallet funding, env/session handling, subprocess helpers).
   Test-only deps live here and never touch an example's manifests.
-- **`examples/*/*`** — one directory per example, each holding up to four
-  workspace packages: `contract` (required), then `client`, `deploy` and
+- **`examples/*/*`** — one directory per example, each holding up to three
+  workspace packages: `contract` (required), then `deploy` and
   `integration-tests` as warranted. Each package holds exactly one kind of
   thing, and the split is by WHAT the code is, never by who happens to call it:
   - `contract` — the Compact contract plus its environment-agnostic client
     surface: witnesses, circuit-id/private-state/provider TYPES, ledger reads,
     and the contract's own constants. Runs unchanged in a browser.
-  - `client` — the same client surface's Node half, the part that cannot be
-    environment-agnostic: the compiled-contract binding over `managed/`, and a
-    live provider set.
-  - `deploy` — ONLY deploying and post-deploy initialisation: constructor args,
+  - `deploy` — deploying and post-deploy initialisation (constructor args,
     the deploy transaction, one-shot init circuits, and the configuration those
-    resolve. Anything a client would still need after the deploy is over
-    belongs in `contract` or `client`, never here.
+    resolve) plus the Node half of the client surface those flows and the
+    integration tests share: the compiled-contract binding over `managed/`
+    and a live provider set. Anything a browser client needs belongs in
+    `contract`, never here.
   - `integration-tests` — flows and specs.
   An example's flows are typed functions in `integration-tests/src/flows/`, run
   in-process by its tests, and its deploy / init flows are typed functions in
@@ -290,9 +289,8 @@ apply to all of them:
   from the environment. This is the rule that decides what may live here: the
   ledger reads, the provider TYPE and the circuit-id union qualify, while the
   Node binding and a live provider set do not and live in the example's
-  `client` package. Env access, filesystem and `@sig-net/midnight-examples-lib` imports
-  belong in `client`, `deploy` or `integration-tests`, never in a contract
-  package.
+  `deploy` package. Env access, filesystem and `@sig-net/midnight-examples-lib` imports
+  belong in `deploy` or `integration-tests`, never in a contract package.
 - **Every in-circuit hash is `transientHash`** (wrapped in
   `upgradeFromTransient` where a `Bytes<32>` digest is needed), whatever the
   persistence class of the hashed value. No circuit calls `persistentHash` or

@@ -5,7 +5,7 @@
 // flow functions. The pieces come from where they belong: generic wallet
 // construction from the harness session, the contract's types and witnesses
 // from its own package, and the provider set + compiled-contract binding from
-// the example's client package, which the deploy entrypoints build on too.
+// the example's deploy package, which its deploy flows build on too.
 
 import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
 // midnight-js reads a process-global network id (unlike compact-js, which
@@ -16,10 +16,6 @@ import {
   SignetRequestResponseReader,
 } from "@sig-net/midnight";
 import {
-  buildVaultProviders,
-  vaultCompiledContract,
-} from "@sig-net/midnight-examples-erc20-vault-client";
-import {
   createVaultPrivateState,
   VAULT_REQUESTS_PATH,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
@@ -28,6 +24,10 @@ import {
   VAULT_PRIVATE_STATE_ID,
   type VaultProviders,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  buildVaultProviders,
+  vaultCompiledContract,
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
   getMidnightNodeConfig,
   type MidnightNodeConfig,

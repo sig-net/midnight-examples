@@ -15,7 +15,6 @@ import {
 } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import * as ledger from "@midnightntwrk/ledger-v9";
 import { hexToBytes } from "@sig-net/midnight";
-import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-client";
 import {
   createVaultPrivateState,
   pureCircuits,
@@ -39,6 +38,8 @@ import {
   type TransactionIdentifier,
   withSyncedWalletFacade,
 } from "@sig-net/midnight-examples-lib";
+
+import { vaultCompiledContract } from "./vault-contract-binding.ts";
 
 // The full 17-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
 // post-burn keys are large), so the base registers just ONE small circuit and every other

@@ -19,10 +19,6 @@ import {
   parseSecp256k1PublicKey,
 } from "@sig-net/midnight";
 import {
-  buildVaultProviders,
-  vaultCompiledContract,
-} from "@sig-net/midnight-examples-erc20-vault-client";
-import {
   createVaultPrivateState,
   type DeployedVaultContract,
   deriveVaultEvmAddress,
@@ -39,6 +35,8 @@ import {
 } from "@sig-net/midnight-examples-lib";
 
 import { resolveEvmTargets, type VaultEvmTargets } from "./evm-targets.ts";
+import { vaultCompiledContract } from "./vault-contract-binding.ts";
+import { buildVaultProviders } from "./vault-providers.ts";
 
 /** What an {@link initialiseVaultContract} call did. */
 export enum InitialiseVaultOutcome {

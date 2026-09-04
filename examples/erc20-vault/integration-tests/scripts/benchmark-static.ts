@@ -16,7 +16,7 @@ import { dirname } from "node:path";
 import {
   SIGNET_SIGNER_MANAGED_PATH,
   VAULT_MANAGED_PATH,
-} from "@sig-net/midnight-examples-erc20-vault-client";
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
 
 import { STATIC_METRICS_FILE, STATIC_METRICS_MARKDOWN_FILE } from "../src/benchmark/paths.ts";
 import {

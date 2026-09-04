@@ -9,11 +9,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  SIGNET_SIGNER_MANAGED_PATH,
-  VAULT_CONTRACT_PACKAGE_VERSION,
-  VAULT_MANAGED_PATH,
-} from "../src/vault-contract-binding.ts";
+import { SIGNET_SIGNER_MANAGED_PATH, VAULT_MANAGED_PATH } from "../src/vault-contract-binding.ts";
 
 describe("vault contract binding", () => {
   it("resolves the vault's compiler output inside the contract package", () => {
@@ -21,10 +17,6 @@ describe("vault contract binding", () => {
     expect(existsSync(join(VAULT_MANAGED_PATH, "contract")), `run \`yarn compile\` first`).toBe(
       true,
     );
-  });
-
-  it("reads the contract package's own version, which is the workspace placeholder here", () => {
-    expect(VAULT_CONTRACT_PACKAGE_VERSION).toBe("0.0.0");
   });
 
   it("resolves the signet callee's compiler output inside the SDK package that ships it", () => {

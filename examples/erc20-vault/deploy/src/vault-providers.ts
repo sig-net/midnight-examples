@@ -2,8 +2,11 @@
 // reads keys from, the private-state store, and the wallet adapter. The types
 // it satisfies come from the contract package, the binding from
 // vault-contract-binding.ts, and the generic wallet plumbing from
-// @sig-net/midnight-examples-lib. Both the deploy tooling and the integration tests
-// compose this and call `findDeployedContract(providers, ...)`.
+// @sig-net/midnight-examples-lib. Both the deploy flows and the integration
+// tests compose this and call `findDeployedContract(providers, ...)`.
+
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
@@ -16,23 +19,24 @@ import {
   type AccountKeys,
   createCrossContractProofServerProvider,
   createWalletAndMidnightProvider,
-  isLocalStandaloneNetwork,
   type MidnightNodeConfig,
   type ProofServerObserver,
   type WalletFacade,
 } from "@sig-net/midnight-examples-lib";
 
 import { SIGNET_SIGNER_MANAGED_PATH, VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
-import { VaultReleaseZkConfigProvider } from "./vault-release-zk-config-provider.ts";
 
 /**
- * Build the midnight-js provider set for the vault.
+ * Build the midnight-js provider set for the vault. Proving reads the vault's
+ * keys from the contract package's compiler output on every network, so the
+ * checkout must hold `yarn compile:erc20-vault:zk` output.
  *
- * @param facade - A started (and synced) wallet facade — see lib's `withSyncedWalletFacade`.
+ * @param facade - A started (and synced) wallet facade, see lib's `withSyncedWalletFacade`.
  * @param keys - The key material of the same wallet, for balancing and signing.
  * @param config - The Midnight network endpoints to run against.
  * @param proofObserver - Called after every proof-server /check and /prove round trip.
  * @returns The provider set to hand to `findDeployedContract` / `deployContract`.
+ * @throws {Error} If the vault's compiler output carries no keys.
  */
 export function buildVaultProviders(
   facade: WalletFacade,
@@ -40,18 +44,18 @@ export function buildVaultProviders(
   config: MidnightNodeConfig,
   proofObserver?: ProofServerObserver,
 ): VaultProviders {
+  // Fail here, naming the fix, rather than as an ENOENT inside the proof
+  // provider on the first circuit call.
+  if (!existsSync(join(VAULT_MANAGED_PATH, "keys"))) {
+    throw new Error(
+      `no prover keys under ${VAULT_MANAGED_PATH}: run \`yarn compile:erc20-vault:zk\` first`,
+    );
+  }
+
   // Retrieves the ZK artifacts of a contract needed to create proofs.
-  // Key methods: getProverKey(id), getVerifierKey(id), getZKIR(id) — id is
+  // Key methods: getProverKey(id), getVerifierKey(id), getZKIR(id), with id
   // typed to the circuit-name union.
-  //
-  // The local standalone stack proves against the keys `compile:zk` just wrote,
-  // so it reads them straight off disk. Every deployed network goes through the
-  // release-backed provider, which serves local keys when they are there and
-  // otherwise downloads the circuit's key from the contract package version's
-  // GitHub release: the published package ships verifier keys only.
-  const vaultZkConfigProvider = isLocalStandaloneNetwork(config.networkId)
-    ? new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH)
-    : new VaultReleaseZkConfigProvider();
+  const vaultZkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH);
 
   // The callee (signet contract) circuits, resolved for the cross-contract
   // proof provider so deposit's whole call tree proves.
@@ -69,7 +73,7 @@ export function buildVaultProviders(
     //              getSigningKey/setSigningKey (keyed by contract address),
     //              exportPrivateStates/importPrivateStates.
     // Storage is LevelDB (browser: IndexedDB): clearing the store permanently
-    // destroys it — the package itself warns against production use where
+    // destroys it, and the package itself warns against production use where
     // loss matters. Fine here: our private state is just the identity secret
     // the caller already holds in env/config, so nothing is lost with the DB.
     privateStateProvider: levelPrivateStateProvider({
@@ -83,18 +87,18 @@ export function buildVaultProviders(
       // Set to prevent collision with other dApps.
       signingKeyStoreName: "vault-signing-keys",
 
-      // Account identifier used to scope storage — isolates data between
+      // Account identifier used to scope storage: isolates data between
       // different accounts/wallets using the same database.
       accountId,
 
       // Returns the password (sync or async) used to encrypt BOTH stores.
       // Must pass validatePassword: ≥16 chars, ≥3 of {upper,lower,digit,
-      // special}, no 3+ repeated chars, no 4+ sequential runs — else
-      // PasswordValidationError at runtime. A constant in client source is
-      // obfuscation, not secrecy — acceptable here only because nothing
-      // sensitive is stored. (Kept constant rather than derived from the
-      // account id: derived hex could trip the repeat/sequence rules, and
-      // per-account isolation already comes from `accountId` scoping.)
+      // special}, no 3+ repeated chars, no 4+ sequential runs, else
+      // PasswordValidationError at runtime. A constant in source is
+      // obfuscation, not secrecy, acceptable here only because nothing
+      // sensitive is stored. (Kept constant: hex derived from the account id
+      // could trip the repeat/sequence rules, and per-account isolation
+      // already comes from `accountId` scoping.)
       privateStoragePasswordProvider: () => "&*(BHJqwe419-erc20Vault",
     }),
 
@@ -107,7 +111,7 @@ export function buildVaultProviders(
     }),
 
     // midnight-js's provider record holds exactly one, so the SLOT keeps the
-    // bare kind name; the local binding is qualified because a second one
+    // bare kind name. The local binding is qualified because a second one
     // (the signet callee's) exists beside it.
     zkConfigProvider: vaultZkConfigProvider,
 

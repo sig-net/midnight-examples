@@ -2,7 +2,6 @@
 #
 #   @sig-net/midnight-examples-lib                            (packages/lib)
 #   @sig-net/midnight-examples-erc20-vault-contract           (examples/erc20-vault/contract)
-#   @sig-net/midnight-examples-erc20-vault-client             (examples/erc20-vault/client)
 #   @sig-net/midnight-examples-erc20-vault-deploy             (examples/erc20-vault/deploy)
 #
 # Release tags are per-example, so a future example publishes from its own
@@ -131,7 +130,6 @@ jobs:
           for dir in \
             packages/lib \
             examples/erc20-vault/contract \
-            examples/erc20-vault/client \
             examples/erc20-vault/deploy; do
             version=$(node -p "require('./$dir/package.json').version")
             name=$(node -p "require('./$dir/package.json').name")
@@ -242,7 +240,6 @@ jobs:
           for entry in \
             "@sig-net/midnight-examples-lib:packages/lib" \
             "@sig-net/midnight-examples-erc20-vault-contract:examples/erc20-vault/contract" \
-            "@sig-net/midnight-examples-erc20-vault-client:examples/erc20-vault/client" \
             "@sig-net/midnight-examples-erc20-vault-deploy:examples/erc20-vault/deploy"; do
             name="${entry%%:*}"
             dir="${entry#*:}"

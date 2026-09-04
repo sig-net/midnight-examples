@@ -343,7 +343,7 @@ import { createVaultPrivateState } from "@sig-net/midnight-examples-erc20-vault-
 
 const vault = await findDeployedContract(providers, {
   contractAddress: vaultContractAddress,
-  compiledContract: vaultCompiledContract, // the compiled contract bound to its witnesses
+  compiledContract: vaultCompiledContract, // the deploy package's binding: generated module + witnesses + managed/ assets
   privateStateId: "erc20-vault",
   initialPrivateState: createVaultPrivateState(callerSecretKey),
 });
@@ -753,8 +753,7 @@ functions: [`approve-router.ts`](integration-tests/src/flows/approve-router.ts),
 | Package | What it is |
 |---|---|
 | [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads and the EVM constants, all browser-safe. Plus simulator unit tests. Its dependency list (`@sig-net/midnight`, `@sig-net/midnight-contract` and the compact tooling) is the minimal integration surface. |
-| [`client/`](client/) | The Node half of the vault's client surface: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. Everything here needs Node, which is why it is not in the contract package; the deploy tooling and the integration tests both build on it. |
-| [`deploy/`](deploy/) | ONLY deploying and post-deploy initialisation: the split base-deploy-plus-maintenance-adds, the deployer-gated `initialise`, and the configuration those resolve. Typed functions taking an environment map, plus thin CLI entrypoints over them, so a hand-run deploy and the e2e setup execute identical code. |
+| [`deploy/`](deploy/) | Deploying and post-deploy initialisation: the split base-deploy-plus-maintenance-adds, the deployer-gated `initialise`, and the configuration those resolve, as typed functions taking an environment map plus thin CLI entrypoints over them, so a hand-run deploy and the e2e setup execute identical code. Also the Node half of the vault's client surface those flows and the integration tests share: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. Everything here needs Node, which is why it is not in the contract package. |
 | [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
 
 # Running it
@@ -887,12 +886,11 @@ erc20-vault example:
 | Package | Directory | What a consumer gets |
 | ------- | --------- | -------------------- |
 | `@sig-net/midnight-examples-erc20-vault-contract` | [`contract/`](contract/) | The contract's export surface plus its compiled `managed/` assets: the generated module, the zkir, the verifier keys and the integrity manifest. The prover keys are release assets, fetched on demand (see [A note on package size](#a-note-on-package-size)) |
-| `@sig-net/midnight-examples-erc20-vault-client` | [`client/`](client/) | The Node compiled-contract binding and the midnight-js provider set |
-| `@sig-net/midnight-examples-erc20-vault-deploy` | [`deploy/`](deploy/) | The deploy and initialise flows |
-| `@sig-net/midnight-examples-lib` | [`packages/lib`](../../packages/lib/) | The wallet, provider and deploy-transaction plumbing the client and deploy packages run on |
+| `@sig-net/midnight-examples-erc20-vault-deploy` | [`deploy/`](deploy/) | The deploy and initialise flows, the Node compiled-contract binding and the midnight-js provider set |
+| `@sig-net/midnight-examples-lib` | [`packages/lib`](../../packages/lib/) | The wallet, provider and deploy-transaction plumbing the deploy package runs on |
 
 [`packages/lib`](../../packages/lib/) is shared by every example rather than
-owned by this one, but the client and deploy packages import it at runtime, so
+owned by this one, but the deploy package imports it at runtime, so
 it releases on this tag and moves in lockstep with it. A second example that
 starts publishing needs lib moved to a release line of its own first.
 

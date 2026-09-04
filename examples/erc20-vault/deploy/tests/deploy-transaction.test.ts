@@ -8,15 +8,13 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  VAULT_MANAGED_PATH,
-  vaultCompiledContract,
-} from "@sig-net/midnight-examples-erc20-vault-client";
-import {
   createVaultPrivateState,
   pureCircuits,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { buildDeployTransaction } from "@sig-net/midnight-examples-lib";
 import { describe, expect, it } from "vitest";
+
+import { VAULT_MANAGED_PATH, vaultCompiledContract } from "../src/vault-contract-binding.ts";
 
 const HAS_VERIFIER_KEYS = existsSync(join(VAULT_MANAGED_PATH, "keys"));
 
