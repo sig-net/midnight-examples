@@ -2029,6 +2029,7 @@ __metadata:
     "@types/node": "npm:^26.1.1"
     effect: "npm:^3.22.0"
     typescript: "npm:^7.0.2"
+    vitest: "npm:^4.1.10"
   languageName: unknown
   linkType: soft
 

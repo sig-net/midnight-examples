@@ -15,9 +15,9 @@ import { REPO_ROOT } from "@sig-net/midnight-examples-lib";
  * existing lines are never read, reordered, or rewritten, so this call
  * cannot corrupt a hand-edited file. Presence and conflict checks are the
  * CALLER's job (via lib's `loadRepoDotEnv`). Never append a key the file
- * already holds: duplicate-key precedence differs between consumers (that
- * reader takes the last occurrence; docker compose applies its own rule), so
- * a duplicate is a latent inconsistency, not an override.
+ * already holds: that reader and docker compose both take a key's last
+ * occurrence, so an appended duplicate silently overrides the operator's
+ * hand-edited value instead of failing.
  *
  * @param entries - The KEY=value pairs to append, in iteration order.
  * @param provenance - One-line note of who wrote the block and why.

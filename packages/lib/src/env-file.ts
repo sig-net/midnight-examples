@@ -3,8 +3,10 @@
 // deploy entrypoints and the e2e setup pipeline. Node's own loaders cannot be
 // used here (vitest/node reject `--env-file` in NODE_OPTIONS), so each
 // entrypoint loads the file itself and overlays `process.env` on top.
-// Deliberately minimal: KEY=VALUE lines, #-comments, optional single/double
-// quotes; no interpolation, no multiline.
+// Deliberately minimal: KEY=VALUE lines, `#` comment lines, optional single or
+// double quotes, and docker compose's inline-comment rule (see
+// {@link parseDotEnv}); no interpolation, no multiline. Compose reads the same
+// file for the fakenet container, so a value must parse identically here.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,9 +16,49 @@ import { fileURLToPath } from "node:url";
 export const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 /**
- * Read the repo-root `.env` file into a plain map. Missing file yields an
- * empty map. Callers should overlay `process.env` on top so the real
- * environment always wins over the file.
+ * The value of one `KEY=<raw>` line, by docker compose's rules: a quoted
+ * value is the text inside the quotes, whatever follows the closing quote
+ * included a `#` comment; an unquoted value is trimmed and ends at the first
+ * `#` preceded by whitespace, while a `#` with no whitespace before it is
+ * part of the value.
+ *
+ * @param raw - Everything after the `=`.
+ * @returns The value as compose would hand it to a container.
+ */
+function parseDotEnvValue(raw: string): string {
+  const trimmed = raw.trim();
+  const quoted = /^(["'])(.*?)\1/.exec(trimmed)?.[2];
+  if (quoted !== undefined) return quoted;
+  return trimmed.replace(/\s+#.*$/, "").trimEnd();
+}
+
+/**
+ * Parse `.env` file text into a plain map: `KEY=value` lines with an optional
+ * `export ` prefix, `#` comment lines skipped, values read by
+ * {@link parseDotEnvValue}. A key's last occurrence wins, and an empty value
+ * leaves the key out.
+ *
+ * @param text - The file's contents.
+ * @returns The parsed KEY=VALUE pairs (empty values skipped).
+ */
+export function parseDotEnv(text: string): Record<string, string> {
+  const parsed: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    if (line.trimStart().startsWith("#")) continue;
+    const [, key, raw] = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line) ?? [];
+    if (key === undefined || raw === undefined) continue;
+    const value = parseDotEnvValue(raw);
+    if (value !== "") {
+      parsed[key] = value;
+    }
+  }
+  return parsed;
+}
+
+/**
+ * Read the repo-root `.env` file into a plain map with {@link parseDotEnv}.
+ * Missing file yields an empty map. Callers should overlay `process.env` on
+ * top so the real environment always wins over the file.
  *
  * @returns The parsed KEY=VALUE pairs (empty values skipped).
  */
@@ -27,20 +69,7 @@ export function loadRepoDotEnv(): Record<string, string> {
   } catch {
     return {};
   }
-
-  const parsed: Record<string, string> = {};
-  for (const line of text.split("\n")) {
-    const [, key, rawValue] =
-      /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line) ?? [];
-    if (key === undefined || rawValue === undefined || line.trimStart().startsWith("#")) {
-      continue;
-    }
-    const value = rawValue.replace(/^(["'])(.*)\1$/, "$2");
-    if (value !== "") {
-      parsed[key] = value;
-    }
-  }
-  return parsed;
+  return parseDotEnv(text);
 }
 
 /**
