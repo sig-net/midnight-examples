@@ -6,12 +6,12 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
+import { makeCompiledContract } from "@sig-net/midnight-contract-deploy";
 import {
   Contract,
   type VaultPrivateState,
   witnesses,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { makeCompiledContract } from "@sig-net/midnight-examples-lib";
 
 // Both resolved through the PACKAGE SPECIFIER: each package's entry module
 // sits beside its own managed/ output, so the paths follow whatever layout

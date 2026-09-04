@@ -16,8 +16,8 @@ import { join } from "node:path";
 import { inspect } from "node:util";
 
 import { deriveMidnightResponseKey, formatSecp256k1PublicKey } from "@sig-net/midnight";
-import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
-import { getMidnightNodeConfig, loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
+import { deploySignetContract, getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
+import { loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv } from "./env-file.ts";

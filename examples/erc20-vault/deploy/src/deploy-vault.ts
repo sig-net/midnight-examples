@@ -1,6 +1,7 @@
 // The vault's deploy flow: build, balance, prove and submit the split deploy
-// transaction using the generic plumbing in @sig-net/midnight-examples-lib. Everything
-// contract-specific lives HERE: the constructor args (deployerCommitment, the
+// transaction using the wallet and node-config plumbing of
+// @sig-net/midnight-contract-deploy and the split-deploy builders of
+// @sig-net/midnight-examples-lib. Everything contract-specific lives HERE: the constructor args (deployerCommitment, the
 // signet contract reference), the witnesses, and the private state. Requires
 // `yarn compile:zk` output (verifier keys) in the contract package's managed
 // dir. The MPC response key is NOT a deploy input: it derives from the new
@@ -16,15 +17,7 @@ import {
 import * as ledger from "@midnightntwrk/ledger-v9";
 import { hexToBytes } from "@sig-net/midnight";
 import {
-  createVaultPrivateState,
-  pureCircuits,
-} from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
   type AccountKeys,
-  assertDeployerFunded,
-  buildDeployTransactionDeferring,
-  buildMaintenanceInsertTransaction,
-  type DeferredCircuit,
   deriveAccountKeys,
   envOrUndefined,
   getDeployConfig,
@@ -32,11 +25,21 @@ import {
   type MidnightNodeConfig,
   type NetworkId,
   parseIdentitySecretKey,
-  SPLIT_DEPLOY_BASE_SUBMITTED_MARKER,
-  SplitDeployAfterBaseSubmitError,
   submitUnprovenTransaction,
   type TransactionIdentifier,
   withSyncedWalletFacade,
+} from "@sig-net/midnight-contract-deploy";
+import {
+  createVaultPrivateState,
+  pureCircuits,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  assertDeployerFunded,
+  buildDeployTransactionDeferring,
+  buildMaintenanceInsertTransaction,
+  type DeferredCircuit,
+  SPLIT_DEPLOY_BASE_SUBMITTED_MARKER,
+  SplitDeployAfterBaseSubmitError,
 } from "@sig-net/midnight-examples-lib";
 
 import { vaultCompiledContract } from "./vault-contract-binding.ts";
@@ -210,8 +213,8 @@ export interface VaultDeployment {
  *
  * @param env - Environment providing `DEPLOYER_SEED`, `VAULT_DEPLOYER_SECRET_KEY`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the signet contract to seal as the
- *   cross-contract signer), `MAINTENANCE_SIGNING_KEY` and lib's Midnight node
- *   configuration; defaults to `process.env`.
+ *   cross-contract signer), `MAINTENANCE_SIGNING_KEY` and the deploy SDK's Midnight
+ *   node configuration; defaults to `process.env`.
  * @returns The deployed contract address and base deploy transaction id.
  * @throws {Error} If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed,
  *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, the deployer

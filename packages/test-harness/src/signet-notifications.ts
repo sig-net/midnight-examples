@@ -15,7 +15,7 @@ import {
   type SignetMiscEvent,
   stripHexPrefix,
 } from "@sig-net/midnight";
-import { getMidnightNodeConfig } from "@sig-net/midnight-examples-lib";
+import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 
 import { requireEnv } from "./e2e-env.ts";
 

@@ -6,8 +6,9 @@
 
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 import { printVaultState } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { buildBaseEnv, getMidnightNodeConfig } from "@sig-net/midnight-examples-lib";
+import { buildBaseEnv } from "@sig-net/midnight-examples-lib";
 import { requireEnv } from "@sig-net/midnight-examples-test-harness";
 
 const env = buildBaseEnv();

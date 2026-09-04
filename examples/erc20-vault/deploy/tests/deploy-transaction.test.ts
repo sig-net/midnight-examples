@@ -7,11 +7,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
+import { buildDeployTransaction } from "@sig-net/midnight-contract-deploy";
 import {
   createVaultPrivateState,
   pureCircuits,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { buildDeployTransaction } from "@sig-net/midnight-examples-lib";
 import { describe, expect, it } from "vitest";
 
 import { VAULT_MANAGED_PATH, vaultCompiledContract } from "../src/vault-contract-binding.ts";
@@ -27,10 +27,6 @@ const SIGNET_CONTRACT_REF = { bytes: new Uint8Array(32).fill(0x5e) };
 // Dummy coin public key (32-byte hex) for the constructor context.
 const CPK = "0".repeat(64);
 
-// No MAINTENANCE_SIGNING_KEY: the builder then samples a throwaway authority,
-// which is all an unsubmitted transaction needs.
-const NO_MAINTENANCE_ENV: Record<string, string | undefined> = {};
-
 describe.skipIf(!HAS_VERIFIER_KEYS)(
   "vault deploy tx (SKIPPED without the contract's src/managed/keys: run `yarn compile:erc20-vault:zk`)",
   () => {
@@ -39,7 +35,6 @@ describe.skipIf(!HAS_VERIFIER_KEYS)(
         vaultCompiledContract,
         "undeployed",
         CPK,
-        NO_MAINTENANCE_ENV,
         createVaultPrivateState(SECRET_KEY),
         pureCircuits.userCommitment(SECRET_KEY),
         SIGNET_CONTRACT_REF,
@@ -59,7 +54,6 @@ describe.skipIf(!HAS_VERIFIER_KEYS)(
           vaultCompiledContract,
           "undeployed",
           CPK,
-          NO_MAINTENANCE_ENV,
           createVaultPrivateState(SECRET_KEY),
           new Uint8Array(31), // not Bytes<32>: the generated arg validation must trip
           SIGNET_CONTRACT_REF,

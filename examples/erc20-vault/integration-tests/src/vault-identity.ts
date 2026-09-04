@@ -1,11 +1,11 @@
 // The user's vault identity: secret key -> commitment -> MPC derivation path.
 // Derivation calls the compiled circuits, never a TS re-implementation. The
-// secret itself is parsed by lib's `parseIdentitySecretKey`
+// secret itself is parsed by the deploy SDK's `parseIdentitySecretKey`
 // (`VAULT_USER_SECRET_KEY`, defaulting to the `USER_SEED` bytes).
 
 import { bytesToHex } from "@sig-net/midnight";
+import { parseIdentitySecretKey } from "@sig-net/midnight-contract-deploy";
 import { pureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { parseIdentitySecretKey } from "@sig-net/midnight-examples-lib";
 import { resolveUserSeed } from "@sig-net/midnight-examples-test-harness";
 
 /** The caller identity every vault interaction is bound to. */

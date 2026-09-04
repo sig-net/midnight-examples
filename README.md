@@ -544,7 +544,8 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
     │   │   ├── src/
     │   │   │   ├── deploy-vault.ts     # The split deploy (base tx + a maintenance update per
     │   │   │   │                       #   deferred circuit): constructor args & witness
-    │   │   │   │                       #   integration live here, wallet & tx plumbing from lib.
+    │   │   │   │                       #   integration live here, wallet plumbing from the deploy
+    │   │   │   │                       #   SDK, split-deploy tx builders from lib.
     │   │   │   ├── initialise-vault.ts # The deployer-gated post-deploy initialise.
     │   │   │   ├── entrypoint-env.ts   # The entrypoints' env: .env + process.env, refused when
     │   │   │   │                       #   the file's values belong to another network.

@@ -13,8 +13,8 @@ import {
   type RequestIdHex,
   respondBidirectionalEventToCircuitInput,
 } from "@sig-net/midnight";
+import type { EncPublicKey } from "@sig-net/midnight-contract-deploy";
 import { VAULT_DEPOSIT_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
-import type { EncPublicKey } from "@sig-net/midnight-examples-lib";
 
 import type { VaultContext } from "../vault-context.ts";
 import { pollRespondBidirectional } from "./poll-respond-bidirectional.ts";

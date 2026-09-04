@@ -10,7 +10,7 @@ import "./provided-context.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { getMidnightNodeConfig } from "@sig-net/midnight-examples-lib";
+import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 import { afterAll, beforeAll, beforeEach, inject } from "vitest";
 
 import { testHeader } from "./output.ts";

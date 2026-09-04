@@ -15,6 +15,7 @@ import {
   signetEventSourceFromPublicDataProvider,
   SignetRequestResponseReader,
 } from "@sig-net/midnight";
+import { getMidnightNodeConfig, type MidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 import {
   createVaultPrivateState,
   VAULT_REQUESTS_PATH,
@@ -28,11 +29,7 @@ import {
   buildVaultProviders,
   vaultCompiledContract,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
-import {
-  getMidnightNodeConfig,
-  type MidnightNodeConfig,
-  type ProofServerObserver,
-} from "@sig-net/midnight-examples-lib";
+import type { ProofServerObserver } from "@sig-net/midnight-examples-lib";
 import { requireEnv, type SessionWallet } from "@sig-net/midnight-examples-test-harness";
 
 import { resolveUserIdentity, type UserIdentity } from "./vault-identity.ts";

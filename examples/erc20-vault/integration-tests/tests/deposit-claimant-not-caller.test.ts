@@ -26,12 +26,12 @@
 // (src/flows/) — in-process, never a subprocess.
 
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
-import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   deriveAccountKeys,
   getMidnightNodeConfig,
   withSyncedWalletFacade,
-} from "@sig-net/midnight-examples-lib";
+} from "@sig-net/midnight-contract-deploy";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   banner,
   getErc20Balance,

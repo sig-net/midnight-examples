@@ -19,6 +19,13 @@ import {
   parseSecp256k1PublicKey,
 } from "@sig-net/midnight";
 import {
+  deriveAccountKeys,
+  envOrUndefined,
+  getDeployConfig,
+  parseIdentitySecretKey,
+  withSyncedWalletFacade,
+} from "@sig-net/midnight-contract-deploy";
+import {
   createVaultPrivateState,
   type DeployedVaultContract,
   deriveVaultEvmAddress,
@@ -26,13 +33,6 @@ import {
   readVaultLedger,
   VAULT_PRIVATE_STATE_ID,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
-  deriveAccountKeys,
-  envOrUndefined,
-  getDeployConfig,
-  parseIdentitySecretKey,
-  withSyncedWalletFacade,
-} from "@sig-net/midnight-examples-lib";
 
 import { resolveEvmTargets, type VaultEvmTargets } from "./evm-targets.ts";
 import { vaultCompiledContract } from "./vault-contract-binding.ts";
@@ -231,7 +231,7 @@ export async function initialiseVaultContract(
  * (`VAULT_DEPLOYER_SECRET_KEY`, falling back to the `DEPLOYER_SEED` bytes), so
  * the caller and the commitment sealed at deploy agree by construction.
  *
- * @param env - The environment: lib's Midnight node configuration, `DEPLOYER_SEED`,
+ * @param env - The environment: the deploy SDK's Midnight node configuration, `DEPLOYER_SEED`,
  *   `VAULT_DEPLOYER_SECRET_KEY`, and everything {@link resolveInitialiseConfig} reads;
  *   defaults to `process.env`.
  * @param contractAddress - The vault to initialise; defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.

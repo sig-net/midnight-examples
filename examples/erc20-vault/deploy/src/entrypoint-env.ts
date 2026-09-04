@@ -4,12 +4,11 @@
 // one the local e2e pipeline appended to the repo-root `.env`.
 
 import {
-  buildBaseEnv,
   envOrUndefined,
   getMidnightNodeConfig,
-  loadRepoDotEnv,
   type NetworkId,
-} from "@sig-net/midnight-examples-lib";
+} from "@sig-net/midnight-contract-deploy";
+import { buildBaseEnv, loadRepoDotEnv } from "@sig-net/midnight-examples-lib";
 
 // Values that only mean anything on the network that produced them. The e2e
 // setup pipeline appends the first two to the repo-root `.env` on every local

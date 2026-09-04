@@ -15,15 +15,15 @@ import * as Configuration from "@midnight-ntwrk/platform-js/effect/Configuration
 import * as SigningKey from "@midnight-ntwrk/platform-js/effect/SigningKey";
 import * as ledger from "@midnightntwrk/ledger-v9";
 import type { FacadeState } from "@midnightntwrk/wallet-sdk-facade";
-import { Effect, Layer, Option, type Types } from "effect";
-
-import { envOrUndefined } from "./env.ts";
 import {
+  envOrUndefined,
   getFaucetUrl,
   getMidnightNodeConfig,
+  isLocalStandaloneNetwork,
   type MidnightNodeConfig,
-} from "./midnight-node-config.ts";
-import { isLocalStandaloneNetwork, type NetworkId } from "./network-id.ts";
+  type NetworkId,
+} from "@sig-net/midnight-contract-deploy";
+import { Effect, Layer, Option, type Types } from "effect";
 
 /** Everything needed to perform a contract deploy: which stack to target, and which wallet pays for it. */
 export interface DeployConfig {

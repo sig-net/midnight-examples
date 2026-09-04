@@ -18,7 +18,7 @@ import {
   getMidnightNodeConfig,
   initialiseWalletFacade,
   type WalletFacade,
-} from "@sig-net/midnight-examples-lib";
+} from "@sig-net/midnight-contract-deploy";
 
 import { requireEnv } from "./e2e-env.ts";
 

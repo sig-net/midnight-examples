@@ -9,7 +9,8 @@
 // for verifying the stack machinery, not for managing a stack you are
 // testing against.
 
-import { buildBaseEnv, getMidnightNodeConfig } from "@sig-net/midnight-examples-lib";
+import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
+import { buildBaseEnv } from "@sig-net/midnight-examples-lib";
 
 import { getEvmChainId } from "../src/evm.ts";
 import { runCommand } from "../src/exec.ts";

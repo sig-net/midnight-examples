@@ -20,6 +20,7 @@ import {
   fundChildFromRoot,
   generateHexSeed,
   GENESIS_MINT_WALLET_SEED,
+  getFaucetUrl,
   getMidnightNodeConfig,
   isFeeReady,
   isLocalStandaloneNetwork,
@@ -28,7 +29,6 @@ import {
   type WalletAddresses,
   WalletUnfundedError,
 } from "@sig-net/midnight-contract-deploy";
-import { getFaucetUrl } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv } from "./env-file.ts";

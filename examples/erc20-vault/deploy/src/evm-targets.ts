@@ -2,12 +2,12 @@
 // The addresses themselves are the contract package's canonicals; resolving
 // WHICH ones a given deploy seals is configuration, hence deploy's job.
 
+import { envOrUndefined } from "@sig-net/midnight-contract-deploy";
 import {
   AAVE_USDC,
   STATA_USDC,
   UNISWAP_SWAP_ROUTER_02,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { envOrUndefined } from "@sig-net/midnight-examples-lib";
 
 /** The EVM contracts `initialise` seals into the vault. */
 export interface VaultEvmTargets {

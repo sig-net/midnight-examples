@@ -1,7 +1,7 @@
 // The vault's midnight-js provider set: the zk-config paths the proof provider
 // reads keys from, the private-state store, and the wallet adapter. The types
 // it satisfies come from the contract package, the binding from
-// vault-contract-binding.ts, and the generic wallet plumbing from
+// vault-contract-binding.ts, and the midnight-js provider adapters from
 // @sig-net/midnight-examples-lib. Both the deploy flows and the integration
 // tests compose this and call `findDeployedContract(providers, ...)`.
 
@@ -12,16 +12,18 @@ import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-p
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
 import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
 import type {
+  AccountKeys,
+  MidnightNodeConfig,
+  WalletFacade,
+} from "@sig-net/midnight-contract-deploy";
+import type {
   VaultCircuitId,
   VaultProviders,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
-  type AccountKeys,
   createCrossContractProofServerProvider,
   createWalletAndMidnightProvider,
-  type MidnightNodeConfig,
   type ProofServerObserver,
-  type WalletFacade,
 } from "@sig-net/midnight-examples-lib";
 
 import { SIGNET_SIGNER_MANAGED_PATH, VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
@@ -31,7 +33,7 @@ import { SIGNET_SIGNER_MANAGED_PATH, VAULT_MANAGED_PATH } from "./vault-contract
  * keys from the contract package's compiler output on every network, so the
  * checkout must hold `yarn compile:erc20-vault:zk` output.
  *
- * @param facade - A started (and synced) wallet facade, see lib's `withSyncedWalletFacade`.
+ * @param facade - A started (and synced) wallet facade, see the SDK's `withSyncedWalletFacade`.
  * @param keys - The key material of the same wallet, for balancing and signing.
  * @param config - The Midnight network endpoints to run against.
  * @param proofObserver - Called after every proof-server /check and /prove round trip.

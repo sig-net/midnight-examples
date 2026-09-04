@@ -22,6 +22,7 @@
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
     "@sig-net/midnight": "0.21.0-rc.6",
     "@sig-net/midnight-contract": "0.21.0-rc.6",
+    "@sig-net/midnight-contract-deploy": "0.21.0-rc.6",
     "@sig-net/midnight-examples-erc20-vault-contract": "*",
     "@sig-net/midnight-examples-lib": "*"
   },

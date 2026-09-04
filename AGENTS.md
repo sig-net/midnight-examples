@@ -324,9 +324,11 @@ apply to all of them:
   `ledger(ctx.callContext.currentQueryContext.state)`. Circuit failures reject the
   promise (`await expect(...).rejects.toThrow(...)`). Pure circuits are synchronous,
   called directly via `pureCircuits.<name>(...)`.
-- **The deploy split: generic plumbing in `packages/lib`, everything
-  contract-specific in the example's own `deploy` package.** lib's deploy/wallet
-  helpers know no contract; the example's deploy package owns the constructor
+- **The deploy split: generic plumbing in `@sig-net/midnight-contract-deploy`
+  (wallet, node config, seeds, env) and `packages/lib` (the split-deploy
+  builders and midnight-js provider adapters), everything contract-specific in
+  the example's own `deploy` package.** Neither plumbing home knows a
+  contract; the example's deploy package owns the constructor
   args, witnesses, private state and post-deploy circuit calls, statically
   importing its own contract package's generated module so all of it stays fully
   typed. There is NO generic deployer package: a generic deployer forces dynamic
