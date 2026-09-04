@@ -496,7 +496,7 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
 │       ├── example-test.yaml       # Reusable workflow (workflow_call), parameterized by example
 │       │                           #   dir: install → compact update → compile:zk (cached) →
 │       │                           #   compose up → unit + integration tests.
-│       ├── erc20-vault.yaml        # Thin caller (~10 lines): paths-filter on
+│       ├── erc20-vault-test.yaml   # Thin caller (~10 lines): paths-filter on
 │       │                           #   examples/erc20-vault/**, packages/**, compose file and
 │       │                           #   the reusable workflow itself, then one `uses:` call.
 │       └── other-example.yaml      # One thin caller per example.
