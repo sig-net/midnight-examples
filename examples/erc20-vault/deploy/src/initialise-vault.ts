@@ -44,7 +44,7 @@ import { buildVaultProviders } from "./vault-providers.ts";
 export enum InitialiseVaultOutcome {
   /** The initialise circuit ran and sealed the configuration in this call. */
   Initialised = "initialised",
-  /** The ledger already reported the vault initialised; nothing was submitted. */
+  /** The ledger already reported the vault initialised, so nothing was submitted. */
   AlreadyInitialised = "already-initialised",
 }
 
@@ -129,12 +129,12 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
  * Resolve every `initialise` argument for the vault at `vaultContractAddress`.
  * The vault's EVM address and MPC response key are DERIVED from the MPC's
  * secp256k1 public key plus that contract address, so a fresh deploy needs no
- * new configuration; values already pinned in the environment are verified
+ * new configuration. Values already pinned in the environment are verified
  * against the derivation rather than trusted, since a stale pin would seal an
  * account the MPC never signs from.
  *
  * @param env - The environment providing `MPC_SECP256K1_PUBKEY`, `EVM_CHAIN_ID` and the
- *   optional `ROUTER` / `STATA_UNDERLYING` / `STATA_TOKEN` overrides.
+ *   optional `EVM_ROUTER` / `EVM_STATA_UNDERLYING` / `EVM_STATA_TOKEN` overrides.
  * @param vaultContractAddress - The deployed vault contract's address.
  * @returns The resolved arguments.
  * @throws {Error} If a required variable is missing, `EVM_CHAIN_ID` is not a positive
@@ -236,7 +236,7 @@ export async function initialiseVaultContract(
  * @param env - The environment: the deploy SDK's Midnight node configuration, `DEPLOYER_SEED`,
  *   `VAULT_DEPLOYER_SECRET_KEY`, and everything {@link resolveInitialiseConfig} reads;
  *   defaults to `process.env`.
- * @param contractAddress - The vault to initialise; defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
+ * @param contractAddress - The vault to initialise. Defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
  * @returns Whether this call initialised the vault or found it already initialised.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.

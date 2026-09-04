@@ -85,7 +85,7 @@ export function buildVaultProviders(
       privateStateStoreName: "vault-private-states",
 
       // Sublevel for contract-maintenance signing keys, keyed by contract
-      // address; written on deployContract. Default 'signing-keys'.
+      // address, written on deployContract. Default 'signing-keys'.
       // Set to prevent collision with other dApps.
       signingKeyStoreName: "vault-signing-keys",
 
@@ -120,7 +120,7 @@ export function buildVaultProviders(
     // Creates proven, unbalanced transactions (proves the contract-call
     // transcript). This is NOT the wallet's proving config: the facade's
     // proof server only proves the wallet's own balancing additions when it
-    // finalizes a recipe; the call transcript is proven here first. Spans the
+    // finalizes a recipe. The call transcript is proven here first. Spans the
     // vault AND the signet contract so deposit's cross-contract call
     // resolves keys for the whole call tree.
     proofProvider: createCrossContractProofServerProvider(

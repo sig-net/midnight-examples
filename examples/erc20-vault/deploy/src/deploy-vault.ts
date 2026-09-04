@@ -254,7 +254,7 @@ export interface VaultDeployment {
  * @param env - Environment providing `DEPLOYER_SEED`, `VAULT_DEPLOYER_SECRET_KEY`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the signet contract to seal as the
  *   cross-contract signer), `MAINTENANCE_SIGNING_KEY` and the deploy SDK's Midnight
- *   node configuration; defaults to `process.env`.
+ *   node configuration. Defaults to `process.env`.
  * @returns The deployed contract address and base deploy transaction id.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.

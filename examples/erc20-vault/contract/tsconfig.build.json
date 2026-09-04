@@ -1,7 +1,7 @@
 {
   // Emit build for npm publishing ONLY. Local dev and `yarn build` typecheck
   // under the base config's noEmit and consume raw TS source (exports ->
-  // ./src/index.ts); `prepack` runs this to emit the ./dist the published
+  // ./src/index.ts). `prepack` runs this to emit the ./dist the published
   // package ships, which publishConfig.exports points at.
   "extends": "./tsconfig.json",
   "compilerOptions": {

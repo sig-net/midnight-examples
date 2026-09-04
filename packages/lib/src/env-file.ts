@@ -5,7 +5,7 @@
 // entrypoint loads the file itself and overlays `process.env` on top.
 // Deliberately minimal: KEY=VALUE lines, `#` comment lines, optional single or
 // double quotes, and docker compose's inline-comment rule (see
-// {@link parseDotEnv}); no interpolation, no multiline. Compose reads the same
+// {@link parseDotEnv}), with no interpolation and no multiline. Compose reads the same
 // file for the fakenet container, so a value must parse identically here.
 
 import { readFileSync } from "node:fs";
@@ -18,7 +18,7 @@ export const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 /**
  * The value of one `KEY=<raw>` line, by docker compose's rules: a quoted
  * value is the text inside the quotes, whatever follows the closing quote
- * included a `#` comment; an unquoted value is trimmed and ends at the first
+ * included a `#` comment, and an unquoted value is trimmed and ends at the first
  * `#` preceded by whitespace, while a `#` with no whitespace before it is
  * part of the value.
  *

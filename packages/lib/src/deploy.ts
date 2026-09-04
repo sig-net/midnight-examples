@@ -25,6 +25,20 @@ import { Effect, Layer, Option } from "effect";
 // How long the deploy intent stays valid before it must be re-built.
 const DEPLOY_TTL_MS = 30 * 60 * 1000;
 
+// `MAINTENANCE_SIGNING_KEY` normalized to bare lowercase hex, or undefined when
+// unset. Shared by every reader so the accepted spellings cannot drift apart.
+function maintenanceSigningKeyHex(env: Record<string, string | undefined>): string | undefined {
+  const raw = envOrUndefined(env, "MAINTENANCE_SIGNING_KEY");
+  if (!raw) return undefined;
+  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hex)) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
+    );
+  }
+  return hex;
+}
+
 /** A circuit held back from the base deploy, added afterwards by a maintenance update. */
 export interface DeferredCircuit {
   /** The provable circuit id (its name). */
@@ -232,20 +246,6 @@ export function buildMaintenanceInsertTransaction(
     intent,
   );
   return { serializedTransaction: transaction.serialize() };
-}
-
-// `MAINTENANCE_SIGNING_KEY` normalized to bare lowercase hex, or undefined when
-// unset. Shared by every reader so the accepted spellings cannot drift apart.
-function maintenanceSigningKeyHex(env: Record<string, string | undefined>): string | undefined {
-  const raw = envOrUndefined(env, "MAINTENANCE_SIGNING_KEY");
-  if (!raw) return undefined;
-  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(hex)) {
-    throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
-    );
-  }
-  return hex;
 }
 
 /**

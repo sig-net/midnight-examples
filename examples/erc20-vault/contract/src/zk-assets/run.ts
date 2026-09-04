@@ -2,7 +2,7 @@
 // under one directory in the layout a fetch-based zk config provider reads
 // (`keys/`, `zkir/`, `compiler/`, and the same under `signet/`). The vault's
 // prover keys are regenerated with the pinned toolchain and accepted only when
-// every served file matches the manifest this package ships; the callee's
+// every served file matches the manifest this package ships. The callee's
 // tree is copied from `@sig-net/midnight-contract`, which ships its provers.
 // Not part of the package's export surface.
 
@@ -61,7 +61,7 @@ export interface ZkAssetsResult {
 }
 
 // This module sits at `<pkg>/src/zk-assets/` in the workspace and at
-// `<pkg>/dist/zk-assets/` when installed; `managed/` is a sibling of
+// `<pkg>/dist/zk-assets/` when installed. `managed/` is a sibling of
 // `zk-assets/` in both, and the package root is one level further up.
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(moduleDir, "..", "..");
@@ -145,7 +145,7 @@ async function resolveCompactPath(): Promise<string> {
 }
 
 // The pinned release must be installed and must report the compiler version
-// the shipped manifest records; the launcher's version directory is the only
+// the shipped manifest records. The launcher's version directory is the only
 // place the -rc suffix of the pin is visible.
 async function assertToolchain(
   options: ZkAssetsOptions,
@@ -261,7 +261,7 @@ async function produceVault(
 
   const stageDir = join(stagingRoot, "stage", "vault");
   // The served manifest is the shipped one, byte for byte, so its hash is
-  // the stable value an app pins; the build's own copy carries source-map
+  // the stable value an app pins, while the build's own copy carries source-map
   // hashes that depend on where it was compiled.
   await stageServedEntries(shipped.manifest, shipped.bytes, buildDir, stageDir, true);
   await assertStageVerifies("vault", shipped, stageDir, options.outDir);

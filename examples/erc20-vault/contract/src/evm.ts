@@ -1,7 +1,7 @@
 // The EVM side of the vault's interface: the contracts it trades and lends
 // through, and the byte conversion every EVM address crosses to reach a
 // circuit. The addresses are the Sepolia canonicals, which is what the example
-// runs against (its local stack forks Sepolia); `initialise` pins whichever
+// runs against (its local stack forks Sepolia), and `initialise` pins whichever
 // values a deployment chooses into the contract.
 
 import { hexToBytes } from "@sig-net/midnight";
