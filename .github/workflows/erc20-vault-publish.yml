@@ -143,7 +143,7 @@ jobs:
       # prepack refuses outright when keys/*.prover is absent.
       - name: Generate the vault's zk keys (the shipped manifest hashes them)
         run: yarn compile:erc20-vault:zk
-      - name: Build (typecheck, no emit: the package's dist comes from its prepack)
+      - name: Build (typecheck only, the published dist comes from prepack)
         run: yarn build
       - name: Unit tests (offline, in-process)
         run: yarn test
