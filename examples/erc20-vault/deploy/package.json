@@ -1,0 +1,52 @@
+{
+  "name": "@sig-net/midnight-examples-erc20-vault-deploy",
+  "version": "0.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sig-net/midnight-examples",
+    "directory": "examples/erc20-vault/deploy"
+  },
+  "type": "module",
+  "description": "Deploy + initialise flows for the ERC20 vault contract: the split base deploy plus per-circuit maintenance adds, and the deployer-gated initialise. Typed functions taking an env map, so the CLI entrypoints and the e2e setup run exactly the same code.",
+  "//exports": "Local dev consumes raw TS source. `publishConfig.exports` below swaps this to the emitted ./dist at publish time, so npm consumers get JS + .d.ts while the workspace keeps resolving to src.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "rm -rf dist && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "deploy": "tsx scripts/deploy.ts",
+    "deploy-initialise": "tsx scripts/deploy-initialise.ts",
+    "initialise": "tsx scripts/initialise.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "dependencies": {
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.6",
+    "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
+    "@sig-net/midnight": "0.21.0-rc.2",
+    "@sig-net/midnight-examples-erc20-vault-client": "workspace:*",
+    "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
+    "@sig-net/midnight-examples-lib": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

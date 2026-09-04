@@ -29,7 +29,7 @@ import tseslint from "typescript-eslint";
  *
  * A RELATIVE path into another package's output is `import-x/no-relative-packages`' catch.
  */
-const MANAGED_DEEP_IMPORTS = ["@midnight-examples/*/src/managed/**", "@sig-net/*/src/managed/**"];
+const MANAGED_DEEP_IMPORTS = ["@sig-net/*/src/managed/**"];
 
 export default defineConfig([
   // Only generated output that ESLint would otherwise lint. node_modules is
@@ -43,6 +43,8 @@ export default defineConfig([
     // hardhat solc output: absent until `yarn compile:evm` runs.
     "examples/*/integration-tests/artifacts/**",
     "examples/*/integration-tests/cache/**",
+    // The published packages' emit, produced by `prepack` and gitignored.
+    "**/dist/**",
   ]),
 
   {
@@ -97,7 +99,7 @@ export default defineConfig([
 
   {
     name: "workspace/jsdoc",
-    files: ["**/src/**/*.ts", "**/deploy.ts"],
+    files: ["**/src/**/*.ts", "**/deploy.ts", "**/record-contract-address.ts"],
     extends: [jsdoc.configs["flat/recommended-typescript-error"]],
     rules: {
       // Every export carries a block. Internal helpers are the author's call.

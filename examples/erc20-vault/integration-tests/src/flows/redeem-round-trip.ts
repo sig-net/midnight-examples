@@ -1,8 +1,8 @@
 // The full redeem journey as one arrange-stage helper: startRedeem, MPC signature, broadcast,
 // completeRedeem. No approve is needed: the vault redeems its OWN shares (owner = vault).
-import { VAULT_REDEEM_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { getTransactionNonce } from "@midnight-examples/test-harness";
 import type { RequestIdHex } from "@sig-net/midnight";
+import { VAULT_REDEEM_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";

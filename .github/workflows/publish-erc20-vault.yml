@@ -1,0 +1,262 @@
+# Publishes the erc20-vault example's npm packages, in dependency order:
+#
+#   @sig-net/midnight-examples-lib                            (packages/lib)
+#   @sig-net/midnight-examples-erc20-vault-contract           (examples/erc20-vault/contract)
+#   @sig-net/midnight-examples-erc20-vault-client             (examples/erc20-vault/client)
+#   @sig-net/midnight-examples-erc20-vault-deploy             (examples/erc20-vault/deploy)
+#
+# Release tags are per-example, so a future example publishes from its own
+# workflow on its own tag prefix:
+#
+#   erc20-vault-v1.2.3        -> npm 1.2.3       (dist-tag latest)
+#   erc20-vault-v1.2.3-rc.4   -> npm 1.2.3-rc.4  (dist-tag rc)
+#
+# packages/lib is shared by every example rather than owned by this one, but
+# client and deploy import it at runtime, so it publishes here and moves in
+# lockstep with this tag. When a second example starts publishing, lib needs a
+# release line of its own before both examples can cut releases independently.
+#
+# The vault's prover keys do not go to npm. They are uploaded as assets on this
+# tag's GitHub release, one per circuit, and the contract package ships
+# everything else (verifier keys, zkir, the compact integrity manifest). The
+# client downloads a circuit's prover key on demand and verifies it against that
+# shipped manifest, so the npm package stays small and the bytes stay anchored
+# to a hash npm delivered with provenance. The release also carries
+# zk-config.tar.gz, those same three artifacts laid out for an app that serves
+# them from its own origin, which is how a browser consumer gets them.
+
+name: publish-erc20-vault
+
+on:
+  push:
+    tags:
+      - "erc20-vault-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-erc20-vault-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Reviewer-gated environment: a human approves before any step runs.
+    environment: npm-publish
+    permissions:
+      contents: write # create the release and upload the prover-key assets
+      id-token: write # OIDC trusted publishing
+    steps:
+      - name: Refuse a ref that is not a release tag
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ] || ! printf '%s' "$GITHUB_REF_NAME" |
+            grep -Eq '^erc20-vault-v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
+            echo "::error::publish runs on an erc20-vault-vX.Y.Z or erc20-vault-vX.Y.Z-rc.N tag only, got $GITHUB_REF_TYPE $GITHUB_REF_NAME"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: the stable-tag guard below asks whether the tagged
+          # commit is an ancestor of main.
+          fetch-depth: 0
+          persist-credentials: false
+      # Tag rulesets gate WHO may create a stable tag; this guards WHERE it
+      # points. A hyphen in the version marks a prerelease (the same test the
+      # publish step uses to pick the npm dist-tag), and prereleases may come
+      # from any branch.
+      - name: Stable tags must point at a commit on main
+        if: ${{ !contains(github.ref_name, '-rc.') }}
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::stable tag $GITHUB_REF_NAME is not on main; only prerelease (-rc.N) tags may come from other branches"
+            exit 1
+          }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+          # corepack owns yarn: the action's yarn-1 cache probe would die here
+          package-manager-cache: false
+      - name: Enable corepack (yarn 4 via the packageManager field)
+        run: corepack enable
+      # Just log the version. Upgrading npm here breaks sigstore (provenance).
+      - run: npm --version
+      # The toolchain installs fresh here, no compact-* cache: its downloads
+      # are checksum-verified and cost seconds, so caching them in a publish
+      # job would trade nothing for a cache-poisoning surface.
+      - name: Install the compact toolchain (pinned launcher + compiler, per AGENTS.md)
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.compact/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.compact/bin" >> "$GITHUB_PATH"
+          # Launcher pinned to compact-v0.5.1 (never releases/latest): the
+          # toolchain is frozen, so bump this tag deliberately.
+          if ! command -v compact >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -LsSf --retry 4 -o /tmp/compact-installer.sh \
+              https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.1/compact-installer.sh
+            echo "85e74a53ae4a67b31fa4d854f3b6ffb4c29f7c53e3372c5008b6a4729a8b4a73  /tmp/compact-installer.sh" | sha256sum -c
+            sh /tmp/compact-installer.sh
+          fi
+          # compactc 0.33.0-rc.2 is the PINNED compiler, part of the ledger-9
+          # MATCHED SET. It is a prerelease published on the toolchain's LF
+          # home (LFDT-Minokawa/compact), which the launcher's channel does not
+          # list: download it directly and let the launcher adopt it. A bare
+          # `compact update` would install latest stable and break the pin, so
+          # it is never run here.
+          RC_DIR="$HOME/.compact/versions/0.33.0-rc.2/x86_64-unknown-linux-musl"
+          if [ ! -x "$RC_DIR/compactc" ]; then
+            mkdir -p "$RC_DIR"
+            curl -fsSL --retry 4 -o /tmp/compactc-rc.zip \
+              https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.33.0-rc.2/compactc_v0.33.0-rc.2_x86_64-unknown-linux-musl.zip
+            echo "3055ab92bbc8d5bb0d6282b661b83761d2a0de2ee37e21cf7107e25aaf2a9aad  /tmp/compactc-rc.zip" | sha256sum -c
+            unzip -qo /tmp/compactc-rc.zip -d "$RC_DIR"
+            chmod +x "$RC_DIR"/*
+          fi
+          # `compact update <ver>` adopts an already-on-disk version without
+          # downloading; if the launcher refuses (version not in its channel),
+          # wire the default symlinks it would have created.
+          mkdir -p "$HOME/.compact/bin"
+          compact update 0.33.0-rc.2 || ln -sfn "$RC_DIR"/* "$HOME/.compact/bin/"
+          compact compile --version
+      - name: Install dependencies (frozen, from the committed yarn.lock)
+        run: yarn install --immutable
+      - name: Verify the published package versions move in lockstep (and match the tag)
+        run: |
+          set -euo pipefail
+          # The tag carries the example prefix; npm versions do not.
+          TAG_VERSION="${GITHUB_REF_NAME#erc20-vault-v}"
+          for dir in \
+            packages/lib \
+            examples/erc20-vault/contract \
+            examples/erc20-vault/client \
+            examples/erc20-vault/deploy; do
+            version=$(node -p "require('./$dir/package.json').version")
+            name=$(node -p "require('./$dir/package.json').name")
+            if [ "$version" != "$TAG_VERSION" ]; then
+              echo "::error::$name is at $version, but tag $GITHUB_REF_NAME expects $TAG_VERSION"
+              exit 1
+            fi
+          done
+      - name: Check formatting (prettier)
+        run: yarn format:check
+      - name: Compile (skip-zk)
+        run: yarn compile
+      # Type-aware lint rules read the generated src/managed/ types the source
+      # imports, so lint cannot run on a clean checkout before compile.
+      - name: Lint (eslint, type-aware)
+        run: yarn lint
+      # Keygen runs here every time, with NO cache: these keys are published
+      # bytes, and a cache is written by other workflows. Restoring them would
+      # put an artifact this job did not build into the release. The ~10 minutes
+      # it costs buys a package built entirely from the tagged source.
+      #
+      # The prover keys are release bytes twice over: they upload as the tag's
+      # assets, and their hashes go into the contract-manifest.json the npm
+      # package ships, which is what a downloading consumer verifies against.
+      # skip-zk output has neither, so the contract package's prepack refuses
+      # outright when keys/*.prover is absent.
+      - name: Generate the vault's zk keys (the release assets and the shipped manifest need them)
+        run: yarn compile:erc20-vault:zk
+      - name: Build (typecheck, no emit; each package's dist comes from its prepack)
+        run: yarn build
+      - name: Unit tests (simulator-only, offline)
+        run: yarn test
+      # Without the vault's ~1.1 GB of prover keys the contract package packs to
+      # roughly 2 MB. Log the packed and unpacked sizes BEFORE publishing: a
+      # registry size rejection lands on the first package otherwise, leaving
+      # the rest of the release half-published. The guard is the npm side of the
+      # split: a prover key in the tarball means the package the client expects
+      # to be download-backed is shipping the keys after all.
+      - name: Report the contract package's packed size (and refuse a prover key in it)
+        run: |
+          set -euo pipefail
+          yarn workspace @sig-net/midnight-examples-erc20-vault-contract pack --out /tmp/vault-contract.tgz
+          if tar -tzf /tmp/vault-contract.tgz | grep -q '\.prover$'; then
+            echo "::error::the contract tarball contains prover keys, which publish as GitHub release assets rather than to npm"
+            rm -f /tmp/vault-contract.tgz
+            exit 1
+          fi
+          packed=$(du -h /tmp/vault-contract.tgz | cut -f1)
+          unpacked=$(du -sh examples/erc20-vault/contract/dist | cut -f1)
+          echo "contract package: $packed packed, $unpacked unpacked"
+          echo "contract package: $packed packed, $unpacked unpacked" >> "$GITHUB_STEP_SUMMARY"
+          rm -f /tmp/vault-contract.tgz
+      # Assets BEFORE npm: a run that dies half way must never leave published
+      # packages pointing at a release whose keys are not there yet.
+      #
+      # The release carries one .prover per circuit plus zk-config.tar.gz, which
+      # holds everything else a fetch-based provider reads (zkir, verifier keys,
+      # the integrity manifest). Browsers cannot fetch release assets at all, so
+      # a browser app extracts that archive into an origin it serves itself and
+      # copies in the provers it proves with. The Node client reads those three
+      # from the npm package and needs the .prover assets alone.
+      #
+      # A version already on npm freezes the manifest hashes its consumers
+      # verify downloads against, and keygen is not byte-reproducible, so a
+      # rerun of an already-published version leaves the assets it pinned alone.
+      # That skip is what makes a re-run after a partial failure safe.
+      - name: Upload the release assets, prover keys and zk-config (skipped once the version is on npm)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./examples/erc20-vault/contract/package.json').version")
+          name="@sig-net/midnight-examples-erc20-vault-contract"
+          if [ -n "$(npm view "$name@$version" version 2>/dev/null || true)" ]; then
+            echo "$name@$version is already on npm and its shipped manifest pins the assets on this release, leaving them untouched"
+            exit 0
+          fi
+          notes="ZK artifacts for the erc20-vault example at $version: one .prover asset per circuit, plus zk-config.tar.gz holding the zkir, the verifier keys and the integrity manifest for an app that serves them from its own origin. The npm packages carry everything else and download the provers on demand."
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # A hyphen in the version marks a prerelease, the same test the npm
+            # dist-tag choice makes below.
+            if [ "${version#*-}" != "$version" ]; then
+              gh release create "$GITHUB_REF_NAME" --verify-tag --prerelease --title "$GITHUB_REF_NAME" --notes "$notes"
+            else
+              gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes "$notes"
+            fi
+          fi
+          managed="examples/erc20-vault/contract/src/managed/erc20-vault"
+          # Members are named one by one, which is both what leaves the provers
+          # out and what keeps the archive from landing inside itself. Extracting
+          # it into a served directory yields keys/, zkir/ and compiler/ at the
+          # top level, the layout a fetch-based zk config provider expects.
+          (cd "$managed" && tar -czf keys/zk-config.tar.gz zkir compiler keys/*.verifier)
+          cd "$managed/keys"
+          keys=(*.prover)
+          if [ ! -e "${keys[0]}" ]; then
+            echo "::error::no prover keys under $PWD, so the zk compile step did not produce the assets this release needs"
+            exit 1
+          fi
+          # Uploaded alongside the assets so an operator can check a cached or
+          # mirrored copy without the npm package's manifest in hand.
+          sha256sum "${keys[@]}" zk-config.tar.gz > SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" "${keys[@]}" zk-config.tar.gz SHA256SUMS --clobber
+      - name: Publish to npm (dependency order, versions already on npm are skipped)
+        run: |
+          set -euo pipefail
+          for entry in \
+            "@sig-net/midnight-examples-lib:packages/lib" \
+            "@sig-net/midnight-examples-erc20-vault-contract:examples/erc20-vault/contract" \
+            "@sig-net/midnight-examples-erc20-vault-client:examples/erc20-vault/client" \
+            "@sig-net/midnight-examples-erc20-vault-deploy:examples/erc20-vault/deploy"; do
+            name="${entry%%:*}"
+            dir="${entry#*:}"
+            version=$(node -p "require('./$dir/package.json').version")
+            if [ -n "$(npm view "$name@$version" version 2>/dev/null || true)" ]; then
+              echo "$name@$version is already on npm, skipping"
+              continue
+            fi
+            echo "publishing $name@$version"
+            # A hyphen in the version marks a prerelease: keep it off the
+            # `latest` dist-tag so a plain install never resolves to an rc.
+            if [ "${version#*-}" != "$version" ]; then
+              yarn workspace "$name" npm publish --provenance --tag rc
+            else
+              yarn workspace "$name" npm publish --provenance
+            fi
+          done

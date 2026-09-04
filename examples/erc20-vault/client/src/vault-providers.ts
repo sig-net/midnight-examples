@@ -1,85 +1,29 @@
-// The vault's midnight-js provider set — everything VAULT-specific about
-// talking to a deployed instance: the compiled-contract binding (generated
-// module + witnesses + the contract package's managed assets), the zk-config
-// path the proof provider reads keys from, the circuit-id union, and the
-// private-state store id. The generic wallet + adapter come from
-// @midnight-examples/lib; {@link file://./vault-context.ts createVaultContext}
-// composes the two and calls `findDeployedContract(providers, ...)`.
+// The vault's midnight-js provider set: the zk-config paths the proof provider
+// reads keys from, the private-state store, and the wallet adapter. The types
+// it satisfies come from the contract package, the binding from
+// vault-contract-binding.ts, and the generic wallet plumbing from
+// @sig-net/midnight-examples-lib. Both the deploy tooling and the integration tests
+// compose this and call `findDeployedContract(providers, ...)`.
 
-import { fileURLToPath } from "node:url";
-
-import {
-  Contract,
-  type VaultPrivateState,
-  witnesses,
-} from "@midnight-examples/erc20-vault-contract";
+import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
+import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
+import type {
+  VaultCircuitId,
+  VaultProviders,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   type AccountKeys,
   createCrossContractProofServerProvider,
   createWalletAndMidnightProvider,
-  makeCompiledContract,
+  isLocalStandaloneNetwork,
   type MidnightNodeConfig,
   type ProofServerObserver,
   type WalletFacade,
-} from "@midnight-examples/lib";
-import type { MidnightProviders } from "@midnight-ntwrk/midnight-js/types";
-import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
-import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
-import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
+} from "@sig-net/midnight-examples-lib";
 
-/** The vault's provable circuit ids, straight from the generated contract. */
-export type VaultCircuitId = keyof InstanceType<typeof Contract>["provableCircuits"];
-
-/**
- * Literal of the private-state storage key. Just a string, but a
- * single-value union so the providers/`findDeployedContract` pairing is
- * enforced by the type system.
- */
-export type VaultPrivateStateId = "erc20-vault";
-
-/**
- * Key under which midnight-js persists the vault's private state locally (in
- * the private-state store from {@link buildVaultProviders}). Distinct per
- * contract so two clients don't share an entry.
- */
-export const VAULT_PRIVATE_STATE_ID: VaultPrivateStateId = "erc20-vault";
-
-/** The full midnight-js provider set, typed to the vault. */
-export type VaultProviders = MidnightProviders<
-  // PCK: the union of the contract's provable circuit names.
-  VaultCircuitId,
-  // PSI: the private-state storage key literal.
-  VaultPrivateStateId,
-  // PS: the shape of the contract's private state object.
-  VaultPrivateState
->;
-
-// The compiler output dirs (each holds contract/, keys/, zkir/): the "zk
-// config roots" the proof + zk-config providers read proving/verifier keys
-// from. The request circuits cross-contract-call the signet contract, so
-// proving spans both: SignetSigner is a compile-time symlink to the published
-// signet contract's managed output (see the contract package's compile
-// script). Resolved RELATIVE to this file: the contract package is this
-// example's sibling, and an integrator copies the whole example directory
-// together.
-/** Absolute path of the vault contract's compiler output dir. */
-export const VAULT_MANAGED_PATH = fileURLToPath(
-  new URL("../../contract/src/managed/erc20-vault", import.meta.url),
-);
-/** Absolute path of the signet callee contract's compiler output dir. */
-export const SIGNET_SIGNER_MANAGED_PATH = fileURLToPath(
-  new URL("../../contract/src/managed/SignetSigner", import.meta.url),
-);
-
-/**
- * The vault's compact-js compiled-contract binding: generated module + real
- * witnesses + the contract package's compiled assets. Consumed by
- * `findDeployedContract` (and usable by deploy tooling).
- */
-export const vaultCompiledContract = makeCompiledContract<
-  Contract<VaultPrivateState>,
-  VaultPrivateState
->("erc20-vault", Contract, witnesses, VAULT_MANAGED_PATH);
+import { SIGNET_SIGNER_MANAGED_PATH, VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
+import { VaultReleaseZkConfigProvider } from "./vault-release-zk-config-provider.ts";
 
 /**
  * Build the midnight-js provider set for the vault.
@@ -99,7 +43,15 @@ export function buildVaultProviders(
   // Retrieves the ZK artifacts of a contract needed to create proofs.
   // Key methods: getProverKey(id), getVerifierKey(id), getZKIR(id) — id is
   // typed to the circuit-name union.
-  const zkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH);
+  //
+  // The local standalone stack proves against the keys `compile:zk` just wrote,
+  // so it reads them straight off disk. Every deployed network goes through the
+  // release-backed provider, which serves local keys when they are there and
+  // otherwise downloads the circuit's key from the contract package version's
+  // GitHub release: the published package ships verifier keys only.
+  const vaultZkConfigProvider = isLocalStandaloneNetwork(config.networkId)
+    ? new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH)
+    : new VaultReleaseZkConfigProvider();
 
   // The callee (signet contract) circuits, resolved for the cross-contract
   // proof provider so deposit's whole call tree proves.
@@ -154,7 +106,10 @@ export function buildVaultProviders(
       subscriptionURL: config.indexerWsUrl,
     }),
 
-    zkConfigProvider,
+    // midnight-js's provider record holds exactly one, so the SLOT keeps the
+    // bare kind name; the local binding is qualified because a second one
+    // (the signet callee's) exists beside it.
+    zkConfigProvider: vaultZkConfigProvider,
 
     // Creates proven, unbalanced transactions (proves the contract-call
     // transcript). This is NOT the wallet's proving config: the facade's
@@ -164,7 +119,7 @@ export function buildVaultProviders(
     // resolves keys for the whole call tree.
     proofProvider: createCrossContractProofServerProvider(
       config.proofServerUrl,
-      [zkConfigProvider, signetZkConfigProvider],
+      [vaultZkConfigProvider, signetZkConfigProvider],
       proofObserver,
     ),
 

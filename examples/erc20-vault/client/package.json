@@ -1,0 +1,48 @@
+{
+  "name": "@sig-net/midnight-examples-erc20-vault-client",
+  "version": "0.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sig-net/midnight-examples",
+    "directory": "examples/erc20-vault/client"
+  },
+  "type": "module",
+  "description": "Node runtime client for the ERC20 vault: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. The half of the vault's client surface that cannot be environment-agnostic, so it sits beside the contract package rather than inside it.",
+  "//exports": "Local dev consumes raw TS source. `publishConfig.exports` below swaps this to the emitted ./dist at publish time, so npm consumers get JS + .d.ts while the workspace keeps resolving to src.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "rm -rf dist && tsc -p tsconfig.build.json",
+    "test": "vitest run"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "dependencies": {
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.6",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.6",
+    "@sig-net/midnight-contract": "0.21.0-rc.2",
+    "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
+    "@sig-net/midnight-examples-lib": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

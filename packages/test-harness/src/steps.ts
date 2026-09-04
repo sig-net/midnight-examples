@@ -13,15 +13,16 @@
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { inspect } from "node:util";
 
-import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { deriveMidnightResponseKey, formatSecp256k1PublicKey } from "@sig-net/midnight";
 import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
+import { getMidnightNodeConfig, loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
-import { appendRepoDotEnv, loadRepoDotEnv } from "./env-file.ts";
+import { appendRepoDotEnv } from "./env-file.ts";
 import { getEvmChainId } from "./evm.ts";
-import { CommandError, REPO_ROOT, runCommand, runRootScript } from "./exec.ts";
+import { CommandError, runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { banner, logSkip } from "./output.ts";
 import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
@@ -243,6 +244,26 @@ export async function compileContractZk(
 }
 
 /**
+ * Whether `error` is the transient "the paying wallet has no spendable DUST
+ * yet" failure a young chain produces, as opposed to a real failure.
+ *
+ * The marker reaches us in several shapes: the wallet SDK's own error, an error
+ * wrapping it as `cause`, a tagged object, or a subprocess failure. A
+ * {@link CommandError} is matched on its FULL captured output, since the
+ * trigger the child printed may sit far above the tail its message quotes.
+ * Anything else is inspected INCLUDING its cause chain: `String(error)`
+ * renders only the top-level message and would miss the wrapped forms,
+ * turning the dust window into a hard failure.
+ *
+ * @param error - The thrown value to classify.
+ * @returns Whether the failure is the transient dust-generation one.
+ */
+export function isDustGenerationFailure(error: unknown): boolean {
+  const rendered = error instanceof CommandError ? error.output : inspect(error, { depth: 5 });
+  return rendered.includes("InsufficientFunds") || rendered.includes("could not balance dust");
+}
+
+/**
  * Thrown by an action that must never be reattempted, whatever its text says:
  * it left behind partial state (an on-chain deploy, a half-installed contract)
  * that a second attempt would duplicate rather than resume.
@@ -286,12 +307,7 @@ export async function retryWhileDustGenerates<T>(
       if (error instanceof NonRetryableError) {
         throw error;
       }
-      // A subprocess failure is matched on its FULL output: the trigger the
-      // child printed may sit far above the tail its message quotes.
-      const text = error instanceof CommandError ? error.output : String(error);
-      const transient =
-        text.includes("InsufficientFunds") || text.includes("could not balance dust");
-      if (!transient || attempt >= MAX_ATTEMPTS) {
+      if (!isDustGenerationFailure(error) || attempt >= MAX_ATTEMPTS) {
         throw error;
       }
       console.log(

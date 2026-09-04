@@ -38,11 +38,11 @@ import {
   serializeRespondOutput,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { fetchFakenetResponse } from "../fakenet-responses.ts";
 import { ERC20_TRANSFER_RESULT_SCHEMA } from "../mpc-routing.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import { warnOnce } from "../warn-once.ts";
 
 /** What the MPC attested for a request, resolved by signature verification. */

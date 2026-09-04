@@ -13,6 +13,11 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
+import {
+  SIGNET_SIGNER_MANAGED_PATH,
+  VAULT_MANAGED_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-client";
+
 import { STATIC_METRICS_FILE, STATIC_METRICS_MARKDOWN_FILE } from "../src/benchmark/paths.ts";
 import {
   type CircuitStaticMetrics,
@@ -20,7 +25,6 @@ import {
   renderStaticMetricsMarkdown,
   resolveZkirV3Binary,
 } from "../src/benchmark/static-metrics.ts";
-import { SIGNET_SIGNER_MANAGED_PATH, VAULT_MANAGED_PATH } from "../src/vault-providers.ts";
 
 const zkirV3 = resolveZkirV3Binary(process.env);
 

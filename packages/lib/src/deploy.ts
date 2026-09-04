@@ -1,15 +1,14 @@
-// Contract-deploy plumbing shared by every contract package's deploy script:
-// the deploy config, the compiled-contract binding, and building the unproven
-// deploy transaction. Everything contract-SPECIFIC — constructor args, witness
-// implementations, initial private state — stays in the contract package's own
-// deploy.ts and arrives here through the type parameters.
+// Contract-deploy plumbing shared by every example's deploy package: the
+// deploy config, the compiled-contract binding, and building the unproven
+// deploy and maintenance-update transactions. Everything contract-SPECIFIC
+// (constructor args, witness implementations, initial private state) stays in
+// the example's own deploy package and arrives here through the type
+// parameters. Configuration is read from the `env` map passed in, never from
+// `process.env`, so one caller can deploy under an environment it composed.
 
 import { NodeContext } from "@effect/platform-node";
-import {
-  CompiledContract,
-  type Contract,
-  ContractExecutable,
-} from "@midnight-ntwrk/compact-js/effect";
+import type { Contract } from "@midnight-ntwrk/compact-js/effect";
+import { CompiledContract, ContractExecutable } from "@midnight-ntwrk/compact-js/effect";
 import { ZKFileConfiguration } from "@midnight-ntwrk/compact-js-node/effect";
 import * as CoinPublicKey from "@midnight-ntwrk/platform-js/effect/CoinPublicKey";
 import * as Configuration from "@midnight-ntwrk/platform-js/effect/Configuration";
@@ -154,6 +153,7 @@ const DEPLOY_TTL_MS = 30 * 60 * 1000;
  * @param compiledContract - The bound contract, from {@link makeCompiledContract}.
  * @param networkId - The network the transaction targets.
  * @param coinPublicKeyHex - The deploying wallet's Zswap coin public key (hex).
+ * @param env - The environment carrying `MAINTENANCE_SIGNING_KEY` (see {@link resolveMaintenanceSigningKey}).
  * @param initialPrivateState - The private state the constructor (and its witnesses, if any) runs against.
  * @param constructorArgs - The contract's constructor arguments, statically typed per contract.
  * @returns The deterministic contract address plus the serialized unproven transaction.
@@ -164,6 +164,7 @@ export async function buildDeployTransaction<C extends Contract.Contract<PS>, PS
   compiledContract: CompiledContract.CompiledContract<C, PS>,
   networkId: NetworkId,
   coinPublicKeyHex: string,
+  env: Record<string, string | undefined>,
   initialPrivateState: PS,
   ...constructorArgs: Contract.Contract.InitializeParameters<C>
 ): Promise<DeployTransaction> {
@@ -174,7 +175,7 @@ export async function buildDeployTransaction<C extends Contract.Contract<PS>, PS
   // authority, leaving the contract unmaintainable.
   const keysLayer = Layer.succeed(Configuration.Keys, {
     coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
-    getSigningKey: () => resolveMaintenanceSigningKey(),
+    getSigningKey: () => resolveMaintenanceSigningKey(env),
   });
 
   // Run the contract constructor and attach verifier keys → initial ContractState.
@@ -239,6 +240,17 @@ const operationIdToString = (id: string | Uint8Array): string =>
 export const SPLIT_DEPLOY_BASE_SUBMITTED_MARKER = "[split-deploy] base deploy tx submitted";
 
 /**
+ * Thrown by a split-deploy flow that fails AFTER its base deploy transaction
+ * was submitted. The split deploy has no resume path, so rerunning the flow
+ * from the top would deploy a SECOND contract and orphan the half-installed
+ * first one: a caller wrapping the flow in a retry loop must rethrow this
+ * error instead of reattempting, whatever transient failure it carries as its
+ * `cause`. The in-process counterpart of
+ * {@link SPLIT_DEPLOY_BASE_SUBMITTED_MARKER}.
+ */
+export class SplitDeployAfterBaseSubmitError extends Error {}
+
+/**
  * Like {@link buildDeployTransaction}, but registers ONLY the circuits in
  * `baseCircuitIds` in the initial contract state, returning the REST so the caller
  * can add them with {@link buildMaintenanceInsertTransaction}. A contract whose full
@@ -252,6 +264,7 @@ export const SPLIT_DEPLOY_BASE_SUBMITTED_MARKER = "[split-deploy] base deploy tx
  * @param compiledContract - The bound contract, from {@link makeCompiledContract}.
  * @param networkId - The network the transaction targets.
  * @param coinPublicKeyHex - The deploying wallet's Zswap coin public key (hex).
+ * @param env - The environment carrying `MAINTENANCE_SIGNING_KEY` (see {@link resolveMaintenanceSigningKey}).
  * @param initialPrivateState - The private state the constructor runs against.
  * @param baseCircuitIds - Circuit ids to register in the base deploy; all others are deferred.
  * @param constructorArgs - The contract's constructor arguments.
@@ -264,6 +277,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   compiledContract: CompiledContract.CompiledContract<C, PS>,
   networkId: NetworkId,
   coinPublicKeyHex: string,
+  env: Record<string, string | undefined>,
   initialPrivateState: PS,
   baseCircuitIds: readonly string[],
   ...constructorArgs: Contract.Contract.InitializeParameters<C>
@@ -271,7 +285,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   // Fail before anything is built, let alone submitted: without an authority key the
   // base deploy would land under an SDK-sampled throwaway authority and the deferred
   // circuits could never be installed, leaving a permanently unusable contract.
-  if (Option.isNone(resolveMaintenanceSigningKey())) {
+  if (Option.isNone(resolveMaintenanceSigningKey(env))) {
     throw new Error(
       "MAINTENANCE_SIGNING_KEY must be set for a split deploy: the deferred circuits are " +
         "installed by maintenance updates its authority signs.",
@@ -279,7 +293,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   }
   const keysLayer = Layer.succeed(Configuration.Keys, {
     coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
-    getSigningKey: () => resolveMaintenanceSigningKey(),
+    getSigningKey: () => resolveMaintenanceSigningKey(env),
   });
 
   const deployResult = await Effect.runPromise(
@@ -343,26 +357,6 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
 }
 
 /**
- * `MAINTENANCE_SIGNING_KEY` as normalized 64-digit hex, or undefined when unset. The single
- * definition of the env var's accepted format, which {@link resolveMaintenanceSigningKey} and
- * {@link buildMaintenanceInsertTransaction} both parse through.
- *
- * @returns The normalized key hex, or undefined when the env var is unset.
- * @throws {Error} If the env var is set but not 32 bytes of hex.
- */
-function maintenanceSigningKeyHex(): string | undefined {
-  const raw = envOrUndefined(process.env, "MAINTENANCE_SIGNING_KEY");
-  if (!raw) return undefined;
-  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(hex)) {
-    throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
-    );
-  }
-  return hex;
-}
-
-/**
  * Build an unproven maintenance-update transaction that inserts `verifierKey` under `circuitId`
  * on the deployed contract at `contractAddress`, signed by the `MAINTENANCE_SIGNING_KEY` authority.
  * Ledger-level operation-version `'v4'` (which accepts the v7 verifier keys the compiler emits),
@@ -370,6 +364,7 @@ function maintenanceSigningKeyHex(): string | undefined {
  * `currentContractStateBytes`, so re-query the live state before each add.
  *
  * @param networkId - The network the transaction targets.
+ * @param env - The environment carrying `MAINTENANCE_SIGNING_KEY` (the authority that signs the update).
  * @param contractAddress - The deployed contract's address (hex).
  * @param circuitId - The circuit id to install `verifierKey` under.
  * @param verifierKey - The new circuit's verifier key bytes.
@@ -379,13 +374,14 @@ function maintenanceSigningKeyHex(): string | undefined {
  */
 export function buildMaintenanceInsertTransaction(
   networkId: NetworkId,
+  env: Record<string, string | undefined>,
   contractAddress: string,
   circuitId: string,
   verifierKey: Uint8Array,
   currentContractStateBytes: Uint8Array,
 ): { serializedTransaction: Uint8Array } {
-  const hex = maintenanceSigningKeyHex();
-  if (hex === undefined) {
+  const hex = maintenanceSigningKeyHex(env);
+  if (!hex) {
     throw new Error(
       "MAINTENANCE_SIGNING_KEY must be set to sign a maintenance update for the contract's authority.",
     );
@@ -429,6 +425,20 @@ export function assertDeployerFunded(state: FacadeState): void {
   );
 }
 
+// `MAINTENANCE_SIGNING_KEY` normalized to bare lowercase hex, or undefined when
+// unset. Shared by every reader so the accepted spellings cannot drift apart.
+function maintenanceSigningKeyHex(env: Record<string, string | undefined>): string | undefined {
+  const raw = envOrUndefined(env, "MAINTENANCE_SIGNING_KEY");
+  if (!raw) return undefined;
+  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hex)) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
+    );
+  }
+  return hex;
+}
+
 /**
  * The contract maintenance authority signing key, read from
  * `MAINTENANCE_SIGNING_KEY` (32-byte BIP-340 key as hex, `0x` optional).
@@ -436,11 +446,13 @@ export function assertDeployerFunded(state: FacadeState): void {
  * circuits via a maintenance update later; the same secret must sign those
  * updates. Absent yields `Option.none()`, leaving the contract unmaintainable.
  *
+ * @param env - The environment to read `MAINTENANCE_SIGNING_KEY` from.
  * @returns The maintenance authority key, or none when the env var is unset.
  * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is set but not 32 bytes of hex.
  */
-export function resolveMaintenanceSigningKey(): Option.Option<SigningKey.SigningKey> {
-  const hex = maintenanceSigningKeyHex();
-  if (hex === undefined) return Option.none();
-  return Option.some(SigningKey.make(hex));
+export function resolveMaintenanceSigningKey(
+  env: Record<string, string | undefined>,
+): Option.Option<SigningKey.SigningKey> {
+  const hex = maintenanceSigningKeyHex(env);
+  return hex ? Option.some(SigningKey.make(hex)) : Option.none();
 }

@@ -1,7 +1,6 @@
 // Settle side of the supply flow: resolve the MPC's attested outcome by signature
 // verification, then settle through the circuit the output selects (completeSupply mints the
 // attested stataUSDC shares, refundSupply re-mints the surrendered underlying).
-import { VAULT_SUPPLY_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
 import {
   deserializeEvmOutput,
   MPC_FAILURE_OUTPUT,
@@ -13,11 +12,12 @@ import {
   serializeRespondOutput,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
+import { VAULT_SUPPLY_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { SUPPLY_OUTPUT_SCHEMA, SUPPLY_RESPOND_SCHEMA } from "../evm-stata.ts";
 import { type FakenetResponse, fetchFakenetResponse } from "../fakenet-responses.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import { warnOnce } from "../warn-once.ts";
 
 /** The resolved attested outcome of a supply (uint64 shares minted, or the failure output). */

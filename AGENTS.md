@@ -8,11 +8,28 @@ node-modules`), split between shared machinery and the examples integrators copy
 - **`packages/test-harness`** — test-only machinery (stack bring-up/teardown,
   mpc-keys setup, wallet funding, env/session handling, subprocess helpers).
   Test-only deps live here and never touch an example's manifests.
-- **`examples/*/*`** — one directory per example, each holding 1–2 workspace
-  packages: `contract` (required) and `integration-tests` (as warranted). An
-  example's flows are typed functions in `integration-tests/src/flows/`, run
-  in-process by its tests; `integration-tests/scripts/` holds thin `tsx`
-  entrypoints over those same flows for hand-driving a live stack.
+- **`examples/*/*`** — one directory per example, each holding up to four
+  workspace packages: `contract` (required), then `client`, `deploy` and
+  `integration-tests` as warranted. Each package holds exactly one kind of
+  thing, and the split is by WHAT the code is, never by who happens to call it:
+  - `contract` — the Compact contract plus its environment-agnostic client
+    surface: witnesses, circuit-id/private-state/provider TYPES, ledger reads,
+    and the contract's own constants. Runs unchanged in a browser.
+  - `client` — the same client surface's Node half, the part that cannot be
+    environment-agnostic: the compiled-contract binding over `managed/`, and a
+    live provider set.
+  - `deploy` — ONLY deploying and post-deploy initialisation: constructor args,
+    the deploy transaction, one-shot init circuits, and the configuration those
+    resolve. Anything a client would still need after the deploy is over
+    belongs in `contract` or `client`, never here.
+  - `integration-tests` — flows and specs.
+  An example's flows are typed functions in `integration-tests/src/flows/`, run
+  in-process by its tests, and its deploy / init flows are typed functions in
+  `deploy/src/`, run in-process by the setup pipeline. Both kinds get thin `tsx`
+  entrypoints over those SAME functions for hand-driving a live stack
+  (`integration-tests/scripts/` and `deploy/scripts/`) —
+  never a subprocess call with its output scraped, which is how the two paths
+  silently diverge.
 
 Run `yarn install` from the repo root — never from inside a member. Run
 `yarn compile` before `build`/`test`: contract packages typecheck against their
@@ -42,13 +59,35 @@ any instinct carried in from product-repo conventions.
   example can't see, and it ideally shrinks toward zero as pieces graduate into
   the SDK. Test-only deps (vitest, hardhat, viem) live in
   `packages/test-harness` and never appear in an example's manifests.
-- **No workspace package is published by default.** Every member uses the
-  `@midnight-examples/*` scope and starts `"private": true`. The one exception
-  is contract packages: each is written to be publishable as-is (see the
-  environment-agnostic rule under "Contract packages"), and individual ones may
-  be published for consumption by downstream example applications that combine
-  many chains. Anything else worth publishing graduates to the protocol repo's
-  SDK packages.
+- **No workspace package is published by default.** Every member is named
+  `@sig-net/midnight-examples-*` and starts `"private": true`. That is the SAME
+  npm scope the published SDK uses (`@sig-net/midnight`,
+  `@sig-net/midnight-contract`), so the `midnight-examples-` prefix is the only
+  thing separating an example from a product package: never drop it, and never
+  clear `"private"` without meaning to publish into the SDK's scope. Anything
+  else worth publishing graduates to the protocol repo's SDK packages.
+  The packages that ARE published today are the erc20-vault trio plus the lib
+  they run on: `@sig-net/midnight-examples-lib`,
+  `@sig-net/midnight-examples-erc20-vault-{contract,client,deploy}`. They exist
+  for downstream example applications that combine many chains. Each drops
+  `"private"` and carries `files`, `publishConfig` and a `prepack`; the rest of
+  the workspace stays private. A contract package ships no `*.prover`: prover
+  keys publish as assets on the example's release tag, the client downloads the
+  one circuit it needs and verifies it against the manifest the npm package
+  ships, and the assets of a version already on npm are frozen (that manifest
+  pins their hashes, and keygen is not byte-reproducible).
+- **A published package's intra-workspace deps use `workspace:*`; its SDK deps
+  use a fixed npm version.** `workspace:*` resolves to the sibling during
+  development and yarn rewrites it to that sibling's EXACT version at pack time,
+  which is what keeps a release's packages pinned to each other rather than to
+  whatever the registry serves later. This does not soften the rule above that
+  an example names `@sig-net/midnight` / `@sig-net/midnight-contract` as a plain
+  npm semver range: `workspace:` is only ever for members of THIS repo, never a
+  reference back to the protocol repo.
+- **Every published package version moves in lockstep with its example's release
+  tag.** A release is tagged `<example-dir>-vX.Y.Z` (or `-vX.Y.Z-rc.N`) and the
+  publish workflow refuses to run unless every package it publishes is already
+  at exactly `X.Y.Z`. Bump them together in the commit that precedes the tag.
 
 Corollary: an example's `contract` package depends on the Signature Network SDK +
 compact tooling and **nothing else** — its dependency list is itself documentation
@@ -86,13 +125,17 @@ exception for that specific case.
   `yarn npm audit` reports no new advisory. The compact toolchain is likewise
   pinned: install it with `compact update 0.33.0-rc.2` (the exact version named
   in the README's prerequisites), and CI installs exactly that version. The
-  toolchain pin lives in several places that move TOGETHER: the workflow's
-  launcher URL (`compact-v0.5.1`) and compiler zip URL, the SHA-256 checksums
-  the workflow verifies for those two downloads (recompute each from a fresh
-  download of the new URL), the workflow cache keys, and the README's
-  Prerequisites table. This trigger is bidirectional: a request to "update the
-  compact version" AND a request to edit the version in the README's table
-  both mean updating every one of these sites in the same change.
+  toolchain pin lives in several places that move TOGETHER, in EVERY workflow
+  that installs the toolchain (`example-test.yaml`, `publish-erc20-vault.yml`
+  and `erc20-vault-deploy.yml` all do): each workflow's launcher URL
+  (`compact-v0.5.1`) and compiler zip
+  URL, the SHA-256 checksums it verifies for those two downloads (recompute
+  each from a fresh download of the new URL), the workflow cache keys, and the
+  README's Prerequisites table. This trigger is bidirectional: a request to
+  "update the compact version" AND a request to edit the version in the README's
+  table both mean updating every one of these sites in the same change. Grep
+  `.github/workflows/` for the old version rather than editing the workflows you
+  happen to remember.
   Corollary: a dependency shared by two members MUST resolve to the same
   version in every member. Bump it everywhere in the same change and
   `yarn install` from the root: a single shared version is what keeps the
@@ -103,6 +146,12 @@ exception for that specific case.
   No `dist/`, no `tsc --outDir`, no ts-node loaders, no copy steps. Tests run under
   vitest; entrypoints run under `tsx`. If you think you need a build step, stop and
   ask — a build step is a defect in this workspace, not a missing feature.
+  **The one exception is publishing:** each npm-published package additionally
+  emits `dist/` via a `tsconfig.build.json`, ships ONLY `dist/`
+  (`files: ["dist"]`), and swaps its entry to it through `publishConfig.exports`
+  at pack time. The emit belongs to `prepack`, never to `build`, so `yarn build`
+  keeps meaning "typecheck, no emit" everywhere and the workspace itself always
+  resolves raw `src/index.ts`, never `dist/`.
 - **ALWAYS finish a change with `yarn format:check && yarn lint && yarn build && yarn test`**
   in the member you touched (or from the root). `tsx` and vitest execute without
   typechecking — "it runs" is NOT verification. If you add a new top-level TS
@@ -238,10 +287,12 @@ apply to all of them:
   `node:` builtin imports (fs, path, crypto, …), no `process`/`process.env`
   access, no `Buffer` (use `Uint8Array`), no DOM/browser globals, no Node-only
   dependencies. Configuration enters as typed function parameters — never read
-  from the environment. `deploy.ts` sits outside the export surface precisely so
-  it can be a Node entrypoint: env access, filesystem, and
-  `@midnight-examples/lib` imports belong there (or in `integration-tests`),
-  never under `src/`.
+  from the environment. This is the rule that decides what may live here: the
+  ledger reads, the provider TYPE and the circuit-id union qualify, while the
+  Node binding and a live provider set do not and live in the example's
+  `client` package. Env access, filesystem and `@sig-net/midnight-examples-lib` imports
+  belong in `client`, `deploy` or `integration-tests`, never in a contract
+  package.
 - **Every in-circuit hash is `transientHash`** (wrapped in
   `upgradeFromTransient` where a `Bytes<32>` digest is needed), whatever the
   persistence class of the hashed value. No circuit calls `persistentHash` or
@@ -269,10 +320,20 @@ apply to all of them:
   promise (`await expect(...).rejects.toThrow(...)`). Pure circuits are synchronous,
   called directly via `pureCircuits.<name>(...)`.
 - **The deploy split: generic plumbing in `packages/lib`, everything
-  contract-specific in the example's own `deploy.ts`.** lib's deploy/wallet
-  helpers know no contract; the deploy script owns the constructor args,
-  witnesses, private state and post-deploy circuit calls, statically importing its
-  own generated module so all of it stays fully typed. There is NO generic
-  deployer package: a generic deployer forces dynamic module loading and witness
-  stubs, which break the moment a constructor takes real args — keep deploy logic
-  static and fully typed in the example's own contract package.
+  contract-specific in the example's own `deploy` package.** lib's deploy/wallet
+  helpers know no contract; the example's deploy package owns the constructor
+  args, witnesses, private state and post-deploy circuit calls, statically
+  importing its own contract package's generated module so all of it stays fully
+  typed. There is NO generic deployer package: a generic deployer forces dynamic
+  module loading and witness stubs, which break the moment a constructor takes
+  real args — keep deploy logic static and fully typed in the example's own
+  packages.
+- **Every deploy flow is a typed function taking an `env` map, and the
+  entrypoint is a shell over it.** `deployX(env = process.env)` returns its
+  outcome (the contract address, an initialise outcome enum); the CLI entrypoint
+  and the e2e setup step both CALL it, so the multistage deploy a remote network
+  needs is exercised on every local run. Never spawn a deploy as a subprocess and
+  parse its stdout: config then differs per caller, the return value degrades to
+  a regex, and only one of the two paths gets tested. Config is read from the
+  passed map (never `process.env` directly, never mutated), so every process
+  reads the SAME variable for the same thing.

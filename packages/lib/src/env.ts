@@ -1,7 +1,6 @@
-// Environment reads: the one place "blank means unset" is decided.
-//
-// Internal to this package on purpose, so it stays out of the curated
-// index.ts surface.
+// Environment reads: the one place "blank means unset" is decided, for this
+// package and for every consumer resolving its own configuration from an env
+// map (an example's deploy flows, the setup pipeline's steps).
 
 /**
  * The trimmed value of `name`, or `undefined` when it is unset OR blank.

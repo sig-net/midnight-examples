@@ -3,10 +3,10 @@
 // secret itself is parsed by lib's `parseIdentitySecretKey`
 // (`VAULT_USER_SECRET_KEY`, defaulting to the `USER_SEED` bytes).
 
-import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
-import { parseIdentitySecretKey } from "@midnight-examples/lib";
-import { resolveUserSeed } from "@midnight-examples/test-harness";
 import { bytesToHex } from "@sig-net/midnight";
+import { pureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { parseIdentitySecretKey } from "@sig-net/midnight-examples-lib";
+import { resolveUserSeed } from "@sig-net/midnight-examples-test-harness";
 
 /** The caller identity every vault interaction is bound to. */
 export interface UserIdentity {

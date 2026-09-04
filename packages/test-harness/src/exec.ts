@@ -1,13 +1,10 @@
-// Subprocess plumbing for SETUP steps that must shell out: docker compose,
-// the zk compile root scripts, and an example's `deploy` entrypoint. Flows
-// themselves are in-process typed function calls — nothing under a flow
-// should ever need this module.
+// Subprocess plumbing for SETUP steps that must shell out: docker compose and
+// the zk compile root scripts. Flows and contract deploys are in-process typed
+// function calls, so nothing under a flow should ever need this module.
 
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 
-/** Absolute path of the repository root (where the workspace's root scripts live). */
-export const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
+import { REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
 /**
  * Run a root-level package script (`yarn run <script>` at {@link REPO_ROOT}),
