@@ -19,8 +19,10 @@ import { hexToBytes } from "@sig-net/midnight";
 import {
   type AccountKeys,
   deriveAccountKeys,
+  ensureFeeReady,
   envOrUndefined,
   getDeployConfig,
+  getFaucetUrl,
   isLocalStandaloneNetwork,
   type MidnightNodeConfig,
   type NetworkId,
@@ -34,7 +36,6 @@ import {
   pureCircuits,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
-  assertDeployerFunded,
   buildDeployTransactionDeferring,
   buildMaintenanceInsertTransaction,
   type DeferredCircuit,
@@ -83,7 +84,9 @@ async function readContractState(
  * @param networkId - The network the updates target.
  * @param contractAddress - The deployed base contract's address.
  * @param deferred - The circuits to add, in order.
- * @throws {Error} If the base deploy never indexes, or an add's counter never advances.
+ * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor DUST before an add.
+ * @throws {Error} If the base deploy never indexes, no spendable DUST appears after registering
+ *   the wallet's NIGHT, or an add's counter never advances.
  */
 async function addDeferredCircuits(
   nodeConfig: MidnightNodeConfig,
@@ -122,7 +125,7 @@ async function addDeferredCircuits(
       current.serialized,
     );
     const txId = await withSyncedWalletFacade(accountKeys, nodeConfig, async (facade, state) => {
-      assertDeployerFunded(state);
+      await ensureFeeReady(facade, accountKeys, state, networkId, getFaucetUrl(env, networkId));
       return submitUnprovenTransaction(facade, accountKeys, serializedTransaction);
     });
     const target = current.counter + 1n;
@@ -216,9 +219,12 @@ export interface VaultDeployment {
  *   cross-contract signer), `MAINTENANCE_SIGNING_KEY` and the deploy SDK's Midnight
  *   node configuration; defaults to `process.env`.
  * @returns The deployed contract address and base deploy transaction id.
+ * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
+ *   DUST: the error carries the wallet's NIGHT receive address to fund.
  * @throws {Error} If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed,
- *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, the deployer
- *   wallet holds no funds, or the base deploy submission fails.
+ *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, no spendable
+ *   DUST appears after registering the wallet's NIGHT, or the base deploy
+ *   submission fails.
  * @throws {SplitDeployAfterBaseSubmitError} If installing the deferred
  *   circuits fails after the base deploy was submitted: a rerun would deploy
  *   a second contract, so callers must not retry on it.
@@ -273,7 +279,7 @@ export async function deployVault(
     accountKeys,
     deployConfig.midnightNodeConfig,
     async (facade, state) => {
-      assertDeployerFunded(state);
+      await ensureFeeReady(facade, accountKeys, state, networkId, getFaucetUrl(env, networkId));
       return submitUnprovenTransaction(
         facade,
         accountKeys,

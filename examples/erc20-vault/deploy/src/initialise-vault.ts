@@ -20,8 +20,10 @@ import {
 } from "@sig-net/midnight";
 import {
   deriveAccountKeys,
+  ensureFeeReady,
   envOrUndefined,
   getDeployConfig,
+  getFaucetUrl,
   parseIdentitySecretKey,
   withSyncedWalletFacade,
 } from "@sig-net/midnight-contract-deploy";
@@ -236,8 +238,11 @@ export async function initialiseVaultContract(
  *   defaults to `process.env`.
  * @param contractAddress - The vault to initialise; defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
  * @returns Whether this call initialised the vault or found it already initialised.
+ * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
+ *   DUST: the error carries the wallet's NIGHT receive address to fund.
  * @throws {Error} If no contract address is available, a required variable is missing,
- *   no contract answers at the address, or the circuit rejects the caller.
+ *   no spendable DUST appears after registering the wallet's NIGHT, no contract
+ *   answers at the address, or the circuit rejects the caller.
  */
 export async function initialiseVault(
   env: Record<string, string | undefined> = process.env,
@@ -270,7 +275,14 @@ export async function initialiseVault(
   );
   const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, nodeConfig.networkId);
 
-  return withSyncedWalletFacade(accountKeys, nodeConfig, async (facade) => {
+  return withSyncedWalletFacade(accountKeys, nodeConfig, async (facade, state) => {
+    await ensureFeeReady(
+      facade,
+      accountKeys,
+      state,
+      nodeConfig.networkId,
+      getFaucetUrl(env, nodeConfig.networkId),
+    );
     const providers = buildVaultProviders(facade, accountKeys, nodeConfig);
     const vault = await findDeployedContract(providers, {
       contractAddress: vaultContractAddress,
