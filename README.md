@@ -506,8 +506,9 @@ The `contract` package's dependency list demonstrates minimal Signature Network 
 │
 ├── packages/                   # Shared utilities for repository.
 │   ├── lib/                    # @sig-net/midnight-examples-lib
-│   │   ├── package.json        # Runtime helpers imported by examples
-│   │   ├── tsconfig.json       #   (wallet, providers, tx build & submit).
+│   │   ├── package.json        # Runtime helpers the deploy SDK does not publish
+│   │   ├── tsconfig.json       #   (split-deploy tx builders, provider adapters,
+│   │   │                       #   .env readers, shielded transfers).
 │   │   └── src/
 │   │       └── index.ts
 │   │

@@ -50,9 +50,11 @@ any instinct carried in from product-repo conventions.
   this repo's CI a continuous compatibility test of the published packages.
 - **Hoist only *boring infra*; duplicate anything *instructive*.** Each example
   must read standalone: an integrator copying `examples/<name>/` should see the
-  whole integration without chasing imports. Generic wallet/provider/test plumbing
-  belongs in `packages/lib` / `packages/test-harness`; anything protocol-relevant
-  belongs in the published SDK, not in either. When in doubt, duplicate in the
+  whole integration without chasing imports. Wallet, node-config, seed and deploy
+  plumbing comes from `@sig-net/midnight-contract-deploy`; generic provider/test
+  plumbing the SDK does not publish belongs in `packages/lib` /
+  `packages/test-harness`; anything protocol-relevant belongs in the published
+  SDK, not in either. When in doubt, duplicate in the
   example — readability of the example outranks DRY here. Keep `packages/lib`
   ruthlessly small: every import from it is plumbing an integrator copying an
   example can't see, and it ideally shrinks toward zero as pieces graduate into
