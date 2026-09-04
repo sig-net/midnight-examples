@@ -880,12 +880,12 @@ proof server restarts and resume vars between failures for you.
 
 # Releasing to npm
 
-Four packages publish to npm, and they are the whole published surface of the
+One package publishes to npm, and it is the whole published surface of the
 erc20-vault example:
 
 | Package | Directory | What a consumer gets |
 | ------- | --------- | -------------------- |
-| `@sig-net/midnight-examples-erc20-vault-contract` | [`contract/`](contract/) | The contract's export surface plus its compiled `managed/` assets: the generated module, the zkir, the verifier keys and the integrity manifest. The prover keys are release assets, fetched on demand (see [A note on package size](#a-note-on-package-size)) |
+| `@sig-net/midnight-examples-erc20-vault-contract` | [`contract/`](contract/) | The contract's export surface, its compiled `managed/` assets minus the prover keys (the generated module, the binary zkir, the verifier keys, the integrity manifest, and the signet callee's generated module), the `.compact` source, and the `erc20-vault-zk-assets` bin that regenerates the prover keys (see [Regenerating the zk assets](#regenerating-the-zk-assets)) |
 
 The deploy package and [`packages/lib`](../../packages/lib/) it runs on stay
 private: they are consumed only inside this workspace, by the entrypoints and
@@ -901,13 +901,11 @@ prefix. The tag carries the example name, the npm version does not:
 | `erc20-vault-v1.2.3` | `1.2.3` | `latest` |
 | `erc20-vault-v1.2.3-rc.4` | `1.2.3-rc.4` | `rc` |
 
-1. Set all four packages to the release version. The publish refuses to run
-   unless every one of them already reads exactly the tag's version:
+1. Set the contract package to the release version. The publish refuses to
+   run unless it already reads exactly the tag's version:
 
    ```sh
-   yarn workspaces foreach --all --include '@sig-net/midnight-examples-lib' \
-     --include '@sig-net/midnight-examples-erc20-vault-{contract,client,deploy}' \
-     version 1.2.3 --immediate
+   yarn workspace @sig-net/midnight-examples-erc20-vault-contract version 1.2.3
    ```
 
 2. Commit the bump, then tag it and push the tag:
@@ -918,87 +916,73 @@ prefix. The tag carries the example name, the npm version does not:
 
 3. The tag starts the
    [`publish-erc20-vault`](../../.github/workflows/publish-erc20-vault.yml)
-   workflow, which **waits for a reviewer to approve** the `npm-publish`
-   environment before any step runs. Nothing reaches npm until someone
-   approves it.
+   workflow under the `npm-publish` environment. Give that environment
+   required reviewers in the repository settings and nothing reaches npm
+   until someone approves the run.
 
-4. The workflow creates the GitHub release for the tag and uploads the ZK
-   artifacts to it: the 17 prover keys, one asset per circuit, plus
-   `zk-config.tar.gz` (the zkir, the verifier keys and the integrity manifest,
-   for an app that serves them from its own origin) and a `SHA256SUMS` file
-   covering all 15. The assets go up **before** anything reaches npm, so a
-   published package never points at a release whose keys are missing. Re-running the workflow for a
-   version that is already on npm leaves those assets untouched: the published
-   package's manifest pins their hashes, and keygen is not byte-reproducible.
-
-The workflow refuses any ref that is not an `erc20-vault-vX.Y.Z` or
-`erc20-vault-vX.Y.Z-rc.N` tag, and a stable tag must point at a commit on
-`main` (prerelease tags may come from any branch). It then reinstalls from the
-committed lockfile, compiles the contract **with** zk keys, and runs
-format/lint/build/test before publishing in dependency order with npm
-provenance. A version already on npm is skipped, so a re-run after a partial
-failure resumes rather than erroring.
+4. The workflow refuses any ref that is not an `erc20-vault-vX.Y.Z` or
+   `erc20-vault-vX.Y.Z-rc.N` tag, and a stable tag must point at a commit on
+   `main` (prerelease tags may come from any branch). It reinstalls from the
+   committed lockfile, compiles the contract **with** zk keys so the shipped
+   manifest hashes them, runs format/lint/build/test, checks the tarball
+   (no prover key, and the `.compact` source, the bin, the manifest and the
+   signet callee's module present), then publishes with npm provenance. A
+   version already on npm is skipped, so a re-run resumes rather than errors.
 
 ## A note on package size
 
-The vault has 17 circuits carrying over a gigabyte of prover keys, against
-kilobytes for the verifier keys that actually go on-chain. Those prover keys are not on
-npm: they are assets on the `erc20-vault-vX.Y.Z` GitHub release, which leaves
-the contract package at roughly 2 MB packed. The workflow logs the packed and
-unpacked size before it publishes anything, so a registry size rejection
-surfaces in that step rather than half way through the release.
+The vault has 17 circuits carrying 1.4 GB of prover keys, against kilobytes
+for the verifier keys that go on-chain. Those prover keys are published
+nowhere: the package packs to well under a megabyte, and the workflow logs the
+packed and unpacked size before it publishes anything.
 
-`buildVaultProviders` picks the key source from the network:
+Keygen is deterministic under the pinned toolchain: two independent
+`compact compile` runs of the same source with the same compiler release
+produce byte-identical keys, so the `compiler/contract-manifest.json` the
+package ships, which pins every artefact's size and sha256, is enough for a
+consumer to regenerate the keys and prove they are the published ones.
 
-- **`undeployed`** (the local standalone stack) reads keys straight off disk,
-  from whatever `yarn compile:erc20-vault:zk` last wrote. Nothing is downloaded.
-- **Every deployed network** goes through `VaultReleaseZkConfigProvider`, which
-  is still disk-first: a workspace checkout with freshly compiled keys uses
-  them. Only when the key is absent, the npm-installed case, does it download
-  that one circuit's asset from the release matching the contract package's
-  version. Proving a deposit costs about 14 MB rather than 1.1 GB, and a
-  consumer that only reads ledger state downloads nothing.
+Inside this workspace, `buildVaultProviders` reads the vault's keys from the
+contract package's own `managed/` output on every network, so a deploy or an
+e2e run against any network needs `yarn compile:erc20-vault:zk` first, and
+says so if the keys are missing.
 
-Every downloaded key is verified against the `compiler/contract-manifest.json`
-inside the npm package before it is used, so the bytes are anchored to a hash
-npm delivered with provenance rather than to the host they came from. Verified
-keys are cached under `$XDG_CACHE_HOME` (or `~/.cache`) in
-`sig-net-midnight-examples/erc20-vault/<version>/`. That directory is safe to
-delete at any time: entries that fail verification are discarded and fetched
-again.
+## Regenerating the zk assets
 
-A workspace checkout sits at version `0.0.0`, which has no release. Proving
-against a deployed network from a checkout therefore needs
-`yarn compile:erc20-vault:zk` first, and says so if the keys are missing.
-
-## Serving keys to a browser
-
-GitHub release assets carry no `Access-Control-Allow-Origin` header, on either
-the `releases/download` URL or the API's asset endpoint, so a browser cannot
-fetch them at all. An app that proves in the browser serves the artifacts from
-its own origin instead: its `public/` directory in development, a bucket behind
-its own domain in production.
-
-The release carries what that origin needs. Extract `zk-config.tar.gz`, which
-unpacks to `keys/`, `zkir/` and `compiler/`, then add a prover key for each
-circuit the app proves:
+An app that proves in the browser serves the artefacts from its own origin:
+its `public/` directory in development, a bucket behind its own domain in
+production. The package's bin lays that origin out. Install the package and
+the [pinned compact toolchain](../../README.md#prerequisites), then run:
 
 ```sh
-tag=erc20-vault-v1.2.3
-base=https://github.com/sig-net/midnight-examples/releases/download/$tag
-
-mkdir -p public/zk-config
-curl -fsSL "$base/zk-config.tar.gz" | tar -xz -C public/zk-config
-curl -fsSL -o public/zk-config/keys/deposit.prover "$base/deposit.prover"
+erc20-vault-zk-assets public
 ```
 
+It compiles the shipped `src/erc20-vault.compact` with the pinned compiler
+(about ten minutes), refuses anything that does not match the shipped
+manifest, and writes:
+
+```
+public/keys/<circuit>.prover, <circuit>.verifier    the vault's 17 circuits
+public/zkir/<circuit>.bzkir
+public/compiler/contract-manifest.json, contract-info.json
+public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract
+```
+
+A rerun verifies what is there and skips a tree that already matches;
+`--force` rebuilds it. `--signet-only` copies the callee's tree without the
+toolchain, `--vault-only` skips the copy. The run ends by printing each tree's
+`compiler/contract-manifest.json` sha256.
+
 Point [`@midnight-ntwrk/midnight-js-fetch-zk-config-provider`](https://www.npmjs.com/package/@midnight-ntwrk/midnight-js-fetch-zk-config-provider)
-at `5.0.0-beta.6`, the version matching the rest of this stack, and point it at
-the URL that directory is served from (`/zk-config` for the layout above). It
-reads the same
-`keys/<id>.prover`, `keys/<id>.verifier`, `zkir/<id>.bzkir` and
+at `5.0.0-beta.6`, the version matching the rest of this stack, at the origin
+(`/` for the vault and `/signet` for the callee in the layout above). It reads
+the same `keys/<id>.prover`, `keys/<id>.verifier`, `zkir/<id>.bzkir` and
 `compiler/contract-manifest.json` paths the Node provider does. Pass the
-sha-256 of `compiler/contract-manifest.json` as `expectedManifestHash` in its
-integrity options: that pins the served manifest to a hash the app controls,
-rather than trusting whatever manifest the origin hands back alongside the
-artifacts it certifies.
+printed sha256 as `expectedManifestHash` in its integrity options: that pins
+the served manifest to a hash the app controls, rather than trusting whatever
+manifest the origin hands back alongside the artefacts it certifies.
+
+For production, upload the four directories to the object store the app's
+origin points at, and upload again after every release: the manifest hash
+changes with the contract.

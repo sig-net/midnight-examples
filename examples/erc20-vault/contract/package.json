@@ -7,7 +7,7 @@
     "directory": "examples/erc20-vault/contract"
   },
   "type": "module",
-  "description": "The ERC20 vault Compact contract. src/index.ts is the curated export surface \u2014 this IS the \"sdk\" face of the package.",
+  "description": "The ERC20 vault Compact contract. src/index.ts is the curated export surface — this IS the \"sdk\" face of the package.",
   "//exports": "Local dev consumes raw TS source and the compiler output under src/managed. `publishConfig.exports` below swaps both to the emitted ./dist at publish time, where prepack copies the shippable managed/ parts.",
   "exports": {
     ".": "./src/index.ts",

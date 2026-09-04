@@ -1965,6 +1965,8 @@ __metadata:
     tsx: "npm:^4.23.1"
     typescript: "npm:^7.0.2"
     vitest: "npm:^4.1.10"
+  bin:
+    erc20-vault-zk-assets: ./dist/bin/erc20-vault-zk-assets.js
   languageName: unknown
   linkType: soft
 
