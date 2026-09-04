@@ -26,7 +26,9 @@ import type { VaultContext } from "../vault-context.ts";
  *
  * The caller must be the DEPLOYER identity: the circuit compares the
  * `callerSecretKey` witness commitment against the sealed `deployer` field, so
- * `VAULT_USER_SECRET_KEY` must hold the deployer's secret for this call.
+ * `context` must come from a session whose wallet seed is the deployer's
+ * (`MIDNIGHT_DEPLOYER_WALLET_SEED`, unless `VAULT_DEPLOYER_SECRET` overrides
+ * the identity the deploy sealed).
  *
  * @param context - The flow context.
  * @param config - The resolved circuit arguments, from the deploy package's

@@ -16,3 +16,7 @@ export * from "./signet-notifications.ts";
 export * from "./steps.ts";
 export * from "./waitForGo.ts";
 export * from "./wallets.ts";
+// Seed generation, re-exported so example setups generate additional wallet
+// seeds (e.g. an EVM-side user seed) the same way the harness generates the
+// Midnight ones.
+export { generateHexSeed } from "@sig-net/midnight-contract-deploy";

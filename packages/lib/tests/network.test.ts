@@ -37,7 +37,7 @@ describe("network ids", () => {
 
 describe("getMidnightNodeConfig for stagenet", () => {
   it("resolves the committed endpoints with no env vars set", () => {
-    expect(getMidnightNodeConfig({ NETWORK_ID: "stagenet" })).toEqual({
+    expect(getMidnightNodeConfig({ MIDNIGHT_NETWORK_ID: "stagenet" })).toEqual({
       networkId: "stagenet",
       indexerUrl: "https://indexer.stagenet.shielded.tools/api/v4/graphql",
       indexerWsUrl: "wss://indexer.stagenet.shielded.tools/api/v4/graphql/ws",
@@ -48,9 +48,9 @@ describe("getMidnightNodeConfig for stagenet", () => {
 
   it("env-provided endpoints override the defaults (WS twin derived from the indexer URL)", () => {
     const config = getMidnightNodeConfig({
-      NETWORK_ID: "stagenet",
+      MIDNIGHT_NETWORK_ID: "stagenet",
       MIDNIGHT_NODE_URL: "https://node.example",
-      MIDNIGHT_NODE_INDEXER_URL: "https://indexer.example/api/v4/graphql",
+      MIDNIGHT_INDEXER_URL: "https://indexer.example/api/v4/graphql",
     });
     expect(config).toEqual({
       networkId: "stagenet",
@@ -59,6 +59,12 @@ describe("getMidnightNodeConfig for stagenet", () => {
       nodeUrl: "https://node.example",
       proofServerUrl: "http://127.0.0.1:6300",
     });
+  });
+
+  it("rejects an unknown MIDNIGHT_NETWORK_ID", () => {
+    expect(() => getMidnightNodeConfig({ MIDNIGHT_NETWORK_ID: "nosuchnet" })).toThrow(
+      /Invalid MIDNIGHT_NETWORK_ID/,
+    );
   });
 
   it("publishes the stagenet faucet URL; MIDNIGHT_FAUCET_URL overrides it", () => {

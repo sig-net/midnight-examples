@@ -17,11 +17,11 @@ import {
 // stack the file legitimately holds local-chain values for all of them.
 const NETWORK_SCOPED_KEYS = [
   "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
-  "MPC_ROOT_KEY",
-  "MPC_SECP256K1_PUBKEY",
-  "MPC_RESPONSE_KEY",
+  "MPC_ROOT_PRIVATE_KEY",
+  "MPC_ROOT_PUBLIC_KEY",
+  "MPC_VAULT_RESPONSE_PUBLIC_KEY",
   "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
-  "EVM_VAULT_ADDRESS",
+  "EVM_VAULT_ACCOUNT_ADDRESS",
 ] as const;
 
 /**
@@ -31,7 +31,7 @@ const NETWORK_SCOPED_KEYS = [
  *
  * A vault deploy seals `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` into the contract as
  * a constructor argument, and `initialise` seals values derived from
- * `MPC_SECP256K1_PUBKEY`. Both are permanent. When the `.env` was written for a
+ * `MPC_ROOT_PUBLIC_KEY`. Both are permanent. When the `.env` was written for a
  * different network than this run targets (the usual case: a local e2e run
  * populated it, and the operator now points a shell at a remote network), those
  * file values are silently wrong and would produce a contract that can never
@@ -61,9 +61,9 @@ export function assertEnvFileMatchesNetwork(
   processEnv: Record<string, string | undefined>,
   networkId: NetworkId,
 ): void {
-  // Read the file's own NETWORK_ID rather than resolving a whole config from
-  // it: the network name is the only thing being compared.
-  const fileNetworkId = envOrUndefined(fileEnv, "NETWORK_ID") ?? "undeployed";
+  // Read the file's own MIDNIGHT_NETWORK_ID rather than resolving a whole config
+  // from it: the network name is the only thing being compared.
+  const fileNetworkId = envOrUndefined(fileEnv, "MIDNIGHT_NETWORK_ID") ?? "undeployed";
   if (fileNetworkId === networkId) return;
 
   const stale = NETWORK_SCOPED_KEYS.filter(

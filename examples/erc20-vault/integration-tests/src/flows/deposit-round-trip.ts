@@ -18,7 +18,7 @@ const MINUTE = 60_000;
 export interface DepositRoundTripOptions {
   /** Deposit amount in ERC20 base units. */
   readonly amount: bigint;
-  /** The ERC20 to deposit; defaults to the suite's `ERC20_ADDRESS`. */
+  /** The ERC20 to deposit; defaults to the suite's `EVM_ERC20_CONTRACT_ADDRESS`. */
   readonly erc20Address?: string;
   /**
    * Resume from an existing request instead of calling {@link startDeposit} —

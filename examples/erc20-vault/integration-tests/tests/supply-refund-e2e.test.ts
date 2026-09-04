@@ -18,6 +18,15 @@ import { vaultTokenType } from "../src/vault-token.ts";
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
+// The deployer's session, for initialise only: the circuit is gated to the
+// deployer identity (the deployer wallet seed's bytes, whose commitment the
+// deploy sealed), so the user session cannot drive it. Lazily built like
+// every session — a rerun against an initialised vault never starts it.
+const deployerSession = createVaultSession({
+  ...env,
+  MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
+});
+
 // 1 USDC (6 decimals): deposited, surrendered by the doomed supply, and refunded whole.
 const SUPPLY_AMOUNT = 1_000_000n;
 
@@ -25,6 +34,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
   installFlowHooks();
   afterAll(async () => {
     await session.stop();
+    await deployerSession.stop();
   });
 
   it(
@@ -32,9 +42,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
     async () => {
       const context = await session.vaultContext();
 
-      // Seal the config before any flow. A kept contract address that is already initialised
-      // is left untouched.
-      await initialise(context, resolveInitialiseConfig(env, context.vaultContractAddress));
+      // The setup pipeline deploys the vault but does not initialise it (the key it pins
+      // derives from the vault address), so seal the config here before any flow. A kept
+      // contract address that is already initialised is left untouched.
+      await initialise(
+        await deployerSession.vaultContext(),
+        resolveInitialiseConfig(env, context.vaultContractAddress),
+      );
 
       // Fund: deposit Aave USDC, minting the caller a shielded Aave-USDC coin and funding the
       // vault's EVM Aave-USDC balance (which the drain below then removes).

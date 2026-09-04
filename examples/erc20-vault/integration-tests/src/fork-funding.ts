@@ -140,18 +140,21 @@ async function liftAaveUsdcSupplyCap(provider: ethers.JsonRpcProvider): Promise<
 }
 
 /**
- * Setup step: deal the derived EVM accounts their gas + tokens on the fork. The user gets ETH +
- * USDC (the deposit source), and the vault gets ETH (withdraw/approve/swap gas, deposits fund
- * its USDC). Requires EVM_RPC_URL to point at a Sepolia fork exposing anvil_* cheatcodes.
+ * Setup step: deal the example's EVM accounts their gas + tokens on the fork. The deposit
+ * account gets ETH + USDC (the deposit source), the vault gets ETH (withdraw/approve/swap gas,
+ * deposits fund its USDC), and user 1's own wallet account gets ETH + USDC (a spendable wallet
+ * on the EVM side). Requires EVM_RPC_URL to point at a Sepolia fork exposing anvil_* cheatcodes.
  *
- * @param env - The suite's env accumulator (reads EVM_RPC_URL, EVM_USER_ADDRESS, EVM_VAULT_ADDRESS).
+ * @param env - The suite's env accumulator (reads EVM_RPC_URL, EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS,
+ *   EVM_VAULT_ACCOUNT_ADDRESS, EVM_USER1_WALLET_ACCOUNT_ADDRESS).
  * @throws {Error} If the anvil cheatcalls fail (the EVM is not a cheatcode-capable fork).
  */
 export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void> {
   const rpcUrl = requireEnv(env, "EVM_RPC_URL");
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const user = requireEnv(env, "EVM_USER_ADDRESS");
-  const vault = requireEnv(env, "EVM_VAULT_ADDRESS");
+  const user = requireEnv(env, "EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
+  const vault = requireEnv(env, "EVM_VAULT_ACCOUNT_ADDRESS");
+  const userWallet = requireEnv(env, "EVM_USER1_WALLET_ACCOUNT_ADDRESS");
 
   // Fail loudly BEFORE dealing: if USDC has no code, the EVM is not forking Sepolia (almost
   // always a missing/empty SEPOLIA_FORK_RPC_URL), and the balance-slot probe would fail with an
@@ -173,6 +176,7 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
   try {
     await dealFork(provider, user, USER_USDC, userAaveUsdc);
     await dealFork(provider, vault, 0n);
+    await dealFork(provider, userWallet, USER_USDC);
     if (aaveUsdcOnFork) await liftAaveUsdcSupplyCap(provider);
   } catch (error) {
     throw new Error(
@@ -182,6 +186,6 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
   }
   console.log(
     `dealt on fork: user ${user} <- 100 USDC${aaveUsdcOnFork ? " + 100 Aave USDC" : ""} + gas; ` +
-      `vault ${vault} <- gas`,
+      `vault ${vault} <- gas; user wallet ${userWallet} <- 100 USDC + gas`,
   );
 }

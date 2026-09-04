@@ -33,7 +33,7 @@ node-modules`), split between shared machinery and the examples integrators copy
 
 Run `yarn install` from the repo root — never from inside a member. Run
 `yarn compile` before `build`/`test`: contract packages typecheck against their
-generated `src/managed/` output. The full layout lives in [README.md](README.md).
+generated `src/managed/` output.
 
 # Examples-repo identity rules
 
@@ -337,3 +337,70 @@ apply to all of them:
   a regex, and only one of the two paths gets tested. Config is read from the
   passed map (never `process.env` directly, never mutated), so every process
   reads the SAME variable for the same thing.
+
+# Diagrams
+
+- **The style guide and workflow in [docs/diagramming.md](docs/diagramming.md) are
+  binding** for every draw.io diagram in this repo: the committed `.drawio` +
+  `.drawio.png` pair, the palette, the label styles, the shapes, the icon bank. Copy
+  styled cells from `docs/diagram-palette.drawio` rather than authoring styles by hand.
+- **Diagram labels are verbatim from source**: circuit names with parentheses
+  (`deposit(...)`), event and ledger field names exactly as exported. A label is correct
+  iff it greps in the source. When a term exists in several sources, truth priority is
+  code > README > diagram: take it from the leftmost source that has it. One exemption: the generic protocol diagram
+  (`docs/sign-bidirectional-flow.*`) depicts a hypothetical integrating contract, so its
+  placeholder circuits (`startCrossChain(...)`, `completeCrossChain(...)`) grep nowhere
+  by design. Every real name in it (events, singleton circuits, ledger fields) still
+  must grep.
+- **An example's actor map is the ONLY diagram carrying the contract's full
+  anatomy** (every exported circuit, every witness, every ledger field,
+  exported pure circuits omitted by default). A flow diagram's
+  contract box shows only the members (ledger fields, circuits, witnesses)
+  that flow interacts with, membership read from the
+  contract source and the flow's
+  `integration-tests/src/flows/` files. Kept cells are the actor map's own,
+  value and style byte-identical, only geometry free to adapt: the full rule is
+  the "Flow diagram membership" section of [docs/diagramming.md](docs/diagramming.md).
+- **NEVER:** hand-export from the draw.io UI, screenshot, pass ad hoc scale or border
+  overrides (resolution changes are edits to [drawio.config.json](drawio.config.json),
+  re-rendering every pair in the same change), commit a PNG not rendered from the
+  `.drawio` source beside it, leave an edge without `source` and `target` attachments,
+  or embed a draw.io SVG export in docs (it renders theme-mangled in dark-mode viewers).
+  Never draw a diagonal or almost-straight edge segment (edges are strict horizontal and
+  vertical runs, `strokeWidth=2`, coloured step edges turning their corners as arcs and
+  derivation edges keeping sharp right angles), never let an edge cut
+  through a shape when a route around exists, never let two edges of the same step
+  colour cross each other, and never scatter one step's edges across distant anchors
+  when they can share a base: the full routing rules are the "Edge routing" section of
+  [docs/diagramming.md](docs/diagramming.md).
+- **`drawio.config.json` lives ONCE at the repo root**, exactly as `eslint.config.js` and
+  `.prettierrc.json` do: it is found by upward search from each diagram, and one root file
+  is what reaches both `docs/` and every `examples/*/docs/`. A copy inside a docs directory
+  would govern only its siblings and drift from the rest.
+- **Eyeball every render before finishing**: downscale the PNG and read it as an image.
+  Broken edge labels, escaped containment, missing icons and dead bands of empty space
+  (area only a deleted or moved cell explains) are visible at a glance and invisible in
+  the XML. Ask of every render: does any region read as "something used to be here"?
+
+# Flow pages
+
+- **The style guide in [docs/flow-pages.md](docs/flow-pages.md) is binding** for every
+  flow page (`examples/*/docs/<flow>/<flow>.md`): the page DESCRIBES the flow as one
+  flat golden step list — `- **N.**` dash bullets carrying bold manual ordinals, with
+  detail bullets indented two spaces beneath each headline — and links into the
+  contract source and flow files instead of quoting them. The bullet shape is
+  deliberate (renderers indent nested dash bullets reliably where ordered lists do
+  not), so never "fix" the bold numbers into an ordered list.
+- **Code snippets on a flow page default to ZERO.** A reader who wants the code reads
+  the code and its comments through the page's links. A snippet earns its place only
+  where prose cannot carry a specific point (argument order in a hash, a byte
+  layout), cut to the lines that make that point.
+- **One vocabulary, two renderings per flow, both on the page**: the step-list
+  bullets (ordinal + the canonical string's tail) and the mermaid `Note over` lines
+  (the full canonical string). The strings are frozen per flow in the correspondence
+  contract, and a change to one rendering is a change to both in the same commit.
+  The flow diagram carries NO step text: its numbered circles are exactly the frozen
+  strings' ordinals (a branch's arms share one ordinal, one circle per arm), and
+  every bit of text on or beside an arrow is an edge label under the diagramming
+  style guide's golden rules — bold acting party, colon, verb-led body — never a
+  free-standing caption.

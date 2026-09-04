@@ -1,158 +1,165 @@
 # Midnight Contracts Calling Foreign Chains with Sig Network
 
-This monorepo contains experimental example projects demonstrating Midnight contracts leveraging the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains.
+This monorepo holds experimental example contracts for Midnight. They use the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains, through the [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow).
 
-They show how builders can integrate with the MPC's [sign bidirectional flow](https://docs.sig.network/architecture/sign-bidirectional) to bring functionality on foreign blockchains to their contracts on Midnight. The examples are built on [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight), the client-agnostic signet protocol library, and each example's `contract` package demonstrates the minimal dependencies an integrator needs.
+The examples demonstrate how to integrate using the following packages:
+- [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight): the
+  client-agnostic protocol library (the shared Compact modules, state readers,
+  event decoders, request feed and crypto helpers).
+- [`@sig-net/midnight-contract`](https://www.npmjs.com/package/@sig-net/midnight-contract):
+  the central Signet singleton contract.
+- [`@sig-net/midnight-contract-deploy`](https://www.npmjs.com/package/@sig-net/midnight-contract-deploy):
+  deploy tooling for that contract plus generic Midnight deploy and wallet
+  plumbing. Used here by the test harness to deploy the singleton for the
+  local e2e stack.
 
-Jump to the [Quickstart](#quickstart) to get an example running, read the [Integrator Guide](#integrator-guide) to wire the protocol into your own contract, or start at [Repository Layout](#repository-layout) to gain a deeper understanding of what you can find in this repository.
+## Reading Guide
+- Start by reading the [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
+- Then go through the [Integrator Guide](#integrator-guide) to see how to wire your own applications with Sig Network to make cross chain calls.
+- Or jump straight into complete [Examples](#examples) to see applications of the protocol.
+
+If you are looking for the parts of the Sig Network stack that these examples are built upon, visit:
+- [Midnight Integration Protocol and SDK Repository](https://github.com/sig-net/midnight-integration)
+- [Sig Network Distributed MPC Repository](https://github.com/sig-net/mpc)
+
+# Examples
+
+Each example is a directory under [`examples/`](examples/) holding up to four packages, split by what the code is: `contract` (required), plus `client`, `deploy` and `integration-tests` as warranted.
+
+The examples are what integrators read and copy. Shared repo-private plumbing lives under [`packages/`](packages/): `lib` holds the runtime helpers the examples import (wallets, providers, transaction build and submit), and `test-harness` the test-only utilities behind the e2e suites (stack bring-up, wallet funding, the setup pipeline).
 
 > ## ⚠️ CAUTION ⚠️
 >
 > These are example applications for educational and experimental purposes.
 > Use at your own risk and expect rapid iteration.
 
-# Sign Bidirectional Flow
+| Example | What it demonstrates | Flow walkthroughs |
+|---|---|---|
+| [ERC20 Vault](examples/erc20-vault/README.md) | A Midnight vault holding, swapping (Uniswap) and lending (Aave) ERC20 tokens on an EVM chain. | [deposit](examples/erc20-vault/docs/deposit/deposit.md), [withdraw](examples/erc20-vault/docs/withdraw/withdraw.md), [swap](examples/erc20-vault/docs/swap/swap.md), [supply](examples/erc20-vault/docs/supply/supply.md), [redeem](examples/erc20-vault/docs/redeem/redeem.md) |
 
-The flow comprises 5 steps:
+# Sign Bidirectional Protocol Flow
 
-1. Client calls a contract on Midnight which requests a signature for a transaction destined for a foreign chain. The signature is made with a key derived for the requesting contract (see [Derived keys](#derived-keys)).
-2. Sig Network MPC honours the request, generating the transaction signature and posting it back to Midnight.
-3. Client extracts the signature, using it to submit the signed transaction to the foreign chain.
-4. Sig Network MPC observes the foreign transaction and posts an attestation of the execution back to Midnight: its ECDSA signature over the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))`. Both the digest and the output itself travel off chain.
-5. Client obtains the execution output off chain (see the output recovery note below: it broadcast the transaction in step 3, so it can read the result), extracts the posted attestation and submits both back to the Midnight contract, which recomputes the digest from the output bytes and verifies the MPC's signature in-circuit against the contract's own response key (see [Derived keys](#derived-keys)), completing the foreign transaction execution.
+This Sig Network Protocol Flow brings foreign blockchain assets and functionality to contracts on Midnight. Contracts record signature requests that the Sig Network MPC signs. dApps relay signed transactions to foreign chains and the MPC attests their execution outcomes back to Midnight. Then contracts complete cross chain interactions with in-circuit validation of the MPC foreign execution attestation.
 
-> **Output recovery:** how the client reads the execution output is chain-specific. For EVM chains it is the mined call's return data, extracted with `debug_traceTransaction` (callTracer, top call frame), the same RPC method the MPC observes executions with. Clients without trace access can fetch the raw output from the fakenet responder's helper API at `GET /responses/{requestId}` (served by [`ResponsesApi.ts`](https://github.com/sig-net/solana-signet-program/blob/fakenet-v0.18.0/fakenet-signer/src/server/ResponsesApi.ts), port 3040 in the local stack, consumed here by [`fakenet-responses.ts`](examples/erc20-vault/integration-tests/src/fakenet-responses.ts)). The fetched bytes are untrusted until step 5's in-circuit signature verification.
+Illustrated below, the protocol is best understood in 5 steps:
 
-## Derived keys
+![The sign bidirectional protocol flow: five steps between a dApp, contracts on Midnight, the Sig Network MPC and a foreign blockchain](./docs/sign-bidirectional-flow.drawio.png)
 
-Every key the MPC uses is derived for the requesting contract and a path. There are two kinds: the request signing key, whose path each contract chooses, and the response signing key, whose path is fixed by the protocol. Both key derivations are **scoped by the address** of the requesting contract.
+1. A user interacts with a dApp, which starts a cross chain interaction by calling a circuit (`startCrossChain(...)` in the diagram) on a contract on Midnight that has integrated with Sig Network.
+2. The MPC network, watching for events on the Singleton contract, picks up the emitted **SignBidirectionalEventNotification** and honours the signature request it points to.
+3. The integrating dApp, watching for events on the Singleton contract, picks up the emitted **SignatureRespondedEvent** and relays the fully signed transaction to the foreign chain.
+4. The MPC network observes execution of the signed transaction on the foreign blockchain and posts an attestation thereof back to Midnight.
+5. The integrating dApp collects the execution output and its attestation and submits both back to the integrating contract, completing the cross chain interaction.
 
-### Request signing key
+Consult the [protocol documentation in the Midnight integration repository](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-protocol-flow) for a more detailed description of the protocol including:
 
-The key the MPC signs requested foreign transactions with:
+- MPC key derivation and signing
+- MPC discovery and verification of the Sign Bidirectional Event signature requests
+- MPC & Client foreign transaction execution output recovery (including failed transaction flow)
+- MPC foreign transaction execution attestation
+- Handling foreign transaction execution failure
 
-`requestSigningKey = f(mpcRootKey[keyVersion], contractAddress, path)`
+# Integrator Guide
 
-The path is 32 opaque bytes of the contract's choosing (e.g. a fixed literal for a contract-owned account like "vault", or a hash of a caller's secret for per-user accounts). There are no format requirements. The contract address is always part of the derivation, so no contract can reach another contract's derived keys.
+Integrating a contract on Midnight with the Sig Network MPC requires 4 once-off setup
+steps and 5 per-request runtime steps.
 
-### Response key
+Setup entails:
+1. Installing `@sig-net/midnight` into your project.
+2. Importing the Signet Compact module into your contract.
+3. Declaring the required protocol state in your ledger (the `SignBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits invoke via cross contract call to notify the MPC of requests).
+4. Setting the contract's own `mpcResponseKey` with an initialisation circuit call after deploy (its derivation takes the contract's address as input, which exists only once the contract is deployed).
 
-The key the MPC signs remote execution attestations with when posting them back to Midnight:
+At runtime you integrate the [Sign Bidirectional Protocol Flow above](#sign-bidirectional-protocol-flow):
+- **Steps 1** and **5** are circuits on your contract.
+- **Steps 2**, **3** and **4** are off-chain client/dApp/relayer code built on the readers and helpers in `@sig-net/midnight`.
 
-`responseKey = f(mpcRootKey[keyVersion], contractAddress, "midnight response key")`
+Consult the [Integrator Guide documentation](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide) in the Midnight integration repository for a more detailed description of how to integrate.
 
-The same derivation, but with the path fixed to the literal `"midnight response key"`, giving each contract one well-known response key. A contract pins its own response key in its ledger after deploy and verifies every response against it in-circuit (step 5 of the flow above).
+# Contributor Guide
 
-# Quickstart
+First install the [Prerequisites](#prerequisites), then get set up for contributing by getting both test layers green: the offline unit tests, then the end to end integration suites.
 
-The quickest way to get going with these examples is to get an end to end integration test for one of them running locally. We recommend you start with the erc20-vault happy day test.
+Every change must also pass the linter and the formatter, which CI enforces on every pull request. One ESLint flat config (`eslint.config.js`) and one Prettier config (`.prettierrc.json`) at the repo root cover all packages, so there is nothing to configure per package. In VS Code, install the two recommended extensions the editor offers on first open (`dbaeumer.vscode-eslint` and `esbenp.prettier-vscode`) and both run on save.
 
-1. Ensure you have all of the [prerequisites](#prerequisites) installed.
-2. From the repository root, install workspace dependencies, select the required Compact toolchain explicitly, and compile:
-   ```sh
-   corepack enable
-   yarn install
-   compact update 0.33.0-rc.2   # Exact version required.
-                                # `compact update` installs/downgrades
-                                # to stable.
-   yarn compile
-   ```
-3. Fork Sepolia on the local EVM. The e2e suites use the **real** Sepolia Uniswap V3 deployment and real USDC (dealt to the derived accounts with anvil cheatcodes), so the anvil service must fork Sepolia. Copy the env template and set a Sepolia RPC:
-   ```sh
-   cp .env.example .env
-   # in .env, set:
-   #   SEPOLIA_FORK_RPC_URL=https://sepolia.infura.io/v3/<your-key>   # required: the EVM forks Sepolia
-   #   SEPOLIA_FORK_BLOCK=<block>                                     # optional: pin a block for determinism (needs an ARCHIVE RPC)
-   ```
-4. Start the local stack (Midnight node, indexer, proof server, anvil EVM forking Sepolia) with `docker compose up -d`. The fakenet MPC responder is not part of this: its compose service sits behind the `fakenet` profile, and the test setup starts it itself mid-run once the hand-off values are in `.env`.
-5. Run the happy day test and watch it go. The first run can take **~20–25 minutes** (it generates zk proving keys, deploys every contract and funds the derived accounts, all automatically. `SEPOLIA_FORK_RPC_URL` is the only `.env` value you set):
-   ```sh
-   yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
+## Compiling, Building and Running Unit Tests
 
-   # Optional: Run with 'step-through' enabled to pause test at each step
-   # to make it a little easier to follow along with everything that is happening.
-   STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
-   ```
-   Green looks like `Tests  15 passed (15)`. Afterwards, paste the setup's printed `.env` block into `.env` so the next run reuses the deployed contracts (~3–4 minutes).
+Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only contract packages have a compile step, and only they have a zk compile option. Unit tests run offline against a simulated Midnight runtime, so zk keys are not needed before running them.
 
-**TIP:** If you are using Claude Code you can ask it to do all of this for you using this [skill](.claude/skills/e2e/SKILL.md), for example:
-```
-Use your /e2e skill to get the erc20-vault happy day test running for me, from fresh clone to green. Recover the run yourself if anything fails along the way.
-```
-
-**NOTE:** The most common reason that the run fails is as a result of the proof server hanging or crashing when it exhausts memory on a proving leg. This happens routinely, even on a Docker VM with 16 GB of RAM (the heavy claim/settle proofs peak above 12 GiB). This most often presents as the test failing with `connect ECONNREFUSED 127.0.0.1:6300` partway through a claim or settle step, with `docker ps -a` showing the `midnight-proof-server` container as `Exited (137)`, i.e. OOM-killed. If this happens it is usually possible to restart the proof server and pick up the test run at the last successful chain interaction, not starting over, using variables printed out in banners as the test progresses. See [test run recovery](./examples/erc20-vault/README.md#test-run-recovery) in the erc20-vault integration testing package for more details.
-
-# Compiling, Building and Running Tests
-
-There are two test layers. The unit tests run offline against a simulated Midnight runtime: no docker stack, no zk keys, seconds not minutes. The end to end integration suites (what the [Quickstart](#quickstart) runs) drive the full protocol against the local docker stack and the fakenet MPC responder.
-
-## Unit tests
-
-Packages can be compiled (with or without generating zk keys), built and unit tested either independently or together. Only the contract packages have a compile step, and only they have a zk compile option. Unit tests do not need zk keys, though the vault's deploy-tx suite gates itself on them: without keys it skips visibly (its describe title says so), so a keyless run stays green. From the root of the repository:
+From the root of the repository:
 
 ```sh
-## --- All packages ---
+# Install all dependencies for all workspace members once to start.
+# Run this from the repository root.
+yarn install
+
+## --- Compile, build or test: All packages (whole workspace, from repository root) ---
 
 # Quick compile: all packages (checks syntax and generates circuits)
-# Runs the compact compiler for each contract package without generating zk keys (compiler output in the package's src/managed/)
+# Runs the compact compiler for each package without generating zk keys (compiler output in the package's src/managed/)
 yarn compile
 
 # Longer compile: all packages that require zk keys (checks syntax, generates circuits and zk keys)
-# Runs the compact compiler with zk keys for each package that has a :zk option (needed for deploys and the e2e suites, not for unit tests)
+# Runs the compact compiler with zk keys for each package that has a :zk option (compiler output in the package's src/managed/)
 yarn compile:zk
 
 # Test: all packages (typecheck + unit tests: offline simulator-only)
-# Requires 'yarn compile' to have been run (contract packages typecheck against the generated managed/ output).
+# Requires 'yarn compile' to have been run (zk keys not required for unit testing).
 yarn test
 
-# Build: all packages
-# Requires 'yarn compile'.
+# Build: all packages (typecheck)
+# Requires 'yarn compile' to have been run (packages typecheck against the
+# compiler's generated src/managed/ output, no zk keys required).
 yarn build
 
-## --- Linting and formatting (whole workspace, from the root) ---
+## --- Linting and formatting: All packages (whole workspace, from repository root) ---
 
-# Check formatting. Needs nothing compiled.
+# Check formatting (Prettier). Needs nothing compiled.
 yarn format:check
-# Rewrite files to match the Prettier config.
-yarn format
+yarn format        # rewrite files in place
 
-# Lint. Requires 'yarn compile': the type-aware rules read the generated
-# managed/ types the source imports, exactly as 'yarn build' does.
+# Lint (ESLint + typescript-eslint, type-aware).
+# Requires 'yarn compile': the rules read the generated src/managed/ types,
+# the same reason 'yarn build' needs it.
 yarn lint
-# Apply the autofixable subset. Read the diff before keeping it.
-yarn lint:fix
+yarn lint:fix      # apply every autofix
 
-## --- Per example ---
+## --- Compile, build or test a single example independently ---
 
-# The erc20-vault example (contract + deploy + integration-tests packages):
+# The erc20-vault example (contract + client + deploy + integration-tests packages):
 yarn compile:erc20-vault
 yarn compile:erc20-vault:zk  # generates the vault contract's zk keys
 yarn test:erc20-vault        # requires at least 'yarn compile:erc20-vault'
 yarn build:erc20-vault       # requires 'yarn compile:erc20-vault'
+
+# The erc20-vault example can also be deployed and initialised. Unlike the
+# offline commands above, these need a full local stack running and a
+# populated .env: see the 'Integration Tests' section below for that setup.
 yarn deploy:erc20-vault             # deploy a vault, requires 'yarn compile:erc20-vault:zk'
 yarn deploy-initialise:erc20-vault  # deploy + the deployer-gated initialise (remote networks)
 yarn initialise:erc20-vault         # initialise an already-deployed vault (recovers a half-done run)
 ```
 
-CI runs `yarn format:check` and `yarn lint` on every push and pull request, so a
-formatting drift or a lint finding fails the build. ESLint and Prettier are
-configured once at the repo root (`eslint.config.js`, `.prettierrc.json`), which
-covers every workspace member. Each package inherits that single config. The config turns
-no rule off, so when a rule fires the fix belongs in the code.
+Scripts targeting a particular example carry that example's directory name in full (e.g. `compile:erc20-vault`), so every example gains the same family of scripts. The task prefix decides which of the example's packages run: `test:` and `build:` fan out over every package the example has, `compile:` reaches only its contract package, and `deploy:` or `deploy-initialise:` only its deploy package.
 
-Opening the repo in VS Code will offer to install the ESLint and Prettier
-extensions (`.vscode/extensions.json`), and with those in place the workspace
-settings format on save and apply ESLint's autofixes using the repo's own pinned
-Prettier.
+## Integration Tests
 
-## Integration tests
+The e2e integration test suites need a local stack of services. To bring it up:
 
-The e2e suites need the running docker stack and the fakenet MPC responder: the [Quickstart](#quickstart) walks the first run end to end, and the [erc20-vault README](examples/erc20-vault/README.md) documents every spec in the suite. From the root:
+1. Populate a minimal `.env` file at the root of the repository with at least the `SEPOLIA_FORK_RPC_URL` variable (see [`.env.example`](.env.example)).
+2. Run `docker compose up -d` from the root of the repository.
+
+With the stack running, each example's e2e suite runs from the root:
 
 ```sh
-yarn test:erc20-vault:e2e                              # the full e2e suite, requires 'yarn compile'
-yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any tests/*.test.ts name works), requires 'yarn compile'
+# --- The erc20-vault example ---
+# The first run's setup pipeline generates the vault's zk proving keys itself
+# (~10 min), so there is no need to run 'yarn compile:erc20-vault:zk' first.
+yarn test:erc20-vault:e2e                              # every spec in the suite
+yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file
 ```
+
+For more detail on the ERC20 vault example and on running its e2e suite (a fresh-clone walkthrough, expected timings and failure recovery), see the [ERC20 Vault README](examples/erc20-vault/README.md).
 
 # Prerequisites
 
@@ -164,417 +171,13 @@ yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any test
 | A docker environment | any recent engine | `docker --version` | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS/Windows) or your distro's engine, with **≥ 16 GB RAM allocated** (see note) |
 | Docker Compose v2 | ≥ 2.x | `docker compose version` | Included with Docker Desktop, plugin package on Linux |
 
-**NOTE:** every `compact compile` against this stack must pass the `--feature-zkir-v3` flag: it is part of the pinned ledger-9 matched set (compiler, node, indexer, proof server), and output compiled without it is not compatible with that stack. This repository's compile scripts already pass it. Integrators compiling their own contracts must pass it themselves (as shown in the [Integrator Guide](#integrator-guide)).
-
-**NOTE:** the midnight proof server is quite heavy. It is recommended that you allocate at least 16 GB of RAM to your docker environment, otherwise expect to have to restart the tests multiple times as the proof server hangs.
-
-# Running against Sepolia
-
-By default the EVM leg runs on the local anvil chain from `docker-compose.yaml`, which forks Sepolia. To point the tests at the real Sepolia network, only the EVM side changes: the Midnight stack and the fakenet MPC responder stay local. Minimal changes, all in `.env`:
-
-```sh
-# Both must point at the SAME chain: the tests' endpoint and the responder's
-# container-side twin (an Infura/Alchemy/etc. Sepolia RPC URL works for both):
-EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
-FAKENET_EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
-
-# Required on any non-local chain: an existing ERC20
-# with code on Sepolia, e.g. USDC.
-ERC20_ADDRESS=0x...
-```
-
-Then recreate the responder so it re-reads `.env` (`docker compose --profile fakenet up -d --force-recreate fakenet`) and run the test as usual. The chain id (11155111) is resolved from the RPC automatically and sealed into the vault contract at initialise.
-
-What does NOT happen automatically on a real chain, by design:
-
-- **No auto-funding.** The flows spend from two EVM accounts *derived from the vault contract's address*, so you only learn them mid-run, when setup prints `EVM_VAULT_ADDRESS` / `EVM_USER_ADDRESS` with funding hints (the user account needs ≥ 0.01 ETH for gas and ≥ 0.1 USDC, and the vault account needs ETH for withdrawal gas). Fund them when printed, either across two runs (first run derives + prints, second run tests), or in one attended run with `STEP_THROUGH` (below).
-- **Bring your own token.** On the real Sepolia network you set `ERC20_ADDRESS` to an existing ERC20 with code. The local anvil already has real USDC from the fork.
-- A redeploy of the vault contract derives **new** accounts, and any you already funded do not move with it.
-
-## Watching a run step by step: `STEP_THROUGH=1`
-
-```sh
-STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts
-```
-
-pauses before every setup step and every test (after the first) until you press Enter, and each pause names the step about to run. Recommended for seeing exactly how the sign-bidirectional flow unfolds, and **specifically recommended on Sepolia with Infura**: you can fund the derived accounts the moment they're printed (completing everything in one run), watch each transaction confirm on Etherscan before releasing the next leg, and avoid bursts against Infura rate limits. Attended runs only: it waits on stdin forever, so never set it in CI or an unattended/backgrounded run.
-
-# Integrator Guide
-
-Each example application under [`examples/`](examples/) shows a concrete application of the integration guidelines in this section.
-
-Integrating a contract on Midnight with the Sig Network MPC consists of:
-
-- 4 once-off **setup** steps
-- 5 per-request **runtime** steps that drive the full sign bidirectional flow
-
-## Setup
-
-1. Add the protocol library to your project:
-
-   ```sh
-   yarn add @sig-net/midnight   # or: npm install @sig-net/midnight
-   ```
-
-2. Import the Signet module at the top of your contract (resolved through `node_modules` via `COMPACT_PATH`):
-
-   ```compact
-   import "@sig-net/midnight/src/Signet";
-   ```
-
-   Then tell the compact compiler about the npm packages with its `COMPACT_PATH` environment variable at compile time:
-
-   ```sh
-   COMPACT_PATH=node_modules compact compile --feature-zkir-v3 src/my-contract.compact src/managed/my-contract
-   ```
-
-   The Compact toolchain requirements in [Prerequisites](#prerequisites) apply: compile with the pinned compiler version and always pass `--feature-zkir-v3`, as above.
-
-3. Declare the required Sig Network protocol state in your ledger (plus recommended deployer identity and initialisation state). The event map can sit at ANY ledger field: each notification event your contract emits carries the map's resolved ledger-tree path (see [The request map's ledger-tree path](#the-request-maps-ledger-tree-path)), and the MPC reads the authenticated request from there.
-
-   ```compact
-   // Required: Map of SignBidirectionalEvent signature requests, configured by transaction type.
-   // Configured and sized here for an EVM Type 2 transaction with
-   // <1 calldata word, 0 access-list entries, 0 storage keys> and
-   // 34-byte serialisation schemas.
-   export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<1, 0, 0>, 34, 34>;
-
-   // Required: The Signet singleton signer interface, set at deploy.
-   // Used to notify the MPC of events you add to your signBidirectionalEventMap.
-   sealed ledger signetSigner: SignetSigner;
-
-   // Required: This contract's MPC response key, set in step 4.
-   // Used to verify RespondBidirectionalEvents attesting the output of foreign chain execution.
-   export ledger mpcResponseKey: Secp256k1Point;
-
-   // Recommended: contract-local source of request nonces, so identical
-   // requests hash to distinct request ids. Nothing off-chain reads it.
-   export ledger signetRequestNonce: Counter;
-
-   // Recommended: used in step 4 to ensure initialisation runs only once.
-   export ledger initialised: Counter;
-
-   // Recommended: set on deploy, used in step 4 to ensure only the deployer may set the mpcResponseKey.
-   sealed ledger deployer: Bytes<32>;
-
-   // Recommended: supplies the deployer's identity secret from private state
-   // off-chain. Only its commitment (below) ever reaches the ledger.
-   witness witnessDeployerSecretKey(): Bytes<32>;
-
-   // Recommended: the deployer identity commitment scheme. Exported so deploy
-   // tooling can compute the constructor argument by calling the compiled circuit.
-   export pure circuit calculateDeployerCommitment(sk: Bytes<32>): Bytes<32> {
-     return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([pad(32, "my-contract:deployer:"), sk]));
-   }
-
-   // Required: set signet contract and (recommended) deployer commitment on deployment.
-   constructor(signetContract: SignetSigner, deployerCommitment: Bytes<32>) {
-     signetSigner = disclose(signetContract);
-     deployer = disclose(deployerCommitment);
-   }
-   ```
-
-4. Set the contract's MPC response key once, right after deploy. Deriving this key requires the address of the contract, which only exists after deploy (see [Response key](#response-key)):
-
-   ```compact
-   export circuit initialise(responseKey: Secp256k1Point): [] {
-     // Recommended: confirm that only the deployer may initialise, and only once:
-     assert(deployer == calculateDeployerCommitment(witnessDeployerSecretKey()), "Not the deployer");
-     assert(initialised == 0, "Already initialised");
-     initialised.increment(1);
-
-     // Required: set MPC response key for verification of RespondBidirectionalEvents
-     mpcResponseKey = disclose(responseKey);
-   }
-   ```
-
-## The request map's ledger-tree path
-
-Each notification tells the MPC where your `signBidirectionalEventMap` sits in your contract's compiled on-chain state, so the MPC can read the authenticated request out of raw contract state. The location is a path in the state tree, passed to `constructSignBidirectionalEventNotificationV1` as two arguments:
-
-- `requestsPathDepth`: the number of meaningful entries in the path (1 to 4).
-- `requestsPath`: the path itself, zero padded to 4 entries.
-
-The path shape comes from how compactc lays out state. The compiler packs a contract's public ledger fields into a tree whose array nodes hold at most 15 entries. With 15 or fewer fields, field N sits directly in the root array, at path `[N]` (depth 1). With more than 15 fields, the compiler groups the fields into segments of at most 15 (the remainder segment first) and the root array holds the segments. Each grouping adds one level to the tree and one entry to every field's path. A 20-field contract splits 5 + 15: field 4 sits at `[0, 4]` and field 19 sits at `[1, 14]` (depth 2).
-
-Do not derive the path by hand: the compiler records it in your compiled artifacts. Compile your contract, then look up your map's `"index"` in `managed/<contract>/compiler/contract-info.json` (a bare number `4` means path `[4]`). The generated `managed/<contract>/contract/index.js` accessors walk the same indices, for example `state.asArray()[1].asArray()[14]` for a map recorded at `[1, 14]`. That path packs as `requestsPathDepth = 2` and `requestsPath = [1, 14, 0, 0]`.
-
-The [erc20-vault example](examples/erc20-vault) is a worked chunked case: its 21-field ledger splits 6 + 15, so its approve/withdraw map at field 0 resolves to `[0, 0]` and its deposit map at field 9 resolves to `[1, 3]`, and their notifications carry depth `2` with paths `[0, 0, 0, 0]` and `[1, 3, 0, 0]`. Its contract package exports one `VAULT_*_REQUESTS_PATH` constant per map for off-chain readers. Note that the padded `[0, 0, 0, 0]` literal is unchanged from the flat case: only the depth tells them apart.
-
-## Runtime
-
-Each interaction with your contract that executes a transaction on a foreign chain runs these 5 steps.
-
-Steps 1 and 5 are circuits on your contract, and steps 2 to 4 are off-chain client code built on the utilities in `@sig-net/midnight`.
-
-The off-chain steps share one `SignetRequestResponseReader` over your contract / Signet singleton pair, and the expected signer of the requested transaction (the key the MPC derives for your contract and the request's path, see [Derived keys](#derived-keys)):
-
-```ts
-import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
-import {
-   deriveEvmAddress,
-   signetEventSourceFromPublicDataProvider,
-   SignetRequestResponseReader,
-} from "@sig-net/midnight";
-
-// Provider to index Midnight Blockchain
-const publicDataProvider = indexerPublicDataProvider({
-   queryURL: indexerUrl,
-   subscriptionURL: indexerWsUrl
-});
-
-// SignetRequestResponseReader to poll for Signed Transactions and Signed RespondBidirectionalEvents
-const reader = new SignetRequestResponseReader({
-   // Address of YOUR deployed contract
-   requesterContractAddress: myContractAddress,
-
-   // signBidirectionalEventMap's ledger-tree path (see The request map's ledger-tree path)
-   requesterRequestsPath: [0],
-
-   // Address of the Signet singleton contract
-   signetContractAddress,
-
-   // Raw contract state (your contract's authenticated request map)
-   publicDataProvider,
-
-   // The contract events the Signet singleton emits (the MPC's responses),
-   // read through the same provider
-   eventSource: signetEventSourceFromPublicDataProvider(publicDataProvider),
-});
-
-const expectedSigner = deriveEvmAddress(mpcRootPublicKey, myContractAddress, "my-path");
-```
-
-1. Store a signature request and notify the MPC via cross contract call. Build (or overwrite) every part of the transaction your contract enforces in-circuit, calldata above all (see [EVM Type 2 Transactions and ABI Calldata Words](#evm-type-2-transactions-and-abi-calldata-words)), and never pass caller input through unchecked:
-
-   ```compact
-   // Construct SignBidirectionalEvent signature request and calculate its RequestId
-   const request = constructSignBidirectionalEvent<EvmType2TxParams<1, 0, 0>, 34, 34>(/* ... */);
-   const requestId = disclose(calculateRequestId<EvmType2TxParams<1, 0, 0>, 34, 34>(request));
-
-   // Store the signature request in your signBidirectionalEventMap for MPC to discover
-   signetRequestNonce.increment(1);
-   signBidirectionalEventMap.insert(requestId, disclose(request));
-
-   // Notify the MPC of the SignBidirectionalEvent and the location of your signBidirectionalEventMap.
-   // The map is at ledger field 0 (Setup step 3). With 15 or fewer ledger fields that
-   // resolves to [0] at depth 1; past 15 the tree chunks and it becomes [0, 0] at depth 2.
-   // (see The request map's ledger-tree path).
-   signetSigner.signBidirectional(
-      requestId,
-      constructSignBidirectionalEventNotificationV1(
-         kernel.self(),
-         1 as Uint<8>,                        // requestsPathDepth
-         [0, 0, 0, 0] as Vector<4, Uint<8>>,  // requestsPath, zero padded
-      ),
-   );
-   ```
-
-   **NOTE:** `requestId` should be returned from the above circuit call so that it may be used in subsequent steps (or compute it off-chain with the `calculateRequestId` TS twin, as the erc20-vault example does). The cross-contract `signBidirectional` call itself is a statement: it returns nothing.
-
-2. Poll the Signet singleton for the MPC's signature response, emitted as a contract event carrying the request id it answers. That id is unauthenticated routing data on an open event log (anyone can post), so use the verifying getter: it only returns a post whose signature recovers to `expectedSigner` over the requested transaction's signing hash. Event indexing lags finalization, so keep polling until a verified post appears:
-
-   ```ts
-   const { verified } = await reader.getVerifiedSignatureRespondedEvent(requestId, expectedSigner);
-   // verified === undefined: no valid response posted yet, poll again.
-   ```
-
-3. Construct the signed transaction and submit it to the foreign chain. The reader rebuilds the transaction from the request record on your ledger and attaches the verified MPC signature:
-
-   ```ts
-   import { JsonRpcProvider } from "ethers";
-
-   const signedTx = await reader.getSignedEvmTransaction(requestId, expectedSigner);
-   await new JsonRpcProvider(foreignChainRpcUrl).broadcastTransaction(signedTx.serialized);
-   ```
-
-4. Poll the Signet singleton for the MPC's remote execution attestation (emitted once the MPC observes the transaction execute on the foreign chain). The event carries the request id it answers plus the MPC's ECDSA signature over the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))`: neither the digest nor the serialized output goes on chain, so obtain the raw execution output independently (on the local stack the fakenet responder serves it over its public `/responses/{requestId}` helper API on port 3040), re-pack it per your respond serialisation schema, and select the posted event whose signature verifies over those bytes against your contract's response key. Posts are emitted unverified, so that signature check is what makes a candidate meaningful off chain. The authoritative check is your contract's verify circuit in step 5:
-
-   ```ts
-   import { deserializeEvmOutput, serializeRespondOutput } from "@sig-net/midnight";
-
-   // Recompute the serialized output from the raw execution output (fetched
-   // off chain, e.g. from the fakenet's /responses API), then let the reader
-   // return only a post whose signature covers exactly those bytes. Check
-   // against the SAME key your contract pinned in Setup step 4 (read it back
-   // from your own ledger), so a post accepted here is one that proves.
-   const decoded = deserializeEvmOutput(mySchema, rawExecutionOutput);
-   const serializedOutput = serializeRespondOutput(mySchema, decoded);
-   const respondBidirectionalEvent = await reader.getVerifiedRespondBidirectionalEvent(
-      requestId,
-      serializedOutput,
-      mpcResponseKey,
-   );
-   // undefined: no attestation of those bytes posted yet, poll again.
-   ```
-
-5. Deliver the event AND the recomputed output bytes to your contract, which re-hashes the bytes, verifies the ECDSA signature in-circuit against the response key pinned in Setup step 4, and consumes the request:
-
-   ```compact
-   assert(
-      verifyRespondBidirectionalEvent<1>(
-         requestId,
-         serializedOutput,
-         disclose(respondBidirectionalEvent),
-         mpcResponseKey
-      ),
-      "Invalid attestation signature"
-   );
-   signBidirectionalEventMap.remove(requestId);
-   ```
-
-   The width parameter (`<1>` here) is your respond serialisation schema's exact packed byte width: the output is hashed at that width, never padded.
-
-# EVM Type 2 Transactions and ABI Calldata Words
-
-An `EvmType2TxParams` request decomposes the EVM transaction into typed fields your contract can enforce field by field in-circuit, declared in canonical EIP-1559 order (chainId, nonce, maxPriorityFeePerGas, maxFeePerGas, gasLimit, to, value, calldata, accessListEntryCount, accessList), which is also the request-id hash order. Its optional `calldata` is an `EvmCalldata<maxWords>`: the 4-byte function selector plus a list of 32-byte ABI words, per the [Solidity ABI spec](https://docs.soliditylang.org/en/latest/abi-spec.html). Slots past `noWords` are unused capacity and never reach the transaction.
-
-Every word must be stored in canonical ABI form (big-endian). The MPC signs a transaction whose calldata is exactly `selector || words[0..noWords]`, byte for byte, so a word stored in any other form becomes a signed transaction calling the foreign contract with garbage arguments. Compact's integer casts are little-endian, so do not hand-roll the byte order: build every word with the helper circuits the Signet module exports, and read words back with the matching readers.
-
-| Solidity type | Build with | Read back with |
-|---|---|---|
-| `address` | `evmAddressAbiWord(addr: Bytes<20>)` | |
-| unsigned integers up to `uint128` (amounts, ids) | `numericAbiWord(value: Uint<128>)` | `abiWordToUint128(word)` |
-| `bool` | `boolAbiWord(value: Boolean)` | `abiWordToBool(word)` |
-
-## Example: an ERC20 transfer
-
-`transfer(address,uint256)`, selector `0xa9059cbb`, takes an address word and a numeric word. This is exactly how the erc20-vault contract builds its deposit and withdrawal calldata:
-
-```compact
-const calldata = EvmCalldata<2> {
-  selector: Bytes[0xa9, 0x05, 0x9c, 0xbb],
-  noWords: 2 as Uint<16>,
-  words: [
-    evmAddressAbiWord(recipient),  // address argument (Bytes<20>)
-    numericAbiWord(amount)         // uint256 argument (from a Uint<128>)
-  ]
-};
-```
-
-## Example: a bool argument, and decoding a bool result
-
-`setApprovalForAll(address,bool)`, selector `0xa22cb465`:
-
-```compact
-const calldata = EvmCalldata<2> {
-  selector: Bytes[0xa2, 0x2c, 0xb4, 0x65],
-  noWords: 2 as Uint<16>,
-  words: [
-    evmAddressAbiWord(operator),
-    boolAbiWord(true)
-  ]
-};
-```
-
-The readers run the same rules in the other direction, rejecting any non-canonical word, never silently truncating or coercing it. The serialized output a `RespondBidirectionalEvent` attests is the schema-packed return data of the remote call, delivered to the settle circuit as its own argument (Runtime step 5). Packed booleans are single bytes, so an ERC20 `transfer`'s result reads directly:
-
-```compact
-const succeeded = serializedOutput as Field == 1 as Field;
-assert(succeeded, "Remote transfer failed");
-```
-
-The same builders and readers exist in `@sig-net/midnight` as TypeScript twins under identical names, for composing expected words off-chain (UIs, expected-record builders, tests).
-
-# Repository Layout
-
-This repository is structured as a yarn monorepo, split at the top level between shared utilities (`packages/`) and examples for integrators (`examples/`).
-
-Each example is a directory under `examples/` containing up to four workspace packages: `contract` is **required**, and `client`, `deploy` and `integration-tests` are added as required. The split is by what the code IS: the contract package holds the contract plus its browser-safe client surface, `client` holds the Node half of that surface (the compiled-contract binding, a live provider set), and `deploy` holds only deploying and post-deploy initialisation.
-
-The `contract` package's dependency list demonstrates minimal Signature Network SDK & compact tooling dependencies that an integrator requires.
-
-```
-├── README.md                   # This README!
-├── AGENTS.md                   # Non-negotiable workspace rules for agents & humans.
-├── CLAUDE.md                   # Points at AGENTS.md.
-├── package.json                # workspaces: ["packages/*", "examples/*/*"]
-├── tsconfig.base.json          # Shared no-emit TS config, extended by every package.
-├── docker-compose.yaml         # Example-agnostic local stack: midnight node + indexer +
-│                               #   proof server, anvil EVM, fakenet MPC server.
-├── .env.example
-│
-├── .github/
-│   └── workflows/
-│       ├── example-test.yaml       # Reusable workflow (workflow_call), parameterized by example
-│       │                           #   dir: install → compact update → compile:zk (cached) →
-│       │                           #   compose up → unit + integration tests.
-│       ├── erc20-vault.yaml        # Thin caller (~10 lines): paths-filter on
-│       │                           #   examples/erc20-vault/**, packages/**, compose file and
-│       │                           #   the reusable workflow itself, then one `uses:` call.
-│       └── other-example.yaml      # One thin caller per example.
-│
-├── packages/                   # Shared utilities for repository.
-│   ├── lib/                    # @sig-net/midnight-examples-lib
-│   │   ├── package.json        # Runtime helpers imported by examples
-│   │   ├── tsconfig.json       #   (wallet, providers, tx build & submit).
-│   │   └── src/
-│   │       └── index.ts
-│   │
-│   └── test-harness/           # @sig-net/midnight-examples-test-harness
-│       ├── package.json        # Test-only utilities: stack bring-up/teardown, mpc-keys setup,
-│       ├── tsconfig.json       #   wallet funding, env/session handling, subprocess helpers,
-│       └── src/                #   hardhat helpers.
-│           └── index.ts
-│
-└── examples/                   # The things integrators read and copy.
-    ├── erc20-vault/
-    │   ├── README.md           # Demonstration of bridging ERC20 assets from an EVM to Shielded UTXOs on midnight.
-    │   ├── contract/           # @sig-net/midnight-examples-erc20-vault-contract
-    │   │   ├── package.json        # Deps: @sig-net/midnight (npm) + compact tooling.
-    │   │   ├── tsconfig.json
-    │   │   ├── .gitignore          # src/managed/ (generated artifacts not committed, cached in CI)
-    │   │   ├── src/
-    │   │   │   ├── erc20-vault.compact # KEY: Contract demonstrating integration with Signature Network.
-    │   │   │   ├── witnesses.ts        # Handwritten witnesses construction helpers.
-    │   │   │   ├── managed/            # Contract artifacts generated by compactc, gitignored.
-    │   │   │   ├── contract-surface.ts # Circuit ids, private-state id, provider + joined-contract TYPES.
-    │   │   │   ├── vault-ledger.ts     # Decoded reads of the vault's public ledger state.
-    │   │   │   ├── evm.ts              # The EVM contracts it trades through + address-to-bytes.
-    │   │   │   └── index.ts            # Curated export surface, i.e. the "SDK" surface of the erc20
-    │   │   │                           #   vault. Environment-agnostic: browser or backend, unchanged.
-    │   │   └── tests/
-    │   │       └── erc20-vault.test.ts # Simulator-level unit tests that require no network.
-    │   │
-    │   ├── client/             # @sig-net/midnight-examples-erc20-vault-client
-    │   │   └── src/            # The Node half of the vault's client surface: the compiled-contract
-    │   │                       #   binding over the contract package's managed/ output, and the
-    │   │                       #   midnight-js provider set. Used by deploy AND integration-tests.
-    │   │
-    │   ├── deploy/             # @sig-net/midnight-examples-erc20-vault-deploy
-    │   │   ├── scripts/             # Thin tsx entrypoints over src/, one per root script:
-    │   │   │                        #   deploy.ts (`yarn deploy:erc20-vault`),
-    │   │   │                        #   deploy-initialise.ts (the one-shot remote bring-up), and
-    │   │   │                        #   initialise.ts (recovery when a deploy landed but init did not).
-    │   │   ├── src/
-    │   │   │   ├── deploy-vault.ts     # The split deploy (base tx + a maintenance update per
-    │   │   │   │                       #   deferred circuit): constructor args & witness
-    │   │   │   │                       #   integration live here, wallet & tx plumbing from lib.
-    │   │   │   ├── initialise-vault.ts # The deployer-gated post-deploy initialise.
-    │   │   │   ├── entrypoint-env.ts   # The entrypoints' env: .env + process.env, refused when
-    │   │   │   │                       #   the file's values belong to another network.
-    │   │   │   └── evm-targets.ts      # Which EVM contracts THIS deployment pins at initialise.
-    │   │   └── tests/                  # Deploy-tx build + env-guard tests, no network.
-    │   │
-    │   └── integration-tests/  # @sig-net/midnight-examples-erc20-vault-integration-tests
-    │       ├── src/
-    │       │   └── flows/      # Example-specific typed flow functions (start-deposit,
-    │       │                   #   complete-deposit, start-withdraw, …): the executable
-    │       │                   #   documentation of the example. All generic setup comes
-    │       │                   #   from @sig-net/midnight-examples-test-harness.
-    │       ├── scripts/        # Thin tsx entrypoints: read-state.ts prints the live vault
-    │       │                   #   ledger, benchmark-static.ts and benchmark-report.ts
-    │       │                   #   collect circuit metrics and render the report.
-    │       └── tests/
-    │           └── happy-day-e2e.test.ts   # Runs the flows in-process against the local stack.
-    │
-    └── other-example/          # Minimal examples may be contract-only with simulator tests.
-        └── contract/
-```
-
-# Related Packages and Repositories
-
-- [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight): the client-agnostic signet protocol library the examples integrate against (shared Compact modules, state readers, event decoders, request feed, crypto helpers).
-- [`@sig-net/midnight-contract`](https://www.npmjs.com/package/@sig-net/midnight-contract): the central Signet singleton contract.
-- [`@sig-net/midnight-contract-deploy`](https://www.npmjs.com/package/@sig-net/midnight-contract-deploy): deploy tooling for that contract plus generic Midnight deploy/wallet plumbing.
-- [sig-net/midnight-integration](https://github.com/sig-net/midnight-integration): where the protocol library and singleton contract are developed.
+**NOTE:** every `compact compile` against this stack must pass the
+`--feature-zkir-v3` flag: it is part of the pinned ledger-9 matched set
+(compiler, node, indexer, proof server), and output compiled without it is not
+compatible with that stack. This repository's compile scripts already pass it.
+Integrators compiling their own contracts must pass it themselves, as shown in
+the [Integrator Guide](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide).
+
+**NOTE:** the Midnight proof server is quite heavy. Allocate at least 16 GB of
+RAM to your docker environment, otherwise expect to restart the tests multiple
+times as the proof server hangs.

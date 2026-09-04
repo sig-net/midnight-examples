@@ -179,7 +179,7 @@ jobs:
           curl -fsS -X POST -H 'content-type: application/json' \
             -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' http://127.0.0.1:8545
       # The suite's own globalSetup does the rest: deploys the singleton + the
-      # example contract, defaults ERC20_ADDRESS to real Sepolia USDC, creates
+      # example contract, defaults EVM_ERC20_CONTRACT_ADDRESS to real Sepolia USDC, creates
       # .env and appends the fakenet hand-off values, starts the fakenet
       # responder container, and deals the derived accounts ETH + USDC on the fork.
       - name: e2e suite — gate spec only

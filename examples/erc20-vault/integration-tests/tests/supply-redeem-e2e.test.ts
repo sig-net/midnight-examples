@@ -18,6 +18,15 @@ import { vaultTokenType } from "../src/vault-token.ts";
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
+// The deployer's session, for initialise only: the circuit is gated to the
+// deployer identity (the deployer wallet seed's bytes, whose commitment the
+// deploy sealed), so the user session cannot drive it. Lazily built like
+// every session — a rerun against an initialised vault never starts it.
+const deployerSession = createVaultSession({
+  ...env,
+  MIDNIGHT_USER1_WALLET_SEED: env.MIDNIGHT_DEPLOYER_WALLET_SEED ?? "",
+});
+
 // 1 USDC (6 decimals). The wrapper's exchange rate is live, so the shares minted and the assets
 // redeemed are read from the settle result, not hardcoded.
 const SUPPLY_AMOUNT = 1_000_000n;
@@ -26,6 +35,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave lending e2
   installFlowHooks();
   afterAll(async () => {
     await session.stop();
+    await deployerSession.stop();
   });
 
   it(
@@ -35,12 +45,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave lending e2
 
       // The setup pipeline deploys the vault but does not initialise it (the key it pins
       // derives from the vault address), so seal the config here before any flow. A kept
+      // The setup pipeline deploys the vault but does not initialise it (the key it pins
+      // derives from the vault address), so seal the config here before any flow. A kept
       // contract address that is already initialised is left untouched.
-      await initialise(context, resolveInitialiseConfig(env, context.vaultContractAddress));
+      await initialise(
+        await deployerSession.vaultContext(),
+        resolveInitialiseConfig(env, context.vaultContractAddress),
+      );
 
       // Fund the vault + mint the caller a shielded USDC coin equal to the amount we supply.
       // Deposit Aave's USDC specifically (the wrapper's underlying), independent of the suite's
-      // default ERC20_ADDRESS: the vault mints a distinct colour per token.
+      // default EVM_ERC20_CONTRACT_ADDRESS: the vault mints a distinct colour per token.
       await runDepositRoundTrip(session, { amount: SUPPLY_AMOUNT, erc20Address: AAVE_USDC });
 
       // The caller's own shielded balances (owner-readable): supply mints stataUSDC shares, redeem

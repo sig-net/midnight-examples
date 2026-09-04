@@ -29,7 +29,7 @@ const SIGNET_CONTRACT_REF = { bytes: new Uint8Array(32).fill(0x5e) };
 // Dummy coin public key (32-byte hex) for the constructor context.
 const CPK = "0".repeat(64);
 
-// No MAINTENANCE_SIGNING_KEY: the builder then samples a throwaway authority,
+// No MIDNIGHT_MAINTENANCE_PRIVATE_KEY: the builder then samples a throwaway authority,
 // which is all an unsubmitted transaction needs.
 const NO_MAINTENANCE_ENV: Record<string, string | undefined> = {};
 

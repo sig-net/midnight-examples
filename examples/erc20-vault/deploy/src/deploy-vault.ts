@@ -32,7 +32,7 @@ import {
   isLocalStandaloneNetwork,
   type MidnightNodeConfig,
   type NetworkId,
-  parseIdentitySecretKey,
+  parseIdentitySecret,
   SPLIT_DEPLOY_BASE_SUBMITTED_MARKER,
   SplitDeployAfterBaseSubmitError,
   submitUnprovenTransaction,
@@ -70,11 +70,11 @@ async function readContractState(
 /**
  * Install the circuits deferred from the base deploy via one maintenance update each, waiting for
  * the authority counter to advance between them so every update binds to the current counter. Each
- * update re-syncs the wallet (fresh fee coins) and is signed by the `MAINTENANCE_SIGNING_KEY`
+ * update re-syncs the wallet (fresh fee coins) and is signed by the `MIDNIGHT_MAINTENANCE_PRIVATE_KEY`
  * authority sealed at deploy time.
  *
  * @param nodeConfig - The Midnight stack config (node/indexer endpoints + network id).
- * @param env - The environment carrying the `MAINTENANCE_SIGNING_KEY` that signs each update.
+ * @param env - The environment carrying the `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` that signs each update.
  * @param accountKeys - The deployer's derived account keys (pays the update fees).
  * @param networkId - The network the updates target.
  * @param contractAddress - The deployed base contract's address.
@@ -158,7 +158,7 @@ function contractAddressToReference(contractAddress: string): { bytes: Uint8Arra
 /**
  * Resolve the environment the deploy signs its maintenance updates with. The split deploy adds the
  * deferred circuits via maintenance updates, so the contract needs a maintenance authority: on a
- * deployed network `MAINTENANCE_SIGNING_KEY` is REQUIRED, since it is the only way to add or
+ * deployed network `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` is REQUIRED, since it is the only way to add or
  * replace a circuit afterwards and an ephemeral one would leave the contract unmaintainable
  * forever. The local standalone chain is throwaway, so an ephemeral key is generated into a COPY
  * of `env` (never `process.env`, and never the caller's map): the deploy and its adds all run
@@ -167,23 +167,23 @@ function contractAddressToReference(contractAddress: string): { bytes: Uint8Arra
  * @param env - The caller's environment.
  * @param networkId - The network the deploy targets.
  * @returns `env` itself, or a copy carrying a generated ephemeral key.
- * @throws {Error} If a deployed network has no `MAINTENANCE_SIGNING_KEY`.
+ * @throws {Error} If a deployed network has no `MIDNIGHT_MAINTENANCE_PRIVATE_KEY`.
  */
 function resolveMaintenanceEnv(
   env: Record<string, string | undefined>,
   networkId: NetworkId,
 ): Record<string, string | undefined> {
-  if (envOrUndefined(env, "MAINTENANCE_SIGNING_KEY")) return env;
+  if (envOrUndefined(env, "MIDNIGHT_MAINTENANCE_PRIVATE_KEY")) return env;
   if (!isLocalStandaloneNetwork(networkId)) {
     throw new Error(
-      `MAINTENANCE_SIGNING_KEY is required on "${networkId}". The split deploy installs most ` +
+      `MIDNIGHT_MAINTENANCE_PRIVATE_KEY is required on "${networkId}". The split deploy installs most ` +
         "circuits via maintenance updates, and the key signing them becomes the contract's sealed " +
         "maintenance authority, the only way to add or replace a circuit later. Set it to 32 " +
         "bytes of hex (0x optional) and KEEP it.",
     );
   }
-  console.log("generated an ephemeral MAINTENANCE_SIGNING_KEY for the local split deploy");
-  return { ...env, MAINTENANCE_SIGNING_KEY: randomBytes(32).toString("hex") };
+  console.log("generated an ephemeral MIDNIGHT_MAINTENANCE_PRIVATE_KEY for the local split deploy");
+  return { ...env, MIDNIGHT_MAINTENANCE_PRIVATE_KEY: randomBytes(32).toString("hex") };
 }
 
 /** The outcome of a successful vault deployment. */
@@ -200,20 +200,20 @@ export interface VaultDeployment {
  * wallet, then install every deferred circuit by a maintenance update. Progress
  * is logged to the console.
  *
- * The deployer identity comes from `VAULT_DEPLOYER_SECRET_KEY` (falling back
- * to the `DEPLOYER_SEED` bytes): its commitment is sealed into the contract
+ * The deployer identity comes from `VAULT_DEPLOYER_SECRET` (falling back
+ * to the `MIDNIGHT_DEPLOYER_WALLET_SEED` bytes): its commitment is sealed into the contract
  * as `deployer`, and the same secret must later answer the `callerSecretKey`
  * witness to pass `initialise`'s gate. That gate is what protects the
  * post-deploy configuration (vault EVM address, chain, MPC response key)
  * from front-running (see {@link file://./initialise-vault.ts}).
  *
- * @param env - Environment providing `DEPLOYER_SEED`, `VAULT_DEPLOYER_SECRET_KEY`,
+ * @param env - Environment providing `MIDNIGHT_DEPLOYER_WALLET_SEED`, `VAULT_DEPLOYER_SECRET`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the signet contract to seal as the
- *   cross-contract signer), `MAINTENANCE_SIGNING_KEY` and lib's Midnight node
+ *   cross-contract signer), `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` and lib's Midnight node
  *   configuration; defaults to `process.env`.
  * @returns The deployed contract address and base deploy transaction id.
  * @throws {Error} If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed,
- *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, the deployer
+ *   `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` is missing on a deployed network, the deployer
  *   wallet holds no funds, or the base deploy submission fails.
  * @throws {SplitDeployAfterBaseSubmitError} If installing the deferred
  *   circuits fails after the base deploy was submitted: a rerun would deploy
@@ -226,11 +226,7 @@ export async function deployVault(
   const { networkId } = deployConfig.midnightNodeConfig;
   const deployEnv = resolveMaintenanceEnv(env, networkId);
 
-  const secretKey = parseIdentitySecretKey(
-    "VAULT_DEPLOYER_SECRET_KEY",
-    env,
-    deployConfig.deployerSeed,
-  );
+  const secretKey = parseIdentitySecret("VAULT_DEPLOYER_SECRET", env, deployConfig.deployerSeed);
   const deployerCommitment = pureCircuits.userCommitment(secretKey);
 
   // The signet contract the vault cross-contract-calls to register signature

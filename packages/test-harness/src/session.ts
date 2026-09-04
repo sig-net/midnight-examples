@@ -23,17 +23,17 @@ import {
 import { requireEnv } from "./e2e-env.ts";
 
 /**
- * The user-side wallet seed in effect: `USER_SEED`, a role wallet the setup
- * resolves (generated + persisted to `.env` when absent) and funds from the
- * root wallet — see wallets.ts. Required: by the time a session or identity
- * derivation runs, the wallet steps have populated it.
+ * The user-side wallet seed in effect: `MIDNIGHT_USER1_WALLET_SEED`, a wallet
+ * the setup resolves (generated + persisted to `.env` when absent) and funds
+ * from the root wallet — see wallets.ts. Required: by the time a session or
+ * identity derivation runs, the wallet steps have populated it.
  *
- * @param env - The environment to read `USER_SEED` from.
+ * @param env - The environment to read `MIDNIGHT_USER1_WALLET_SEED` from.
  * @returns The seed (hex or mnemonic) the user-side flows spend from.
- * @throws {Error} If `USER_SEED` is unset (the wallet steps did not run).
+ * @throws {Error} If `MIDNIGHT_USER1_WALLET_SEED` is unset (the wallet steps did not run).
  */
 export function resolveUserSeed(env: NodeJS.ProcessEnv): string {
-  return requireEnv(env, "USER_SEED");
+  return requireEnv(env, "MIDNIGHT_USER1_WALLET_SEED");
 }
 
 /** The started user wallet a session hands out: facade + its key material. */

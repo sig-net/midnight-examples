@@ -5,9 +5,9 @@
 // continuously tested. Prints the address to set as
 // NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS in the frontend.
 //
-// A deployed network REQUIRES a kept MAINTENANCE_SIGNING_KEY (the sealed
+// A deployed network REQUIRES a kept MIDNIGHT_MAINTENANCE_PRIVATE_KEY (the sealed
 // authority that installs the deferred circuits, and the only way to add or
-// replace one later) and a faucet-funded DEPLOYER_SEED.
+// replace one later) and a faucet-funded MIDNIGHT_DEPLOYER_WALLET_SEED.
 
 import { deployVault } from "../src/deploy-vault.ts";
 import { buildEntrypointEnv } from "../src/entrypoint-env.ts";

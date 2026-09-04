@@ -88,96 +88,105 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
 }
 
 /**
- * Ensure `MPC_ROOT_KEY` is set, generating a fresh random key when absent.
+ * Ensure `MPC_ROOT_PRIVATE_KEY` is set, generating a fresh random key when absent.
  *
  * @param env - The suite's env accumulator.
  */
 export function ensureMpcRootKey(env: NodeJS.ProcessEnv): void {
-  if (env.MPC_ROOT_KEY) {
-    logSkip("check/derive MPC root key", `MPC_ROOT_KEY is set as ${env.MPC_ROOT_KEY}`);
+  if (env.MPC_ROOT_PRIVATE_KEY) {
+    logSkip(
+      "check/derive MPC root key",
+      `MPC_ROOT_PRIVATE_KEY is set as ${env.MPC_ROOT_PRIVATE_KEY}`,
+    );
     return;
   }
-  env.MPC_ROOT_KEY = generateMpcRootKey();
-  console.log(`generated a fresh MPC_ROOT_KEY=${env.MPC_ROOT_KEY}`);
+  env.MPC_ROOT_PRIVATE_KEY = generateMpcRootKey();
+  console.log(`generated a fresh MPC_ROOT_PRIVATE_KEY=${env.MPC_ROOT_PRIVATE_KEY}`);
   console.log(` ➜ seeds MPC key generation`);
-  console.log(` ➜ 💡 Set as MPC_ROOT_KEY in the environment to skip this step on the next run`);
+  console.log(
+    ` ➜ 💡 Set as MPC_ROOT_PRIVATE_KEY in the environment to skip this step on the next run`,
+  );
   console.log("(printed again in the MPC server configuration step)");
 }
 
 // Derive MPC keys for setting or checking public keys. Must be called INSIDE
 // the steps below — after ensureMpcRootKey has a chance to generate
-// MPC_ROOT_KEY.
-const mpcKeys = (env: NodeJS.ProcessEnv) => deriveMpcKeys(requireEnv(env, "MPC_ROOT_KEY"));
+// MPC_ROOT_PRIVATE_KEY.
+const mpcKeys = (env: NodeJS.ProcessEnv) => deriveMpcKeys(requireEnv(env, "MPC_ROOT_PRIVATE_KEY"));
 
 /**
- * Derive (or check) `MPC_RESPONSE_KEY` for a deployed client contract:
- * `MPC_RESPONSE_KEY = f(MPC root key, client contract address, "midnight
+ * Derive (or check) `MPC_VAULT_RESPONSE_PUBLIC_KEY` for a deployed client contract:
+ * `MPC_VAULT_RESPONSE_PUBLIC_KEY = f(MPC root key, client contract address, "midnight
  * response key")`, the sender-scoped derivation the real MPC uses for
  * respond-bidirectional signing. The key depends on the client contract's
  * address, so this step MUST run after the client contract deploy; the
  * example's initialise flow then pins the key on-chain via the contract's
  * one-shot initialise circuit. The fakenet responder derives the same key
- * per request from its MPC_ROOT_KEY + the request's sender, so nothing
+ * per request from its MPC_ROOT_PRIVATE_KEY + the request's sender, so nothing
  * extra is handed off.
  *
  * @param env - The suite's env accumulator.
  * @param contractAddressEnvVar - The env-var name holding the client
  *   contract's deployed address (e.g. the example's vault contract).
- * @throws {Error} If a pre-set MPC_RESPONSE_KEY disagrees with the derivation.
+ * @throws {Error} If a pre-set MPC_VAULT_RESPONSE_PUBLIC_KEY disagrees with the derivation.
  */
 export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvVar: string): void {
   const expected = formatSecp256k1PublicKey(
     deriveMidnightResponseKey(
-      requireEnv(env, "MPC_SECP256K1_PUBKEY"),
+      requireEnv(env, "MPC_ROOT_PUBLIC_KEY"),
       requireEnv(env, contractAddressEnvVar),
     ),
   );
-  if (env.MPC_RESPONSE_KEY) {
-    console.log(`Found MPC_RESPONSE_KEY in the environment as ${env.MPC_RESPONSE_KEY}`);
-    if (env.MPC_RESPONSE_KEY !== expected) {
+  if (env.MPC_VAULT_RESPONSE_PUBLIC_KEY) {
+    console.log(
+      `Found MPC_VAULT_RESPONSE_PUBLIC_KEY in the environment as ${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`,
+    );
+    if (env.MPC_VAULT_RESPONSE_PUBLIC_KEY !== expected) {
       throw new Error(
-        `MPC_RESPONSE_KEY should be derived from MPC_ROOT_KEY + ${contractAddressEnvVar}: ` +
-          `expected ${expected}, found ${env.MPC_RESPONSE_KEY}`,
-      );
-    }
-    logSkip("check/derive MPC_RESPONSE_KEY public key", `MPC_RESPONSE_KEY is set correctly`);
-    return;
-  }
-  env.MPC_RESPONSE_KEY = expected;
-  console.log(`derived a fresh MPC_RESPONSE_KEY=${env.MPC_RESPONSE_KEY}`);
-  console.log(
-    ` ➜ the MPC's respond-bidirectional key for the client contract; the initialise flow pins it on-chain`,
-  );
-  console.log(` ➜ 💡 Set as MPC_RESPONSE_KEY in the environment to skip this step on the next run`);
-}
-
-/**
- * Ensure `MPC_SECP256K1_PUBKEY` matches the key derived from `MPC_ROOT_KEY`,
- * deriving it when absent.
- *
- * @param env - The suite's env accumulator.
- * @throws {Error} If a preset `MPC_SECP256K1_PUBKEY` mismatches the derived key.
- */
-export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
-  const expectedSECP256k1CompressedPubkey = mpcKeys(env).secp256k1CompressedPubkey;
-  if (env.MPC_SECP256K1_PUBKEY) {
-    console.log(`Found MPC_SECP256K1_PUBKEY in the environment as ${env.MPC_SECP256K1_PUBKEY}`);
-    if (env.MPC_SECP256K1_PUBKEY !== expectedSECP256k1CompressedPubkey) {
-      throw new Error(
-        `MPC_SECP256K1_PUBKEY should be derived from MPC_ROOT_KEY: expected ${expectedSECP256k1CompressedPubkey}, found ${env.MPC_SECP256K1_PUBKEY}`,
+        `MPC_VAULT_RESPONSE_PUBLIC_KEY should be derived from MPC_ROOT_PRIVATE_KEY + ${contractAddressEnvVar}: ` +
+          `expected ${expected}, found ${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`,
       );
     }
     logSkip(
-      "check/derive MPC_SECP256K1_PUBKEY public key",
-      `MPC_SECP256K1_PUBKEY is set correctly`,
+      "check/derive MPC_VAULT_RESPONSE_PUBLIC_KEY",
+      `MPC_VAULT_RESPONSE_PUBLIC_KEY is set correctly`,
     );
     return;
   }
-  env.MPC_SECP256K1_PUBKEY = expectedSECP256k1CompressedPubkey;
-  console.log(`generated a fresh MPC_SECP256K1_PUBKEY=${env.MPC_SECP256K1_PUBKEY}`);
+  env.MPC_VAULT_RESPONSE_PUBLIC_KEY = expected;
+  console.log(`derived a fresh MPC_VAULT_RESPONSE_PUBLIC_KEY=${env.MPC_VAULT_RESPONSE_PUBLIC_KEY}`);
+  console.log(
+    ` ➜ the MPC's respond-bidirectional key for the client contract; the initialise flow pins it on-chain`,
+  );
+  console.log(
+    ` ➜ 💡 Set as MPC_VAULT_RESPONSE_PUBLIC_KEY in the environment to skip this step on the next run`,
+  );
+}
+
+/**
+ * Ensure `MPC_ROOT_PUBLIC_KEY` matches the key derived from `MPC_ROOT_PRIVATE_KEY`,
+ * deriving it when absent.
+ *
+ * @param env - The suite's env accumulator.
+ * @throws {Error} If a preset `MPC_ROOT_PUBLIC_KEY` mismatches the derived key.
+ */
+export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
+  const expectedSECP256k1CompressedPubkey = mpcKeys(env).secp256k1CompressedPubkey;
+  if (env.MPC_ROOT_PUBLIC_KEY) {
+    console.log(`Found MPC_ROOT_PUBLIC_KEY in the environment as ${env.MPC_ROOT_PUBLIC_KEY}`);
+    if (env.MPC_ROOT_PUBLIC_KEY !== expectedSECP256k1CompressedPubkey) {
+      throw new Error(
+        `MPC_ROOT_PUBLIC_KEY should be derived from MPC_ROOT_PRIVATE_KEY: expected ${expectedSECP256k1CompressedPubkey}, found ${env.MPC_ROOT_PUBLIC_KEY}`,
+      );
+    }
+    logSkip("check/derive MPC_ROOT_PUBLIC_KEY", `MPC_ROOT_PUBLIC_KEY is set correctly`);
+    return;
+  }
+  env.MPC_ROOT_PUBLIC_KEY = expectedSECP256k1CompressedPubkey;
+  console.log(`generated a fresh MPC_ROOT_PUBLIC_KEY=${env.MPC_ROOT_PUBLIC_KEY}`);
   console.log(` ➜ used by contracts to validate signatures`);
   console.log(
-    ` ➜ 💡 Set as MPC_SECP256K1_PUBKEY in the environment to skip this step on the next run`,
+    ` ➜ 💡 Set as MPC_ROOT_PUBLIC_KEY in the environment to skip this step on the next run`,
   );
 }
 
@@ -352,7 +361,7 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
 
 // The fakenet responder hand-off, automated. docker compose interpolates the
 // fakenet service's environment from the repo-root .env, so the responder can
-// only start once MPC_ROOT_KEY and MIDNIGHT_SIGNET_CONTRACT_ADDRESS are IN
+// only start once MPC_ROOT_PRIVATE_KEY and MIDNIGHT_SIGNET_CONTRACT_ADDRESS are IN
 // THAT FILE — the two steps below persist them (append-only) and start the
 // container, right after the signet deploy so the responder boots and syncs
 // while the (long) example zk compile runs. Set FAKENET_MANAGED=0 to run the
@@ -360,7 +369,7 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
 // checkout for responder development) — both steps then skip.
 
 /** The env keys docker compose interpolates into the fakenet service — the hand-off payload. */
-const FAKENET_HANDOFF_KEYS = ["MPC_ROOT_KEY", "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"] as const;
+const FAKENET_HANDOFF_KEYS = ["MPC_ROOT_PRIVATE_KEY", "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"] as const;
 
 /**
  * Whether {@link persistFakenetHandoffToDotEnv} appended hand-off values to
@@ -496,12 +505,13 @@ export function printMpcServerConfig(
   env: NodeJS.ProcessEnv,
   pipelineKeys: readonly string[],
 ): void {
-  const rootKey = env.MPC_ROOT_KEY ?? "(not derived here — already held by the server operator)";
+  const rootKey =
+    env.MPC_ROOT_PRIVATE_KEY ?? "(not derived here — already held by the server operator)";
   const managed = env.FAKENET_MANAGED !== "0";
   banner([
     "MPC (fakenet) responder configuration:",
     "",
-    `  MPC_ROOT_KEY=${rootKey}`,
+    `  MPC_ROOT_PRIVATE_KEY=${rootKey}`,
     `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS")}`,
     "  # 💡 The responder DISCOVERS requesters by polling this signet",
     "  #    contract's emitted notification events — no requester contract list needed.",

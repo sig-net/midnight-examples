@@ -34,7 +34,7 @@ import {
   deriveAccountKeys,
   envOrUndefined,
   getDeployConfig,
-  parseIdentitySecretKey,
+  parseIdentitySecret,
   withSyncedWalletFacade,
 } from "@sig-net/midnight-examples-lib";
 
@@ -103,8 +103,8 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
 } {
   const mpcSecp256k1PublicKey = requireValue(
     env,
-    "MPC_SECP256K1_PUBKEY",
-    "it is the MPC network's public key, derived from MPC_ROOT_KEY by the setup pipeline",
+    "MPC_ROOT_PUBLIC_KEY",
+    "it is the MPC network's public key, derived from MPC_ROOT_PRIVATE_KEY by the setup pipeline",
   );
   const chainIdRaw = requireValue(
     env,
@@ -133,12 +133,12 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
  * against the derivation rather than trusted, since a stale pin would seal an
  * account the MPC never signs from.
  *
- * @param env - The environment providing `MPC_SECP256K1_PUBKEY`, `EVM_CHAIN_ID` and the
- *   optional `ROUTER` / `STATA_UNDERLYING` / `STATA_TOKEN` overrides.
+ * @param env - The environment providing `MPC_ROOT_PUBLIC_KEY`, `EVM_CHAIN_ID` and the
+ *   optional `UNISWAP_ROUTER_CONTRACT_ADDRESS` / `AAVE_STATA_UNDERLYING_TOKEN_CONTRACT_ADDRESS` / `AAVE_STATA_TOKEN_CONTRACT_ADDRESS` overrides.
  * @param vaultContractAddress - The deployed vault contract's address.
  * @returns The resolved arguments.
  * @throws {Error} If a required variable is missing, `EVM_CHAIN_ID` is not a positive
- *   integer, or a preset `EVM_VAULT_ADDRESS` / `MPC_RESPONSE_KEY` contradicts the derivation.
+ *   integer, or a preset `EVM_VAULT_ACCOUNT_ADDRESS` / `MPC_VAULT_RESPONSE_PUBLIC_KEY` contradicts the derivation.
  */
 export function resolveInitialiseConfig(
   env: Record<string, string | undefined>,
@@ -148,15 +148,19 @@ export function resolveInitialiseConfig(
 
   const vaultEvmAddress = deriveVaultEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress);
   assertDerivedMatch(
-    envOrUndefined(env, "EVM_VAULT_ADDRESS"),
+    envOrUndefined(env, "EVM_VAULT_ACCOUNT_ADDRESS"),
     vaultEvmAddress,
-    "EVM_VAULT_ADDRESS",
+    "EVM_VAULT_ACCOUNT_ADDRESS",
   );
 
   const mpcResponseKey = formatSecp256k1PublicKey(
     deriveMidnightResponseKey(mpcSecp256k1PublicKey, vaultContractAddress),
   );
-  assertDerivedMatch(envOrUndefined(env, "MPC_RESPONSE_KEY"), mpcResponseKey, "MPC_RESPONSE_KEY");
+  assertDerivedMatch(
+    envOrUndefined(env, "MPC_VAULT_RESPONSE_PUBLIC_KEY"),
+    mpcResponseKey,
+    "MPC_VAULT_RESPONSE_PUBLIC_KEY",
+  );
 
   return {
     vaultEvmAddress,
@@ -230,11 +234,11 @@ export async function initialiseVaultContract(
  * Join a deployed vault as the deployer and initialise it: the standalone
  * counterpart of {@link initialiseVaultContract} for entrypoints that hold no
  * session. The deployer identity resolves exactly as the deploy resolves it
- * (`VAULT_DEPLOYER_SECRET_KEY`, falling back to the `DEPLOYER_SEED` bytes), so
+ * (`VAULT_DEPLOYER_SECRET`, falling back to the `MIDNIGHT_DEPLOYER_WALLET_SEED` bytes), so
  * the caller and the commitment sealed at deploy agree by construction.
  *
- * @param env - The environment: lib's Midnight node configuration, `DEPLOYER_SEED`,
- *   `VAULT_DEPLOYER_SECRET_KEY`, and everything {@link resolveInitialiseConfig} reads;
+ * @param env - The environment: lib's Midnight node configuration, `MIDNIGHT_DEPLOYER_WALLET_SEED`,
+ *   `VAULT_DEPLOYER_SECRET`, and everything {@link resolveInitialiseConfig} reads;
  *   defaults to `process.env`.
  * @param contractAddress - The vault to initialise; defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
  * @returns Whether this call initialised the vault or found it already initialised.
@@ -265,11 +269,7 @@ export async function initialiseVault(
   // preset contradicting the derivation should fail here, not after a sync.
   const config = resolveInitialiseConfig(env, vaultContractAddress);
 
-  const secretKey = parseIdentitySecretKey(
-    "VAULT_DEPLOYER_SECRET_KEY",
-    env,
-    deployConfig.deployerSeed,
-  );
+  const secretKey = parseIdentitySecret("VAULT_DEPLOYER_SECRET", env, deployConfig.deployerSeed);
   const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, nodeConfig.networkId);
 
   return withSyncedWalletFacade(accountKeys, nodeConfig, async (facade) => {

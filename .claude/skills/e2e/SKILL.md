@@ -53,9 +53,10 @@ One value MUST be in `.env` before the stack comes up: `SEPOLIA_FORK_RPC_URL`
 deployment and real USDC are present. Without it anvil is a bare chain and the
 suites fail dealing tokens. (`SEPOLIA_FORK_BLOCK` is optional: pin a block for
 determinism, needs an archive RPC.) Everything else the setup pipeline creates:
-it appends the generated wallet seeds (root + the deployer/user/mpc
-responder/bearer roles, funded from root) and the fakenet hand-off values
-(`MPC_ROOT_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`) plus prints a ready-to-paste
+it appends the generated wallet seeds (the Midnight root + deployer/user 1/mpc
+responder/user 2 wallets, funded from root, plus the independent
+`EVM_USER1_WALLET_SEED`) and the fakenet hand-off values
+(`MPC_ROOT_PRIVATE_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`) plus prints a ready-to-paste
 block with everything else it deployed/derived. Appends are append-only:
 existing lines are never modified, and a value that conflicts with the shell
 environment is a hard error, not an overwrite. On the Sepolia-forked anvil
@@ -78,17 +79,18 @@ kept contracts.
 - **`/e2e redeploy`**: a circuit changed (any `.compact` edit that alters a
   circuit, struct layout, or the request-id hash domain): comment out
   `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
-  `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS` (and
-  `ERC20_ADDRESS` if the anvil container restarted, its chain is in-memory)
-  in `.env`, then rerun. `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS` and
-  `EVM_USER_ADDRESS` all derive from the vault's contract address, so a stale
-  one left set stops the run with a mismatch error rather than being used.
-  The whole redeploy completes in ONE run: setup re-compiles (zk keygen,
-  ~10 min, background the run), redeploys, re-derives, re-funds, and
+  `MPC_VAULT_RESPONSE_PUBLIC_KEY`, `EVM_VAULT_ACCOUNT_ADDRESS`,
+  `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` (and `EVM_ERC20_CONTRACT_ADDRESS` if the
+  anvil container restarted, its chain is in-memory) in `.env`, then rerun.
+  `MPC_VAULT_RESPONSE_PUBLIC_KEY`, `EVM_VAULT_ACCOUNT_ADDRESS` and
+  `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` all derive from the vault's contract
+  address, so a stale one left set stops the run with a mismatch error rather
+  than being used. The whole redeploy completes in ONE run: setup re-compiles
+  (zk keygen, ~10 min, background the run), redeploys, re-derives, re-funds, and
   `--force-recreate`s the responder automatically. Afterwards, update `.env`
   with the freshly printed values and delete the commented-out lines.
-  (The derived EVM accounts move on a redeploy: `EVM_VAULT_ADDRESS` and
-  `EVM_USER_ADDRESS` are epsilon-derived from the vault contract address,
+  (The derived EVM accounts move on a redeploy: `EVM_VAULT_ACCOUNT_ADDRESS` and
+  `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` are epsilon-derived from the vault contract address,
   but on the local chain the new accounts are simply funded by setup,
   nothing needs sweeping.)
 
@@ -111,14 +113,15 @@ kept contracts.
   `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**. 95 total. The setup
   pipeline verifies Uniswap and the stataUSDC wrapper are deployed on the fork,
   so a fork missing either fails the run at setup rather than mid-spec.
-- **Wallets are role wallets funded from ROOT at setup.** The setup's
-  wallet steps resolve/generate `ROOT_SEED` plus the role seeds
-  (`DEPLOYER_SEED`, `USER_SEED`, `MPC_RESPONDER_SEED`, `BEARER_SEED`),
-  persist generated ones to `.env` (append-only), and fund each role from
+- **The Midnight wallets are funded from ROOT at setup.** The setup's
+  wallet steps resolve/generate `MIDNIGHT_ROOT_WALLET_SEED` plus the other seeds
+  (`MIDNIGHT_DEPLOYER_WALLET_SEED`, `MIDNIGHT_USER1_WALLET_SEED`,
+  `MIDNIGHT_MPC_RESPONDER_WALLET_SEED`, `MIDNIGHT_USER2_WALLET_SEED`),
+  persist generated ones to `.env` (append-only), and fund each from
   root with dust-registered NIGHT (on the local chain root is the genesis
   mint wallet, so this is fully automatic, and on a deployed network the
-  first run stops printing root's NIGHT address to faucet-fund). Roles are
-  provisioned by runtime NIGHT funding: on the node 2.0.0-rc.4 line a runtime
+  first run stops printing root's NIGHT address to faucet-fund). The wallets
+  are provisioned by runtime NIGHT funding: on the node 2.0.0-rc.4 line a runtime
   NIGHT transfer or registration does not brick a wallet's dust spend proofs
   (error 170). Receive-only test wallets (`…42`, `…43`) need no funding at all.
 - Every test from the first signature poll onward needs the **fakenet MPC
@@ -144,7 +147,7 @@ The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
 `docker-compose.yaml`, built from
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
 stand-in: it polls the signet contract's emitted notification events via the
-indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and
+indexer, signs EVM transactions with keys derived from `MPC_ROOT_PRIVATE_KEY`, and
 posts responses through the proof server. It also serves the public
 `/responses/{requestId}` helper API on port 3040 (mapped to localhost by the
 compose file): the attestation poll and settle flows fetch each request's
@@ -153,7 +156,7 @@ raw traced EVM output from it, so a poll that times out with
 (or its API port mapping) is down, not the Midnight stack.
 
 - **Managed by setup (default):** the setup's hand-off steps append
-  `MPC_ROOT_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
+  `MPC_ROOT_PRIVATE_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
   `docker compose --profile fakenet up -d fakenet`, with `--force-recreate`
   exactly when values newly landed in `.env` (recreate re-reads `.env` AND
   resets the responder's container-local LevelDB state). A running responder
@@ -267,8 +270,9 @@ raw traced EVM output from it, so a poll that times out with
   account is unfunded. On the local stack that means the anvil container
   restarted (its chain is in-memory) while `.env` still holds addresses from
   the previous chain. Comment out the derived EVM address vars
-  (`EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS`) and rerun so setup re-derives and
-  re-deals ETH + real USDC to the accounts on the fork.
+  (`EVM_VAULT_ACCOUNT_ADDRESS`, `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS`,
+  `EVM_USER1_WALLET_ACCOUNT_ADDRESS`) and rerun so setup re-derives and re-deals
+  ETH + real USDC to the accounts on the fork.
 - **`vault is already initialised`** on a kept address is informational: the
   test still asserts state and passes.
 - **`Insufficient funds: … Dust`** from a deploy/call: the wallet's NIGHT

@@ -10,15 +10,17 @@
 //
 // Wallet B is a real SPENDING wallet (unlike the claimant-not-caller flow's
 // receive-only recipient): its withdraw pays fees in DUST, so its seed is
-// the `bearer` role wallet the setup resolves and funds from root
-// (BEARER_SEED — generated + persisted to .env and topped up with
-// dust-registered NIGHT like every role wallet, see the harness's
-// wallets.ts). B's session overrides USER_SEED and VAULT_USER_SECRET_KEY
-// together (see the false-claimer flow header for why both). The arrange
-// deposit's 0.1 USDC leaves the vault's EVM account again through B's
-// withdraw to EVM_USER_ADDRESS, so the suite's EVM funds keep cycling; the
-// vault tokens left on B beyond the withdrawn amount strand on its seed,
-// like the claimant-not-caller recipient's.
+// user 2's wallet the setup resolves and funds from root
+// (MIDNIGHT_USER2_WALLET_SEED — generated + persisted to .env and topped up
+// with dust-registered NIGHT like every funded wallet, see the harness's
+// wallets.ts). B's session overrides MIDNIGHT_USER1_WALLET_SEED, which
+// changes B's identity with it (identity = seed bytes; see the
+// false-claimer flow header for why a distinct seed, not a distinct secret
+// under the same seed). The arrange deposit's 0.1 USDC leaves the vault's
+// EVM account again through B's withdraw to EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS, so
+// the suite's EVM funds keep cycling; the vault tokens left on B beyond the
+// withdrawn amount strand on its seed, like the claimant-not-caller
+// recipient's.
 //
 // Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives
 // there. Recovery from a run that died mid-flow (proof-server OOM): rerun
@@ -84,25 +86,21 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // the network); stopped once in afterAll.
 const session = createVaultSession(env);
 
-// Wallet B's seed AND identity secret: the `bearer` role wallet's seed
-// serving as both, deliberately different from the depositor's USER_SEED /
-// VAULT_USER_SECRET_KEY and from the other flows' fixed receive-only seeds
-// (`…42`/`…43`). A role wallet specifically because B SPENDS: the setup
-// funds it from root with dust-registered NIGHT so it can pay its
-// withdraw's fees on ANY network. Both env vars are overridden together —
-// a changed secret under the SAME seed would hit midnight-js's persisted
-// private state (midnight-level-db, scoped per wallet account) and the
-// stale identity would win. Read leniently at module scope: offline
-// (RUN_INTEGRATION_TESTS unset) the injected env is empty and the suite
-// skips before any test touches it.
-const BEARER_SEED = env.BEARER_SEED ?? "";
+// Wallet B's seed: user 2's wallet, whose bytes are also B's vault identity
+// secret (one seed is both the wallet and the identity, as everywhere).
+// Deliberately different from the depositor's MIDNIGHT_USER1_WALLET_SEED and
+// from the other flows' fixed receive-only seeds (`…42`/`…43`). A funded
+// wallet specifically because B SPENDS: the setup funds it from root with
+// dust-registered NIGHT so it can pay its withdraw's fees on ANY network.
+// Read leniently at module scope: offline (RUN_INTEGRATION_TESTS unset) the
+// injected env is empty and the suite skips before any test touches it.
+const USER2_SEED = env.MIDNIGHT_USER2_WALLET_SEED ?? "";
 
 // Wallet B — the transferee's session: same lazily-built shape as A's, over
-// the same stack, differing ONLY in wallet seed + identity secret.
+// the same stack, differing ONLY in wallet seed (and so in identity).
 const bearerSession = createVaultSession({
   ...env,
-  USER_SEED: BEARER_SEED,
-  VAULT_USER_SECRET_KEY: BEARER_SEED,
+  MIDNIGHT_USER1_WALLET_SEED: USER2_SEED,
 });
 
 // One deposit's worth of shielded vault tokens is arranged on A, handed to B
@@ -113,7 +111,10 @@ const WITHDRAW_AMOUNT = DEPOSIT_AMOUNT;
 
 /** The vault-token color for the suite's ERC20 on the deployed vault. */
 const vaultTokenColor = () =>
-  vaultTokenType(requireEnv("ERC20_ADDRESS"), requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS"));
+  vaultTokenType(
+    requireEnv("EVM_ERC20_CONTRACT_ADDRESS"),
+    requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
+  );
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
   "erc20-vault bearer-transfer e2e: the withdraw claim moves with the coin, wallet to wallet",
@@ -129,9 +130,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the withdraw gas budget",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const userAddress = requireEnv("EVM_USER_ADDRESS");
-        const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-        const erc20Address = requireEnv("ERC20_ADDRESS");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
+        const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+        const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
         // Same minimums as the happy-day deposit leg: the user's derived
         // account pays the sweep gas and supplies the deposited ERC20.
@@ -195,8 +196,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           (await walletA.facade.waitForSyncedState()).shielded.balances[vaultTokenColor()] ?? 0n;
         const { balance: vaultErc20 } = await getErc20Balance(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("ERC20_ADDRESS"),
-          requireEnv("EVM_VAULT_ADDRESS"),
+          requireEnv("EVM_ERC20_CONTRACT_ADDRESS"),
+          requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
         const alreadyArranged = aBalance >= WITHDRAW_AMOUNT && vaultErc20 >= WITHDRAW_AMOUNT;
         let requestId: RequestIdHex | undefined;
@@ -230,14 +231,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "wallet-B fee preflight: the bearer role wallet holds spendable dust for its withdraw (read-only)",
+      "wallet-B fee preflight: user 2's wallet holds spendable dust for its withdraw (read-only)",
       async () => {
         const walletB = await bearerSession.wallet();
         const dust = (await walletB.facade.waitForSyncedState()).dust.balance(new Date());
         console.log(`wallet B dust (fee) balance: ${String(dust)}`);
         expect(
           dust,
-          "wallet B holds no spendable dust — did the setup's root-funding step fund BEARER_SEED?",
+          "wallet B holds no spendable dust — did the setup's root-funding step fund MIDNIGHT_USER2_WALLET_SEED?",
         ).toBeGreaterThan(0n);
       },
       5 * MINUTE,
@@ -332,12 +333,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // the attempt dies client-side — the tx is never submitted.
         const evmNonce = await getTransactionNonce(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
+          requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
         await expect(
           startWithdraw(context, {
             amount: WITHDRAW_AMOUNT,
-            destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
+            destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
             evmNonce,
           }),
         ).rejects.toThrow(/[Ii]nsufficient funds/);
@@ -380,12 +381,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // account, so the suite's funds cycle.
         const evmNonce = await getTransactionNonce(
           requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
+          requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         );
 
         withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
-          destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
+          destEvmAddress: requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"),
           evmNonce,
         });
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
@@ -417,7 +418,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requestId: withdrawRequestId,
           intervalMs: 1000,
           timeoutMs: 2 * MINUTE,
-          expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+          expectedSigner: requireEnv("EVM_VAULT_ACCOUNT_ADDRESS"),
         });
 
         banner([
@@ -443,7 +444,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Withdraw transaction mined on EVM: ${receipt.hash}`,
           "",
           `The vault's derived account transferred ${String(WITHDRAW_AMOUNT)} base units`,
-          `back to ${requireEnv("EVM_USER_ADDRESS")}.`,
+          `back to ${requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS")}.`,
         ]);
       },
       3 * MINUTE,

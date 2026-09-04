@@ -15,15 +15,15 @@
 # (keep the two lists in lockstep) carrying:
 #
 # secrets:
-# - DEPLOYER_SEED
+# - MIDNIGHT_DEPLOYER_WALLET_SEED
 #   - wallet seed paying the fees, faucet-funded with NIGHT
 #   - example: c0ffee...c0ffee (32 or 64 bytes of hex) or a 24-word mnemonic
-# - VAULT_DEPLOYER_SECRET_KEY
+# - VAULT_DEPLOYER_SECRET
 #   - identity sealed as `deployer`, the only one initialise accepts: KEEP
-#     it. Optional when DEPLOYER_SEED is itself 32 bytes of hex, which then
+#     it. Optional when MIDNIGHT_DEPLOYER_WALLET_SEED is itself 32 bytes of hex, which then
 #     doubles as the identity
 #   - example: facade...facade (exactly 64 hex chars, 0x optional)
-# - MAINTENANCE_SIGNING_KEY
+# - MIDNIGHT_MAINTENANCE_PRIVATE_KEY
 #   - signs the maintenance adds, sealed as the contract's only
 #     circuit-upgrade authority forever: KEEP it
 #   - example: decade...decade (exactly 64 hex chars, 0x optional)
@@ -33,16 +33,16 @@
 #   - the network's deployed signet singleton, sealed as the vault's
 #     cross-contract signer
 #   - example: 0badf00d...1dea (64 hex chars, 0x optional)
-# - MPC_SECP256K1_PUBKEY
+# - MPC_ROOT_PUBLIC_KEY
 #   - the network's MPC root public key
 #   - example: 04 followed by 128 hex chars (uncompressed SEC1)
 # - EVM_CHAIN_ID
 #   - the EVM chain the vault operates on
 #   - example: 11155111 (Sepolia)
-# - ROUTER / STATA_UNDERLYING / STATA_TOKEN (optional)
+# - UNISWAP_ROUTER_CONTRACT_ADDRESS / AAVE_STATA_UNDERLYING_TOKEN_CONTRACT_ADDRESS / AAVE_STATA_TOKEN_CONTRACT_ADDRESS (optional)
 #   - EVM target overrides, defaulting to the Sepolia canonicals
 #   - example: 0x followed by 40 hex chars
-# - MIDNIGHT_NODE_URL / MIDNIGHT_NODE_INDEXER_URL (optional)
+# - MIDNIGHT_NODE_URL / MIDNIGHT_INDEXER_URL (optional)
 #   - endpoint overrides, defaulting to the committed per-network endpoints
 #   - example: https://rpc.stagenet.shielded.tools
 
@@ -187,23 +187,23 @@ jobs:
       - name: Deploy and initialise the vault contract
         id: deploy
         env:
-          NETWORK_ID: ${{ inputs.network }}
-          DEPLOYER_SEED: ${{ secrets.DEPLOYER_SEED }}
-          VAULT_DEPLOYER_SECRET_KEY: ${{ secrets.VAULT_DEPLOYER_SECRET_KEY }}
-          MAINTENANCE_SIGNING_KEY: ${{ secrets.MAINTENANCE_SIGNING_KEY }}
+          MIDNIGHT_NETWORK_ID: ${{ inputs.network }}
+          MIDNIGHT_DEPLOYER_WALLET_SEED: ${{ secrets.MIDNIGHT_DEPLOYER_WALLET_SEED }}
+          VAULT_DEPLOYER_SECRET: ${{ secrets.VAULT_DEPLOYER_SECRET }}
+          MIDNIGHT_MAINTENANCE_PRIVATE_KEY: ${{ secrets.MIDNIGHT_MAINTENANCE_PRIVATE_KEY }}
           MIDNIGHT_SIGNET_CONTRACT_ADDRESS: ${{ vars.MIDNIGHT_SIGNET_CONTRACT_ADDRESS }}
-          MPC_SECP256K1_PUBKEY: ${{ vars.MPC_SECP256K1_PUBKEY }}
+          MPC_ROOT_PUBLIC_KEY: ${{ vars.MPC_ROOT_PUBLIC_KEY }}
           EVM_CHAIN_ID: ${{ vars.EVM_CHAIN_ID }}
           # Optional per-environment EVM target overrides. Blank falls through
           # to the Sepolia canonicals the contract package publishes.
-          ROUTER: ${{ vars.ROUTER }}
-          STATA_UNDERLYING: ${{ vars.STATA_UNDERLYING }}
-          STATA_TOKEN: ${{ vars.STATA_TOKEN }}
+          UNISWAP_ROUTER_CONTRACT_ADDRESS: ${{ vars.UNISWAP_ROUTER_CONTRACT_ADDRESS }}
+          AAVE_STATA_UNDERLYING_TOKEN_CONTRACT_ADDRESS: ${{ vars.AAVE_STATA_UNDERLYING_TOKEN_CONTRACT_ADDRESS }}
+          AAVE_STATA_TOKEN_CONTRACT_ADDRESS: ${{ vars.AAVE_STATA_TOKEN_CONTRACT_ADDRESS }}
           # Optional per-environment endpoint overrides. Every network has
           # committed defaults, and a blank var falls through to them.
           MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}
-          MIDNIGHT_NODE_INDEXER_URL: ${{ vars.MIDNIGHT_NODE_INDEXER_URL }}
-          MIDNIGHT_NODE_PROOF_SERVER_URL: http://127.0.0.1:6300
+          MIDNIGHT_INDEXER_URL: ${{ vars.MIDNIGHT_INDEXER_URL }}
+          MIDNIGHT_PROOF_SERVER_URL: http://127.0.0.1:6300
           # $GITHUB_REF_NAME is the dispatching branch, so carry the tag over.
           TAG: ${{ inputs.tag }}
         run: |
@@ -220,7 +220,7 @@ jobs:
             echo ""
             echo "| field | value |"
             echo "| --- | --- |"
-            echo "| network | $NETWORK_ID |"
+            echo "| network | $MIDNIGHT_NETWORK_ID |"
             echo "| tag | $TAG |"
             echo "| address | \`$address\` |"
           } >> "$GITHUB_STEP_SUMMARY"

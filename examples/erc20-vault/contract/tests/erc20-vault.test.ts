@@ -114,7 +114,7 @@ const OTHER_COMMITMENT = pureCircuits.userCommitment(OTHER_SECRET_KEY);
 // exactly as a real deployment pins the off-chain-derived key (the key
 // depends on the contract's own address, so it cannot be a constructor arg).
 const MPC_RESPONSE_SECRET = bytes(32, 0x42);
-const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
+const MPC_VAULT_RESPONSE_PUBLIC_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
 
 // The signet contract (callee) the vault seals + cross-contract-calls. A valid
 // sample contract address so the runtime's address checks pass.
@@ -258,7 +258,7 @@ const strangerContext = async (
   );
 
 /**
- * Deploy + initialise(VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY) as
+ * Deploy + initialise(VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_VAULT_RESPONSE_PUBLIC_KEY) as
  * the deployer: the ready-to-use vault, with the MPC response key stored.
  */
 const deployInitialised = async () => {
@@ -272,7 +272,7 @@ const deployInitialised = async () => {
       STATA_TOKEN,
       CHAIN_ID,
       CAIP2_ID,
-      MPC_RESPONSE_KEY,
+      MPC_VAULT_RESPONSE_PUBLIC_KEY,
     )
   ).context;
   return { contract, ctx: next };
@@ -380,7 +380,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         CHAIN_ID,
         CAIP2_ID,
-        MPC_RESPONSE_KEY,
+        MPC_VAULT_RESPONSE_PUBLIC_KEY,
       ),
     ).rejects.toThrow(/Not the deployer/);
   });
@@ -396,7 +396,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         CHAIN_ID,
         CAIP2_ID,
-        MPC_RESPONSE_KEY,
+        MPC_VAULT_RESPONSE_PUBLIC_KEY,
       ),
     ).rejects.toThrow(/Already initialised/);
   });
@@ -412,7 +412,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         0n,
         CAIP2_ID,
-        MPC_RESPONSE_KEY,
+        MPC_VAULT_RESPONSE_PUBLIC_KEY,
       ),
     ).rejects.toThrow(/Chain ID must be positive/);
   });
@@ -425,7 +425,7 @@ describe("initialise", () => {
     expect(state.uniswapRouter).toEqual(ROUTER);
     expect(state.evmChainId).toBe(CHAIN_ID);
     expect(state.caip2Id).toEqual(CAIP2_ID);
-    expect(state.mpcResponseKey).toEqual(MPC_RESPONSE_KEY);
+    expect(state.mpcResponseKey).toEqual(MPC_VAULT_RESPONSE_PUBLIC_KEY);
   });
 });
 

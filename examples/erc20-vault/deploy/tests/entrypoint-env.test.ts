@@ -1,5 +1,5 @@
 // The guard standing between a local e2e run's leftovers and a remote deploy.
-// The e2e setup appends MPC_ROOT_KEY and MIDNIGHT_SIGNET_CONTRACT_ADDRESS to
+// The e2e setup appends MPC_ROOT_PRIVATE_KEY and MIDNIGHT_SIGNET_CONTRACT_ADDRESS to
 // the repo-root .env on every local run, and the vault's constructor seals the
 // signet address permanently, so a stagenet deploy that silently picked those
 // up would produce a contract that can never work.
@@ -10,11 +10,11 @@ import { assertEnvFileMatchesNetwork } from "../src/entrypoint-env.ts";
 
 // What a local e2e run leaves in the repo-root .env.
 const LOCAL_ENV_FILE = {
-  ROOT_SEED: "00".repeat(32),
-  MPC_ROOT_KEY: "123456",
+  MIDNIGHT_ROOT_WALLET_SEED: "00".repeat(32),
+  MPC_ROOT_PRIVATE_KEY: "123456",
   MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "aa".repeat(32),
   MIDNIGHT_VAULT_CONTRACT_ADDRESS: "bb".repeat(32),
-  MPC_SECP256K1_PUBKEY: "0x04ab",
+  MPC_ROOT_PUBLIC_KEY: "0x04ab",
 } as const;
 
 /** A case: what the file holds, what the shell exports, the network targeted. */
@@ -36,24 +36,27 @@ const ACCEPTED: readonly GuardCase[] = [
     name: "a remote run overriding every network-scoped value it inherits",
     fileEnv: LOCAL_ENV_FILE,
     processEnv: {
-      NETWORK_ID: "stagenet",
-      MPC_ROOT_KEY: "999",
+      MIDNIGHT_NETWORK_ID: "stagenet",
+      MPC_ROOT_PRIVATE_KEY: "999",
       MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "cc".repeat(32),
       MIDNIGHT_VAULT_CONTRACT_ADDRESS: "dd".repeat(32),
-      MPC_SECP256K1_PUBKEY: "0x04cd",
+      MPC_ROOT_PUBLIC_KEY: "0x04cd",
     },
     networkId: "stagenet",
   },
   {
     name: "a remote run whose file carries only network-agnostic values",
-    fileEnv: { ROOT_SEED: LOCAL_ENV_FILE.ROOT_SEED, FUND_CHILD_NIGHT: "1000" },
-    processEnv: { NETWORK_ID: "stagenet" },
+    fileEnv: {
+      MIDNIGHT_ROOT_WALLET_SEED: LOCAL_ENV_FILE.MIDNIGHT_ROOT_WALLET_SEED,
+      FUND_WALLET_NIGHT_AMOUNT: "1000",
+    },
+    processEnv: { MIDNIGHT_NETWORK_ID: "stagenet" },
     networkId: "stagenet",
   },
   {
     name: "a blank value in the file, which counts as unset",
     fileEnv: { MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "   " },
-    processEnv: { NETWORK_ID: "stagenet" },
+    processEnv: { MIDNIGHT_NETWORK_ID: "stagenet" },
     networkId: "stagenet",
   },
 ];
@@ -67,18 +70,18 @@ const REFUSED: readonly RefusedCase[] = [
   {
     name: "a remote run inheriting the local run's network-scoped values",
     fileEnv: LOCAL_ENV_FILE,
-    processEnv: { NETWORK_ID: "stagenet" },
+    processEnv: { MIDNIGHT_NETWORK_ID: "stagenet" },
     networkId: "stagenet",
     names: [
       "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
-      "MPC_ROOT_KEY",
-      "MPC_SECP256K1_PUBKEY",
+      "MPC_ROOT_PRIVATE_KEY",
+      "MPC_ROOT_PUBLIC_KEY",
       "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
     ],
   },
   {
     name: "a local run against a file pinned to a remote network",
-    fileEnv: { ...LOCAL_ENV_FILE, NETWORK_ID: "stagenet" },
+    fileEnv: { ...LOCAL_ENV_FILE, MIDNIGHT_NETWORK_ID: "stagenet" },
     processEnv: {},
     networkId: "undeployed",
     names: ["MIDNIGHT_SIGNET_CONTRACT_ADDRESS"],
@@ -86,9 +89,12 @@ const REFUSED: readonly RefusedCase[] = [
   {
     name: "a remote run overriding only some of what it inherits",
     fileEnv: LOCAL_ENV_FILE,
-    processEnv: { NETWORK_ID: "stagenet", MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "cc".repeat(32) },
+    processEnv: {
+      MIDNIGHT_NETWORK_ID: "stagenet",
+      MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "cc".repeat(32),
+    },
     networkId: "stagenet",
-    names: ["MPC_ROOT_KEY"],
+    names: ["MPC_ROOT_PRIVATE_KEY"],
   },
 ];
 

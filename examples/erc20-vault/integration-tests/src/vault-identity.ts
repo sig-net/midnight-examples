@@ -1,11 +1,11 @@
 // The user's vault identity: secret key -> commitment -> MPC derivation path.
 // Derivation calls the compiled circuits, never a TS re-implementation. The
-// secret itself is parsed by lib's `parseIdentitySecretKey`
-// (`VAULT_USER_SECRET_KEY`, defaulting to the `USER_SEED` bytes).
+// secret itself is parsed by lib's `parseIdentitySecret`
+// (`VAULT_USER_SECRET`, defaulting to the `MIDNIGHT_USER1_WALLET_SEED` bytes).
 
 import { bytesToHex } from "@sig-net/midnight";
 import { pureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { parseIdentitySecretKey } from "@sig-net/midnight-examples-lib";
+import { parseIdentitySecret } from "@sig-net/midnight-examples-lib";
 import { resolveUserSeed } from "@sig-net/midnight-examples-test-harness";
 
 /** The caller identity every vault interaction is bound to. */
@@ -32,7 +32,7 @@ export interface UserIdentity {
 
 /**
  * Derive the user's vault identity from the environment: the secret from
- * `VAULT_USER_SECRET_KEY` (falling back to the `USER_SEED` bytes) and the
+ * `VAULT_USER_SECRET` (falling back to the `MIDNIGHT_USER1_WALLET_SEED` bytes) and the
  * commitment via the vault's compiled `userCommitment` circuit.
  *
  * @param env - The environment holding the identity secret (or seed).
@@ -40,7 +40,7 @@ export interface UserIdentity {
  * @throws {ParseError} If the identity secret/seed is malformed.
  */
 export function resolveUserIdentity(env: NodeJS.ProcessEnv): UserIdentity {
-  const secretKey = parseIdentitySecretKey("VAULT_USER_SECRET_KEY", env, resolveUserSeed(env));
+  const secretKey = parseIdentitySecret("VAULT_USER_SECRET", env, resolveUserSeed(env));
   const commitment = pureCircuits.userCommitment(secretKey);
   return {
     secretKey,

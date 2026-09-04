@@ -10,7 +10,7 @@
 // deploy: the key derives from the vault's own contract address, and the
 // initialise flow pins it on-chain.
 
-import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
+import { deriveEvmAddress } from "@sig-net/midnight";
 import {
   deriveVaultEvmAddress,
   STATA_USDC,
@@ -49,14 +49,14 @@ import { resolveUserIdentity } from "./vault-identity.ts";
 // .env block" printout reads like the flow that produced it.
 const PIPELINE_KEYS = [
   "EVM_CHAIN_ID",
-  "ERC20_ADDRESS",
-  "MPC_ROOT_KEY",
-  "MPC_SECP256K1_PUBKEY",
+  "EVM_ERC20_CONTRACT_ADDRESS",
+  "MPC_ROOT_PRIVATE_KEY",
+  "MPC_ROOT_PUBLIC_KEY",
   "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
   "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
-  "MPC_RESPONSE_KEY",
-  "EVM_VAULT_ADDRESS",
-  "EVM_USER_ADDRESS",
+  "MPC_VAULT_RESPONSE_PUBLIC_KEY",
+  "EVM_VAULT_ACCOUNT_ADDRESS",
+  "EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS",
 ] as const;
 
 /**
@@ -70,8 +70,8 @@ const PIPELINE_KEYS = [
  * split deploy has no resume path, so a rerun past that point would deploy a
  * SECOND contract and orphan the half-installed first one.
  *
- * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
- *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
+ * @param env - The suite's env accumulator (the deploy reads `MIDNIGHT_DEPLOYER_WALLET_SEED`,
+ *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MIDNIGHT_MAINTENANCE_PRIVATE_KEY` and node
  *   config from it).
  * @throws {NonRetryableError} If the deploy failed after its base deploy was submitted.
  * @throws {Error} If the deploy fails otherwise, after the dust-generation retries.
@@ -84,18 +84,11 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
     );
     return;
   }
-  // The deploy seals the DEPLOYER identity commitment into the contract and
-  // `initialise` is deployer-gated, while the flows drive the identity-gated
-  // circuits AS THE USER. The wallets are split roles (the deployer wallet
-  // pays, the user wallet drives), so keep the IDENTITIES equal by sealing
-  // the user's: default VAULT_DEPLOYER_SECRET_KEY to the user identity
-  // secret unless the operator pinned it explicitly.
-  if (!env.VAULT_DEPLOYER_SECRET_KEY) {
-    env.VAULT_DEPLOYER_SECRET_KEY = bytesToHex(resolveUserIdentity(env).secretKey);
-    console.log(
-      "defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialise is deployer-gated)",
-    );
-  }
+  // The deploy seals the DEPLOYER identity commitment, defaulting to the
+  // deployer wallet seed's bytes, and `initialise` is deployer-gated. The
+  // suites therefore drive initialise from a deployer session, exactly as the
+  // deploy package's own entrypoint does, so the local run exercises the same
+  // gate a remote bring-up meets.
   const { contractAddress } = await retryWhileDustGenerates("deploy vault contract", async () => {
     try {
       return await deployVault(env);
@@ -121,75 +114,81 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
 }
 
 /**
- * Ensure `EVM_VAULT_ADDRESS` matches the vault's derived EVM account, deriving
+ * Ensure `EVM_VAULT_ACCOUNT_ADDRESS` matches the vault's derived EVM account, deriving
  * it when absent. The derivation is the contract package's
  * {@link deriveVaultEvmAddress}, the same one the deploy package's
  * `resolveInitialiseConfig` seals on-chain, so this step and the initialise
  * agree by construction.
  *
  * @param env - The suite's env accumulator.
- * @throws {Error} If a preset `EVM_VAULT_ADDRESS` mismatches the derivation.
+ * @throws {Error} If a preset `EVM_VAULT_ACCOUNT_ADDRESS` mismatches the derivation.
  */
 function ensureVaultEvmAddress(env: NodeJS.ProcessEnv): void {
   const expectedAddress = deriveVaultEvmAddress(
-    requireEnv(env, "MPC_SECP256K1_PUBKEY"),
+    requireEnv(env, "MPC_ROOT_PUBLIC_KEY"),
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
   );
-  if (env.EVM_VAULT_ADDRESS) {
-    console.log(`Found EVM_VAULT_ADDRESS in the environment as ${env.EVM_VAULT_ADDRESS}`);
+  if (env.EVM_VAULT_ACCOUNT_ADDRESS) {
+    console.log(
+      `Found EVM_VAULT_ACCOUNT_ADDRESS in the environment as ${env.EVM_VAULT_ACCOUNT_ADDRESS}`,
+    );
     // Case-insensitive: an EVM address is EIP-55 checksummed, so the same
     // account differs only in case between one speller and another.
-    if (env.EVM_VAULT_ADDRESS.toLowerCase() !== expectedAddress.toLowerCase()) {
+    if (env.EVM_VAULT_ACCOUNT_ADDRESS.toLowerCase() !== expectedAddress.toLowerCase()) {
       throw new Error(
-        `EVM_VAULT_ADDRESS should be derived from MPC_SECP256K1_PUBKEY + vault contract address: expected ${expectedAddress}, found ${env.EVM_VAULT_ADDRESS}`,
+        `EVM_VAULT_ACCOUNT_ADDRESS should be derived from MPC_ROOT_PUBLIC_KEY + vault contract address: expected ${expectedAddress}, found ${env.EVM_VAULT_ACCOUNT_ADDRESS}`,
       );
     }
-    logSkip("check/derive vault EVM address", `EVM_VAULT_ADDRESS is set correctly`);
+    logSkip("check/derive vault EVM address", `EVM_VAULT_ACCOUNT_ADDRESS is set correctly`);
     return;
   }
-  env.EVM_VAULT_ADDRESS = expectedAddress;
-  console.log(`derived a fresh EVM_VAULT_ADDRESS=${expectedAddress}`);
+  env.EVM_VAULT_ACCOUNT_ADDRESS = expectedAddress;
+  console.log(`derived a fresh EVM_VAULT_ACCOUNT_ADDRESS=${expectedAddress}`);
   console.log(` ➜ the vault's own EVM account (path "vault")`);
   console.log(
     ` ➜ fund it with ETH for gas before running withdrawals (automatic on the local dev chain)`,
   );
   console.log(
-    ` ➜ 💡 Set as EVM_VAULT_ADDRESS in the environment to skip this step on the next run`,
+    ` ➜ 💡 Set as EVM_VAULT_ACCOUNT_ADDRESS in the environment to skip this step on the next run`,
   );
 }
 
 /**
- * Ensure `EVM_USER_ADDRESS` matches the user's derived EVM account
- * (`MPC_SECP256K1_PUBKEY` + vault contract address, path = the hex rendering
+ * Ensure `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` matches the user's derived EVM account
+ * (`MPC_ROOT_PUBLIC_KEY` + vault contract address, path = the hex rendering
  * of the user's identity commitment), deriving it when absent.
  *
  * @param env - The suite's env accumulator.
- * @throws {Error} If a preset `EVM_USER_ADDRESS` mismatches the derivation.
+ * @throws {Error} If a preset `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS` mismatches the derivation.
  */
 function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   const identity = resolveUserIdentity(env);
   const expectedAddress = deriveEvmAddress(
-    requireEnv(env, "MPC_SECP256K1_PUBKEY"),
+    requireEnv(env, "MPC_ROOT_PUBLIC_KEY"),
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
     identity.commitmentHex,
   );
-  if (env.EVM_USER_ADDRESS) {
-    console.log(`Found EVM_USER_ADDRESS in the environment as ${env.EVM_USER_ADDRESS}`);
-    if (env.EVM_USER_ADDRESS.toLowerCase() !== expectedAddress.toLowerCase()) {
+  if (env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS) {
+    console.log(
+      `Found EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS in the environment as ${env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS}`,
+    );
+    if (env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS.toLowerCase() !== expectedAddress.toLowerCase()) {
       throw new Error(
-        `EVM_USER_ADDRESS should be derived from MPC_SECP256K1_PUBKEY + vault contract + user identity: expected ${expectedAddress}, found ${env.EVM_USER_ADDRESS}`,
+        `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS should be derived from MPC_ROOT_PUBLIC_KEY + vault contract + user identity: expected ${expectedAddress}, found ${env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS}`,
       );
     }
-    logSkip("check/derive user EVM address", `EVM_USER_ADDRESS is set correctly`);
+    logSkip("check/derive user EVM address", `EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS is set correctly`);
     return;
   }
-  env.EVM_USER_ADDRESS = expectedAddress;
-  console.log(`derived a fresh EVM_USER_ADDRESS=${expectedAddress}`);
+  env.EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS = expectedAddress;
+  console.log(`derived a fresh EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS=${expectedAddress}`);
   console.log(` ➜ the user's derived EVM account (path = identity commitment)`);
   console.log(
     ` ➜ FUND IT ON EVM before the deposit test: >= 0.01 ETH (gas) and >= 0.1 USDC (deposit) — automatic on the local dev chain`,
   );
-  console.log(` ➜ 💡 Set as EVM_USER_ADDRESS in the environment to skip this step on the next run`);
+  console.log(
+    ` ➜ 💡 Set as EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS in the environment to skip this step on the next run`,
+  );
 }
 
 /**
@@ -208,20 +207,23 @@ function defaultEvmRpcUrl(env: NodeJS.ProcessEnv): void {
 }
 
 /**
- * Default `ERC20_ADDRESS` to real Sepolia USDC — the suites run against a Sepolia fork, so the
+ * Default `EVM_ERC20_CONTRACT_ADDRESS` to real Sepolia USDC — the suites run against a Sepolia fork, so the
  * token is the real (unmintable) USDC rather than a locally deployed test token. Any other
  * ERC20 with a standard balance mapping (dealable by storage write) can be pinned explicitly.
  *
  * @param env - The suite's env accumulator.
  */
 function ensureErc20Address(env: NodeJS.ProcessEnv): void {
-  if (env.ERC20_ADDRESS) {
-    logSkip("default ERC20_ADDRESS", `ERC20_ADDRESS is set (${env.ERC20_ADDRESS})`);
+  if (env.EVM_ERC20_CONTRACT_ADDRESS) {
+    logSkip(
+      "default EVM_ERC20_CONTRACT_ADDRESS",
+      `EVM_ERC20_CONTRACT_ADDRESS is set (${env.EVM_ERC20_CONTRACT_ADDRESS})`,
+    );
     return;
   }
-  env.ERC20_ADDRESS = SEPOLIA_USDC;
+  env.EVM_ERC20_CONTRACT_ADDRESS = SEPOLIA_USDC;
   console.log(
-    `defaulted ERC20_ADDRESS=${SEPOLIA_USDC} (real Sepolia USDC — the suites fork Sepolia)`,
+    `defaulted EVM_ERC20_CONTRACT_ADDRESS=${SEPOLIA_USDC} (real Sepolia USDC — the suites fork Sepolia)`,
   );
 }
 
@@ -266,9 +268,9 @@ const STEPS: readonly SetupStep[] = [
   ["setup: resolve/generate wallet seeds (root + deployer/user/mpc responder)", ensureWalletSeeds],
   ["setup: preflight root funding + fund the role wallets from root", ensureWalletsFunded],
   ["setup: resolve EVM chain id from EVM_RPC_URL", resolveEvmChain],
-  ["setup: default ERC20_ADDRESS to real Sepolia USDC", ensureErc20Address],
+  ["setup: default EVM_ERC20_CONTRACT_ADDRESS to real Sepolia USDC", ensureErc20Address],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
-  ["setup: check/derive MPC_SECP256K1_PUBKEY public key", ensureMpcSecp256k1Pubkey],
+  ["setup: check/derive MPC_ROOT_PUBLIC_KEY public key", ensureMpcSecp256k1Pubkey],
   ["setup: deploy signet contract", deploySignetContractStep],
   ["setup: persist fakenet hand-off values to .env (append-only)", persistFakenetHandoffToDotEnv],
   ["setup: start the fakenet responder (docker compose)", startFakenetResponder],
@@ -283,7 +285,7 @@ const STEPS: readonly SetupStep[] = [
   ],
   ["setup: deploy vault contract", deployVaultContractStep],
   [
-    "setup: check/derive MPC_RESPONSE_KEY for the vault contract",
+    "setup: check/derive MPC_VAULT_RESPONSE_PUBLIC_KEY for the vault contract",
     (env) => {
       ensureMpcResponseKey(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
     },

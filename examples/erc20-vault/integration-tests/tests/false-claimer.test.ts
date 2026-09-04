@@ -6,18 +6,19 @@
 // success attestation posted.
 //
 // Arrange: a deposit round trip up to but NOT including the claim
-// (src/flows/deposit-round-trip.ts with skipClaim). Act: attempt claim through a
-// SECOND session whose USER_SEED and VAULT_USER_SECRET_KEY both differ from
-// the depositor's — both must be overridden together: a changed secret under
-// the SAME seed would hit midnight-js's persisted private state
-// (midnight-level-db, scoped per wallet account), and the stale identity
-// would win. A distinct seed gets its own clean slot. The false claimer's
+// (src/flows/deposit-round-trip.ts with skipClaim). Act: attempt claim through
+// a SECOND session whose MIDNIGHT_USER1_WALLET_SEED differs from the
+// depositor's, which changes its identity with it (identity = seed bytes).
+// A DISTINCT seed matters: midnight-js persists private state per wallet
+// account (midnight-level-db), so a different identity under the same seed
+// would lose to the stale persisted one. A distinct seed gets its own clean
+// slot. The false claimer's
 // wallet never pays anything — the circuit rejects during local transaction
 // building, before proving or balancing — so its seed needs no funding.
 // Assert: the claim rejects with the circuit's identity-assert message and
 // the request STAYS on the ledger. Then identity A claims it for real (no
 // stranded deposit), and the fakenet-only drain returns the deposited ERC20
-// to EVM_USER_ADDRESS, so the suite's EVM funds keep cycling.
+// to EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS, so the suite's EVM funds keep cycling.
 //
 // Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives
 // there. Recovery from a run that died mid-flow (proof-server OOM): rerun
@@ -64,21 +65,20 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // the network); stopped once in afterAll.
 const session = createVaultSession(env);
 
-// The false claimer's seed AND identity secret (identity B): one fixed
-// constant serving as both, deliberately different from the depositor's
-// USER_SEED / VAULT_USER_SECRET_KEY (and from the claimant-not-caller flow's
-// recipient seed `…42`). Both env vars are overridden together — see the
-// header for why — and the seed needs no funding (the rejected claim never
-// reaches proving or balancing).
+// The false claimer's seed (identity B): a fixed constant whose bytes are
+// also B's vault identity secret (one seed is both the wallet and the
+// identity, as everywhere), deliberately different from the depositor's
+// MIDNIGHT_USER1_WALLET_SEED (and from the claimant-not-caller flow's
+// recipient seed `…42`). The seed needs no funding (the rejected claim
+// never reaches proving or balancing).
 const FALSE_CLAIMER_SEED = "0000000000000000000000000000000000000000000000000000000000000043";
 
 // The false claimer's session (identity B): same lazily-built shape as the
-// depositor's, over the same stack, differing ONLY in wallet seed + identity
-// secret.
+// depositor's, over the same stack, differing ONLY in wallet seed (and so in
+// identity).
 const falseClaimerSession = createVaultSession({
   ...env,
-  USER_SEED: FALSE_CLAIMER_SEED,
-  VAULT_USER_SECRET_KEY: FALSE_CLAIMER_SEED,
+  MIDNIGHT_USER1_WALLET_SEED: FALSE_CLAIMER_SEED,
 });
 
 // One deposit's worth is arranged, defended against the false claimer, and
@@ -99,9 +99,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "funding preflight: user EVM account holds the deposit minimums, vault EVM account holds the drain gas",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const userAddress = requireEnv("EVM_USER_ADDRESS");
-        const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-        const erc20Address = requireEnv("ERC20_ADDRESS");
+        const userAddress = requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS");
+        const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+        const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
         // Same minimums as the happy-day deposit leg: the user's derived
         // account pays the sweep gas and supplies the deposited ERC20.
@@ -264,15 +264,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "cycle funds: drain the vault's EVM ERC20 balance (fakenet-only) back to the user's derived account",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
-        const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
-        const erc20Address = requireEnv("ERC20_ADDRESS");
+        const vaultAddress = requireEnv("EVM_VAULT_ACCOUNT_ADDRESS");
+        const erc20Address = requireEnv("EVM_ERC20_CONTRACT_ADDRESS");
 
         // The claimed value lives on as shielded tokens in the depositor's
         // wallet (this flow does not withdraw them), so send the deposited
         // ERC20 (plus any prior-run leftovers) back to the user's derived
         // account — the suite's EVM funds keep cycling. A zero balance means a
         // prior aborted run already drained it.
-        const drained = await drainVaultErc20(env, requireEnv("EVM_USER_ADDRESS"));
+        const drained = await drainVaultErc20(env, requireEnv("EVM_USER1_DEPOSIT_ACCOUNT_ADDRESS"));
         if (drained === 0n) {
           logSkip("drain", "the vault's derived account already holds no ERC20");
         }

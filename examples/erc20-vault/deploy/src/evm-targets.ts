@@ -31,7 +31,7 @@ function withHexPrefix(address: string): string {
  * canonical. Blank values count as unset, so an empty `.env` line falls back to
  * the default rather than pinning the zero address.
  *
- * @param env - The environment to read `ROUTER`, `STATA_UNDERLYING` and `STATA_TOKEN` from.
+ * @param env - The environment to read `UNISWAP_ROUTER_CONTRACT_ADDRESS`, `AAVE_STATA_UNDERLYING_TOKEN_CONTRACT_ADDRESS` and `AAVE_STATA_TOKEN_CONTRACT_ADDRESS` from.
  * @returns The resolved targets.
  */
 export function resolveEvmTargets(env: Record<string, string | undefined>): VaultEvmTargets {
@@ -40,8 +40,8 @@ export function resolveEvmTargets(env: Record<string, string | undefined>): Vaul
     return value ? withHexPrefix(value) : fallback;
   };
   return {
-    routerAddress: override("ROUTER", UNISWAP_SWAP_ROUTER_02),
-    stataUnderlyingAddress: override("STATA_UNDERLYING", AAVE_USDC),
-    stataTokenAddress: override("STATA_TOKEN", STATA_USDC),
+    routerAddress: override("UNISWAP_ROUTER_CONTRACT_ADDRESS", UNISWAP_SWAP_ROUTER_02),
+    stataUnderlyingAddress: override("AAVE_STATA_UNDERLYING_TOKEN_CONTRACT_ADDRESS", AAVE_USDC),
+    stataTokenAddress: override("AAVE_STATA_TOKEN_CONTRACT_ADDRESS", STATA_USDC),
   };
 }
