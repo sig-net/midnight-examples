@@ -1,0 +1,201 @@
+# Publishes @sig-net/midnight-examples-erc20-vault-contract, the erc20-vault
+# example's one npm package, from examples/erc20-vault/contract.
+#
+# Release tags are per-example, so a future example publishes from its own
+# workflow on its own tag prefix:
+#
+#   erc20-vault-v1.2.3        -> npm 1.2.3       (dist-tag latest)
+#   erc20-vault-v1.2.3-rc.4   -> npm 1.2.3-rc.4  (dist-tag rc)
+#
+# The package ships the contract's export surface, its compiled managed/ output
+# minus the prover keys (the generated module, the binary zkir, the verifier
+# keys, the compact integrity manifest, and the signet callee's generated
+# module), the .compact source, and the erc20-vault-zk-assets bin. Keygen is
+# deterministic under the pinned toolchain, so a consumer regenerates the
+# prover keys with that bin and verifies them against the shipped manifest,
+# which pins every artefact's size and sha256. The prover keys themselves are
+# published nowhere.
+
+name: erc20-vault-publish
+
+on:
+  push:
+    tags:
+      - "erc20-vault-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-erc20-vault-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Reviewer-gated environment: a human approves before any step runs.
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write # OIDC trusted publishing
+    steps:
+      - name: Refuse a ref that is not a release tag
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ] || ! printf '%s' "$GITHUB_REF_NAME" |
+            grep -Eq '^erc20-vault-v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
+            echo "::error::publish runs on an erc20-vault-vX.Y.Z or erc20-vault-vX.Y.Z-rc.N tag only, got $GITHUB_REF_TYPE $GITHUB_REF_NAME"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: the stable-tag guard below asks whether the tagged
+          # commit is an ancestor of main.
+          fetch-depth: 0
+          persist-credentials: false
+      # Tag rulesets gate WHO may create a stable tag. This guards WHERE it
+      # points. A hyphen in the version marks a prerelease (the same test the
+      # publish step uses to pick the npm dist-tag), and prereleases may come
+      # from any branch.
+      - name: Stable tags must point at a commit on main
+        if: ${{ !contains(github.ref_name, '-rc.') }}
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::stable tag $GITHUB_REF_NAME is not on main. Only prerelease (-rc.N) tags may come from other branches"
+            exit 1
+          }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+          # corepack owns yarn: the action's yarn-1 cache probe would die here
+          package-manager-cache: false
+      - name: Enable corepack (yarn 4 via the packageManager field)
+        run: corepack enable
+      # Just log the version. Upgrading npm here breaks sigstore (provenance).
+      - run: npm --version
+      # The toolchain installs fresh here, no compact-* cache: its downloads
+      # are checksum-verified and cost seconds, so caching them in a publish
+      # job would trade nothing for a cache-poisoning surface.
+      - name: Install the compact toolchain (pinned launcher + compiler, per AGENTS.md)
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.compact/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.compact/bin" >> "$GITHUB_PATH"
+          # Launcher pinned to compact-v0.5.1 (never releases/latest): the
+          # toolchain is frozen, so bump this tag deliberately.
+          if ! command -v compact >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -LsSf --retry 4 -o /tmp/compact-installer.sh \
+              https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.1/compact-installer.sh
+            echo "85e74a53ae4a67b31fa4d854f3b6ffb4c29f7c53e3372c5008b6a4729a8b4a73  /tmp/compact-installer.sh" | sha256sum -c
+            sh /tmp/compact-installer.sh
+          fi
+          # compactc 0.33.0-rc.2 is the PINNED compiler, part of the ledger-9
+          # MATCHED SET. It is a prerelease published on the toolchain's LF
+          # home (LFDT-Minokawa/compact), which the launcher's channel does not
+          # list: download it directly and let the launcher adopt it. A bare
+          # `compact update` would install latest stable and break the pin, so
+          # it is never run here.
+          RC_DIR="$HOME/.compact/versions/0.33.0-rc.2/x86_64-unknown-linux-musl"
+          if [ ! -x "$RC_DIR/compactc" ]; then
+            mkdir -p "$RC_DIR"
+            curl -fsSL --retry 4 -o /tmp/compactc-rc.zip \
+              https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.33.0-rc.2/compactc_v0.33.0-rc.2_x86_64-unknown-linux-musl.zip
+            echo "3055ab92bbc8d5bb0d6282b661b83761d2a0de2ee37e21cf7107e25aaf2a9aad  /tmp/compactc-rc.zip" | sha256sum -c
+            unzip -qo /tmp/compactc-rc.zip -d "$RC_DIR"
+            chmod +x "$RC_DIR"/*
+          fi
+          # `compact update <ver>` adopts an already-on-disk version without
+          # downloading. If the launcher refuses (version not in its channel),
+          # wire the default symlinks it would have created.
+          mkdir -p "$HOME/.compact/bin"
+          compact update 0.33.0-rc.2 || ln -sfn "$RC_DIR"/* "$HOME/.compact/bin/"
+          compact compile --version
+      - name: Install dependencies (frozen, from the committed yarn.lock)
+        run: yarn install --immutable
+      - name: Verify the package version matches the tag
+        run: |
+          set -euo pipefail
+          # The tag carries the example prefix, the npm version does not.
+          TAG_VERSION="${GITHUB_REF_NAME#erc20-vault-v}"
+          dir=examples/erc20-vault/contract
+          version=$(node -p "require('./$dir/package.json').version")
+          name=$(node -p "require('./$dir/package.json').name")
+          if [ "$version" != "$TAG_VERSION" ]; then
+            echo "::error::$name is at $version, but tag $GITHUB_REF_NAME expects $TAG_VERSION"
+            exit 1
+          fi
+      - name: Check formatting (prettier)
+        run: yarn format:check
+      - name: Compile (skip-zk)
+        run: yarn compile
+      # Type-aware lint rules read the generated src/managed/ types the source
+      # imports, so lint cannot run on a clean checkout before compile.
+      - name: Lint (eslint, type-aware)
+        run: yarn lint
+      # Keygen runs here every time, with NO cache: the hashes of these keys go
+      # into the contract-manifest.json the package ships, which every
+      # consumer's regenerated keys are verified against, and a cache is
+      # written by other workflows. This job publishes only bytes it built
+      # from the tagged source. The ~10 minutes it costs buys exactly that.
+      # skip-zk output has no keys and no key hashes, so the contract package's
+      # prepack refuses outright when keys/*.prover is absent.
+      - name: Generate the vault's zk keys (the shipped manifest hashes them)
+        run: yarn compile:erc20-vault:zk
+      - name: Build (typecheck only, the published dist comes from prepack)
+        run: yarn build
+      - name: Unit tests (offline, in-process)
+        run: yarn test
+      # Without the vault's 1.4 GB of prover keys the contract package packs to
+      # well under a megabyte. Log the packed and unpacked sizes BEFORE
+      # publishing, so a registry size rejection surfaces here. The listing is
+      # the contract with consumers: no prover key (they regenerate them), and
+      # everything the regeneration needs present (the .compact source, the
+      # bin, the shipped manifest, and the signet callee's generated module the
+      # vault's compiled module imports by relative path).
+      - name: Check the contract tarball's contents and report its size
+        run: |
+          set -euo pipefail
+          yarn workspace @sig-net/midnight-examples-erc20-vault-contract pack --out /tmp/vault-contract.tgz
+          listing=$(tar -tzf /tmp/vault-contract.tgz)
+          if [ -z "$listing" ]; then
+            echo "::error::the contract tarball lists no files"
+            exit 1
+          fi
+          if printf '%s\n' "$listing" | grep -q '\.prover$'; then
+            echo "::error::the contract tarball contains prover keys: consumers regenerate them, npm never carries them"
+            exit 1
+          fi
+          for required in \
+            package/src/erc20-vault.compact \
+            package/dist/bin/erc20-vault-zk-assets.js \
+            package/dist/managed/erc20-vault/compiler/contract-manifest.json \
+            package/dist/managed/SignetSigner/contract/index.js; do
+            if ! printf '%s\n' "$listing" | grep -qx "$required"; then
+              echo "::error::the contract tarball lacks $required"
+              exit 1
+            fi
+          done
+          packed=$(du -h /tmp/vault-contract.tgz | cut -f1)
+          unpacked=$(du -sh examples/erc20-vault/contract/dist | cut -f1)
+          echo "contract package: $packed packed, $unpacked unpacked"
+          echo "contract package: $packed packed, $unpacked unpacked" >> "$GITHUB_STEP_SUMMARY"
+          rm -f /tmp/vault-contract.tgz
+      - name: Publish to npm (a version already on npm is skipped)
+        run: |
+          set -euo pipefail
+          name="@sig-net/midnight-examples-erc20-vault-contract"
+          version=$(node -p "require('./examples/erc20-vault/contract/package.json').version")
+          if [ -n "$(npm view "$name@$version" version 2>/dev/null || true)" ]; then
+            echo "$name@$version is already on npm, skipping"
+            exit 0
+          fi
+          echo "publishing $name@$version"
+          # A hyphen in the version marks a prerelease: keep it off the
+          # `latest` dist-tag so a plain install never resolves to an rc.
+          if [ "${version#*-}" != "$version" ]; then
+            yarn workspace "$name" npm publish --provenance --tag rc
+          else
+            yarn workspace "$name" npm publish --provenance
+          fi
