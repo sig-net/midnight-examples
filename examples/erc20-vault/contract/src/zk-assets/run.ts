@@ -310,17 +310,20 @@ async function produceSignet(
  * @throws {VerificationFailedError} If a produced tree does not match its manifest.
  */
 export async function runZkAssets(options: ZkAssetsOptions): Promise<ZkAssetsResult> {
-  await mkdir(options.outDir, { recursive: true });
-  await sweepStaging(options.outDir);
+  // The compiler runs with the package root as cwd, so a relative outDir must be
+  // absolute before any path derived from it reaches the compiler.
+  const anchored: ZkAssetsOptions = { ...options, outDir: resolve(options.outDir) };
+  await mkdir(anchored.outDir, { recursive: true });
+  await sweepStaging(anchored.outDir);
   const uuid = randomUUID();
-  const stagingRoot = join(options.outDir, `${STAGING_PREFIX}${uuid}`);
+  const stagingRoot = join(anchored.outDir, `${STAGING_PREFIX}${uuid}`);
   await mkdir(stagingRoot, { recursive: true });
   try {
     const result: { vaultManifestSha256?: string; signetManifestSha256?: string } = {};
-    if (options.trees.vault)
-      result.vaultManifestSha256 = await produceVault(options, stagingRoot, uuid);
-    if (options.trees.signet) {
-      result.signetManifestSha256 = await produceSignet(options, stagingRoot, uuid);
+    if (anchored.trees.vault)
+      result.vaultManifestSha256 = await produceVault(anchored, stagingRoot, uuid);
+    if (anchored.trees.signet) {
+      result.signetManifestSha256 = await produceSignet(anchored, stagingRoot, uuid);
     }
     return result;
   } finally {
