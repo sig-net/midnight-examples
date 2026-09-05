@@ -1,214 +1,42 @@
-// Contract-deploy plumbing shared by every contract package's deploy script:
-// the deploy config, the compiled-contract binding, and building the unproven
-// deploy transaction. Everything contract-SPECIFIC — constructor args, witness
-// implementations, initial private state — stays in the contract package's own
-// deploy.ts and arrives here through the type parameters.
+// The split-deploy plumbing the deploy SDK does not offer, shared by every
+// example whose verifier-key set overflows a block: building the unproven base
+// deploy that registers only some circuits, and the maintenance-update
+// transactions that install the rest. Everything contract-SPECIFIC
+// (constructor args, witness implementations, initial private state) stays in
+// the example's own deploy package and arrives here through the type
+// parameters. Configuration is read from the `env` map passed in, never from
+// `process.env`, so one caller can deploy under an environment it composed.
 
 import { NodeContext } from "@effect/platform-node";
-import {
-  CompiledContract,
-  type Contract,
-  ContractExecutable,
-} from "@midnight-ntwrk/compact-js/effect";
+import type { Contract } from "@midnight-ntwrk/compact-js/effect";
+import { CompiledContract, ContractExecutable } from "@midnight-ntwrk/compact-js/effect";
 import { ZKFileConfiguration } from "@midnight-ntwrk/compact-js-node/effect";
 import * as CoinPublicKey from "@midnight-ntwrk/platform-js/effect/CoinPublicKey";
 import * as Configuration from "@midnight-ntwrk/platform-js/effect/Configuration";
 import * as SigningKey from "@midnight-ntwrk/platform-js/effect/SigningKey";
 import * as ledger from "@midnightntwrk/ledger-v9";
-import type { FacadeState } from "@midnightntwrk/wallet-sdk-facade";
-import { Effect, Layer, Option, type Types } from "effect";
-
-import { envOrUndefined } from "./env.ts";
 import {
-  getFaucetUrl,
-  getMidnightNodeConfig,
-  type MidnightNodeConfig,
-} from "./midnight-node-config.ts";
-import { isLocalStandaloneNetwork, type NetworkId } from "./network-id.ts";
-
-/** Everything needed to perform a contract deploy: which stack to target, and which wallet pays for it. */
-export interface DeployConfig {
-  /** The stack (node/indexer/proof-server endpoints + network id) to deploy to. */
-  readonly midnightNodeConfig: MidnightNodeConfig;
-  /** Seed (hex or mnemonic) of the wallet that funds & signs the deploy. */
-  readonly deployerSeed: string;
-}
-
-/**
- * Pre-funded genesis wallet of the local standalone stack: the default
- * deployer for development, and the ONLY network where it holds funds.
- */
-export const GENESIS_MINT_WALLET_SEED =
-  "0000000000000000000000000000000000000000000000000000000000000001";
-
-// True when `seed` is the genesis mint seed in hex form (0x-optional,
-// case-insensitive). A mnemonic never matches. Used to reject the genesis
-// seed on a deployed network, where it is unfunded.
-function isGenesisSeed(seed: string): boolean {
-  return seed.trim().replace(/^0x/i, "").toLowerCase() === GENESIS_MINT_WALLET_SEED;
-}
-
-/**
- * Resolve the deployer seed for `networkId`. On the local standalone chain
- * the genesis mint wallet is the default; on every deployed network the
- * genesis wallet is unfunded, so a `DEPLOYER_SEED` funded via that network's
- * faucet is required. The single consumer is {@link getDeployConfig}.
- *
- * @param env - The environment to read `DEPLOYER_SEED` from.
- * @param networkId - The network the deploy targets.
- * @returns The seed (hex or mnemonic) that funds & signs deploys.
- * @throws {Error} If a deployed network has no `DEPLOYER_SEED`, or it is set to the
- *   (unfunded-here) genesis mint seed.
- */
-function resolveDeployerSeed(
-  env: Record<string, string | undefined>,
-  networkId: NetworkId,
-): string {
-  const provided = envOrUndefined(env, "DEPLOYER_SEED");
-  if (isLocalStandaloneNetwork(networkId)) {
-    return provided ?? GENESIS_MINT_WALLET_SEED;
-  }
-  const faucet = getFaucetUrl(env, networkId);
-  const fundHint = faucet
-    ? `fund a wallet via ${faucet}`
-    : "fund a wallet via the network's faucet";
-  if (!provided) {
-    throw new Error(
-      `DEPLOYER_SEED is required on "${networkId}": the genesis mint seed only holds funds on the local ` +
-        `standalone chain. Set DEPLOYER_SEED (hex or mnemonic) to a funded wallet: ${fundHint}.`,
-    );
-  }
-  if (isGenesisSeed(provided)) {
-    throw new Error(
-      `DEPLOYER_SEED is the local genesis mint seed, which holds no funds on "${networkId}". ` +
-        `${fundHint} and set DEPLOYER_SEED to it.`,
-    );
-  }
-  return provided;
-}
-
-/**
- * Read a {@link DeployConfig} from the environment. Node config comes from
- * {@link getMidnightNodeConfig}; the deployer seed from {@link resolveDeployerSeed}
- * (genesis mint wallet on the local chain, a required funded `DEPLOYER_SEED`
- * on every deployed network).
- *
- * @param env - The environment to read from; defaults to `process.env`.
- * @returns The resolved deploy configuration.
- * @throws {Error} If a deployed network lacks a valid funded `DEPLOYER_SEED` (see
- *   {@link resolveDeployerSeed}).
- */
-export function getDeployConfig(
-  env: Record<string, string | undefined> = process.env,
-): DeployConfig {
-  const midnightNodeConfig = getMidnightNodeConfig(env);
-  return {
-    midnightNodeConfig,
-    deployerSeed: resolveDeployerSeed(env, midnightNodeConfig.networkId),
-  };
-}
-
-/** An unproven contract-deploy transaction, ready to balance/sign/prove/submit via a wallet. */
-export interface DeployTransaction {
-  /** The contract address this deployment will create, known before submission. */
-  readonly contractAddress: string;
-  /** The serialized unproven transaction — see `submitUnprovenTransaction` in wallet.ts. */
-  readonly serializedTransaction: Uint8Array;
-}
-
-/**
- * Bind a generated Compact contract to its witnesses and compiled assets.
- *
- * Thin typed wrapper over the compact-js `CompiledContract` combinators so
- * contract packages need no direct compact-js dependency. Chained data-first
- * on purpose: the witness/asset combinators rebuild the binding via object
- * spread, which drops the prototype carrying `.pipe`.
- *
- * @param tag - Identifier for the binding (not the on-chain address), e.g. the contract name.
- * @param ctor - The `Contract` class exported by the generated `managed/contract` module.
- * @param witnesses - The contract's real witness implementations (from the package's `witnesses.ts`).
- * @param managedDirPath - Absolute path to the compiler output dir (`contract/`, `zkir/`, `keys/`, `compiler/`).
- * @returns The fully-bound {@link CompiledContract.CompiledContract}, ready for {@link buildDeployTransaction}.
- */
-export function makeCompiledContract<C extends Contract.Contract<PS>, PS>(
-  tag: string,
-  ctor: Types.Ctor<C>,
-  witnesses: Contract.Contract.Witnesses<C>,
-  managedDirPath: string,
-): CompiledContract.CompiledContract<C, PS> {
-  const base = CompiledContract.make<C, PS>(tag, ctor);
-  const withWitnesses = CompiledContract.withWitnesses(base, witnesses);
-  return CompiledContract.withCompiledFileAssets(withWitnesses, managedDirPath);
-}
+  type DeployTransaction,
+  envOrUndefined,
+  type NetworkId,
+} from "@sig-net/midnight-contract-deploy";
+import { Effect, Layer, Option } from "effect";
 
 // How long the deploy intent stays valid before it must be re-built.
 const DEPLOY_TTL_MS = 30 * 60 * 1000;
 
-/**
- * Build an UNPROVEN contract-deploy transaction: run the Compact constructor
- * with `constructorArgs`, attach the verifier keys from the compiled assets,
- * and wrap the resulting contract state in a deploy intent. Touches no
- * network and no wallet — the only wallet-derived input is the deployer's
- * coin public key, which feeds the constructor's context.
- *
- * @param compiledContract - The bound contract, from {@link makeCompiledContract}.
- * @param networkId - The network the transaction targets.
- * @param coinPublicKeyHex - The deploying wallet's Zswap coin public key (hex).
- * @param initialPrivateState - The private state the constructor (and its witnesses, if any) runs against.
- * @param constructorArgs - The contract's constructor arguments, statically typed per contract.
- * @returns The deterministic contract address plus the serialized unproven transaction.
- * @throws {Error} If the constructor traps, or the verifier keys are missing from the
- * compiled assets (run `compile:zk` — the default `--skip-zk` output has none).
- */
-export async function buildDeployTransaction<C extends Contract.Contract<PS>, PS>(
-  compiledContract: CompiledContract.CompiledContract<C, PS>,
-  networkId: NetworkId,
-  coinPublicKeyHex: string,
-  initialPrivateState: PS,
-  ...constructorArgs: Contract.Contract.InitializeParameters<C>
-): Promise<DeployTransaction> {
-  // initialize() needs the deployer's coin public key (constructor context)
-  // and the contract maintenance authority's signing key. A set
-  // MAINTENANCE_SIGNING_KEY becomes that authority, so the contract can later
-  // gain circuits via a maintenance update. Unset samples a throwaway
-  // authority, leaving the contract unmaintainable.
-  const keysLayer = Layer.succeed(Configuration.Keys, {
-    coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
-    getSigningKey: () => resolveMaintenanceSigningKey(),
-  });
-
-  // Run the contract constructor and attach verifier keys → initial ContractState.
-  const deployResult = await Effect.runPromise(
-    ContractExecutable.make(compiledContract)
-      .initialize(initialPrivateState, ...constructorArgs)
-      .pipe(
-        Effect.provide(
-          ZKFileConfiguration.layer(CompiledContract.getCompiledAssetsPath(compiledContract)),
-        ),
-        Effect.provide(NodeContext.layer),
-        Effect.provide(keysLayer),
-      ),
-  );
-
-  // `initialize` yields an onchain-runtime ContractState; bridge it to the
-  // ledger's ContractState (separate package/type) via its serialized form.
-  const contractState = ledger.ContractState.deserialize(
-    deployResult.public.contractState.serialize(),
-  );
-
-  const deploy = new ledger.ContractDeploy(contractState);
-  const intent = ledger.Intent.new(new Date(Date.now() + DEPLOY_TTL_MS)).addDeploy(deploy);
-  const transaction = ledger.Transaction.fromPartsRandomized(
-    networkId,
-    undefined,
-    undefined,
-    intent,
-  );
-
-  return {
-    contractAddress: deploy.address,
-    serializedTransaction: transaction.serialize(),
-  };
+// `MAINTENANCE_SIGNING_KEY` normalized to bare lowercase hex, or undefined when
+// unset. Shared by every reader so the accepted spellings cannot drift apart.
+function maintenanceSigningKeyHex(env: Record<string, string | undefined>): string | undefined {
+  const raw = envOrUndefined(env, "MAINTENANCE_SIGNING_KEY");
+  if (!raw) return undefined;
+  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hex)) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
+    );
+  }
+  return hex;
 }
 
 /** A circuit held back from the base deploy, added afterwards by a maintenance update. */
@@ -229,19 +57,43 @@ const operationIdToString = (id: string | Uint8Array): string =>
   typeof id === "string" ? id : new TextDecoder().decode(id);
 
 /**
- * Machine-readable phase marker a split-deploy entrypoint prints, on a line of
- * its own, the instant its base deploy transaction is submitted. Everything
- * after that line installs circuits INTO the deployed contract, so a driver
- * that reruns the entrypoint past this point deploys a SECOND contract and
- * orphans the first. A caller running such an entrypoint as a subprocess scans
- * its output for this exact string and refuses to retry once it appears.
+ * Phase marker a split-deploy entrypoint prints, on a line of its own, the
+ * instant its base deploy transaction is submitted. Everything after that
+ * line installs circuits INTO the deployed contract, so a log showing this
+ * line and then a failure describes a LIVE contract: rerunning the entrypoint
+ * from the top deploys a second one, and the recovery is the example's
+ * resume entrypoint against the address printed right after the marker.
  */
 export const SPLIT_DEPLOY_BASE_SUBMITTED_MARKER = "[split-deploy] base deploy tx submitted";
 
 /**
- * Like {@link buildDeployTransaction}, but registers ONLY the circuits in
- * `baseCircuitIds` in the initial contract state, returning the REST so the caller
- * can add them with {@link buildMaintenanceInsertTransaction}. A contract whose full
+ * Thrown by a split-deploy flow that fails AFTER its base deploy transaction
+ * was submitted, so the caller knows a contract is live and a rerun from the
+ * top would deploy a second one: recovery is the example's resume entrypoint
+ * against the live address, never a retry of the flow. The in-process
+ * counterpart of {@link SPLIT_DEPLOY_BASE_SUBMITTED_MARKER}.
+ */
+export class SplitDeployAfterBaseSubmitError extends Error {}
+
+/**
+ * The circuit ids a live contract state carries operations for: the base
+ * deploy's circuits plus every maintenance add that landed, so a resume can
+ * tell which deferred circuits are still missing.
+ *
+ * @param contractStateBytes - Serialized live contract state (from queryContractState).
+ * @returns The installed circuit ids, in the ledger's order.
+ */
+export function installedCircuitIds(contractStateBytes: Uint8Array): string[] {
+  const state = ledger.ContractState.deserialize(contractStateBytes);
+  return [...state.operations()].map(operationIdToString);
+}
+
+/**
+ * Build an UNPROVEN contract-deploy transaction (run the Compact constructor,
+ * attach the verifier keys, wrap the state in a deploy intent) that registers
+ * ONLY the circuits in `baseCircuitIds` in the initial contract state,
+ * returning the REST so the caller can add them with
+ * {@link buildMaintenanceInsertTransaction}. A contract whose full
  * verifier-key set overflows a block (the 17-circuit vault) deploys as a small base
  * plus per-circuit maintenance adds. Keep `baseCircuitIds` minimal (one small circuit
  * is enough) so the base tx is well under the block limit; every other circuit is
@@ -249,9 +101,10 @@ export const SPLIT_DEPLOY_BASE_SUBMITTED_MARKER = "[split-deploy] base deploy tx
  * the split is purely which operations land in the deployed state. Requires
  * `MAINTENANCE_SIGNING_KEY` so the contract has an authority to sign the follow-up adds.
  *
- * @param compiledContract - The bound contract, from {@link makeCompiledContract}.
+ * @param compiledContract - The bound contract, from the deploy SDK's `makeCompiledContract`.
  * @param networkId - The network the transaction targets.
  * @param coinPublicKeyHex - The deploying wallet's Zswap coin public key (hex).
+ * @param env - The environment carrying `MAINTENANCE_SIGNING_KEY` (see {@link resolveMaintenanceSigningKey}).
  * @param initialPrivateState - The private state the constructor runs against.
  * @param baseCircuitIds - Circuit ids to register in the base deploy; all others are deferred.
  * @param constructorArgs - The contract's constructor arguments.
@@ -264,6 +117,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   compiledContract: CompiledContract.CompiledContract<C, PS>,
   networkId: NetworkId,
   coinPublicKeyHex: string,
+  env: Record<string, string | undefined>,
   initialPrivateState: PS,
   baseCircuitIds: readonly string[],
   ...constructorArgs: Contract.Contract.InitializeParameters<C>
@@ -271,7 +125,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   // Fail before anything is built, let alone submitted: without an authority key the
   // base deploy would land under an SDK-sampled throwaway authority and the deferred
   // circuits could never be installed, leaving a permanently unusable contract.
-  if (Option.isNone(resolveMaintenanceSigningKey())) {
+  if (Option.isNone(resolveMaintenanceSigningKey(env))) {
     throw new Error(
       "MAINTENANCE_SIGNING_KEY must be set for a split deploy: the deferred circuits are " +
         "installed by maintenance updates its authority signs.",
@@ -279,7 +133,7 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
   }
   const keysLayer = Layer.succeed(Configuration.Keys, {
     coinPublicKey: CoinPublicKey.Hex(coinPublicKeyHex),
-    getSigningKey: () => resolveMaintenanceSigningKey(),
+    getSigningKey: () => resolveMaintenanceSigningKey(env),
   });
 
   const deployResult = await Effect.runPromise(
@@ -343,26 +197,6 @@ export async function buildDeployTransactionDeferring<C extends Contract.Contrac
 }
 
 /**
- * `MAINTENANCE_SIGNING_KEY` as normalized 64-digit hex, or undefined when unset. The single
- * definition of the env var's accepted format, which {@link resolveMaintenanceSigningKey} and
- * {@link buildMaintenanceInsertTransaction} both parse through.
- *
- * @returns The normalized key hex, or undefined when the env var is unset.
- * @throws {Error} If the env var is set but not 32 bytes of hex.
- */
-function maintenanceSigningKeyHex(): string | undefined {
-  const raw = envOrUndefined(process.env, "MAINTENANCE_SIGNING_KEY");
-  if (!raw) return undefined;
-  const hex = raw.trim().replace(/^0x/i, "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(hex)) {
-    throw new Error(
-      "MAINTENANCE_SIGNING_KEY must be 32 bytes of hex (0x optional): a BIP-340 signing key.",
-    );
-  }
-  return hex;
-}
-
-/**
  * Build an unproven maintenance-update transaction that inserts `verifierKey` under `circuitId`
  * on the deployed contract at `contractAddress`, signed by the `MAINTENANCE_SIGNING_KEY` authority.
  * Ledger-level operation-version `'v4'` (which accepts the v7 verifier keys the compiler emits),
@@ -370,6 +204,7 @@ function maintenanceSigningKeyHex(): string | undefined {
  * `currentContractStateBytes`, so re-query the live state before each add.
  *
  * @param networkId - The network the transaction targets.
+ * @param env - The environment carrying `MAINTENANCE_SIGNING_KEY` (the authority that signs the update).
  * @param contractAddress - The deployed contract's address (hex).
  * @param circuitId - The circuit id to install `verifierKey` under.
  * @param verifierKey - The new circuit's verifier key bytes.
@@ -379,13 +214,14 @@ function maintenanceSigningKeyHex(): string | undefined {
  */
 export function buildMaintenanceInsertTransaction(
   networkId: NetworkId,
+  env: Record<string, string | undefined>,
   contractAddress: string,
   circuitId: string,
   verifierKey: Uint8Array,
   currentContractStateBytes: Uint8Array,
 ): { serializedTransaction: Uint8Array } {
-  const hex = maintenanceSigningKeyHex();
-  if (hex === undefined) {
+  const hex = maintenanceSigningKeyHex(env);
+  if (!hex) {
     throw new Error(
       "MAINTENANCE_SIGNING_KEY must be set to sign a maintenance update for the contract's authority.",
     );
@@ -413,34 +249,19 @@ export function buildMaintenanceInsertTransaction(
 }
 
 /**
- * Fail fast when the deployer wallet cannot pay for a transaction: fees are
- * paid in DUST, which only generates on NIGHT registered for dust generation.
- *
- * @param state - The synced facade state to inspect (see `withSyncedWalletFacade` in wallet.ts).
- * @throws {Error} If the deployer's spendable DUST balance is zero.
- */
-export function assertDeployerFunded(state: FacadeState): void {
-  const dust = state.dust.balance(new Date());
-  if (dust > 0n) return;
-  const night = Object.values(state.unshielded.balances).reduce((sum, value) => sum + value, 0n);
-  throw new Error(
-    `deployer wallet has no DUST to pay fees (NIGHT balance: ${String(night)}). ` +
-      "Fund the wallet with NIGHT and register it for dust generation, then retry.",
-  );
-}
-
-/**
  * The contract maintenance authority signing key, read from
  * `MAINTENANCE_SIGNING_KEY` (32-byte BIP-340 key as hex, `0x` optional).
  * Present makes the deployed contract's authority this key, so it can gain
  * circuits via a maintenance update later; the same secret must sign those
  * updates. Absent yields `Option.none()`, leaving the contract unmaintainable.
  *
+ * @param env - The environment to read `MAINTENANCE_SIGNING_KEY` from.
  * @returns The maintenance authority key, or none when the env var is unset.
  * @throws {Error} If `MAINTENANCE_SIGNING_KEY` is set but not 32 bytes of hex.
  */
-export function resolveMaintenanceSigningKey(): Option.Option<SigningKey.SigningKey> {
-  const hex = maintenanceSigningKeyHex();
-  if (hex === undefined) return Option.none();
-  return Option.some(SigningKey.make(hex));
+export function resolveMaintenanceSigningKey(
+  env: Record<string, string | undefined>,
+): Option.Option<SigningKey.SigningKey> {
+  const hex = maintenanceSigningKeyHex(env);
+  return hex ? Option.some(SigningKey.make(hex)) : Option.none();
 }

@@ -1,10 +1,10 @@
 // The full deposit journey as one arrange-stage helper: startDeposit, MPC signature,
 // broadcast the sweep, MPC attestation, completeDeposit.
-import { VAULT_DEPOSIT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@midnight-examples/test-harness";
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { VAULT_DEPOSIT_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
 
-import { readVaultLedger } from "../vault-ledger.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { settleDeposit, type ShieldedTokenRecipient } from "./complete-deposit.ts";

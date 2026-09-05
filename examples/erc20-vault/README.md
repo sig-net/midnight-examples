@@ -214,7 +214,7 @@ Two vault-specific points:
   the compiled `contract-info.json`, and a ledger declaration change re-chunks
   the tree, so re-read them there and update every notification vector in the
   same change.
-- The deploy tooling ([`contract/deploy.ts`](contract/deploy.ts)) computes
+- The deploy tooling ([`deploy/src/deploy-vault.ts`](deploy/src/deploy-vault.ts)) computes
   `deployerCommitment` off-chain by calling the compiled `userCommitment`
   circuit over the deployer's secret, never a TypeScript re-implementation.
 
@@ -273,18 +273,35 @@ The order matters and is not symmetric. Ledger state cannot be added after
 deploy, so the base transaction must carry the final ledger declarations even
 for circuits it does not register yet. Circuits can be added at any time.
 
-[`contract/deploy.ts`](contract/deploy.ts) performs both phases and is the only
-implementation. The e2e setup runs it as a subprocess, and so does the stagenet
-script, so local and remote deploys take the same path:
+[`deploy/src/deploy-vault.ts`](deploy/src/deploy-vault.ts) performs both phases
+and is the only implementation. It is a typed function taking an environment
+map, so the commands below, the e2e setup pipeline and the flow tests all run
+that same function in-process: the multistage deploy a remote network needs is
+exercised on every local e2e run.
 
 ```sh
 # local, against the docker stack
-yarn workspace @midnight-examples/erc20-vault-contract deploy
+yarn deploy:erc20-vault
 
-# stagenet: deploy, then run the deployer-gated initialise
-yarn workspace @midnight-examples/erc20-vault-integration-tests exec \
-  tsx deploy-init-stagenet.ts
+# a remote network (stagenet): deploy, then run the deployer-gated initialise
+yarn deploy-initialise:erc20-vault
+
+# initialise a vault that already exists (recovers a run whose deploy landed
+# but whose initialise did not: initialise is one-shot and idempotent)
+yarn initialise:erc20-vault
+
+# install the circuits a split deploy left missing (recovers a run that died
+# after its base deploy landed, named by MIDNIGHT_VAULT_CONTRACT_ADDRESS, and
+# is a no-op on a vault with every circuit), then initialise as above
+yarn resume-deploy:erc20-vault
 ```
+
+All four read the repo-root `.env` overlaid with the real environment, the same
+way the e2e setup does, so one set of variables drives every path. They refuse to
+run when that `.env` names a different `NETWORK_ID` than the run targets and
+still supplies a network-scoped value (a signet address, an MPC key): those are
+sealed into the contract permanently, and a local-chain value on a remote network
+produces a vault that can never work.
 
 `BASE_DEPLOY_CIRCUITS` names the circuit that goes in the base transaction.
 `buildDeployTransactionDeferring` returns the contract address plus the deferred
@@ -296,10 +313,22 @@ counter, waiting for the counter to advance between updates.
 The base deploy retains a maintenance authority, and this variable is its
 signing key. Every circuit added after the base transaction is signed by it.
 
-Set it to a 32-byte hex key you keep. Unset, the deploy generates an ephemeral
-one and says so, which is fine for a throwaway deploy and wrong anywhere else:
-it is the only way to add or replace a circuit later, and an ephemeral key is
-gone when the process exits.
+Set it to a 32-byte hex key you keep: it is the only way to add or replace a
+circuit later, so a deploy to any network other than the local standalone chain
+REQUIRES it and fails fast when it is unset. On the local chain, which is
+throwaway, an unset key makes the deploy generate an ephemeral one and say so.
+
+### Deploying from CI
+
+The manually dispatched
+[`erc20-vault-deploy` workflow](../../.github/workflows/erc20-vault-deploy.yml)
+runs that same `yarn deploy-initialise:erc20-vault` against a chosen network at
+a chosen `erc20-vault-v*` release tag. Each network is a GitHub environment of
+the same name carrying the per-network secrets and variables (the workflow's
+header comment lists them), and a run whose deploy installed every circuit
+opens a PR recording the new address in the contract package's per-network
+table, served to consumers by `getVaultContractAddress` (when the initialise
+failed after that point, the PR says to run it by hand before merging).
 
 ## Runtime: the deposit round trip
 
@@ -316,11 +345,11 @@ caller's secret key as private state (the witnesses answer the contract's
 
 ```ts
 import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
-import { createVaultPrivateState } from "@midnight-examples/erc20-vault-contract";
+import { createVaultPrivateState } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 const vault = await findDeployedContract(providers, {
   contractAddress: vaultContractAddress,
-  compiledContract: vaultCompiledContract, // the compiled contract bound to its witnesses
+  compiledContract: vaultCompiledContract, // the deploy package's binding: generated module + witnesses + managed/ assets
   privateStateId: "erc20-vault",
   initialPrivateState: createVaultPrivateState(callerSecretKey),
 });
@@ -337,7 +366,10 @@ import {
   signetEventSourceFromPublicDataProvider,
   SignetRequestResponseReader,
 } from "@sig-net/midnight";
-import { pureCircuits, VAULT_DEPOSIT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
+import {
+  pureCircuits,
+  VAULT_DEPOSIT_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 
 // Provider to index the Midnight blockchain.
 const publicDataProvider = indexerPublicDataProvider({
@@ -726,7 +758,8 @@ functions: [`approve-router.ts`](integration-tests/src/flows/approve-router.ts),
 
 | Package | What it is |
 |---|---|
-| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, a curated environment-agnostic export surface, simulator unit tests, and a deploy entrypoint. Its dependency list (`@sig-net/midnight`, `@sig-net/midnight-contract` and the compact tooling) is the minimal integration surface. |
+| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads and the EVM constants, all browser-safe. Plus simulator unit tests. Its runtime dependencies are the SDK (`@sig-net/midnight`, `@sig-net/midnight-contract`) plus the two Midnight packages the generated module and the provider types import (`@midnight-ntwrk/compact-runtime`, `@midnight-ntwrk/midnight-js`). |
+| [`deploy/`](deploy/) | Deploying and post-deploy initialisation: the split base-deploy-plus-maintenance-adds, the deployer-gated `initialise`, and the configuration those resolve, as typed functions taking an environment map plus thin CLI entrypoints over them, so a hand-run deploy and the e2e setup execute identical code. Also the Node half of the vault's client surface those flows and the integration tests share: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. Everything here needs Node, which is why it is not in the contract package. |
 | [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
 
 # Running it
@@ -850,3 +883,112 @@ re-posts the missing responses), then rerun with the resume var as above.
 **TIP:** If you are using Claude Code you can ask it to run the suite for you
 using this [skill](../../.claude/skills/e2e/SKILL.md). It will handle the
 proof server restarts and resume vars between failures for you.
+
+# Releasing to npm
+
+One package publishes to npm, and it is the whole published surface of the
+erc20-vault example:
+
+| Package | Directory | What a consumer gets |
+| ------- | --------- | -------------------- |
+| `@sig-net/midnight-examples-erc20-vault-contract` | [`contract/`](contract/) | The contract's export surface, its compiled `managed/` assets minus the prover keys (the generated module, the binary zkir, the verifier keys, the integrity manifest, and the signet callee's generated module), the `.compact` source, and the `erc20-vault-zk-assets` bin that regenerates the prover keys (see [Regenerating the zk assets](#regenerating-the-zk-assets)) |
+
+The deploy package and [`packages/lib`](../../packages/lib/) it runs on stay
+private: they are consumed only inside this workspace, by the entrypoints and
+the integration tests.
+
+## Cutting a release
+
+Tags are per-example, so future examples release independently under their own
+prefix. The tag carries the example name, the npm version does not:
+
+| Tag | npm version | npm dist-tag |
+| --- | ----------- | ------------ |
+| `erc20-vault-v1.2.3` | `1.2.3` | `latest` |
+| `erc20-vault-v1.2.3-rc.4` | `1.2.3-rc.4` | `rc` |
+
+1. Set the contract package to the release version. The publish refuses to
+   run unless it already reads exactly the tag's version:
+
+   ```sh
+   yarn workspace @sig-net/midnight-examples-erc20-vault-contract version 1.2.3
+   ```
+
+2. Commit the bump, then tag it and push the tag:
+
+   ```sh
+   git tag erc20-vault-v1.2.3 && git push origin erc20-vault-v1.2.3
+   ```
+
+3. The tag starts the
+   [`erc20-vault-publish`](../../.github/workflows/erc20-vault-publish.yml)
+   workflow under the `npm-publish` environment. Give that environment
+   required reviewers in the repository settings and nothing reaches npm
+   until someone approves the run.
+
+4. The workflow refuses any ref that is not an `erc20-vault-vX.Y.Z` or
+   `erc20-vault-vX.Y.Z-rc.N` tag, and a stable tag must point at a commit on
+   `main` (prerelease tags may come from any branch). It reinstalls from the
+   committed lockfile, compiles the contract **with** zk keys so the shipped
+   manifest hashes them, runs format/lint/build/test, checks the tarball
+   (no prover key, and the `.compact` source, the bin, the manifest and the
+   signet callee's module present), then publishes with npm provenance. A
+   version already on npm is skipped, so a re-run resumes rather than errors.
+
+## A note on package size
+
+The vault has 17 circuits carrying 1.4 GB of prover keys, against kilobytes
+for the verifier keys that go on-chain. Those prover keys are published
+nowhere: the package packs to well under a megabyte, and the workflow logs the
+packed and unpacked size before it publishes anything.
+
+Keygen is deterministic under the pinned toolchain: two independent
+`compact compile` runs of the same source with the same compiler release
+produce byte-identical keys, so the `compiler/contract-manifest.json` the
+package ships, which pins every artefact's size and sha256, is enough for a
+consumer to regenerate the keys and prove they are the published ones.
+
+Inside this workspace, `buildVaultProviders` reads the vault's keys from the
+contract package's own `managed/` output on every network, so a deploy or an
+e2e run against any network needs `yarn compile:erc20-vault:zk` first, and
+says so if the keys are missing.
+
+## Regenerating the zk assets
+
+An app that proves in the browser serves the artefacts from its own origin:
+its `public/` directory in development, a bucket behind its own domain in
+production. The package's bin lays that origin out. Install the package and
+the [pinned compact toolchain](../../README.md#prerequisites), then run:
+
+```sh
+erc20-vault-zk-assets public
+```
+
+It compiles the shipped `src/erc20-vault.compact` with the pinned compiler
+(about ten minutes), refuses anything that does not match the shipped
+manifest, and writes:
+
+```
+public/keys/<circuit>.prover, <circuit>.verifier    the vault's 17 circuits
+public/zkir/<circuit>.bzkir
+public/compiler/contract-manifest.json, contract-info.json
+public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract
+```
+
+A rerun verifies what is there and skips a tree that already matches;
+`--force` rebuilds it. `--signet-only` copies the callee's tree without the
+toolchain, `--vault-only` skips the copy. The run ends by printing each tree's
+`compiler/contract-manifest.json` sha256.
+
+Point [`@midnight-ntwrk/midnight-js-fetch-zk-config-provider`](https://www.npmjs.com/package/@midnight-ntwrk/midnight-js-fetch-zk-config-provider)
+at `5.0.0-beta.6`, the version matching the rest of this stack, at the origin
+(`/` for the vault and `/signet` for the callee in the layout above). It reads
+the same `keys/<id>.prover`, `keys/<id>.verifier`, `zkir/<id>.bzkir` and
+`compiler/contract-manifest.json` paths the Node provider does. Pass the
+printed sha256 as `expectedManifestHash` in its integrity options: that pins
+the served manifest to a hash the app controls, rather than trusting whatever
+manifest the origin hands back alongside the artefacts it certifies.
+
+For production, upload the four directories to the object store the app's
+origin points at, and upload again after every release: the manifest hash
+changes with the contract.

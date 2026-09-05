@@ -1,27 +1,52 @@
 {
-  "name": "@midnight-examples/erc20-vault-contract",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@sig-net/midnight-examples-erc20-vault-contract",
+  "version": "0.1.0-rc.6",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sig-net/midnight-examples",
+    "directory": "examples/erc20-vault/contract"
+  },
   "type": "module",
   "description": "The ERC20 vault Compact contract. src/index.ts is the curated export surface — this IS the \"sdk\" face of the package.",
+  "//exports": "Local dev consumes raw TS source and the compiler output under src/managed. `publishConfig.exports` below swaps both to the emitted ./dist at publish time, where prepack copies the shippable managed/ parts.",
   "exports": {
     ".": "./src/index.ts",
     "./managed/*": "./src/managed/*"
+  },
+  "files": [
+    "dist",
+    "src/*.compact"
+  ],
+  "bin": {
+    "erc20-vault-zk-assets": "./dist/bin/erc20-vault-zk-assets.js"
   },
   "scripts": {
     "compile": "COMPACT_PATH=../../../node_modules compact compile --skip-zk --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
     "compile:zk": "COMPACT_PATH=../../../node_modules compact compile --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "deploy": "tsx deploy.ts"
+    "zk-assets": "tsx src/bin/erc20-vault-zk-assets.ts",
+    "prepack": "ls src/managed/erc20-vault/keys/*.prover >/dev/null 2>&1 || { echo 'erc20-vault-contract prepack: no prover keys in src/managed/erc20-vault/keys, run `yarn compile:zk` first (compile uses --skip-zk)' >&2; exit 1; } && rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/managed/erc20-vault && cp -R src/managed/erc20-vault/contract src/managed/erc20-vault/compiler src/managed/erc20-vault/zkir dist/managed/erc20-vault/ && mkdir -p dist/managed/erc20-vault/keys && cp src/managed/erc20-vault/keys/*.verifier dist/managed/erc20-vault/keys/ && mkdir -p dist/managed/SignetSigner && cp -R src/managed/SignetSigner/contract dist/managed/SignetSigner/",
+    "test": "vitest run"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./managed/*": "./dist/managed/*"
+    }
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-    "@sig-net/midnight": "0.21.0-rc.2",
-    "@sig-net/midnight-contract": "0.21.0-rc.2"
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
+    "@sig-net/midnight": "0.21.0-rc.6",
+    "@sig-net/midnight-contract": "0.21.0-rc.6"
   },
   "devDependencies": {
-    "@midnight-examples/lib": "*",
     "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3",
     "@types/node": "^26.1.1",
     "tsx": "^4.23.1",

@@ -3,14 +3,12 @@
 // writing the holder's slot in the token's balance mapping directly (anvil_setStorageAt, the
 // same mechanism as foundry's `deal`), so dealing needs no funded source account and repeated
 // redeploy campaigns can never exhaust one.
-import { type ContractWriteMethod, requireEnv } from "@midnight-examples/test-harness";
+import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { type ContractWriteMethod, requireEnv } from "@sig-net/midnight-examples-test-harness";
 import { ethers } from "ethers";
 
 /** Real Sepolia USDC (the swap suite's tokenIn), also present on a Sepolia fork. */
 export const SEPOLIA_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
-
-/** Aave v3 Sepolia USDC (the lending suite's underlying), the stataUSDC wrapper's `asset()`. */
-export const AAVE_USDC = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8";
 // Aave v3 Sepolia PoolConfigurator + a pool admin: the live USDC reserve is supplied ~2x over its
 // cap, so maxDeposit is 0 and stataUSDC deposits revert. The fork lifts the cap through these.
 const AAVE_POOL_CONFIGURATOR = "0x7Ee60D184C24Ef7AfC1Ec7Be59A0f448A0abd138";

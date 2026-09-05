@@ -1,5 +1,5 @@
 {
-  "name": "@midnight-examples/erc20-vault-integration-tests",
+  "name": "@sig-net/midnight-examples-erc20-vault-integration-tests",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,16 +13,15 @@
     "benchmark:report": "tsx scripts/benchmark-report.ts"
   },
   "dependencies": {
-    "@midnight-examples/erc20-vault-contract": "*",
-    "@midnight-examples/lib": "*",
-    "@midnight-examples/test-harness": "*",
     "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
     "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.6",
-    "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.6",
-    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.6",
-    "@midnight-ntwrk/midnight-js-types": "5.0.0-beta.6",
-    "@sig-net/midnight": "0.21.0-rc.2",
+    "@sig-net/midnight": "0.21.0-rc.6",
+    "@sig-net/midnight-contract-deploy": "0.21.0-rc.6",
+    "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
+    "@sig-net/midnight-examples-erc20-vault-deploy": "workspace:*",
+    "@sig-net/midnight-examples-lib": "workspace:*",
+    "@sig-net/midnight-examples-test-harness": "workspace:*",
     "ethers": "^6.17.0"
   },
   "devDependencies": {

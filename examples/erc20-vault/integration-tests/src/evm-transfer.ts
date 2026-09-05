@@ -1,7 +1,5 @@
 // EVM value helpers shared by the vault flows.
 
-import { hexToBytes } from "@sig-net/midnight";
-
 // EIP-1559 gas parameters for the ERC20 transfers the MPC signs. An ERC20
 // transfer costs ~50-65k gas; the fee caps are generous.
 // Double duty: the gas envelope the deposit flow CHOOSES (the caller's
@@ -25,17 +23,3 @@ export const ERC20_TRANSFER_MAX_FEE_PER_GAS = 30_000_000_000n;
 
 /** Max priority fee per gas of an MPC-signed ERC20 transfer, wei (1 gwei). */
 export const ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS = 1_000_000_000n;
-
-/**
- * Decode a 20-byte 0x-prefixed hex EVM address to its raw bytes.
- *
- * @param hex - The address, e.g. `0xA0c8…1514`.
- * @returns The 20 address bytes.
- * @throws {Error} If the input is not a 20-byte 0x hex string.
- */
-export function evmAddressBytes(hex: string): Uint8Array {
-  if (!/^0x[0-9a-fA-F]{40}$/.test(hex)) {
-    throw new Error(`expected a 20-byte 0x hex EVM address; got "${hex}".`);
-  }
-  return hexToBytes(hex);
-}

@@ -14,14 +14,14 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { deriveMidnightResponseKey, formatSecp256k1PublicKey } from "@sig-net/midnight";
-import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
+import { deploySignetContract, getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
+import { loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
-import { appendRepoDotEnv, loadRepoDotEnv } from "./env-file.ts";
+import { appendRepoDotEnv } from "./env-file.ts";
 import { getEvmChainId } from "./evm.ts";
-import { CommandError, REPO_ROOT, runCommand, runRootScript } from "./exec.ts";
+import { runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { banner, logSkip } from "./output.ts";
 import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
@@ -243,63 +243,41 @@ export async function compileContractZk(
 }
 
 /**
- * Thrown by an action that must never be reattempted, whatever its text says:
- * it left behind partial state (an on-chain deploy, a half-installed contract)
- * that a second attempt would duplicate rather than resume.
- * {@link retryWhileDustGenerates} rethrows it untouched, ahead of any
- * transient-failure matching, so an action can carry a transient failure as
- * its `cause` and still stop the retry loop.
- */
-export class NonRetryableError extends Error {}
-
-/**
- * Run a fee-paying call (a deploy, a root-to-child funding transfer),
- * retrying while the paying wallet cannot yet cover the fee. On a freshly
- * started dev chain DUST generates block by block from the genesis NIGHT,
- * so the first fee-paying transactions can race the chain's first minutes:
- * `Wallet.InsufficientFunds` ("could not balance dust") is transient there.
- * A genuinely unfunded wallet fails fast in the root-funding preflight
- * (see wallets.ts) instead, so the bounded retry here cannot mask real
- * underfunding.
+ * Run a fee-paying call (a deploy, a root-to-child funding transfer) and
+ * translate the one opaque node rejection a local stack produces. Waiting
+ * for DUST is not this function's job: the deploy plumbing retries the
+ * balancing step itself while dust generates, and a wallet with nothing to
+ * generate from fails fast in `ensureFeeReady` with a funding hint.
  *
- * A {@link NonRetryableError} takes precedence over that matching and is
- * rethrown on the spot: an action that knows a second attempt is unsafe says
- * so by its error TYPE, which no output text can override.
- *
- * @param what - Step label for the retry log lines.
- * @param action - The fee-paying call to (re)attempt.
+ * @param what - Step label for the error message.
+ * @param action - The fee-paying call.
  * @returns Whatever `action` resolves to.
- * @throws {NonRetryableError} Immediately, whatever the error text says.
- * @throws {Error} The last error when attempts are exhausted, or immediately for
- *   any error that is not the transient insufficient-dust failure.
+ * @throws {Error} Node error 1010 / "Custom error: 170" (InvalidDustSpendProof)
+ *   wrapped with the stack-reset hint, as the raw message is opaque. Any
+ *   other error passes through unchanged.
  */
-export async function retryWhileDustGenerates<T>(
+export async function explainDustSpendRejection<T>(
   what: string,
   action: () => Promise<T>,
 ): Promise<T> {
-  const RETRY_DELAY_MS = 15_000;
-  const MAX_ATTEMPTS = 24; // ~6 minutes: a young dev chain generates plenty by then
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await action();
-    } catch (error) {
-      if (error instanceof NonRetryableError) {
-        throw error;
-      }
-      // A subprocess failure is matched on its FULL output: the trigger the
-      // child printed may sit far above the tail its message quotes.
-      const text = error instanceof CommandError ? error.output : String(error);
-      const transient =
-        text.includes("InsufficientFunds") || text.includes("could not balance dust");
-      if (!transient || attempt >= MAX_ATTEMPTS) {
-        throw error;
-      }
-      console.log(
-        `${what}: the paying wallet cannot cover the fee yet (dust still generating on a young chain?),` +
-          ` retrying in ${String(RETRY_DELAY_MS / 1000)}s (attempt ${String(attempt)}/${String(MAX_ATTEMPTS)})`,
+  try {
+    return await action();
+  } catch (error) {
+    const message = String(error);
+    if (
+      message.includes("Custom error: 170") ||
+      message.includes("InvalidDustSpendProof") ||
+      /\b1010\b/.test(message)
+    ) {
+      throw new Error(
+        `${what}: node rejected the dust spend (error 170 = InvalidDustSpendProof). ` +
+          "The local chain has diverged from the wallet's dust state: reset the stack " +
+          "(docker compose down and up, then redeploy) before rerunning. " +
+          `Original error: ${message}`,
+        { cause: error },
       );
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
     }
+    throw error;
   }
 }
 
@@ -311,7 +289,7 @@ export async function retryWhileDustGenerates<T>(
  * (requesters seal the signet address at deploy time).
  *
  * @param env - The suite's env accumulator.
- * @throws {Error} If the deploy fails (after the dust-generation retries).
+ * @throws {Error} If the deploy fails.
  */
 export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS) {
@@ -321,7 +299,7 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
     );
     return;
   }
-  const { contractAddress } = await retryWhileDustGenerates("deploy signet contract", () =>
+  const { contractAddress } = await explainDustSpendRejection("deploy signet contract", () =>
     deploySignetContract(env),
   );
   env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = contractAddress;

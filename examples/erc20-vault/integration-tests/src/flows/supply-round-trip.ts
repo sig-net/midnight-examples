@@ -1,8 +1,8 @@
 // The full supply journey as one arrange-stage helper: approve the wrapper, startSupply, MPC
 // signature, broadcast, completeSupply.
-import { VAULT_SUPPLY_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { getTransactionNonce } from "@midnight-examples/test-harness";
 import type { RequestIdHex } from "@sig-net/midnight";
+import { VAULT_SUPPLY_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
 import type { VaultSession } from "../vault-session.ts";
 import { ensureStataApproved } from "./approve-stata.ts";

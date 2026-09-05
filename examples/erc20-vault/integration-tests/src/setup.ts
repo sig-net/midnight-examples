@@ -10,10 +10,15 @@
 // deploy: the key derives from the vault's own contract address, and the
 // initialise flow pins it on-chain.
 
-import { SPLIT_DEPLOY_BASE_SUBMITTED_MARKER } from "@midnight-examples/lib";
+import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
+import {
+  deriveVaultEvmAddress,
+  STATA_USDC,
+  UNISWAP_SWAP_ROUTER_02,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { deployVault } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
   assertEnvironment,
-  CommandError,
   compileContractZk,
   deploySignetContractStep,
   ensureMpcResponseKey,
@@ -21,28 +26,22 @@ import {
   ensureMpcSecp256k1Pubkey,
   ensureWalletSeeds,
   ensureWalletsFunded,
+  explainDustSpendRejection,
   logSkip,
-  NonRetryableError,
   persistFakenetHandoffToDotEnv,
   printMpcServerConfig,
   requireEnv,
   resolveEvmChain,
-  retryWhileDustGenerates,
-  runCommand,
   runSetupPipeline,
   type SetupStep,
   startFakenetResponder,
-} from "@midnight-examples/test-harness";
-import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
+} from "@sig-net/midnight-examples-test-harness";
 import type { TestProject } from "vitest/node";
 
-import { STATA_USDC, stataAvailable } from "./evm-stata.ts";
-import { UNISWAP_SWAP_ROUTER_02, uniswapAvailable } from "./evm-swap.ts";
+import { stataAvailable } from "./evm-stata.ts";
+import { uniswapAvailable } from "./evm-swap.ts";
 import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
-import { VAULT_PATH_HEX } from "./mpc-routing.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
-
-const MINUTE = 60_000;
 
 // The env keys the setup steps populate, in derivation order — the "Minimal
 // .env block" printout reads like the flow that produced it.
@@ -59,22 +58,20 @@ const PIPELINE_KEYS = [
 ] as const;
 
 /**
- * Deploy the vault contract via the contract package's own `deploy`
- * entrypoint (a subprocess — deploy.ts is a self-executing Node script
- * outside the package's export surface), capturing the printed address.
- * Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already set. Retries while
- * the deployer wallet's dust is still generating on a young chain (the
- * subprocess failure carries the child's full output, which the harness's
- * transient-failure matcher reads), but ONLY while the subprocess has not yet
- * submitted its base deploy: the split deploy has no resume path, so a rerun
- * past that point would deploy a SECOND contract and orphan the
- * half-installed first one.
+ * Deploy the vault contract by calling the deploy package's `deployVault`
+ * in-process: the same function the `deploy` and `deploy-initialise`
+ * entrypoints run, so the split deploy (base deploy plus one maintenance
+ * update per deferred circuit) this suite exercises is the one a remote
+ * bring-up performs. Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already
+ * set.
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
- *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` and node config from it).
- * @throws {NonRetryableError} If the subprocess failed after its base deploy was submitted.
- * @throws {Error} If the deploy subprocess fails otherwise (after the dust-generation
- *   retries) or its output carries no contract address.
+ *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
+ *   config from it).
+ * @throws {SplitDeployAfterBaseSubmitError} If the deploy failed after its base
+ *   deploy was submitted: the split deploy has no resume path, so a rerun would
+ *   deploy a SECOND contract and orphan the half-installed first one.
+ * @throws {Error} If the deploy fails otherwise.
  */
 async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.MIDNIGHT_VAULT_CONTRACT_ADDRESS) {
@@ -96,42 +93,9 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
       "defaulted VAULT_DEPLOYER_SECRET_KEY to the user identity secret (initialise is deployer-gated)",
     );
   }
-  const contractAddress = await retryWhileDustGenerates("deploy vault contract", async () => {
-    let stdout: string;
-    try {
-      // 30 minutes, matching deploy-init-stagenet.ts: the split deploy is a base
-      // tx plus one maintenance add per remaining circuit, each with a wallet
-      // re-sync and a counter-confirmation wait.
-      stdout = await runCommand(
-        "yarn",
-        ["workspace", "@midnight-examples/erc20-vault-contract", "deploy"],
-        env,
-        30 * MINUTE,
-      );
-    } catch (error) {
-      // The deploy entrypoint prints the marker the instant its base deploy is
-      // submitted, which is the point past which a rerun costs a second
-      // contract. Everything else stays retryable and keeps its original error.
-      if (
-        error instanceof CommandError &&
-        error.output.includes(SPLIT_DEPLOY_BASE_SUBMITTED_MARKER)
-      ) {
-        throw new NonRetryableError(
-          "vault deploy failed after its base deploy was submitted, not retrying: " +
-            "a retry would deploy a second contract and orphan the first",
-          { cause: error },
-        );
-      }
-      throw error;
-    }
-    const address = /deployed erc20-vault at (\S+)/.exec(stdout)?.[1];
-    if (address === undefined) {
-      throw new Error(
-        "vault deploy succeeded but printed no `deployed erc20-vault at <address>` line",
-      );
-    }
-    return address;
-  });
+  const { contractAddress } = await explainDustSpendRejection("deploy vault contract", () =>
+    deployVault(env),
+  );
   env.MIDNIGHT_VAULT_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_VAULT_CONTRACT_ADDRESS=${contractAddress}`);
   console.log(` ➜ the vault contract on Midnight — holds deposits and authorizes withdrawals`);
@@ -141,22 +105,25 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
 }
 
 /**
- * Ensure `EVM_VAULT_ADDRESS` matches the vault's derived EVM account
- * (`MPC_SECP256K1_PUBKEY` + vault contract address, path = the hex rendering
- * of the contract-fixed `pad(32, "vault")` bytes), deriving it when absent.
+ * Ensure `EVM_VAULT_ADDRESS` matches the vault's derived EVM account, deriving
+ * it when absent. The derivation is the contract package's
+ * {@link deriveVaultEvmAddress}, the same one the deploy package's
+ * `resolveInitialiseConfig` seals on-chain, so this step and the initialise
+ * agree by construction.
  *
  * @param env - The suite's env accumulator.
  * @throws {Error} If a preset `EVM_VAULT_ADDRESS` mismatches the derivation.
  */
 function ensureVaultEvmAddress(env: NodeJS.ProcessEnv): void {
-  const expectedAddress = deriveEvmAddress(
+  const expectedAddress = deriveVaultEvmAddress(
     requireEnv(env, "MPC_SECP256K1_PUBKEY"),
     requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
-    VAULT_PATH_HEX,
   );
   if (env.EVM_VAULT_ADDRESS) {
     console.log(`Found EVM_VAULT_ADDRESS in the environment as ${env.EVM_VAULT_ADDRESS}`);
-    if (env.EVM_VAULT_ADDRESS !== expectedAddress) {
+    // Case-insensitive: an EVM address is EIP-55 checksummed, so the same
+    // account differs only in case between one speller and another.
+    if (env.EVM_VAULT_ADDRESS.toLowerCase() !== expectedAddress.toLowerCase()) {
       throw new Error(
         `EVM_VAULT_ADDRESS should be derived from MPC_SECP256K1_PUBKEY + vault contract address: expected ${expectedAddress}, found ${env.EVM_VAULT_ADDRESS}`,
       );
@@ -192,7 +159,7 @@ function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   );
   if (env.EVM_USER_ADDRESS) {
     console.log(`Found EVM_USER_ADDRESS in the environment as ${env.EVM_USER_ADDRESS}`);
-    if (env.EVM_USER_ADDRESS !== expectedAddress) {
+    if (env.EVM_USER_ADDRESS.toLowerCase() !== expectedAddress.toLowerCase()) {
       throw new Error(
         `EVM_USER_ADDRESS should be derived from MPC_SECP256K1_PUBKEY + vault contract + user identity: expected ${expectedAddress}, found ${env.EVM_USER_ADDRESS}`,
       );
