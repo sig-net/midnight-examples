@@ -2850,6 +2850,31 @@ describe("throughput: the two-phase allocator lets concurrent requests apply", (
     expect(replay(stateOf(assignA.context), assignB, true)).toBe("applied");
   });
 
+  it("CONTENTION: a phase-2 proof survives a phase-1 insert that moves the slots root", async () => {
+    // The monotonicity claim, tested directly. assign* pins checkRoot TRUE,
+    // and checkRoot lowers to `member` against an APPEND-ONLY root history --
+    // not `eq` against the current root. So a request* that lands in between,
+    // moving the tree's current root, must not falsify it.
+    const { contract, ctx } = await deployInitialised();
+    const parked = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const key = requestKeyOf(ctx, VALID_WITHDRAW.coin.nonce);
+    const path = slotPathOf(stateOf(parked.context) as Parameters<typeof ledger>[0], key);
+
+    // Prove the assign against the state as it stands now...
+    const assigned = await contract.circuits.assignWithdraw(parked.context, key, path);
+
+    // ...then let somebody else's phase 1 insert a leaf and move the root.
+    const interloperCtx = await strangerContext("requestWithdraw", parked.context);
+    const interloper = await requestWithdrawOnly(contract, interloperCtx, VALID_WITHDRAW);
+    const movedRoot = stateOf(interloper.context);
+    expect(ledger(movedRoot as Parameters<typeof ledger>[0]).slots.root()).not.toEqual(
+      ledger(stateOf(parked.context) as Parameters<typeof ledger>[0]).slots.root(),
+    );
+
+    // The already-proven assign still applies against the moved root.
+    expect(replay(movedRoot, assigned, true)).toBe("applied");
+  });
+
   // ---- CORRECTNESS ----
 
   it("CORRECTNESS: assigned EVM nonces are distinct, contiguous and evmNonceBase + slot", async () => {
