@@ -28,6 +28,42 @@ export ledger mpcResponseKey: Secp256k1Point;
 // Nonce to keep otherwise identical requests hashing to distinct request ids.
 export ledger signetRequestNonce: Counter;
 
+// ---- Gas parameters of VAULT-SIGNED transactions ------------------------------------
+//
+// These govern every transaction the VAULT itself signs: approveStata, approveRouter,
+// startWithdraw, startSwap, startSupply, startRedeem. They deliberately do NOT govern
+// startDeposit, whose transaction is signed by the USER's own derived EVM account and
+// paid out of it, so its envelope stays a caller argument.
+//
+// WHY LEDGER STATE AND NOT LITERALS.
+// maxFeePerGas is a CEILING, not a price. Under EIP-1559 the sender pays base fee plus
+// tip and is refunded everything below the cap, so a generous cap costs nothing while
+// the market is calm — it is only ever paid during the spike it exists to survive. A
+// cap set too low therefore buys no savings at all; it just makes transactions
+// UNINCLUDABLE the moment the base fee crosses it. And because the vault signs against
+// one sequential EVM nonce, one stalled transaction blocks every transaction queued
+// behind it, so an unincludable cap is a whole-vault stall, not a slow request. The
+// 30 gwei literals these replace did exactly that above 30 gwei of base fee.
+// setGasParams() lets the deployer move them as the fee market moves.
+//
+// The gas LIMIT is a property of the operation, not of the market, so it is per kind;
+// the fee cap and tip track the market, so they are global.
+//
+// DECLARED HERE (immediately after signetRequestNonce) ON PURPOSE, for the reason
+// spelled out over depositRequestNonces below: the compiler puts the LAST 15 ledger
+// fields in chunk 1, so APPENDING these at the end would re-chunk the state tree and
+// move the pinned MPC notification paths. Inserting 7 fields here pushes the chunk-1
+// base 7 slots later too, so every chunk-1 offset — [1,3] [1,7] [1,11] [1,13] — and
+// [0,0] and [0,3] above are all unchanged. tests/ledger-paths.test.ts is the tripwire
+// that fails if that ever stops being true.
+export ledger vaultMaxFeePerGas: Uint<128>;
+export ledger vaultMaxPriorityFeePerGas: Uint<128>;
+export ledger vaultWithdrawGasLimit: Uint<64>;
+export ledger vaultApproveGasLimit: Uint<64>;
+export ledger vaultSwapGasLimit: Uint<64>;
+export ledger vaultSupplyGasLimit: Uint<64>;
+export ledger vaultRedeemGasLimit: Uint<64>;
+
 // Becomes 1 once initialise() has run.
 export ledger initialised: Counter;
 
@@ -247,6 +283,80 @@ export circuit initialise(
   evmChainId = disclose(chainId);
   caip2Id = disclose(chainCaip2Id);
   mpcResponseKey = disclose(responseKey);
+
+  // The fee ceiling of every vault-signed transaction: 150 gwei. This is the MOST
+  // the vault will pay per unit of gas, not what it pays. EIP-1559 charges base fee
+  // plus tip and never the ceiling, so the ceiling decides only whether a
+  // transaction can be included at all. The vault's own account pays this gas, so
+  // the ceiling is the operator's exposure and the operator sets it.
+  //
+  // 150 sits just above the highest base fee of the last year: L1 runs at
+  // single-digit gwei day to day and spikes a little past 100 during major
+  // launches. It bounds the worst case at 0.105 ETH for the 700k-gas swap and
+  // 0.015 ETH for the 100k-gas kinds.
+  //
+  // A ceiling set too low is not a saving, it is an outage: nothing the vault signs
+  // can be included, and one stuck transaction blocks every later one because the
+  // account has a single nonce sequence. Base fee rises at most 12.5% per block, so
+  // a climb from single digits to 150 takes ~29 blocks, roughly six minutes. That
+  // is the window to raise this through setGasParams().
+  vaultMaxFeePerGas = 150000000000 as Uint<128>;   // 150 gwei
+  // The tip is paid in FULL and never refunded, so it is the half worth keeping
+  // tight. 1 gwei is already generous post-Dencun, and setGasParams() can raise it
+  // when a spike makes inclusion genuinely competitive.
+  vaultMaxPriorityFeePerGas = 1000000000 as Uint<128>; // 1 gwei
+
+  // Per-kind gas limits, carried over from the literals they replace: a plain ERC20
+  // approve/transfer, a Uniswap V3 exactOutputSingle, and Aave supply/redeem through
+  // the ERC-4626 wrapper.
+  vaultWithdrawGasLimit = 100000 as Uint<64>;
+  vaultApproveGasLimit = 100000 as Uint<64>;
+  vaultSwapGasLimit = 700000 as Uint<64>;
+  vaultSupplyGasLimit = 500000 as Uint<64>;
+  vaultRedeemGasLimit = 500000 as Uint<64>;
+}
+
+// Deployer-gated update of the gas envelope every VAULT-SIGNED transaction carries.
+// Repeatable, unlike the one-shot initialise: initialise pins identities and addresses,
+// which must never move, whereas the fee market moves constantly and a cap that cannot
+// follow it is the stall this whole mechanism exists to prevent. The gate is
+// initialise's exactly: the caller proves the deployer's identity commitment from the
+// callerSecretKey witness.
+//
+// Does not touch startDeposit, which takes its gas envelope from its caller.
+export circuit setGasParams(
+  newMaxFeePerGas: Uint<128>,
+  newMaxPriorityFeePerGas: Uint<128>,
+  newWithdrawGasLimit: Uint<64>,
+  newApproveGasLimit: Uint<64>,
+  newSwapGasLimit: Uint<64>,
+  newSupplyGasLimit: Uint<64>,
+  newRedeemGasLimit: Uint<64>
+): [] {
+  assert(initialised >= 1, "Not initialised");
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+
+  assert(newMaxFeePerGas > 0 as Uint<128>, "maxFeePerGas must be positive");
+  // EIP-1559 rejects a transaction whose tip exceeds its cap, so a pair that would
+  // make every vault transaction invalid must not reach the ledger.
+  assert(
+    newMaxPriorityFeePerGas <= newMaxFeePerGas,
+    "maxPriorityFeePerGas cannot exceed maxFeePerGas"
+  );
+  // A zero gas limit is an instant out-of-gas on every kind it applies to.
+  assert(newWithdrawGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  assert(newApproveGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  assert(newSwapGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  assert(newSupplyGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  assert(newRedeemGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+
+  vaultMaxFeePerGas = disclose(newMaxFeePerGas);
+  vaultMaxPriorityFeePerGas = disclose(newMaxPriorityFeePerGas);
+  vaultWithdrawGasLimit = disclose(newWithdrawGasLimit);
+  vaultApproveGasLimit = disclose(newApproveGasLimit);
+  vaultSwapGasLimit = disclose(newSwapGasLimit);
+  vaultSupplyGasLimit = disclose(newSupplyGasLimit);
+  vaultRedeemGasLimit = disclose(newRedeemGasLimit);
 }
 
 // One-time MPC-signed approve(stataToken, unlimitedAllowance()) on the underlying
@@ -268,9 +378,9 @@ export circuit approveStata(
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
-    maxFeePerGas: 30000000000 as Uint<128>,        // 30 gwei
-    gasLimit: 100000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultApproveGasLimit,
     to: stataUnderlying,                            // approve is called ON the underlying token
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
@@ -322,9 +432,9 @@ export circuit approveRouter(
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
-    maxFeePerGas: 30000000000 as Uint<128>,        // 30 gwei
-    gasLimit: 100000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultApproveGasLimit,
     to: disclose(erc20Address),                    // approve is called ON the ERC20
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
@@ -548,9 +658,9 @@ export circuit startWithdraw(
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
-    maxFeePerGas: 30000000000 as Uint<128>,       // 30 gwei
-    gasLimit: 100000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultWithdrawGasLimit,
     to: withdrawRequest.erc20Address,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
@@ -733,9 +843,9 @@ export circuit startSwap(
   const txParams = EvmType2TxParams<7, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
-    maxFeePerGas: 30000000000 as Uint<128>,        // 30 gwei
-    gasLimit: 700000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultSwapGasLimit,
     to: uniswapRouter,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<7>>(calldata),
@@ -898,9 +1008,9 @@ export circuit startSupply(
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>,
-    maxFeePerGas: 30000000000 as Uint<128>,
-    gasLimit: 500000 as Uint<64>,   // Aave supply through the ERC-4626 wrapper
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultSupplyGasLimit,
     to: stataToken,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
@@ -1038,9 +1148,9 @@ export circuit startRedeem(
   const txParams = EvmType2TxParams<3, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>,
-    maxFeePerGas: 30000000000 as Uint<128>,
-    gasLimit: 500000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultRedeemGasLimit,
     to: stataToken,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<3>>(calldata),

@@ -19,15 +19,6 @@ export const APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
 /** The allowance approveRouter grants, read from the compiled circuit so it cannot drift. */
 export const MAX_APPROVE = pureCircuits.unlimitedAllowance();
 
-/** Gas ceiling of a V3 single-hop swap (~120-200k gas); the contract fixes this (vault pays). */
-export const SWAP_GAS_LIMIT = 700_000n;
-
-/** Max total fee per gas of a swap, wei (30 gwei). */
-export const SWAP_MAX_FEE_PER_GAS = 30_000_000_000n;
-
-/** Max priority fee per gas of a swap, wei (1 gwei). */
-export const SWAP_MAX_PRIORITY_FEE_PER_GAS = 1_000_000_000n;
-
 /**
  * The schema the MPC decodes the swap's EVM return against, read from the compiled circuit so
  * it cannot drift: exactOutputSingle returns a uint256 amountIn.

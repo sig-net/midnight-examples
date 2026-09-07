@@ -18,15 +18,14 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
-import { VAULT_PATH_BYTES } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
-
 import {
-  ERC20_TRANSFER_GAS_LIMIT,
-  ERC20_TRANSFER_MAX_FEE_PER_GAS,
-  ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
-  ERC20_TRANSFER_SELECTOR,
-} from "../evm-transfer.ts";
+  evmAddressBytes,
+  readVaultLedger,
+  VAULT_PATH_BYTES,
+  vaultGasEnvelope,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+
+import { ERC20_TRANSFER_SELECTOR } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
@@ -94,6 +93,12 @@ export async function startWithdraw(
   if (!before.initialised) {
     throw new Error("vault is not initialised, run the initialise flow first");
   }
+
+  // The gas envelope the circuit itself will stamp, read from the ledger the
+  // deployer's setGasParams writes. Read, never mirrored as a constant: the
+  // envelope is hashed into the request id, so a stale copy recomputes the
+  // wrong id the moment the cap is raised.
+  const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "withdraw");
   const requestNonce = before.signetRequestNonce;
 
   // The surrendered coin: the vault token for THIS erc20, of exactly
@@ -124,9 +129,9 @@ export async function startWithdraw(
       to: erc20,
       chainId: before.evmChainId,
       nonce: options.evmNonce,
-      gasLimit: ERC20_TRANSFER_GAS_LIMIT,
-      maxFeePerGas: ERC20_TRANSFER_MAX_FEE_PER_GAS,
-      maxPriorityFeePerGas: ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
       value: 0n,
       accessListEntryCount: 0n,
       accessList: [],
