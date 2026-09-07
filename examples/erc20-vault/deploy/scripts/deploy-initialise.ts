@@ -11,13 +11,19 @@
 
 import { deployVault } from "../src/deploy-vault.ts";
 import { buildEntrypointEnv } from "../src/entrypoint-env.ts";
-import { assertInitialiseInputsPresent, initialiseVault } from "../src/initialise-vault.ts";
+import {
+  assertInitialiseInputsPresent,
+  assertNoVaultBoundPresets,
+  initialiseVault,
+} from "../src/initialise-vault.ts";
 
 const env = buildEntrypointEnv();
 
-// Before spending a whole multistage deploy: a missing chain id or a malformed
-// router override must fail now, not after the contract exists.
+// Before spending a whole multistage deploy: a missing chain id, a malformed
+// router override or a leftover previous vault's values must fail now, not
+// after the contract exists.
 assertInitialiseInputsPresent(env);
+assertNoVaultBoundPresets(env);
 
 const { contractAddress } = await deployVault(env);
 await initialiseVault(env, contractAddress);

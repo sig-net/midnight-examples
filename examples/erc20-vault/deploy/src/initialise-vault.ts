@@ -111,8 +111,10 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
     "EVM_CHAIN_ID",
     "it pins the chain the vault's EVM transactions target",
   );
-  if (!/^\d+$/.test(chainIdRaw) || chainIdRaw === "0") {
-    throw new Error(`EVM_CHAIN_ID must be a positive integer; got "${chainIdRaw}".`);
+  if (!/^[1-9]\d*$/.test(chainIdRaw)) {
+    throw new Error(
+      `EVM_CHAIN_ID must be a positive integer with no leading zeros, got "${chainIdRaw}".`,
+    );
   }
 
   // Parse the targets here rather than at the circuit call: a malformed
@@ -178,6 +180,37 @@ export function resolveInitialiseConfig(
  */
 export function assertInitialiseInputsPresent(env: Record<string, string | undefined>): void {
   resolveAddressFreeInputs(env);
+}
+
+// The values that belong to ONE vault contract: its address and the two
+// derived from it. A fresh deploy mints a new address, so any of these already
+// in the environment belongs to a previous vault.
+const VAULT_BOUND_KEYS = [
+  "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
+  "EVM_VAULT_ADDRESS",
+  "MPC_RESPONSE_KEY",
+] as const;
+
+/**
+ * Refuse a deploy+initialise run whose environment already carries a vault
+ * address or a value derived from one. {@link resolveInitialiseConfig} checks
+ * a preset against the derivation, but that derivation needs the new address,
+ * so it can only run after the deploy: a stale preset would pass every
+ * pre-deploy check and fail initialise, stranding the fresh vault. Before the
+ * deploy the presence of such a value is itself the defect.
+ *
+ * @param env - The environment the deploy and initialise will read.
+ * @throws {Error} If any of `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `EVM_VAULT_ADDRESS` or
+ *   `MPC_RESPONSE_KEY` is set.
+ */
+export function assertNoVaultBoundPresets(env: Record<string, string | undefined>): void {
+  const stale = VAULT_BOUND_KEYS.filter((key) => envOrUndefined(env, key) !== undefined);
+  if (stale.length === 0) return;
+  throw new Error(
+    `${stale.join(", ")} ${stale.length === 1 ? "is" : "are"} set, but a fresh deploy mints a new vault ` +
+      "address that these values derive from, so they belong to a previous vault. Unset them to " +
+      "deploy a new vault, or run `yarn initialise:erc20-vault` to initialise the one they name.",
+  );
 }
 
 /**
