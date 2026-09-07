@@ -29,16 +29,29 @@ import {
   reportedCompilerVersion,
   ToolchainError,
 } from "./compact-toolchain.ts";
-import { hasProverKeys, servedEntries, SIGNET_TREE } from "./layout.ts";
+import {
+  hasProverKeys,
+  isRunLeftover,
+  parkedName,
+  SERVED_TOP_LEVEL_DIRS,
+  servedEntries,
+  SIGNET_TREE,
+  STAGING_PREFIX,
+} from "./layout.ts";
 import {
   explainBuildIncompatibility,
   MANIFEST_PATH,
+  missingServedEntries,
   type ReadArtifact,
+  type TreeMismatch,
   verifyTree,
 } from "./verify.ts";
 
 /** A laid-out tree does not match the manifest it must satisfy. Nothing was written. */
 export class VerificationFailedError extends Error {}
+
+/** The output holds a directory this run would replace that no run of this tool wrote. */
+export class OutDirConflictError extends Error {}
 
 /** What a run does. */
 export interface ZkAssetsOptions {
@@ -68,8 +81,6 @@ const packageRoot = resolve(moduleDir, "..", "..");
 const shippedVaultManaged = resolve(moduleDir, "..", "managed", "erc20-vault");
 const vaultSource = join(packageRoot, "src", "erc20-vault.compact");
 const requireFromPackage = createRequire(join(packageRoot, "package.json"));
-
-const STAGING_PREFIX = ".erc20-vault-zk-assets.";
 
 async function readManifest(managedDir: string): Promise<{
   manifest: ZkArtifactManifest;
@@ -168,20 +179,44 @@ async function assertToolchain(
   }
 }
 
-async function sweepStaging(outDir: string): Promise<void> {
-  if (!existsSync(outDir)) return;
-  for (const entry of await readdir(outDir)) {
-    if (entry.startsWith(STAGING_PREFIX)) await rm(join(outDir, entry), { recursive: true });
+// Remove what an earlier run killed mid-way left in `dir`: its staging
+// directory and any directory it parked. Returns whether anything was found,
+// which is the evidence that a tool run wrote this directory before.
+async function sweepLeftovers(dir: string, uuid: string): Promise<boolean> {
+  if (!existsSync(dir)) return false;
+  let found = false;
+  for (const entry of await readdir(dir)) {
+    if (!isRunLeftover(entry, uuid)) continue;
+    await rm(join(dir, entry), { recursive: true });
+    found = true;
   }
+  return found;
+}
+
+// A served tree is recognised by its manifest file. A `keys/`, `zkir/` or
+// `compiler/` in `destDir` without one belongs to the app, and replacing it
+// would delete the app's files: refuse unless forced. A directory a killed run
+// left half-swapped can lack the manifest too, which is what `healed` (a
+// leftover of that run was just swept) excuses. Runs before the compile, so
+// the refusal costs nothing.
+function assertReplaceable(what: string, destDir: string, force: boolean, healed: boolean): void {
+  if (force || healed || existsSync(join(destDir, MANIFEST_PATH))) return;
+  const foreign = SERVED_TOP_LEVEL_DIRS.filter((dir) => existsSync(join(destDir, dir)));
+  if (foreign.length === 0) return;
+  throw new OutDirConflictError(
+    `${what}: ${destDir} holds ${foreign.map((dir) => `${dir}/`).join(", ")} but no ` +
+      `${MANIFEST_PATH}, so it is not a tree this tool wrote. Pass --force to replace it.`,
+  );
 }
 
 // Move the staged top-level directories into place one rename each, parking
-// the previous directory beside it until the new one is in.
+// the previous directory beside it until the new one is in. A kill between the
+// two renames leaves the parked directory for the next run's sweep.
 async function swapIn(stageDir: string, destDir: string, uuid: string): Promise<void> {
   await mkdir(destDir, { recursive: true });
   for (const name of await readdir(stageDir)) {
     const target = join(destDir, name);
-    const parked = join(destDir, `.${name}.old.${uuid}`);
+    const parked = join(destDir, parkedName(name, uuid));
     if (existsSync(target)) await rename(target, parked);
     await rename(join(stageDir, name), target);
     if (existsSync(parked)) await rm(parked, { recursive: true });
@@ -209,6 +244,18 @@ async function stageServedEntries(
   await writeFile(join(stageDir, MANIFEST_PATH), manifestBytes);
 }
 
+function verificationFailure(
+  what: string,
+  headline: string,
+  mismatches: readonly TreeMismatch[],
+  destDir: string,
+): VerificationFailedError {
+  const lines = mismatches.map((m) => `  ${m.relativePath}: ${m.reason}`).join("\n");
+  return new VerificationFailedError(
+    `${what}: ${headline}, nothing was written to ${destDir}\n${lines}`,
+  );
+}
+
 async function assertStageVerifies(
   what: string,
   shipped: { manifest: ZkArtifactManifest; bytes: Uint8Array },
@@ -217,16 +264,20 @@ async function assertStageVerifies(
 ): Promise<void> {
   const mismatches = await verifyTree(shipped.manifest, shipped.bytes, readerOver(stageDir));
   if (mismatches.length === 0) return;
-  const lines = mismatches.map((m) => `  ${m.relativePath}: ${m.reason}`).join("\n");
-  throw new VerificationFailedError(
-    `${what}: the produced tree does not match the shipped manifest, nothing was written to ${destDir}\n${lines}`,
+  throw verificationFailure(
+    what,
+    "the produced tree does not match the shipped manifest",
+    mismatches,
+    destDir,
   );
 }
 
+// `healed`: the output root held a leftover of a killed run, swept by the caller.
 async function produceVault(
   options: ZkAssetsOptions,
   stagingRoot: string,
   uuid: string,
+  healed: boolean,
 ): Promise<string> {
   const shipped = await readManifest(shippedVaultManaged);
   if (!hasProverKeys(shipped.manifest)) {
@@ -242,6 +293,7 @@ async function produceVault(
     );
     return sha256;
   }
+  assertReplaceable("vault", options.outDir, options.force, healed);
 
   await assertToolchain(options, shipped.manifest);
   const compactPath = await resolveCompactPath();
@@ -256,6 +308,17 @@ async function produceVault(
     throw new VerificationFailedError(
       `vault: the regenerated compile is not the shipped one, nothing was written to ${options.outDir}\n` +
         incompatible.map((reason) => `  ${reason}`).join("\n"),
+    );
+  }
+  const missing = missingServedEntries(shipped.manifest, (relativePath) =>
+    existsSync(join(buildDir, relativePath)),
+  );
+  if (missing.length > 0) {
+    throw verificationFailure(
+      "vault",
+      "the regenerated compile did not emit every file the shipped manifest lists",
+      missing,
+      options.outDir,
     );
   }
 
@@ -279,6 +342,7 @@ async function produceSignet(
   const shipped = await readManifest(signetManaged);
   const sha256 = computeSha256Hex(shipped.bytes);
   const destDir = join(options.outDir, SIGNET_TREE);
+  const healed = await sweepLeftovers(destDir, uuid);
   const existing = await verifyTree(shipped.manifest, shipped.bytes, readerOver(destDir));
   if (existing.length === 0 && !options.force) {
     options.log(
@@ -286,6 +350,7 @@ async function produceSignet(
     );
     return sha256;
   }
+  assertReplaceable("signet", destDir, options.force, healed);
   const stageDir = join(stagingRoot, "stage", SIGNET_TREE);
   options.log(`signet: copying from ${signetManaged}`);
   await stageServedEntries(shipped.manifest, shipped.bytes, signetManaged, stageDir, false);
@@ -299,12 +364,16 @@ async function produceSignet(
  * Lay out the zk assets under `options.outDir`: `keys/`, `zkir/` and
  * `compiler/` for the vault, the same under {@link SIGNET_TREE} for the
  * signet callee. A
- * tree that already verifies is left alone unless forced. Each tree is
- * swapped in only after it verifies, one directory rename at a time, so a
- * failed run never leaves a half-written tree in place.
+ * tree that already verifies is left alone unless forced, and a directory
+ * under one of those names that no run of this tool wrote is refused unless
+ * forced. Each tree is staged and verified in full, then swapped in one
+ * directory rename at a time, and a run starts by sweeping what a killed
+ * predecessor left behind, so the output never accumulates half-written trees.
  *
  * @param options - What to produce and where.
  * @returns The sha256 of each produced tree's manifest, for the app to pin.
+ * @throws {OutDirConflictError} If the output holds a `keys/`, `zkir/` or `compiler/` this tool
+ *   did not write and `force` is not set.
  * @throws {ToolchainError} If the pinned toolchain or the Compact sources are not usable.
  * @throws {CompileFailedError} If the compiler fails.
  * @throws {VerificationFailedError} If a produced tree does not match its manifest.
@@ -314,14 +383,17 @@ export async function runZkAssets(options: ZkAssetsOptions): Promise<ZkAssetsRes
   // absolute before any path derived from it reaches the compiler.
   const anchored: ZkAssetsOptions = { ...options, outDir: resolve(options.outDir) };
   await mkdir(anchored.outDir, { recursive: true });
-  await sweepStaging(anchored.outDir);
   const uuid = randomUUID();
+  // The root holds the staging directories and the vault tree, so its sweep
+  // happens once here, before this run's own staging directory exists.
+  const healedRoot = await sweepLeftovers(anchored.outDir, uuid);
   const stagingRoot = join(anchored.outDir, `${STAGING_PREFIX}${uuid}`);
   await mkdir(stagingRoot, { recursive: true });
   try {
     const result: { vaultManifestSha256?: string; signetManifestSha256?: string } = {};
-    if (anchored.trees.vault)
-      result.vaultManifestSha256 = await produceVault(anchored, stagingRoot, uuid);
+    if (anchored.trees.vault) {
+      result.vaultManifestSha256 = await produceVault(anchored, stagingRoot, uuid, healedRoot);
+    }
     if (anchored.trees.signet) {
       result.signetManifestSha256 = await produceSignet(anchored, stagingRoot, uuid);
     }

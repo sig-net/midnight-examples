@@ -977,10 +977,12 @@ public/compiler/contract-manifest.json, contract-info.json
 public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract
 ```
 
-A rerun verifies what is there and skips a tree that already matches;
-`--force` rebuilds it. `--signet-only` copies the callee's tree without the
-toolchain, `--vault-only` skips the copy. The run ends by printing each tree's
-`compiler/contract-manifest.json` sha256.
+A rerun verifies what is there and skips a tree that already matches.
+`--force` rebuilds it. A `keys/`, `zkir/` or `compiler/` already under the
+output that the tool did not write (no `compiler/contract-manifest.json` beside
+it) is refused, and `--force` is also what replaces it. `--signet-only` copies
+the callee's tree without the toolchain, `--vault-only` skips the copy. The run
+ends by printing each tree's `compiler/contract-manifest.json` sha256.
 
 Point [`@midnight-ntwrk/midnight-js-fetch-zk-config-provider`](https://www.npmjs.com/package/@midnight-ntwrk/midnight-js-fetch-zk-config-provider)
 at `5.0.0-beta.6`, the version matching the rest of this stack, at the origin

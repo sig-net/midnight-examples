@@ -68,6 +68,23 @@ export async function verifyTree(
 }
 
 /**
+ * The served entries of `manifest` a regenerated compile did not emit, so a
+ * short build is reported by name before any of its files are moved.
+ *
+ * @param manifest - The manifest the package ships.
+ * @param exists - Whether the build holds the file at a manifest path.
+ * @returns Every absent entry as a `missing` mismatch, empty when the build is complete.
+ */
+export function missingServedEntries(
+  manifest: ZkArtifactManifest,
+  exists: (relativePath: string) => boolean,
+): TreeMismatch[] {
+  return servedEntries(manifest)
+    .filter((relativePath) => !exists(relativePath))
+    .map((relativePath) => ({ relativePath, reason: "missing" }));
+}
+
+/**
  * Explain why a regenerated compile cannot have produced the shipped
  * artefacts, before any key is hashed: the toolchain versions the two
  * manifests record must agree, and so must `compiler/contract-info.json`,

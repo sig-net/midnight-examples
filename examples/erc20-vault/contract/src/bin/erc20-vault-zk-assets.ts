@@ -9,7 +9,7 @@
 import { parseArgs } from "node:util";
 
 import { CompileFailedError, ToolchainError } from "../zk-assets/compact-toolchain.ts";
-import { runZkAssets, VerificationFailedError } from "../zk-assets/run.ts";
+import { OutDirConflictError, runZkAssets, VerificationFailedError } from "../zk-assets/run.ts";
 
 /** Process exit codes, one per failure class. */
 enum ExitCode {
@@ -18,11 +18,14 @@ enum ExitCode {
   Toolchain = 2,
   CompileFailed = 3,
   VerificationFailed = 4,
+  OutDirConflict = 5,
 }
 
 const USAGE =
   "usage: erc20-vault-zk-assets <out-dir> [--vault-only | --signet-only] [--force]\n" +
-  "  lays out keys/, zkir/, compiler/ (the vault) and signet/{keys,zkir,compiler} under <out-dir>";
+  "  lays out keys/, zkir/, compiler/ (the vault) and signet/{keys,zkir,compiler} under <out-dir>\n" +
+  "  --force rebuilds a tree that already verifies, and replaces a keys/, zkir/ or compiler/\n" +
+  "  under <out-dir> that this tool did not write";
 
 function parse(): { outDir: string; vault: boolean; signet: boolean; force: boolean } {
   const { values, positionals } = parseArgs({
@@ -85,5 +88,6 @@ try {
   if (failure instanceof ToolchainError) fail(ExitCode.Toolchain, failure);
   if (failure instanceof CompileFailedError) fail(ExitCode.CompileFailed, failure);
   if (failure instanceof VerificationFailedError) fail(ExitCode.VerificationFailed, failure);
+  if (failure instanceof OutDirConflictError) fail(ExitCode.OutDirConflict, failure);
   throw failure;
 }

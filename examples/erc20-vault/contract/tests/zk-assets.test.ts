@@ -6,8 +6,19 @@
 import { computeSha256Hex, parseZkArtifactManifest } from "@midnight-ntwrk/midnight-js/utils";
 import { describe, expect, it } from "vitest";
 
-import { hasProverKeys, isServedEntry, servedEntries } from "../src/zk-assets/layout.ts";
-import { explainBuildIncompatibility, MANIFEST_PATH, verifyTree } from "../src/zk-assets/verify.ts";
+import {
+  hasProverKeys,
+  isRunLeftover,
+  isServedEntry,
+  parkedName,
+  servedEntries,
+} from "../src/zk-assets/layout.ts";
+import {
+  explainBuildIncompatibility,
+  MANIFEST_PATH,
+  missingServedEntries,
+  verifyTree,
+} from "../src/zk-assets/verify.ts";
 
 const encoder = new TextEncoder();
 
@@ -170,6 +181,49 @@ describe("explainBuildIncompatibility", () => {
     );
     expect(explainBuildIncompatibility(MANIFEST, regenerated)).toEqual([
       "compiler/contract-info.json differs: the compiled circuit table is not the shipped one",
+    ]);
+  });
+});
+
+describe("isRunLeftover", () => {
+  const RUN = "11111111-1111-4111-8111-111111111111";
+  const OTHER = "22222222-2222-4222-8222-222222222222";
+
+  /** A case: a name from the output directory's listing and the verdict. */
+  interface Case {
+    readonly entry: string;
+    readonly leftover: boolean;
+  }
+
+  const CASES: readonly Case[] = [
+    { entry: `.erc20-vault-zk-assets.${OTHER}`, leftover: true },
+    { entry: parkedName("keys", OTHER), leftover: true },
+    { entry: parkedName("zkir", OTHER), leftover: true },
+    { entry: parkedName("compiler", OTHER), leftover: true },
+    { entry: `.erc20-vault-zk-assets.${RUN}`, leftover: false },
+    { entry: parkedName("keys", RUN), leftover: false },
+    { entry: "keys", leftover: false },
+    { entry: "signet", leftover: false },
+    { entry: ".keys.old", leftover: false },
+    { entry: `.assets.old.${OTHER}`, leftover: false },
+    { entry: ".gitkeep", leftover: false },
+  ];
+
+  it.each(CASES)("$entry -> $leftover", ({ entry, leftover }) => {
+    expect(isRunLeftover(entry, RUN)).toBe(leftover);
+  });
+});
+
+describe("missingServedEntries", () => {
+  it("is empty for a complete build", () => {
+    expect(missingServedEntries(MANIFEST, (relativePath) => relativePath in FILES)).toEqual([]);
+  });
+
+  it("names every served entry the build lacks, ignoring unserved ones", () => {
+    const emitted = new Set(["compiler/contract-info.json", "keys/startDeposit.verifier"]);
+    expect(missingServedEntries(MANIFEST, (relativePath) => emitted.has(relativePath))).toEqual([
+      { relativePath: "keys/startDeposit.prover", reason: "missing" },
+      { relativePath: "zkir/startDeposit.bzkir", reason: "missing" },
     ]);
   });
 });
