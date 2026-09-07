@@ -2962,12 +2962,15 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
     // they still serialize. This is the failure shape the four vault-signed
     // flows had before the queue, proven here so the tests below are read
     // against a harness that demonstrably detects a shared-cell conflict.
+    // Replayed WITH headroom, exactly like the REQUIREMENTs above: a gas
+    // artefact cannot be the reason this one is turned away, so the only thing
+    // left is the pinned read of a cell Alice moved.
     const { contract, ctx } = await deployInitialised();
     const alice = await contract.circuits.approveRouter(ctx, ERC20, 1n);
-    const stateAfterAlice = alice.context.callContext.currentQueryContext.state;
+    const stateAfterAlice = stateOf(alice.context);
     const bobCtx = await strangerContext("approveRouter", ctx);
     const bob = await contract.circuits.approveRouter(bobCtx, ERC20, 1n);
-    expect(replay(stateAfterAlice, bob)).toMatch(/mismatch between expected .* read/);
+    expect(replay(stateAfterAlice, bob, true)).toMatch(/mismatch between expected .* read/);
   });
 
   it("two concurrent startWithdraws from DIFFERENT callers both apply, and ONE flush emits both with distinct ids", async () => {
@@ -2984,9 +2987,8 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
 
     // The requirement: Bob's transcript, proven concurrently with Alice's, must
     // not be invalidated by Alice's. It no longer can be — neither call reads a
-    // cell the other writes. What it may still hit is the fresh-map-key gas
-    // coupling the deposit CONTROL above shows, which is not a conflict.
-    expect(replay(stateAfterAlice, bob)).not.toMatch(/mismatch between expected .* read/);
+    // cell the other writes.
+    expect(replay(stateAfterAlice, bob, true)).toBe("applied");
 
     // Sequenced, both land in the queue, under keys that differ by BOTH secret
     // and coin, and neither has an id or an event yet.
