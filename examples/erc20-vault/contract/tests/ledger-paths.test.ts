@@ -13,6 +13,7 @@ import {
   VAULT_NONCE_PATH,
   VAULT_REDEEM_REQUESTS_PATH,
   VAULT_REQUESTS_PATH,
+  VAULT_SLOTS_PATH,
   VAULT_SUPPLY_REQUESTS_PATH,
   VAULT_SWAP_REQUESTS_PATH,
 } from "../src/index.ts";
@@ -41,6 +42,7 @@ describe("exported ledger paths match the compiled contract-info.json", () => {
   it.each([
     ["signBidirectionalEventMap", VAULT_REQUESTS_PATH, [0, 0]],
     ["signetRequestNonce", VAULT_NONCE_PATH, [0, 3]],
+    ["slots", VAULT_SLOTS_PATH, [1, 1]],
     ["depositEventMap", VAULT_DEPOSIT_REQUESTS_PATH, [1, 3]],
     ["swapEventMap", VAULT_SWAP_REQUESTS_PATH, [1, 7]],
     ["supplyEventMap", VAULT_SUPPLY_REQUESTS_PATH, [1, 11]],
