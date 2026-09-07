@@ -17,7 +17,16 @@ import "@sig-net/midnight/src/Signet";
 
 // Which flow parked a set of parameters. Phase 2 asserts the kind it expects, so an
 // assignSwap cannot be pointed at a key a requestWithdraw parked.
-enum RequestKind { withdraw, swap, supply, redeem, approveStata, approveRouter }
+//
+// `consumed` is the tombstone phase 2 leaves behind INSTEAD of removing the entry.
+// The tombstone is what keeps allocator leaves unique. For the value flows the key's
+// second preimage is the surrendered coin's nonce, and a coin is spendable once, so a
+// key cannot repeat. The approves surrender no coin and key on a caller-chosen salt:
+// remove the entry and the same caller could re-park the same salt, put a SECOND leaf
+// with the same value in the tree, and then present the path for whichever of the two
+// indices they preferred -- claiming an EVM nonce already spent and stranding the
+// other. The tombstone makes "Request already pending" permanent for a key.
+enum RequestKind { withdraw, swap, supply, redeem, approveStata, approveRouter, consumed }
 
 // The union of every flow's request parameters. Fields a flow does not use are left at
 // their default; phase 2 reads only the ones its own kind writes.
@@ -422,6 +431,8 @@ circuit claimSlot(
 
   assert(pendingParams.member(key), "No pending request for this key");
   const params = pendingParams.lookup(key);
+  // Also the anti-replay gate: a second assign for this key sees the tombstone
+  // RequestKind.consumed, which matches no flow's expected kind.
   assert(params.kind == kind, "Wrong request kind for this key");
 
   return SlotClaim {
@@ -731,7 +742,17 @@ export circuit assignApproveStata(
   const requestId = calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request);
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
   signBidirectionalEventMap.insert(requestId, request);
-  pendingParams.remove(disclosedKey);
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
   signetSigner.signBidirectional(
@@ -812,7 +833,17 @@ export circuit assignApproveRouter(
   const requestId = calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request);
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
   signBidirectionalEventMap.insert(requestId, request);
-  pendingParams.remove(disclosedKey);
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
   signetSigner.signBidirectional(
@@ -1078,7 +1109,17 @@ export circuit assignWithdraw(
       amount: claim.params.amountA as Uint<64>,
     },
   );
-  pendingParams.remove(disclosedKey);
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
   signetSigner.signBidirectional(
@@ -1281,7 +1322,17 @@ export circuit assignSwap(
     amountOut: claim.params.amountA as Uint<64>,
     amountInMaximum: claim.params.amountB as Uint<64>,
   });
-  pendingParams.remove(disclosedKey);
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
 
   // Notify the MPC (swapEventMap's compiled ledger path, [1,7]).
   signetSigner.signBidirectional(
@@ -1456,7 +1507,17 @@ export circuit assignSupply(
     commitment: disclosedKey,
     amount: claim.params.amountA as Uint<64>,
   });
-  pendingParams.remove(disclosedKey);
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
 
   // Notify the MPC (supplyEventMap's compiled ledger path, [1,11]).
   signetSigner.signBidirectional(
@@ -1617,7 +1678,17 @@ export circuit assignRedeem(
     commitment: disclosedKey,
     shares: claim.params.amountA as Uint<64>,
   });
-  pendingParams.remove(disclosedKey);
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
 
   // Notify the MPC (redeemEventMap's compiled ledger path, [1,13]).
   signetSigner.signBidirectional(
