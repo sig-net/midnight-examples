@@ -607,14 +607,13 @@ export circuit completeWithdraw(
   signBidirectionalEventMap.remove(disclosedRequestId);
 
   const succeeded = disclose(deserialize<VaultResponse, 1>(serializedOutput).success);
-
-  // These hashes sit outside the if on purpose: the proving circuit evaluates both
-  // branches, so hoisting them keeps the circuit to one copy of each hash.
-  const myCommitment = refundCommitment(callerSecretKey(), disclosedRequestId);
   const domainSep = vaultTokenDomainSeparator(view.erc20);
 
   // The transfer can fail by the ERC20 returning false even when the transaction succeeds.
+  // The withdrawer's secret is witnessed only on this branch: a succeeded withdrawal is
+  // settleable by anyone and must not require (or consume) a secret to settle.
   if (!succeeded) {
+    const myCommitment = refundCommitment(callerSecretKey(), disclosedRequestId);
     assert(myCommitment == view.commitment, "Not the withdrawer");
     const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
     mintShieldedToken(domainSep, view.amount, disclose(mintNonce), recipient);
