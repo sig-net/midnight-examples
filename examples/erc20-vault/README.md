@@ -263,7 +263,7 @@ pipeline derives and prints all three derived values as `EVM_VAULT_ADDRESS`,
 
 ## Deploying
 
-The contract has 17 circuits and their verifier keys do not fit in one block, so
+The contract has 25 circuits and their verifier keys do not fit in one block, so
 a deploy is two phases:
 
 1. The base transaction registers the whole ledger state and ONE small circuit.
@@ -940,7 +940,7 @@ prefix. The tag carries the example name, the npm version does not:
 
 ## A note on package size
 
-The vault has 17 circuits carrying 1.4 GB of prover keys, against kilobytes
+The vault has 25 circuits carrying 1.4 GB of prover keys, against kilobytes
 for the verifier keys that go on-chain. Those prover keys are published
 nowhere: the package packs to well under a megabyte, and the workflow logs the
 packed and unpacked size before it publishes anything.
@@ -972,7 +972,7 @@ It compiles the shipped `src/erc20-vault.compact` with the pinned compiler
 manifest, and writes:
 
 ```
-public/keys/<circuit>.prover, <circuit>.verifier    the vault's 17 circuits
+public/keys/<circuit>.prover, <circuit>.verifier    the vault's 25 circuits
 public/zkir/<circuit>.bzkir
 public/compiler/contract-manifest.json, contract-info.json
 public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract
