@@ -23,7 +23,10 @@
 // Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives
 // there. Recovery from a run that died mid-flow (proof-server OOM): rerun
 // this file with BEARER_TRANSFER_DEPOSIT_REQUEST_ID /
-// BEARER_TRANSFER_WITHDRAW_REQUEST_ID set to the ids the failed run printed.
+// BEARER_TRANSFER_WITHDRAW_REQUEST_ID set to the ids the failed run printed,
+// plus BEARER_TRANSFER_WITHDRAW_COIN_NONCE — the withdraw's settle proves
+// withdrawer-hood from the surrendered coin's nonce, which no public ledger
+// read recovers.
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
@@ -35,7 +38,6 @@ import {
   banner,
   getErc20Balance,
   getEthBalance,
-  getTransactionNonce,
   logSkip,
   requireEnv as requireEnvOf,
 } from "@sig-net/midnight-examples-test-harness";
@@ -318,40 +320,40 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         ).toBe(0n);
 
         const context = await session.vaultContext();
-        const readNonce = async () =>
+        // The allocator's occupancy is the trace a recorded request leaves now:
+        // phase 1 appends the request key as a leaf, so `firstFree` moves by
+        // one per request that actually applied. (The old shared
+        // signetRequestNonce counter is dead — no circuit reads or increments
+        // it since the allocator landed.)
+        const readSlotsUsed = async () =>
           (
             await readVaultLedger(
               context.providers.publicDataProvider,
               context.vaultContractAddress,
             )
-          ).signetRequestNonce;
-        const nonceBefore = await readNonce();
+          ).slots.firstFree();
+        const slotsBefore = await readSlotsUsed();
 
-        // The `startWithdraw` circuit demands a surrendered coin of the full amount;
+        // The `requestWithdraw` circuit demands a surrendered coin of the full amount;
         // A's wallet holds none of the color, so balancing cannot fund it and
         // the attempt dies client-side — the tx is never submitted.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
         await expect(
           startWithdraw(context, {
             amount: WITHDRAW_AMOUNT,
             destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-            evmNonce,
           }),
         ).rejects.toThrow(/[Ii]nsufficient funds/);
 
-        // Client-side death leaves no trace: the request counter is unchanged.
+        // Client-side death leaves no trace: no allocator slot was taken.
         expect(
-          await readNonce(),
+          await readSlotsUsed(),
           "the failed withdraw must not record a request on the ledger",
-        ).toBe(nonceBefore);
+        ).toBe(slotsBefore);
 
         banner([
           "Wallet A can no longer withdraw: its shielded vault-token balance is 0,",
           "so the surrendered coin cannot be funded. The attempt died client-side;",
-          "no request reached the vault ledger.",
+          "no request reached the vault ledger and no allocator slot was taken.",
         ]);
       },
       15 * MINUTE,
@@ -361,11 +363,18 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     // for the subsequent stages.
     let withdrawRequestId: RequestIdHex;
 
+    // The surrendered coin's nonce the withdraw was keyed on: the settle-view
+    // commitment on the ledger is requestCommitment(B's secret, coinNonce), so
+    // settling takes it back. A resumed run supplies it as
+    // BEARER_TRANSFER_WITHDRAW_COIN_NONCE.
+    let withdrawCommitmentNonce: Uint8Array;
+
     it(
       "new owner: wallet B escrows the transferred vault tokens in a withdraw",
       async () => {
         if (env.BEARER_TRANSFER_WITHDRAW_REQUEST_ID) {
           withdrawRequestId = env.BEARER_TRANSFER_WITHDRAW_REQUEST_ID as RequestIdHex;
+          withdrawCommitmentNonce = hexToBytes(requireEnv("BEARER_TRANSFER_WITHDRAW_COIN_NONCE"));
           logSkip(
             "withdraw",
             `BEARER_TRANSFER_WITHDRAW_REQUEST_ID present, resuming withdraw '${withdrawRequestId}'`,
@@ -375,29 +384,29 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const context = await bearerSession.vaultContext();
 
-        // The withdraw tx sender is the VAULT's derived EVM account; its next
-        // nonce comes from the chain. The destination is the user's derived
-        // account, so the suite's funds cycle.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
-        withdrawRequestId = await startWithdraw(context, {
+        // The withdraw tx sender is the VAULT's derived EVM account, and its
+        // nonce is not read from the chain: startWithdraw runs both phases and
+        // the allocator slot phase 1 takes fixes the EVM nonce phase 2 proves.
+        // The destination is the user's derived account, so the suite's funds
+        // cycle.
+        const started = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-          evmNonce,
         });
+        withdrawRequestId = started.requestId;
+        withdrawCommitmentNonce = started.coinNonce;
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
 
         banner([
           "Wallet B's withdraw request recorded on the vault ledger:",
           "",
           `  request id: ${withdrawRequestId}`,
+          `  coin nonce: ${bytesToHex(withdrawCommitmentNonce)}`,
           "",
           "B's transferred vault tokens are escrowed — same coins, new owner,",
           "no vault-side registry consulted. If a later step dies, resume with",
           `  BEARER_TRANSFER_WITHDRAW_REQUEST_ID=${withdrawRequestId}`,
+          `  BEARER_TRANSFER_WITHDRAW_COIN_NONCE=${bytesToHex(withdrawCommitmentNonce)}`,
         ]);
       },
       15 * MINUTE,
@@ -501,7 +510,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
         expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
+        await settleWithdraw(
+          context,
+          withdrawRequestId,
+          withdrawAttestation,
+          withdrawCommitmentNonce,
+        );
 
         const after = await readLedger();
         expect(

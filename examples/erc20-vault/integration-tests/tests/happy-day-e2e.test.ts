@@ -16,6 +16,7 @@
 import {
   abiWordToUint128,
   bytesToHex,
+  hexToBytes,
   parseSecp256k1PublicKey,
   requestIdBytes,
   type RequestIdHex,
@@ -480,6 +481,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   // subsequent withdraw stages.
   let withdrawTransactionSignatureRequestId: RequestIdHex;
 
+  // The surrendered coin's nonce the withdraw was keyed on. The settle-view
+  // commitment the vault stores IS the phase-1 request key,
+  // requestCommitment(secret, coinNonce), so completeWithdraw takes this back
+  // to prove withdrawer-hood. A resumed run must supply it as
+  // WITHDRAW_COIN_NONCE (the withdraw banner prints the line to copy).
+  let withdrawCommitmentNonce: Uint8Array;
+
   it(
     "withdraw [erc-vault contract method call]: escrow shielded vault tokens and read the request back MPC-style",
     async () => {
@@ -487,6 +495,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // skipping steps during local development / OOM recovery).
       if (env.WITHDRAW_REQUEST_ID) {
         withdrawTransactionSignatureRequestId = env.WITHDRAW_REQUEST_ID as RequestIdHex;
+        // The settle needs the coin nonce as well as the id: it is what the
+        // stored commitment was built over, and nothing on the public ledger
+        // reveals it.
+        withdrawCommitmentNonce = hexToBytes(requireEnv("WITHDRAW_COIN_NONCE"));
         logSkip(
           "withdraw",
           `WITHDRAW_REQUEST_ID present in environment, skipping withdraw call '${withdrawTransactionSignatureRequestId}'`,
@@ -496,20 +508,19 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
       const context = await session.vaultContext();
 
-      // The withdraw tx sender is the VAULT's derived EVM account; its next
-      // nonce comes from the chain, exactly as a wallet would fetch it. The
-      // destination is the user's derived account, so the suite's funds cycle.
-      const evmNonce = await getTransactionNonce(
-        requireEnv("EVM_RPC_URL"),
-        requireEnv("EVM_VAULT_ADDRESS"),
-      );
+      // The withdraw tx sender is the VAULT's derived EVM account, and its
+      // nonce is NOT fetched here: both phases run inside startWithdraw, and
+      // the allocator slot phase 1 takes is what fixes the EVM nonce
+      // (evmNonceBase + slotIndex) that phase 2 proves. The destination is the
+      // user's derived account, so the suite's funds cycle.
       const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
 
-      withdrawTransactionSignatureRequestId = await startWithdraw(context, {
+      const started = await startWithdraw(context, {
         amount: WITHDRAW_AMOUNT,
         destEvmAddress,
-        evmNonce,
       });
+      withdrawTransactionSignatureRequestId = started.requestId;
+      withdrawCommitmentNonce = started.coinNonce;
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       expect(withdrawTransactionSignatureRequestId).toMatch(/^[0-9a-f]{64}$/);
@@ -520,7 +531,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const record = await session
         .responseReader(VAULT_REQUESTS_PATH)
         .getSignatureRequest(withdrawTransactionSignatureRequestId);
-      expect(record.txParams.nonce).toBe(evmNonce);
+      // The EVM nonce the contract proved out of the allocator: slot i owns
+      // evmNonceBase + i, and the recorded request nonce IS that slot index.
+      const state = await readVaultLedger(
+        context.providers.publicDataProvider,
+        context.vaultContractAddress,
+      );
+      expect(record.txParams.nonce).toBe(state.evmNonceBase + record.requestNonce);
       expect(record.txParams.calldata.is_some).toBe(true);
       expect(abiWordToUint128(calldataWordAt(record.txParams.calldata.value.words, 1))).toBe(
         WITHDRAW_AMOUNT,
@@ -531,10 +548,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         `Withdraw request recorded on the vault ledger:`,
         "",
         `  request id: ${withdrawTransactionSignatureRequestId}`,
+        `  coin nonce: ${bytesToHex(withdrawCommitmentNonce)}`,
         "",
         "The caller's shielded vault tokens are escrowed. The response server",
         "should pick the request up on its next poll and sign the EVM transfer",
         'FROM the vault\'s derived account (path "vault").',
+        "",
+        "To resume a died run from here, set BOTH:",
+        `  WITHDRAW_REQUEST_ID=${withdrawTransactionSignatureRequestId}`,
+        `  WITHDRAW_COIN_NONCE=${bytesToHex(withdrawCommitmentNonce)}`,
       ]);
     },
     5 * MINUTE,
@@ -708,6 +730,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         context,
         withdrawTransactionSignatureRequestId,
         withdrawRespondBidirectional,
+        withdrawCommitmentNonce,
       );
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 

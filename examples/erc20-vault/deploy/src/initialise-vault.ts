@@ -68,6 +68,16 @@ export interface VaultInitialiseConfig {
    * completeWithdraw circuits accept only responses ECDSA-signed by it.
    */
   readonly mpcResponseKey: string;
+  /**
+   * The base of the vault's EVM nonce allocator: allocator slot i owns EVM
+   * nonce `firstEvmNonce + i`, sealed once by `initialise` and never rewritten.
+   * 0 is right for the freshly derived account of a brand new vault contract —
+   * funding it is an INCOMING transfer and spends none of its nonces. Set
+   * `FIRST_EVM_NONCE` only when initialising against an account that has
+   * already SENT transactions; too low a base makes every allocated nonce a
+   * reused one, and too high leaves a permanent gap the account never fills.
+   */
+  readonly firstEvmNonce: bigint;
 }
 
 // A required environment value, with a message naming what produces it.
@@ -100,6 +110,7 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
   mpcSecp256k1PublicKey: string;
   evmChainId: bigint;
   targets: VaultEvmTargets;
+  firstEvmNonce: bigint;
 } {
   const mpcSecp256k1PublicKey = requireValue(
     env,
@@ -117,6 +128,15 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
     );
   }
 
+  // The allocator base defaults to 0 because a brand new vault contract
+  // derives a brand new EVM account, and funding it spends none of its nonces.
+  const firstEvmNonceRaw = envOrUndefined(env, "FIRST_EVM_NONCE") ?? "0";
+  if (!/^(0|[1-9]\d*)$/.test(firstEvmNonceRaw)) {
+    throw new Error(
+      `FIRST_EVM_NONCE must be a non-negative integer with no leading zeros, got "${firstEvmNonceRaw}".`,
+    );
+  }
+
   // Parse the targets up front: a malformed override must fail before
   // anything is submitted, not mid-initialise.
   const targets = resolveEvmTargets(env);
@@ -124,7 +144,12 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
   evmAddressBytes(targets.stataUnderlyingAddress);
   evmAddressBytes(targets.stataTokenAddress);
 
-  return { mpcSecp256k1PublicKey, evmChainId: BigInt(chainIdRaw), targets };
+  return {
+    mpcSecp256k1PublicKey,
+    evmChainId: BigInt(chainIdRaw),
+    targets,
+    firstEvmNonce: BigInt(firstEvmNonceRaw),
+  };
 }
 
 /**
@@ -146,7 +171,8 @@ export function resolveInitialiseConfig(
   env: Record<string, string | undefined>,
   vaultContractAddress: string,
 ): VaultInitialiseConfig {
-  const { mpcSecp256k1PublicKey, evmChainId, targets } = resolveAddressFreeInputs(env);
+  const { mpcSecp256k1PublicKey, evmChainId, targets, firstEvmNonce } =
+    resolveAddressFreeInputs(env);
 
   const vaultEvmAddress = deriveVaultEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress);
   assertDerivedMatch(
@@ -166,6 +192,7 @@ export function resolveInitialiseConfig(
     evmChainId,
     caip2Id: `eip155:${String(evmChainId)}`,
     mpcResponseKey,
+    firstEvmNonce,
   };
 }
 
@@ -245,6 +272,7 @@ export async function initialiseVaultContract(
   console.log(`stata pair:        ${config.stataUnderlyingAddress} -> ${config.stataTokenAddress}`);
   console.log(`EVM chain:         ${String(config.evmChainId)} (${config.caip2Id})`);
   console.log(`MPC response key:  ${config.mpcResponseKey}`);
+  console.log(`first EVM nonce:   ${String(config.firstEvmNonce)}`);
 
   const result = await vault.callTx.initialise(
     evmAddressBytes(config.vaultEvmAddress),
@@ -254,6 +282,7 @@ export async function initialiseVaultContract(
     config.evmChainId,
     asciiPadded(config.caip2Id, CAIP2_ID_BYTES),
     parseSecp256k1PublicKey(config.mpcResponseKey),
+    config.firstEvmNonce,
   );
   console.log(`initialise finalized in tx ${result.public.txId}`);
   return InitialiseVaultOutcome.Initialised;

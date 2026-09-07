@@ -31,9 +31,10 @@ export async function readVaultLedger(
 
 /**
  * Read and print the vault's public ledger state: initialisation status, the
- * configured vault EVM address, the pinned EVM chain, and the pending signet
- * signature requests of the deposit and approve/withdraw maps. No proving keys
- * or transactions involved.
+ * configured vault EVM address, the pinned EVM chain, the EVM nonce
+ * allocator's base and occupancy, and the pending signet signature requests of
+ * the deposit and approve/withdraw maps. No proving keys or transactions
+ * involved.
  *
  * @param publicDataProvider - The provider to query raw contract state through.
  * @param vaultContractAddress - The deployed vault contract address, as bare hex.
@@ -56,6 +57,18 @@ export async function printVaultState(
   console.log(
     `EVM chain:         ${String(state.evmChainId)} (${new TextDecoder().decode(state.caip2Id).replace(/\0+$/u, "")})`,
   );
+
+  // The EVM nonce allocator: `slots` leaf i owns EVM nonce evmNonceBase + i,
+  // so firstFree() is both the next slot a phase-1 call takes and the next EVM
+  // nonce the vault account will be promised. `pendingParams` holds the
+  // requests that have run phase 1 but not yet phase 2 — anything lingering
+  // there is a request whose `assign*` never landed.
+  console.log(`EVM nonce base:    ${String(state.evmNonceBase)}`);
+  console.log(
+    `allocator slots:   ${String(state.slots.firstFree())} used ` +
+      `(next EVM nonce ${String(state.evmNonceBase + state.slots.firstFree())})`,
+  );
+  console.log(`parked requests:   ${String(state.pendingParams.size())} awaiting phase 2`);
 
   printRequestMap("deposit", state.depositEventMap);
   printRequestMap("approve/withdraw", state.signBidirectionalEventMap);
