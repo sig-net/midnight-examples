@@ -19,8 +19,8 @@ export const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
  * The value of one `KEY=<raw>` line, by docker compose's rules: a quoted
  * value is the text inside the quotes, whatever follows the closing quote
  * included a `#` comment, and an unquoted value is trimmed and ends at the first
- * `#` preceded by whitespace, while a `#` with no whitespace before it is
- * part of the value.
+ * `#` preceded by a space character, while a `#` preceded by anything else (a
+ * tab included) is part of the value.
  *
  * @param raw - Everything after the `=`.
  * @returns The value as compose would hand it to a container.
@@ -29,11 +29,11 @@ function parseDotEnvValue(raw: string): string {
   const trimmed = raw.trim();
   const quoted = /^(["'])(.*?)\1/.exec(trimmed)?.[2];
   if (quoted !== undefined) return quoted;
-  // A single left-to-right scan for the first `#` preceded by whitespace: the
-  // equivalent `\s+#` regex backtracks over every run of spaces on a line
-  // without a comment, which is quadratic in the line's length.
+  // A single left-to-right scan for the first ` #`: the equivalent ` +#` regex
+  // backtracks over every run of spaces on a line without a comment, which is
+  // quadratic in the line's length.
   for (let index = 1; index < trimmed.length; index++) {
-    if (trimmed[index] === "#" && /\s/.test(trimmed.charAt(index - 1))) {
+    if (trimmed[index] === "#" && trimmed[index - 1] === " ") {
       return trimmed.slice(0, index).trimEnd();
     }
   }

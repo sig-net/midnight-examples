@@ -26,6 +26,11 @@ const CASES: Case[] = [
     expected: { KEY: "a#b" },
   },
   {
+    name: "a hash preceded by a tab, kept as part of the value",
+    text: "KEY=a\t#b\n",
+    expected: { KEY: "a\t#b" },
+  },
+  {
     name: "a double-quoted value keeping its hash and dropping the trailing comment",
     text: 'KEY="a # b" # trailing\n',
     expected: { KEY: "a # b" },
