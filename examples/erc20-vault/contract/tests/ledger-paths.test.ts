@@ -114,17 +114,17 @@ describe("the state tree stays TWO chunks deep", () => {
 describe("the chunk-1 block holds the event maps at their pinned offsets", () => {
   // The sharper tripwire: not just the six notified paths, but the whole of
   // chunk 1 in order. Any ledger field appended at the end, or inserted after
-  // evmChainId, shifts this list and fails here first, naming exactly what
-  // moved.
+  // depositRequestNonces, shifts this list and fails here first, naming
+  // exactly what moved.
   it("holds the same 15 fields at the same offsets", () => {
     const chunkOne = contractInfo.ledger
       .filter((field) => field.index[0] === 1)
       .map((field) => [field.name, [...field.index]] as const);
 
     expect(chunkOne).toEqual([
-      ["caip2Id", [1, 0]],
-      ["deployer", [1, 1]],
-      ["depositRequestNonces", [1, 2]],
+      ["evmNonceBase", [1, 0]],
+      ["slots", [1, 1]],
+      ["pendingParams", [1, 2]],
       ["depositEventMap", [1, 3]],
       ["depositSettleViews", [1, 4]],
       ["withdrawSettleViews", [1, 5]],
