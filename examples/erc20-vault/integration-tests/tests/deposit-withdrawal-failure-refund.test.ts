@@ -24,13 +24,11 @@
 // — refundWithdraw proves withdrawer-hood from the surrendered coin's nonce,
 // which no public ledger read recovers.
 //
-// CAUTION: the drain spends an EVM nonce from the vault's pooled account
-// OUTSIDE the contract's allocator, which promises slot i the nonce
-// `evmNonceBase + i`. A drain therefore takes a nonce some later slot has
-// already been promised, and every request assigned after it signs a nonce
-// the account has already consumed. That is a property of draining a pooled
-// account, not of this test: keep the drain in the same run as a fresh
-// deploy, or re-initialise the vault after one.
+// The drain sends a transfer from the vault's pooled EVM account, whose
+// nonces belong to the contract's allocator (slot i is promised
+// `evmNonceBase + i`). `drainVaultErc20` therefore rewinds the account nonce
+// once its transfer has mined, so the doomed withdraw below still signs the
+// nonce its slot owns and its transfer really does mine and revert.
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.

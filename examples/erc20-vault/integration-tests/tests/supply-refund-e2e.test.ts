@@ -49,9 +49,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
       expect(balanceBefore).toBeGreaterThanOrEqual(SUPPLY_AMOUNT);
 
       // Drain the vault's Aave-USDC EVM balance back to the user, so the wrapper's transferFrom
-      // reverts. runSupplyRoundTrip fetches the vault nonce AFTER this, so the signed supply is the
-      // account's next expected tx. The wrapper approval it also sets means the revert is purely
-      // the zero balance, not a missing allowance.
+      // reverts. The drain rewinds the vault account's nonce afterwards, so the supply still signs
+      // the nonce its allocator slot owns. The wrapper approval runSupplyRoundTrip also sets means
+      // the revert is purely the zero balance, not a missing allowance.
       await drainVaultErc20(env, context.evmUserAddress, AAVE_USDC);
 
       // The supply's stataUSDC.deposit reverts on-chain -> the MPC attests failure -> the settle
