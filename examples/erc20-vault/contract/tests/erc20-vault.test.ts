@@ -931,8 +931,9 @@ describe("withdraw round-trip", () => {
     });
     // The shared counter is dead: nothing reads or increments it any more.
     expect(ledger(state).signetRequestNonce).toBe(0n);
-    // The slot was consumed, so the parked parameters are gone.
-    expect(ledger(state).pendingParams.isEmpty()).toBe(true);
+    // The slot was consumed: the parked parameters are replaced by a tombstone,
+    // never removed, so the key can never be parked (and re-leafed) again.
+    expect(ledger(state).pendingParams.size()).toBe(1n);
     // The allocator leaf STAYS: removing it would rebind an issued index.
     expect(ledger(state).slots.checkRoot(ledger(state).slots.root())).toBe(true);
 
@@ -2974,10 +2975,23 @@ describe("throughput: the two-phase allocator lets concurrent requests apply", (
 
     // The slot leaf is still in the tree (removing it would rebind an issued
     // index), and the root still checks out, so the guard that has to hold is
-    // the consumed pending entry.
+    // the tombstone phase 2 left on the pending entry.
     await expect(contract.circuits.assignWithdraw(run.context, run.key, path)).rejects.toThrow(
-      /No pending request for this key/,
+      /Wrong request kind for this key/,
     );
+  });
+
+  it("ANTI-REPLAY: an approve salt cannot be re-parked after its request settled", async () => {
+    // The approves surrender no coin, so nothing outside the contract stops a
+    // caller reusing a salt. Without the tombstone this would put a SECOND
+    // leaf with the same value in the allocator, and the caller could then
+    // present the path for either index -- one of which owns an EVM nonce the
+    // MPC has already signed against.
+    const { contract, ctx } = await deployInitialised();
+    const settled = await approveRouter(contract, ctx);
+    await expect(
+      contract.circuits.requestApproveRouter(settled.context, ERC20, 1n, APPROVE_SALT),
+    ).rejects.toThrow(/Request already pending/);
   });
 
   it("ANTI-REPLAY: a request id already recorded is rejected by the duplicate-id assert", async () => {
