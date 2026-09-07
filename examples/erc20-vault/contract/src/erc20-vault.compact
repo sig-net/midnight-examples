@@ -123,6 +123,57 @@ sealed ledger deployer: Bytes<32>;
 // vaultGasLimits does rather than adding a field.
 export ledger depositRequestNonces: Map<Bytes<32>, Counter>;
 
+// The kind tag of a queued vault-signed request, telling `flush` which EVM
+// transaction to rebuild, which event map to record it in and which settle view
+// to pin. Deposits are NOT queued: they carry a per-caller counter (see
+// depositRequestNonces) and still emit from startDeposit.
+export enum PendingRequestKind { withdraw, swap, supply, redeem }
+
+// One queued vault-signed request: everything `flush` needs to rebuild the EVM
+// transaction that startWithdraw/startSwap/startSupply/startRedeem used to
+// build inline. The fields are the UNION of the four flows' inputs, so one
+// queue serves all four; the per-kind meaning of each is beside it.
+struct PendingVaultRequest {
+  kind: PendingRequestKind;
+  evmNonce: Uint<64>;    // the vault EVM account's transaction nonce
+  keyVersion: Uint<8>;   // MPC key version; start validates it so flush cannot trap an entry
+  tokenA: Bytes<20>;     // withdraw: the ERC20; swap: tokenIn; supply/redeem: unused
+  tokenB: Bytes<20>;     // withdraw: destEvmAddress; swap: tokenOut; supply/redeem: unused
+  fee: Uint<24>;         // swap: the pool fee tier; other kinds: 0
+  amountA: Uint<128>;    // withdraw: amount; swap: amountOut; supply: amount; redeem: shares
+  amountB: Uint<128>;    // swap: amountInMaximum; other kinds: 0
+  coinNonce: Bytes<32>;  // the surrendered coin's nonce: the settle view's refund binder
+}
+
+// The pending queue the four VAULT-SIGNED flows append to.
+//
+// Those flows used to read the single global signetRequestNonce inside start*,
+// and that read is pinned by a popeq: two requests proven against the same
+// state could not both apply. They now validate, burn the coin and APPEND
+// here. `flush` (bottom of this file, callable by anyone) is the only circuit
+// that reads the shared counter, and it hands out one distinct nonce per
+// queued entry per batch. The shared read is out of the per-user path.
+//
+// KEY: refundCommitment(callerSecretKey(), coin.nonce) — the caller's secret
+// bound to the nonce of the ONE coin each of these flows surrenders. Two
+// different callers cannot collide (different secrets under a
+// collision-resistant hash) and one caller cannot collide with themselves (a
+// coin is spendable once, so its nonce appears in one request). Nothing about
+// the key is derivable from public state, so a front-runner cannot squat a
+// victim's slot and strand their burned coin. Making REQUESTS unique is not
+// this key's job: the flush-assigned monotonic nonce still does that. The key
+// doubles as the settle view's refund commitment, which is why start can pin
+// an ownership gate for a request id that does not exist yet.
+//
+// Declared HERE (immediately before depositEventMap), not appended at the end,
+// for the reason depositRequestNonces above spells out: the compiler puts the
+// LAST 15 fields of this state in chunk 1, so a field added before
+// depositEventMap grows chunk 0 and moves chunk 1's base by the same one slot.
+// [0,0], [0,3], [1,3], [1,7], [1,11] and [1,13] are therefore unchanged
+// (re-checked in managed/erc20-vault/compiler/contract-info.json after
+// compiling).
+export ledger pendingVaultRequests: Map<Bytes<32>, PendingVaultRequest>;
+
 // Deposit requests (2-word ERC20 transfer, 34-byte schemas).
 // Compiled path for MPC notification: [1, 3] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger depositEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
@@ -146,6 +197,7 @@ export ledger depositSettleViews: Map<RequestId, DepositSettleView>;
 // in the completeWithdraw or refundWithdraw circuits.
 struct WithdrawSettleView {
   commitment: Bytes<32>;
+  coinNonce: Bytes<32>; // refund binder: commitment == refundCommitment(sk, coinNonce)
   erc20: Bytes<20>;
   amount: Uint<64>;
 }
@@ -165,6 +217,7 @@ export ledger swapEventMap: SignBidirectionalEventMap<EvmType2TxParams<7, 0, 0>,
 // in the completeSwap or refundSwap circuits.
 struct SwapSettleView {
   commitment: Bytes<32>;
+  coinNonce: Bytes<32>; // refund binder: commitment == refundCommitment(sk, coinNonce)
   tokenIn: Bytes<20>;
   tokenOut: Bytes<20>;
   amountOut: Uint<64>;
@@ -185,6 +238,7 @@ export ledger supplyEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0
 // in the completeSupply or refundSupply circuits.
 struct SupplySettleView {
   commitment: Bytes<32>;
+  coinNonce: Bytes<32>; // refund binder: commitment == refundCommitment(sk, coinNonce)
   amount: Uint<64>;
 }
 export ledger supplySettleViews: Map<RequestId, SupplySettleView>;
@@ -198,6 +252,7 @@ export ledger redeemEventMap: SignBidirectionalEventMap<EvmType2TxParams<3, 0, 0
 // in the completeRedeem or refundRedeem circuits.
 struct RedeemSettleView {
   commitment: Bytes<32>;
+  coinNonce: Bytes<32>; // refund binder: commitment == refundCommitment(sk, coinNonce)
   shares: Uint<64>;
 }
 export ledger redeemSettleViews: Map<RequestId, RedeemSettleView>;
@@ -240,13 +295,17 @@ export pure circuit userCommitment(sk: Bytes<32>): Bytes<32> {
 }
 
 // Pinned into settle views and proven by requester gates. Deliberately NOT
-// userCommitment (reuse would link settle views to depositor identities). Before a
-// fork that changes transientHash, every pending request must be settled or refunded.
-export pure circuit refundCommitment(sk: Bytes<32>, requestId: RequestId): Bytes<32> {
+// userCommitment (reuse would link settle views to depositor identities). The
+// binder is whatever value pins the commitment to ONE request: the four
+// vault-signed flows queue BEFORE their request id exists (see
+// pendingVaultRequests), so they bind to the nonce of the coin they surrender,
+// and the same value is their queue key. Before a fork that changes
+// transientHash, every pending request must be settled or refunded.
+export pure circuit refundCommitment(sk: Bytes<32>, binder: Bytes<32>): Bytes<32> {
   return upgradeFromTransient(transientHash<Vector<3, Bytes<32>>>([
     pad(32, "vault:refund:"),
     sk,
-    requestId as Bytes<32>
+    binder
   ]));
 }
 
@@ -741,8 +800,13 @@ struct WithdrawRequest {
 }
 
 // Starts a withdrawal, optimistically: burns the surrendered vault coin up front and
-// records transfer(destEvmAddress, amount), signed with the VAULT's own account. The
-// coin spend IS the auth, and the vault pays the gas, so the fee envelope is contract-fixed.
+// QUEUES transfer(destEvmAddress, amount) for `flush` to record and sign with the
+// VAULT's own account. The coin spend IS the auth, and the vault pays the gas, so the
+// fee envelope is contract-fixed (rebuilt verbatim by flushWithdraw).
+//
+// This circuit reads NO shared ledger cell: it appends under a key only this caller
+// can compute, so two callers' withdrawals proven against the same state both apply.
+// The request id, its event record and the MPC notification are `flush`'s job.
 export circuit startWithdraw(
   evmNonce: Uint<64>,
   keyVersion: Uint<8>,
@@ -756,6 +820,11 @@ export circuit startWithdraw(
   // refundWithdraw re-mints via stdlib mintShieldedToken, which takes a Uint<64> amount.
   assert(withdrawRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
 
+  // Checked HERE even though only flush constructs the event: the same assert
+  // inside constructSignBidirectionalEvent would fire at flush time, on an entry
+  // whose coin is already burned and which no flush could ever drain.
+  assert(keyVersion >= 1, "keyVersion must be >= 1");
+
   const color = tokenType(
     vaultTokenDomainSeparator(disclose(withdrawRequest.erc20Address)),
     kernel.self()
@@ -763,72 +832,26 @@ export circuit startWithdraw(
   assert(coin.color == color, "Coin is not the vault token for this ERC20");
   assert(coin.value == withdrawRequest.amount, "Coin value must equal the withdraw amount");
 
-  const calldata = EvmCalldata<2> {
-    selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
-    noWords: 2 as Uint<16>,
-    words: [
-      evmAddressAbiWord(withdrawRequest.destEvmAddress),
-      numericAbiWord(withdrawRequest.amount),
-    ]
-  };
-
-  const txParams = EvmType2TxParams<2, 0, 0> {
-    chainId: evmChainId,
-    nonce: evmNonce,
-    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
-    maxFeePerGas: vaultMaxFeePerGas,
-    gasLimit: vaultGasLimits.withdraw,
-    to: withdrawRequest.erc20Address,
-    value: 0 as Uint<128>,
-    calldata: some<EvmCalldata<2>>(calldata),
-    accessListEntryCount: 0,
-    accessList: []
-  };
-
-  const path = pad(32, "vault");
-  const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
-  const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(),
-    requestNonce,
-    keyVersion,
-    path,
-    MPCSignatureAlgorithm.ecdsa,
-    MPCDestination.unused,
-    pad(64, ""),
-    TxParamType.evmType2,
-    txParams,
-    caip2Id,
-    schema,
-    schema
-  );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
-  assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
+  // The queue key, and the refund commitment flush pins into the settle view:
+  // this caller's secret bound to the surrendered coin's nonce.
+  const requestKey = disclose(refundCommitment(callerSecretKey(), coin.nonce));
+  assert(!pendingVaultRequests.member(requestKey), "Request already queued");
 
   // receiveShielded makes the coin the contract's, so the burn send can spend it.
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
 
-  signetRequestNonce.increment(1);
-  signBidirectionalEventMap.insert(requestId, disclose(request));
-  withdrawSettleViews.insert(
-    requestId,
-    WithdrawSettleView {
-      commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
-      erc20: disclose(withdrawRequest.erc20Address),
-      amount: disclose(withdrawRequest.amount as Uint<64>),
-    },
-  );
-
-  // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
-  signetSigner.signBidirectional(
-    requestId,
-    constructSignBidirectionalEventNotificationV1(
-      kernel.self(),
-      2 as Uint<8>,
-      [0, 0, 0, 0] as Vector<4, Uint<8>>,
-    ),
-  );
+  pendingVaultRequests.insert(requestKey, disclose(PendingVaultRequest {
+    kind: PendingRequestKind.withdraw,
+    evmNonce: evmNonce,
+    keyVersion: keyVersion,
+    tokenA: withdrawRequest.erc20Address,
+    tokenB: withdrawRequest.destEvmAddress,
+    fee: 0 as Uint<24>,
+    amountA: withdrawRequest.amount,
+    amountB: 0 as Uint<128>,
+    coinNonce: coin.nonce,
+  }));
 }
 
 // Settles an EXECUTED withdrawal in both branches, decided by the attested 1-byte
@@ -866,7 +889,9 @@ export circuit completeWithdraw(
   // The withdrawer's secret is witnessed only on this branch: a succeeded withdrawal is
   // settleable by anyone and must not require (or consume) a secret to settle.
   if (!succeeded) {
-    const myCommitment = refundCommitment(callerSecretKey(), disclosedRequestId);
+    // The settle view's commitment is bound to the SURRENDERED COIN's nonce,
+    // not to the request id: startWithdraw pinned it before flush minted an id.
+    const myCommitment = refundCommitment(callerSecretKey(), view.coinNonce);
     assert(myCommitment == view.commitment, "Not the withdrawer");
     const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
     mintShieldedToken(domainSep, view.amount, disclose(mintNonce), recipient);
@@ -888,7 +913,7 @@ export circuit refundWithdraw(
   assert(withdrawSettleViews.member(disclosedRequestId), "Withdrawal not found");
   const view = withdrawSettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    refundCommitment(callerSecretKey(), view.coinNonce) == view.commitment,
     "Not the withdrawer"
   );
   signBidirectionalEventMap.remove(disclosedRequestId);
@@ -917,9 +942,10 @@ struct SwapRequest {
 }
 
 // Starts a swap, optimistically: burns the surrendered amountInMaximum of tokenIn and
-// records exactOutputSingle on the pinned router, signed with the VAULT's account.
-// exactOutput (not exactInput) so the mint amount is known and bounded BEFORE the
-// burn: an oversized swap result would strand the already-burned coin.
+// QUEUES exactOutputSingle on the pinned router for `flush` to record and sign with the
+// VAULT's account. exactOutput (not exactInput) so the mint amount is known and bounded
+// BEFORE the burn: an oversized swap result would strand the already-burned coin.
+// Reads no shared ledger cell; see pendingVaultRequests and startWithdraw.
 export circuit startSwap(
   evmNonce: Uint<64>,
   keyVersion: Uint<8>,
@@ -934,6 +960,8 @@ export circuit startSwap(
   // Every later mint uses the Uint<64> mint API, so bound both here, BEFORE the burn.
   assert(swapRequest.amountOut <= 18446744073709551615 as Uint<128>, "amountOut exceeds Uint<64> max");
   assert(swapRequest.amountInMaximum <= 18446744073709551615 as Uint<128>, "amountInMaximum exceeds Uint<64> max");
+  // Checked here, not at flush: an entry flush cannot construct would strand the burn.
+  assert(keyVersion >= 1, "keyVersion must be >= 1");
 
   const color = tokenType(
     vaultTokenDomainSeparator(disclose(swapRequest.tokenIn)),
@@ -942,75 +970,23 @@ export circuit startSwap(
   assert(coin.color == color, "Coin is not the vault token for tokenIn");
   assert(coin.value == swapRequest.amountInMaximum, "Coin value must equal amountInMaximum");
 
-  // recipient is the vault EVM address so bought tokens return to the pool.
-  const calldata = EvmCalldata<7> {
-    selector: Bytes [0x50, 0x23, 0xb4, 0xdf], // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))
-    noWords: 7 as Uint<16>,
-    words: [
-      evmAddressAbiWord(disclose(swapRequest.tokenIn)),
-      evmAddressAbiWord(disclose(swapRequest.tokenOut)),
-      numericAbiWord(swapRequest.fee as Uint<128>),
-      evmAddressAbiWord(vaultEvmAddress),
-      numericAbiWord(swapRequest.amountOut),
-      numericAbiWord(swapRequest.amountInMaximum),
-      numericAbiWord(0 as Uint<128>),
-    ]
-  };
-
-  const txParams = EvmType2TxParams<7, 0, 0> {
-    chainId: evmChainId,
-    nonce: evmNonce,
-    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
-    maxFeePerGas: vaultMaxFeePerGas,
-    gasLimit: vaultGasLimits.swap,
-    to: uniswapRouter,
-    value: 0 as Uint<128>,
-    calldata: some<EvmCalldata<7>>(calldata),
-    accessListEntryCount: 0,
-    accessList: []
-  };
-
-  const path = pad(32, "vault");
-  const requestNonce = signetRequestNonce as Uint<64>;
-  const request = constructSignBidirectionalEvent<EvmType2TxParams<7, 0, 0>, 38, 37>(
-    kernel.self(),
-    requestNonce,
-    keyVersion,
-    path,
-    MPCSignatureAlgorithm.ecdsa,
-    MPCDestination.unused,
-    pad(64, ""),
-    TxParamType.evmType2,
-    txParams,
-    caip2Id,
-    swapOutputSchema(),
-    swapRespondSchema()
-  );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<7, 0, 0>, 38, 37>(request));
-  assert(!swapEventMap.member(requestId), "Request already exists");
+  const requestKey = disclose(refundCommitment(callerSecretKey(), coin.nonce));
+  assert(!pendingVaultRequests.member(requestKey), "Request already queued");
 
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
 
-  signetRequestNonce.increment(1);
-  swapEventMap.insert(requestId, disclose(request));
-  swapSettleViews.insert(requestId, SwapSettleView {
-    commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
-    tokenIn: disclose(swapRequest.tokenIn),
-    tokenOut: disclose(swapRequest.tokenOut),
-    amountOut: disclose(swapRequest.amountOut as Uint<64>),
-    amountInMaximum: disclose(swapRequest.amountInMaximum as Uint<64>),
-  });
-
-  // Notify the MPC (swapEventMap's compiled ledger path, [1,7]).
-  signetSigner.signBidirectional(
-    requestId,
-    constructSignBidirectionalEventNotificationV1(
-      kernel.self(),
-      2 as Uint<8>,
-      [1, 7, 0, 0] as Vector<4, Uint<8>>,
-    ),
-  );
+  pendingVaultRequests.insert(requestKey, disclose(PendingVaultRequest {
+    kind: PendingRequestKind.swap,
+    evmNonce: evmNonce,
+    keyVersion: keyVersion,
+    tokenA: swapRequest.tokenIn,
+    tokenB: swapRequest.tokenOut,
+    fee: swapRequest.fee,
+    amountA: swapRequest.amountOut,
+    amountB: swapRequest.amountInMaximum,
+    coinNonce: coin.nonce,
+  }));
 }
 
 // swapRespondSchema()'s output decoded: the amountIn the swap spent, packed to 8 bytes.
@@ -1050,7 +1026,7 @@ export circuit completeSwap(
   swapEventMap.remove(disclosedRequestId);
 
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    refundCommitment(callerSecretKey(), view.coinNonce) == view.commitment,
     "Not the swapper"
   );
   swapSettleViews.remove(disclosedRequestId);
@@ -1078,7 +1054,7 @@ export circuit refundSwap(
   assert(swapSettleViews.member(disclosedRequestId), "Swap not found");
   const view = swapSettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    refundCommitment(callerSecretKey(), view.coinNonce) == view.commitment,
     "Not the swapper"
   );
   swapEventMap.remove(disclosedRequestId);
@@ -1097,8 +1073,9 @@ export pure circuit supplyRespondSchema(): Bytes<35> {
   return "[{\"name\":\"shares\",\"type\":\"uint64\"}]" as Bytes<35>;
 }
 
-// Burns the surrendered USDC vault coin and records stataToken.deposit(amount, vault),
-// signed by the VAULT account (exact-input, so no change).
+// Burns the surrendered USDC vault coin and QUEUES stataToken.deposit(amount, vault) for
+// `flush` to record and have signed by the VAULT account (exact-input, so no change).
+// Reads no shared ledger cell; see pendingVaultRequests and startWithdraw.
 export circuit startSupply(
   evmNonce: Uint<64>,
   keyVersion: Uint<8>,
@@ -1109,59 +1086,30 @@ export circuit startSupply(
   assert(amount > 0 as Uint<128>, "amount must be positive");
   // refundSupply re-mints via the Uint<64> mint API, so reject unrefundable amounts.
   assert(amount <= 18446744073709551615 as Uint<128>, "amount exceeds Uint<64> max");
+  // Checked here, not at flush: an entry flush cannot construct would strand the burn.
+  assert(keyVersion >= 1, "keyVersion must be >= 1");
 
   const color = tokenType(vaultTokenDomainSeparator(stataUnderlying), kernel.self());
   assert(coin.color == color, "Coin is not the vault token for the underlying");
   assert(coin.value == amount, "Coin value must equal amount");
 
-  const calldata = EvmCalldata<2> {
-    selector: Bytes [0x6e, 0x55, 0x3f, 0x65], // deposit(uint256,address)
-    noWords: 2 as Uint<16>,
-    words: [
-      numericAbiWord(amount),
-      evmAddressAbiWord(vaultEvmAddress),
-    ]
-  };
-  const txParams = EvmType2TxParams<2, 0, 0> {
-    chainId: evmChainId,
-    nonce: evmNonce,
-    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
-    maxFeePerGas: vaultMaxFeePerGas,
-    gasLimit: vaultGasLimits.supply,
-    to: stataToken,
-    value: 0 as Uint<128>,
-    calldata: some<EvmCalldata<2>>(calldata),
-    accessListEntryCount: 0,
-    accessList: []
-  };
-
-  const path = pad(32, "vault");
-  const requestNonce = signetRequestNonce as Uint<64>;
-  const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 36, 35>(
-    kernel.self(), requestNonce, keyVersion, path,
-    MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
-    TxParamType.evmType2, txParams, caip2Id, supplyOutputSchema(), supplyRespondSchema()
-  );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 36, 35>(request));
-  assert(!supplyEventMap.member(requestId), "Request already exists");
+  const requestKey = disclose(refundCommitment(callerSecretKey(), coin.nonce));
+  assert(!pendingVaultRequests.member(requestKey), "Request already queued");
 
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
 
-  signetRequestNonce.increment(1);
-  supplyEventMap.insert(requestId, disclose(request));
-  supplySettleViews.insert(requestId, SupplySettleView {
-    commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
-    amount: disclose(amount as Uint<64>),
-  });
-
-  // Notify the MPC (supplyEventMap's compiled ledger path, [1,11]).
-  signetSigner.signBidirectional(
-    requestId,
-    constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [1, 11, 0, 0] as Vector<4, Uint<8>>,
-    ),
-  );
+  pendingVaultRequests.insert(requestKey, disclose(PendingVaultRequest {
+    kind: PendingRequestKind.supply,
+    evmNonce: evmNonce,
+    keyVersion: keyVersion,
+    tokenA: stataUnderlying,
+    tokenB: stataToken,
+    fee: 0 as Uint<24>,
+    amountA: amount,
+    amountB: 0 as Uint<128>,
+    coinNonce: coin.nonce,
+  }));
 }
 
 // supplyRespondSchema()'s output decoded, packed by the MPC to 8 bytes.
@@ -1188,9 +1136,9 @@ export circuit completeSupply(
 
   assert(supplyEventMap.member(disclosedRequestId), "Supply not found");
   supplyEventMap.remove(disclosedRequestId);
+  const supplyView = supplySettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId)
-      == supplySettleViews.lookup(disclosedRequestId).commitment,
+    refundCommitment(callerSecretKey(), supplyView.coinNonce) == supplyView.commitment,
     "Not the supplier"
   );
   supplySettleViews.remove(disclosedRequestId);
@@ -1213,7 +1161,7 @@ export circuit refundSupply(
   assert(supplySettleViews.member(disclosedRequestId), "Supply not found");
   const view = supplySettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    refundCommitment(callerSecretKey(), view.coinNonce) == view.commitment,
     "Not the supplier"
   );
   supplyEventMap.remove(disclosedRequestId);
@@ -1232,8 +1180,9 @@ export pure circuit redeemRespondSchema(): Bytes<35> {
   return "[{\"name\":\"assets\",\"type\":\"uint64\"}]" as Bytes<35>;
 }
 
-// Burns the surrendered stataToken vault coin and records stataToken.redeem(shares,
-// vault, vault), signed by the VAULT account.
+// Burns the surrendered stataToken vault coin and QUEUES stataToken.redeem(shares,
+// vault, vault) for `flush` to record and have signed by the VAULT account.
+// Reads no shared ledger cell; see pendingVaultRequests and startWithdraw.
 export circuit startRedeem(
   evmNonce: Uint<64>,
   keyVersion: Uint<8>,
@@ -1248,60 +1197,30 @@ export circuit startRedeem(
   // underlying caps the whole vault near 18.4 tokens. See #43 before lending anything
   // but USDC.
   assert(shares <= 18446744073709551615 as Uint<128>, "shares exceeds Uint<64> max");
+  // Checked here, not at flush: an entry flush cannot construct would strand the burn.
+  assert(keyVersion >= 1, "keyVersion must be >= 1");
 
   const color = tokenType(vaultTokenDomainSeparator(stataToken), kernel.self());
   assert(coin.color == color, "Coin is not the vault token for the wrapper");
   assert(coin.value == shares, "Coin value must equal shares");
 
-  const calldata = EvmCalldata<3> {
-    selector: Bytes [0xba, 0x08, 0x76, 0x52], // redeem(uint256,address,address)
-    noWords: 3 as Uint<16>,
-    words: [
-      numericAbiWord(shares),
-      evmAddressAbiWord(vaultEvmAddress),
-      evmAddressAbiWord(vaultEvmAddress),
-    ]
-  };
-  const txParams = EvmType2TxParams<3, 0, 0> {
-    chainId: evmChainId,
-    nonce: evmNonce,
-    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
-    maxFeePerGas: vaultMaxFeePerGas,
-    gasLimit: vaultGasLimits.redeem,
-    to: stataToken,
-    value: 0 as Uint<128>,
-    calldata: some<EvmCalldata<3>>(calldata),
-    accessListEntryCount: 0,
-    accessList: []
-  };
-
-  const path = pad(32, "vault");
-  const requestNonce = signetRequestNonce as Uint<64>;
-  const request = constructSignBidirectionalEvent<EvmType2TxParams<3, 0, 0>, 36, 35>(
-    kernel.self(), requestNonce, keyVersion, path,
-    MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
-    TxParamType.evmType2, txParams, caip2Id, redeemOutputSchema(), redeemRespondSchema()
-  );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<3, 0, 0>, 36, 35>(request));
-  assert(!redeemEventMap.member(requestId), "Request already exists");
+  const requestKey = disclose(refundCommitment(callerSecretKey(), coin.nonce));
+  assert(!pendingVaultRequests.member(requestKey), "Request already queued");
 
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
 
-  signetRequestNonce.increment(1);
-  redeemEventMap.insert(requestId, disclose(request));
-  redeemSettleViews.insert(requestId, RedeemSettleView {
-    commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
-    shares: disclose(shares as Uint<64>),
-  });
-
-  // Notify the MPC (redeemEventMap's compiled ledger path, [1,13]).
-  signetSigner.signBidirectional(
-    requestId,
-    constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [1, 13, 0, 0] as Vector<4, Uint<8>>,
-    ),
-  );
+  pendingVaultRequests.insert(requestKey, disclose(PendingVaultRequest {
+    kind: PendingRequestKind.redeem,
+    evmNonce: evmNonce,
+    keyVersion: keyVersion,
+    tokenA: stataToken,
+    tokenB: stataUnderlying,
+    fee: 0 as Uint<24>,
+    amountA: shares,
+    amountB: 0 as Uint<128>,
+    coinNonce: coin.nonce,
+  }));
 }
 
 // redeemRespondSchema()'s output decoded, packed by the MPC to 8 bytes.
@@ -1328,9 +1247,9 @@ export circuit completeRedeem(
 
   assert(redeemEventMap.member(disclosedRequestId), "Redeem not found");
   redeemEventMap.remove(disclosedRequestId);
+  const redeemView = redeemSettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId)
-      == redeemSettleViews.lookup(disclosedRequestId).commitment,
+    refundCommitment(callerSecretKey(), redeemView.coinNonce) == redeemView.commitment,
     "Not the redeemer"
   );
   redeemSettleViews.remove(disclosedRequestId);
@@ -1353,7 +1272,7 @@ export circuit refundRedeem(
   assert(redeemSettleViews.member(disclosedRequestId), "Redeem not found");
   const view = redeemSettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    refundCommitment(callerSecretKey(), view.coinNonce) == view.commitment,
     "Not the redeemer"
   );
   redeemEventMap.remove(disclosedRequestId);
@@ -1361,4 +1280,293 @@ export circuit refundRedeem(
 
   const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
   mintShieldedToken(vaultTokenDomainSeparator(stataToken), view.shares, disclose(mintNonce), recipient);
+}
+
+// ==== Flush: the batched drain of pendingVaultRequests ===============================
+//
+// One circuit, callable by ANYONE (a user, a relayer, the MPC's own tooling),
+// that turns queued vault-signed requests into recorded SignBidirectionalEvents.
+// It is the ONLY place the four vault-signed flows touch signetRequestNonce, it
+// reads that cell exactly ONCE per call, and it hands slot i of the batch the
+// nonce base+i, so every request in a batch gets a distinct, monotonic id.
+//
+// BOUND: TWO entries per call, named by key. Compact has no unbounded
+// iteration and no way to enumerate a ledger Map, so a drain must be an unrolled
+// loop over caller-supplied keys. A slot whose key is not queued is skipped, so a
+// batch of one is a valid call; a key repeated inside one batch is processed once
+// (the first slot removes it, the rest see it gone).
+//
+// The counter advances by 2 whether or not every slot was live. That is
+// deliberate: it makes the nonce a pure function of (base, slot index), so no two
+// requests can ever be handed the same nonce. The gaps it leaves cost nothing:
+// the nonce exists to keep otherwise identical requests hashing apart, not to
+// count anything.
+//
+// KNOWN LIMITS, stated plainly:
+//  - Concurrent flushes still conflict with each other and with approveStata /
+//    approveRouter, which keep the global counter. Serialising the BATCHES is the
+//    whole point; what had to stop serialising was users' start* calls.
+//  - The flusher chooses the batch and its order, so it chooses the order request
+//    ids are minted in. It cannot forge, alter, drop or steal an entry: every
+//    field comes from the queue and the settle view keeps the requester's own
+//    commitment.
+//  - A queued entry is inert until someone flushes it, and the requester's coin is
+//    already burned by then, so an entry nobody flushes is refundable by nobody.
+//    A client should flush its own request rather than trust a relayer to.
+//  - The circuit carries all four kinds, so every flusher pays for all four in
+//    proof size even when the batch is homogeneous.
+
+// Records a queued withdraw as a signBidirectionalEventMap event under the
+// batch-assigned nonce, pins the settle view and notifies the MPC.
+circuit flushWithdraw(key: Bytes<32>, pending: PendingVaultRequest, requestNonce: Uint<64>): [] {
+  const calldata = EvmCalldata<2> {
+    selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
+    noWords: 2 as Uint<16>,
+    words: [
+      evmAddressAbiWord(pending.tokenB), // destEvmAddress
+      numericAbiWord(pending.amountA),   // amount
+    ]
+  };
+  const txParams = EvmType2TxParams<2, 0, 0> {
+    chainId: evmChainId,
+    nonce: pending.evmNonce,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.withdraw,
+    to: pending.tokenA,                            // the ERC20
+    value: 0 as Uint<128>,
+    calldata: some<EvmCalldata<2>>(calldata),
+    accessListEntryCount: 0,
+    accessList: []
+  };
+  const schema = vaultResponseSchema();
+  const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
+    kernel.self(),
+    requestNonce,
+    pending.keyVersion,
+    pad(32, "vault"),
+    MPCSignatureAlgorithm.ecdsa,
+    MPCDestination.unused,
+    pad(64, ""),
+    TxParamType.evmType2,
+    txParams,
+    caip2Id,
+    schema,
+    schema
+  );
+  const requestId = calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request);
+  assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
+  signBidirectionalEventMap.insert(requestId, request);
+  // The queue key IS the requester's refund commitment (see pendingVaultRequests),
+  // so flush pins the ownership gate without ever seeing a secret.
+  withdrawSettleViews.insert(requestId, WithdrawSettleView {
+    commitment: key,
+    coinNonce: pending.coinNonce,
+    erc20: pending.tokenA,
+    amount: pending.amountA as Uint<64>,
+  });
+  pendingVaultRequests.remove(key);
+
+  // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
+  signetSigner.signBidirectional(
+    requestId,
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(),
+      2 as Uint<8>,
+      [0, 0, 0, 0] as Vector<4, Uint<8>>,
+    ),
+  );
+}
+
+// Records a queued swap on the pinned router. Same shape as flushWithdraw.
+circuit flushSwap(key: Bytes<32>, pending: PendingVaultRequest, requestNonce: Uint<64>): [] {
+  const calldata = EvmCalldata<7> {
+    selector: Bytes [0x50, 0x23, 0xb4, 0xdf], // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))
+    noWords: 7 as Uint<16>,
+    words: [
+      evmAddressAbiWord(pending.tokenA),           // tokenIn
+      evmAddressAbiWord(pending.tokenB),           // tokenOut
+      numericAbiWord(pending.fee as Uint<128>),
+      evmAddressAbiWord(vaultEvmAddress),          // recipient: bought tokens return to the pool
+      numericAbiWord(pending.amountA),             // amountOut
+      numericAbiWord(pending.amountB),             // amountInMaximum
+      numericAbiWord(0 as Uint<128>),              // sqrtPriceLimitX96
+    ]
+  };
+  const txParams = EvmType2TxParams<7, 0, 0> {
+    chainId: evmChainId,
+    nonce: pending.evmNonce,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.swap,
+    to: uniswapRouter,
+    value: 0 as Uint<128>,
+    calldata: some<EvmCalldata<7>>(calldata),
+    accessListEntryCount: 0,
+    accessList: []
+  };
+  const request = constructSignBidirectionalEvent<EvmType2TxParams<7, 0, 0>, 38, 37>(
+    kernel.self(),
+    requestNonce,
+    pending.keyVersion,
+    pad(32, "vault"),
+    MPCSignatureAlgorithm.ecdsa,
+    MPCDestination.unused,
+    pad(64, ""),
+    TxParamType.evmType2,
+    txParams,
+    caip2Id,
+    swapOutputSchema(),
+    swapRespondSchema()
+  );
+  const requestId = calculateRequestId<EvmType2TxParams<7, 0, 0>, 38, 37>(request);
+  assert(!swapEventMap.member(requestId), "Request already exists");
+  swapEventMap.insert(requestId, request);
+  swapSettleViews.insert(requestId, SwapSettleView {
+    commitment: key,
+    coinNonce: pending.coinNonce,
+    tokenIn: pending.tokenA,
+    tokenOut: pending.tokenB,
+    amountOut: pending.amountA as Uint<64>,
+    amountInMaximum: pending.amountB as Uint<64>,
+  });
+  pendingVaultRequests.remove(key);
+
+  // Notify the MPC (swapEventMap's compiled ledger path, [1,7]).
+  signetSigner.signBidirectional(
+    requestId,
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(),
+      2 as Uint<8>,
+      [1, 7, 0, 0] as Vector<4, Uint<8>>,
+    ),
+  );
+}
+
+// Records a queued supply: stataToken.deposit(amount, vault).
+circuit flushSupply(key: Bytes<32>, pending: PendingVaultRequest, requestNonce: Uint<64>): [] {
+  const calldata = EvmCalldata<2> {
+    selector: Bytes [0x6e, 0x55, 0x3f, 0x65], // deposit(uint256,address)
+    noWords: 2 as Uint<16>,
+    words: [
+      numericAbiWord(pending.amountA),
+      evmAddressAbiWord(vaultEvmAddress),
+    ]
+  };
+  const txParams = EvmType2TxParams<2, 0, 0> {
+    chainId: evmChainId,
+    nonce: pending.evmNonce,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.supply,
+    to: pending.tokenB,             // the stataToken wrapper
+    value: 0 as Uint<128>,
+    calldata: some<EvmCalldata<2>>(calldata),
+    accessListEntryCount: 0,
+    accessList: []
+  };
+  const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 36, 35>(
+    kernel.self(), requestNonce, pending.keyVersion, pad(32, "vault"),
+    MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
+    TxParamType.evmType2, txParams, caip2Id, supplyOutputSchema(), supplyRespondSchema()
+  );
+  const requestId = calculateRequestId<EvmType2TxParams<2, 0, 0>, 36, 35>(request);
+  assert(!supplyEventMap.member(requestId), "Request already exists");
+  supplyEventMap.insert(requestId, request);
+  supplySettleViews.insert(requestId, SupplySettleView {
+    commitment: key,
+    coinNonce: pending.coinNonce,
+    amount: pending.amountA as Uint<64>,
+  });
+  pendingVaultRequests.remove(key);
+
+  // Notify the MPC (supplyEventMap's compiled ledger path, [1,11]).
+  signetSigner.signBidirectional(
+    requestId,
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(), 2 as Uint<8>, [1, 11, 0, 0] as Vector<4, Uint<8>>,
+    ),
+  );
+}
+
+// Records a queued redeem: stataToken.redeem(shares, vault, vault).
+circuit flushRedeem(key: Bytes<32>, pending: PendingVaultRequest, requestNonce: Uint<64>): [] {
+  const calldata = EvmCalldata<3> {
+    selector: Bytes [0xba, 0x08, 0x76, 0x52], // redeem(uint256,address,address)
+    noWords: 3 as Uint<16>,
+    words: [
+      numericAbiWord(pending.amountA),    // shares
+      evmAddressAbiWord(vaultEvmAddress),
+      evmAddressAbiWord(vaultEvmAddress),
+    ]
+  };
+  const txParams = EvmType2TxParams<3, 0, 0> {
+    chainId: evmChainId,
+    nonce: pending.evmNonce,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.redeem,
+    to: pending.tokenA,             // the stataToken wrapper
+    value: 0 as Uint<128>,
+    calldata: some<EvmCalldata<3>>(calldata),
+    accessListEntryCount: 0,
+    accessList: []
+  };
+  const request = constructSignBidirectionalEvent<EvmType2TxParams<3, 0, 0>, 36, 35>(
+    kernel.self(), requestNonce, pending.keyVersion, pad(32, "vault"),
+    MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
+    TxParamType.evmType2, txParams, caip2Id, redeemOutputSchema(), redeemRespondSchema()
+  );
+  const requestId = calculateRequestId<EvmType2TxParams<3, 0, 0>, 36, 35>(request);
+  assert(!redeemEventMap.member(requestId), "Request already exists");
+  redeemEventMap.insert(requestId, request);
+  redeemSettleViews.insert(requestId, RedeemSettleView {
+    commitment: key,
+    coinNonce: pending.coinNonce,
+    shares: pending.amountA as Uint<64>,
+  });
+  pendingVaultRequests.remove(key);
+
+  // Notify the MPC (redeemEventMap's compiled ledger path, [1,13]).
+  signetSigner.signBidirectional(
+    requestId,
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(), 2 as Uint<8>, [1, 13, 0, 0] as Vector<4, Uint<8>>,
+    ),
+  );
+}
+
+// Drains up to 2 queued vault-signed requests, in the order given. The batch size
+// is a literal because Compact has no top-level constants; raising it means
+// widening the Vector, the range and the increment together (all three below).
+// Permissionless: nothing here reads a secret, and every field of every request
+// comes from the queue the requester filled in.
+export circuit flush(keys: Vector<2, Bytes<32>>): [] {
+  assert(initialised >= 1, "Not initialised");
+
+  // The ONE read of the shared counter. Slot i gets base+i, so the ids in a
+  // batch are distinct without reading the cell again per entry.
+  const base = signetRequestNonce as Uint<64>;
+
+  for (const slot of 0..2) {
+    const key = disclose(keys[slot]);
+    if (pendingVaultRequests.member(key)) {
+      const pending = pendingVaultRequests.lookup(key);
+      const requestNonce = (base + slot) as Uint<64>;
+      if (pending.kind == PendingRequestKind.withdraw) {
+        flushWithdraw(key, pending, requestNonce);
+      }
+      if (pending.kind == PendingRequestKind.swap) {
+        flushSwap(key, pending, requestNonce);
+      }
+      if (pending.kind == PendingRequestKind.supply) {
+        flushSupply(key, pending, requestNonce);
+      }
+      if (pending.kind == PendingRequestKind.redeem) {
+        flushRedeem(key, pending, requestNonce);
+      }
+    }
+  }
+
+  signetRequestNonce.increment(2);
 }
