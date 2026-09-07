@@ -56,7 +56,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
-import { flushVaultRequests } from "../src/flows/flush.ts";
+import { FlushKind, flushVaultRequests } from "../src/flows/flush.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import {
   predictWithdrawRequestId,
@@ -329,7 +329,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         // ONE flush, drained by caller A on behalf of both. flush is
         // permissionless and reads no secret; A gains no claim on B's refund.
-        await flushVaultRequests(contextA, [queuedA.queueKey, queuedB.queueKey]);
+        await flushVaultRequests(contextA, FlushKind.Withdraws, [
+          queuedA.queueKey,
+          queuedB.queueKey,
+        ]);
 
         const afterFlush = await readVaultLedger(
           contextA.providers.publicDataProvider,
@@ -403,9 +406,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const queued2 = await queueOne();
         const queued3 = await queueOne();
 
-        // Two flush calls, because the contract's batch width is two. The EVM
-        // nonces must still come out CONTIGUOUS across the batch boundary: the
-        // counter advances by entries drained, not by batch width.
+        // Two flush calls on purpose, splitting three requests across a BATCH
+        // BOUNDARY (all three would fit in one batch of the current width).
+        // The EVM nonces must still come out CONTIGUOUS across that boundary:
+        // the counter advances by entries drained, not by batch width.
         const before1 = await readVaultLedger(
           contextA.providers.publicDataProvider,
           contextA.vaultContractAddress,
@@ -426,7 +430,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           before1.signetRequestNonce + 1n,
           evmBase + 1n,
         );
-        await flushVaultRequests(contextA, [queued1.queueKey, queued2.queueKey]);
+        await flushVaultRequests(contextA, FlushKind.Withdraws, [
+          queued1.queueKey,
+          queued2.queueKey,
+        ]);
 
         const before2 = await readVaultLedger(
           contextA.providers.publicDataProvider,
@@ -440,7 +447,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           before2.signetRequestNonce,
           evmBase + 2n,
         );
-        await flushVaultRequests(contextA, [queued3.queueKey]);
+        await flushVaultRequests(contextA, FlushKind.Withdraws, [queued3.queueKey]);
 
         const afterFlush = await readVaultLedger(
           contextA.providers.publicDataProvider,

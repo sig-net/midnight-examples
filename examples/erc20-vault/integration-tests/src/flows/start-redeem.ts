@@ -28,7 +28,7 @@ import {
 import { REDEEM_MPC_ROUTING, STATA_REDEEM_SELECTOR } from "../evm-stata.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
-import { flushVaultRequests, vaultQueueKey } from "./flush.ts";
+import { FlushKind, flushVaultRequests, vaultQueueKey } from "./flush.ts";
 
 /** Options for {@link startRedeem}. */
 export interface StartRedeemOptions {
@@ -115,7 +115,7 @@ export async function startRedeem(
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  await flushVaultRequests(context, [vaultQueueKey(context, coin.nonce)]);
+  await flushVaultRequests(context, FlushKind.Redeems, [vaultQueueKey(context, coin.nonce)]);
 
   const after = await readVaultLedger(
     context.providers.publicDataProvider,

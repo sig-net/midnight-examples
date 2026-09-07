@@ -38,7 +38,7 @@ import { ERC20_TRANSFER_SELECTOR } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
-import { flushVaultRequests, vaultQueueKey } from "./flush.ts";
+import { FlushKind, flushVaultRequests, vaultQueueKey } from "./flush.ts";
 
 /** Options for {@link startWithdraw} and {@link queueWithdraw}. */
 export interface StartWithdrawOptions {
@@ -254,7 +254,7 @@ export async function startWithdraw(
     beforeFlush.vaultEvmNonce,
   );
 
-  await flushVaultRequests(context, [queued.queueKey]);
+  await flushVaultRequests(context, FlushKind.Withdraws, [queued.queueKey]);
 
   const after = await readVaultLedger(
     context.providers.publicDataProvider,

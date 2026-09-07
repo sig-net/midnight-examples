@@ -724,8 +724,13 @@ const withdraw = (
 // and QUEUE. `flush` — permissionless, batched — does the rest. Every test that
 // used to read an event map straight after a start* now starts, then flushes.
 
-/** The contract's flush batch width: `flush` takes exactly this many keys. */
-const FLUSH_BATCH = 2;
+/**
+ * The contract's flush batch width: every flush entry point takes exactly this
+ * many keys. It is declared once in erc20-vault.compact, on the four adjacent
+ * `flush*` wrappers over the `drain*<#N>` circuits, and this mirror of it must
+ * move in the same change.
+ */
+const FLUSH_BATCH = 5;
 
 /** A key nothing is ever queued under: pads a short batch (that slot is skipped). */
 const UNQUEUED_KEY = bytes(32, 0xff);
@@ -739,26 +744,81 @@ const UNQUEUED_KEY = bytes(32, 0xff);
 const queueKey = (secretKey: Uint8Array, coin: { nonce: Uint8Array }) =>
   pureCircuits.refundCommitment(secretKey, coin.nonce);
 
-/** Drain the named queue entries, padding the batch out to the fixed width. */
-const flush = (
-  contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["flush"]>[0],
-  keys: Uint8Array[],
-) => {
+/**
+ * Every flush entry point takes the same context type and the same fixed-width
+ * key vector, so one alias names it for all four.
+ */
+type FlushContext = Parameters<Contract<VaultPrivateState>["circuits"]["flushWithdraws"]>[0];
+
+/** Pad a short batch out to the fixed width with a key nothing is queued under. */
+const padBatch = (keys: Uint8Array[]) => {
   if (keys.length > FLUSH_BATCH) {
-    throw new Error(`flush takes at most ${String(FLUSH_BATCH)} keys`);
+    throw new Error(`a flush takes at most ${String(FLUSH_BATCH)} keys`);
   }
-  const padded = [...keys, ...Array<Uint8Array>(FLUSH_BATCH - keys.length).fill(UNQUEUED_KEY)];
-  return contract.circuits.flush(ctx, padded);
+  return [...keys, ...Array<Uint8Array>(FLUSH_BATCH - keys.length).fill(UNQUEUED_KEY)];
 };
 
-/** Flush the one entry a start* call queued for `coin` (the deployer's, by default). */
-const flushCoin = (
+// There is no single `flush`: the contract exports one entry point per request
+// kind, so a caller proves only the transaction builder it actually uses. Each
+// drains ONLY its own kind — an entry of another kind is skipped exactly as a
+// missing key is.
+
+/** Drain the named WITHDRAW entries. */
+const flushWithdraws = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["flush"]>[0],
+  ctx: FlushContext,
+  keys: Uint8Array[],
+) => contract.circuits.flushWithdraws(ctx, padBatch(keys));
+
+/** Drain the named SWAP entries. */
+const flushSwaps = (contract: Contract<VaultPrivateState>, ctx: FlushContext, keys: Uint8Array[]) =>
+  contract.circuits.flushSwaps(ctx, padBatch(keys));
+
+/** Drain the named SUPPLY entries. */
+const flushSupplies = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  keys: Uint8Array[],
+) => contract.circuits.flushSupplies(ctx, padBatch(keys));
+
+/** Drain the named REDEEM entries. */
+const flushRedeems = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  keys: Uint8Array[],
+) => contract.circuits.flushRedeems(ctx, padBatch(keys));
+
+/** Flush the one WITHDRAW a start* call queued for `coin` (the deployer's, by default). */
+const flushWithdrawCoin = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
   coin: { nonce: Uint8Array },
   secretKey: Uint8Array = SECRET_KEY,
-) => flush(contract, ctx, [queueKey(secretKey, coin)]);
+) => flushWithdraws(contract, ctx, [queueKey(secretKey, coin)]);
+
+/** Flush the one SWAP a startSwap call queued for `coin`. */
+const flushSwapCoin = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  coin: { nonce: Uint8Array },
+  secretKey: Uint8Array = SECRET_KEY,
+) => flushSwaps(contract, ctx, [queueKey(secretKey, coin)]);
+
+/** Flush the one SUPPLY a startSupply call queued for `coin`. */
+const flushSupplyCoin = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  coin: { nonce: Uint8Array },
+  secretKey: Uint8Array = SECRET_KEY,
+) => flushSupplies(contract, ctx, [queueKey(secretKey, coin)]);
+
+/** Flush the one REDEEM a startRedeem call queued for `coin`. */
+const flushRedeemCoin = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  coin: { nonce: Uint8Array },
+  secretKey: Uint8Array = SECRET_KEY,
+) => flushRedeems(contract, ctx, [queueKey(secretKey, coin)]);
 
 // ---- Withdraw tests ----
 
@@ -780,7 +840,7 @@ describe("withdraw round-trip", () => {
     // And it left the shared counter alone, which is the whole point.
     expect(afterStart.signetRequestNonce).toBe(0n);
 
-    const { context: next } = await flushCoin(contract, started, VALID_WITHDRAW.coin);
+    const { context: next } = await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin);
     const state = next.callContext.currentQueryContext.state;
 
     const index = toSignBidirectionalEventIndex(ledger(state).signBidirectionalEventMap);
@@ -873,10 +933,10 @@ describe("withdraw round-trip", () => {
       amount: AMOUNT,
     });
     // The queue entry is consumed, and the shared counter moved by the batch
-    // width (2), not by one: flush hands slot i the nonce base+i and advances by
+    // width, not by one: flush hands slot i the nonce base+i and advances by
     // the full width, so two batches can never hand out the same nonce.
     expect(ledger(state).pendingVaultRequests.isEmpty()).toBe(true);
-    expect(ledger(state).signetRequestNonce).toBe(2n);
+    expect(ledger(state).signetRequestNonce).toBe(BigInt(FLUSH_BATCH));
 
     // The burn, observable in the START call's zswap local state (flush moves no
     // coins): the coin is received (a contract-owned output) and spent as the
@@ -945,7 +1005,7 @@ describe("withdraw round-trip", () => {
     ).toBe(2n);
 
     const drained = (
-      await flush(contract, afterSecond, [
+      await flushWithdraws(contract, afterSecond, [
         queueKey(SECRET_KEY, VALID_WITHDRAW.coin),
         queueKey(SECRET_KEY, otherCoin),
       ])
@@ -1027,7 +1087,10 @@ describe("withdraw validation", () => {
   });
 });
 
-describe("flush", () => {
+// The flush behaviour every entry point shares — permissionless, skipping,
+// and the two counter rules — driven through the WITHDRAW entry point. The
+// cross-kind describe further down covers what differs between them.
+describe("flush, via the withdraw entry point", () => {
   it("is permissionless: a STRANGER drains what a withdrawer queued, and the gate still binds the withdrawer", async () => {
     const { contract, ctx } = await deployInitialised();
     const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
@@ -1036,7 +1099,7 @@ describe("flush", () => {
     // flush reads a secret, so this must work — batching is only useful if
     // anyone can do it.
     const strangerCtx = await strangerContext("flush", started);
-    const drained = (await flushCoin(contract, strangerCtx, VALID_WITHDRAW.coin)).context;
+    const drained = (await flushWithdrawCoin(contract, strangerCtx, VALID_WITHDRAW.coin)).context;
 
     const state = ledger(drained.callContext.currentQueryContext.state);
     const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
@@ -1053,8 +1116,8 @@ describe("flush", () => {
   it("skips a slot whose key is not queued, so flushing the same key twice records once", async () => {
     const { contract, ctx } = await deployInitialised();
     const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
-    const drained = (await flushCoin(contract, started, VALID_WITHDRAW.coin)).context;
-    const again = (await flushCoin(contract, drained, VALID_WITHDRAW.coin)).context;
+    const drained = (await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin)).context;
+    const again = (await flushWithdrawCoin(contract, drained, VALID_WITHDRAW.coin)).context;
 
     const state = ledger(again.callContext.currentQueryContext.state);
     expect(toSignBidirectionalEventIndex(state.signBidirectionalEventMap).size).toBe(1);
@@ -1065,7 +1128,7 @@ describe("flush", () => {
     expect(decodeSignetLogEvents(again.events, SIGNET_ADDRESS)).toHaveLength(1);
     // It still advanced the counter by the batch width. Gaps are deliberate:
     // the nonce is a pure function of (base, slot) so ids can never repeat.
-    expect(state.signetRequestNonce).toBe(4n);
+    expect(state.signetRequestNonce).toBe(BigInt(2 * FLUSH_BATCH));
   });
 
   it("refuses a second request under a coin nonce already queued", async () => {
@@ -1079,31 +1142,52 @@ describe("flush", () => {
     );
   });
 
-  it("assigns the vault EVM nonce from the contract counter, CONTIGUOUSLY across a batch", async () => {
+  it("assigns the vault EVM nonce from the contract counter, CONTIGUOUSLY across a FULL batch", async () => {
     // The four vault-signed flows all sign from ONE shared EVM account, so a
     // caller-supplied evmNonce let two callers pick the same value: only one of
     // the two Ethereum transactions could ever mine and the loser had to
     // refund. start* no longer takes one; flush hands out the next value per
     // entry it drains.
+    //
+    // Every slot of the compiled width is live here, so this pins the whole
+    // batch: FLUSH_BATCH entries in, FLUSH_BATCH consecutive EVM nonces out.
     const { contract, ctx } = await deployInitialised();
-    const secondCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x1a));
-    const afterFirst = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
-    const afterSecond = (
-      await withdraw(contract, afterFirst, { ...VALID_WITHDRAW, coin: secondCoin })
-    ).context;
+    // One coin per slot. Coins that coexist must differ in nonce, because the
+    // queue key binds the surrendered coin's nonce (see queueKey).
+    const coins = [0x1a, 0x1c, 0x1d, 0x1e, 0x1f].map((nonceFill) =>
+      vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, nonceFill)),
+    );
+    expect(coins).toHaveLength(FLUSH_BATCH);
+
+    let queued = ctx;
+    for (const coin of coins) {
+      queued = (await withdraw(contract, queued, { ...VALID_WITHDRAW, coin })).context;
+    }
 
     const drained = (
-      await flush(contract, afterSecond, [
-        queueKey(SECRET_KEY, VALID_WITHDRAW.coin),
-        queueKey(SECRET_KEY, secondCoin),
-      ])
+      await flushWithdraws(
+        contract,
+        queued,
+        coins.map((coin) => queueKey(SECRET_KEY, coin)),
+      )
     ).context;
 
     const state = ledger(drained.callContext.currentQueryContext.state);
     const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
-    expect([...index.values()].map((record) => record.txParams.nonce).sort()).toEqual([0n, 1n]);
+    expect(index.size).toBe(FLUSH_BATCH);
+    // 0,1,2,3,4: one per slot, in slot order, with no gap anywhere.
+    expect([...index.values()].map((record) => record.txParams.nonce).sort()).toEqual([
+      0n,
+      1n,
+      2n,
+      3n,
+      4n,
+    ]);
     // The counter advanced by exactly the number of entries drained.
-    expect(state.vaultEvmNonce).toBe(2n);
+    expect(state.vaultEvmNonce).toBe(BigInt(FLUSH_BATCH));
+    // The request-id counter advanced by the width, which here is the same
+    // number only because the batch happened to be full.
+    expect(state.signetRequestNonce).toBe(BigInt(FLUSH_BATCH));
   });
 
   it("leaves NO EVM-nonce gap when a slot is skipped, unlike signetRequestNonce", async () => {
@@ -1113,25 +1197,84 @@ describe("flush", () => {
     // batch width and its gaps are harmless.
     const { contract, ctx } = await deployInitialised();
     const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
-    // A half-empty batch: one live key, one dead slot.
-    const firstDrain = (await flushCoin(contract, started, VALID_WITHDRAW.coin)).context;
+    // A nearly empty batch: one live key, and FLUSH_BATCH - 1 dead slots the
+    // harness pads it out with.
+    const firstDrain = (await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin)).context;
     expect(ledger(firstDrain.callContext.currentQueryContext.state).vaultEvmNonce).toBe(1n);
 
     const secondCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x1b));
     const startedAgain = (
       await withdraw(contract, firstDrain, { ...VALID_WITHDRAW, coin: secondCoin })
     ).context;
-    const secondDrain = (await flushCoin(contract, startedAgain, secondCoin)).context;
+    const secondDrain = (await flushWithdrawCoin(contract, startedAgain, secondCoin)).context;
 
     const state = ledger(secondDrain.callContext.currentQueryContext.state);
     const nonces = [...toSignBidirectionalEventIndex(state.signBidirectionalEventMap).values()].map(
       (record) => record.txParams.nonce,
     );
-    // 0 then 1 — contiguous across two half-empty batches.
+    // 0 then 1 — contiguous across two nearly empty batches, even though eight
+    // of the ten slots drained nothing.
     expect(nonces.sort()).toEqual([0n, 1n]);
     expect(state.vaultEvmNonce).toBe(2n);
-    // The request-id counter DID skip: two batches of width 2.
-    expect(state.signetRequestNonce).toBe(4n);
+    // The request-id counter DID skip: two batches of the full width, for two
+    // entries drained.
+    expect(state.signetRequestNonce).toBe(BigInt(2 * FLUSH_BATCH));
+  });
+
+  it("burns an EVM nonce only for the LIVE slots of a partly filled batch, wherever they sit", async () => {
+    // The compiled width is fixed, so a caller with fewer keys pads the batch
+    // with a key nothing is queued under. Those dead slots must consume no EVM
+    // nonce — including a dead slot BETWEEN two live ones, which is why the
+    // padding here is interleaved and not merely trailing.
+    const { contract, ctx } = await deployInitialised();
+    const secondCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x2a));
+    const afterFirst = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const afterSecond = (
+      await withdraw(contract, afterFirst, { ...VALID_WITHDRAW, coin: secondCoin })
+    ).context;
+
+    // Slot 0 live, slot 1 dead, slot 2 live, slots 3 and 4 padded dead.
+    const firstDrain = (
+      await flushWithdraws(contract, afterSecond, [
+        queueKey(SECRET_KEY, VALID_WITHDRAW.coin),
+        UNQUEUED_KEY,
+        queueKey(SECRET_KEY, secondCoin),
+      ])
+    ).context;
+
+    const afterBatch = ledger(firstDrain.callContext.currentQueryContext.state);
+    const firstRecords = [
+      ...toSignBidirectionalEventIndex(afterBatch.signBidirectionalEventMap).values(),
+    ];
+    expect(firstRecords).toHaveLength(2);
+    // The whole asymmetry, in two assertions on ONE batch. The request-id
+    // nonce is a pure function of (base, slot), so the dead slot 1 leaves a
+    // hole in it...
+    expect(firstRecords.map((record) => record.requestNonce).sort()).toEqual([0n, 2n]);
+    // ...while the EVM nonce is consumed only inside the live branch, so the
+    // two drained entries got 0 and 1 with nothing between them.
+    expect(firstRecords.map((record) => record.txParams.nonce).sort()).toEqual([0n, 1n]);
+    // Three dead slots burned no EVM nonce at all.
+    expect(afterBatch.vaultEvmNonce).toBe(2n);
+    // The request-id counter still took the FULL width.
+    expect(afterBatch.signetRequestNonce).toBe(BigInt(FLUSH_BATCH));
+
+    // A second partly filled batch continues the EVM sequence with no gap,
+    // which is the property Ethereum actually requires of it.
+    const thirdCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x2b));
+    const startedThird = (
+      await withdraw(contract, firstDrain, { ...VALID_WITHDRAW, coin: thirdCoin })
+    ).context;
+    const secondDrain = (await flushWithdrawCoin(contract, startedThird, thirdCoin)).context;
+
+    const state = ledger(secondDrain.callContext.currentQueryContext.state);
+    const nonces = [...toSignBidirectionalEventIndex(state.signBidirectionalEventMap).values()].map(
+      (record) => record.txParams.nonce,
+    );
+    expect(nonces.sort()).toEqual([0n, 1n, 2n]);
+    expect(state.vaultEvmNonce).toBe(3n);
+    // Two batches of the full width, for three entries drained.
+    expect(state.signetRequestNonce).toBe(BigInt(2 * FLUSH_BATCH));
   });
 
   it("shares the counter with approveRouter, which signs from the same vault account", async () => {
@@ -1141,7 +1284,7 @@ describe("flush", () => {
     const { contract, ctx } = await deployInitialised();
     const approved = (await contract.circuits.approveRouter(ctx, ERC20, 1n)).context;
     const started = (await withdraw(contract, approved, VALID_WITHDRAW)).context;
-    const drained = (await flushCoin(contract, started, VALID_WITHDRAW.coin)).context;
+    const drained = (await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin)).context;
 
     const state = ledger(drained.callContext.currentQueryContext.state);
     const nonces = [...toSignBidirectionalEventIndex(state.signBidirectionalEventMap).values()].map(
@@ -1151,9 +1294,14 @@ describe("flush", () => {
     expect(state.vaultEvmNonce).toBe(2n);
   });
 
-  it("rejects before initialise", async () => {
+  it.each([
+    ["flushWithdraws", flushWithdraws],
+    ["flushSwaps", flushSwaps],
+    ["flushSupplies", flushSupplies],
+    ["flushRedeems", flushRedeems],
+  ] as const)("%s rejects before initialise", async (_name, entryPoint) => {
     const { contract, ctx } = await deployContract();
-    await expect(flush(contract, ctx, [UNQUEUED_KEY])).rejects.toThrow(/Not initialised/);
+    await expect(entryPoint(contract, ctx, [UNQUEUED_KEY])).rejects.toThrow(/Not initialised/);
   });
 });
 
@@ -1225,7 +1373,7 @@ const respond = (
 const withdrawRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
-  const next = (await flushCoin(contract, started, VALID_WITHDRAW.coin)).context;
+  const next = (await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
   );
@@ -1841,7 +1989,7 @@ describe("swap round-trip", () => {
     ).toBe(true);
     expect(ledger(started.callContext.currentQueryContext.state).swapEventMap.isEmpty()).toBe(true);
 
-    const { context: next } = await flushCoin(contract, started, VALID_SWAP.coin);
+    const { context: next } = await flushSwapCoin(contract, started, VALID_SWAP.coin);
     const state = ledger(next.callContext.currentQueryContext.state);
 
     const index = toSignBidirectionalEventIndex(state.swapEventMap);
@@ -1943,7 +2091,7 @@ describe("swap round-trip", () => {
 const swapRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const started = (await swap(contract, ctx, VALID_SWAP)).context;
-  const next = (await flushCoin(contract, started, VALID_SWAP.coin)).context;
+  const next = (await flushSwapCoin(contract, started, VALID_SWAP.coin)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).swapEventMap,
   );
@@ -2120,7 +2268,7 @@ describe("supply round-trip", () => {
       true,
     );
 
-    const { context: next } = await flushCoin(contract, started, coin);
+    const { context: next } = await flushSupplyCoin(contract, started, coin);
     const state = ledger(next.callContext.currentQueryContext.state);
 
     const index = toSignBidirectionalEventIndex(state.supplyEventMap);
@@ -2202,7 +2350,7 @@ const supplyRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const coin = vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR);
   const started = (await supply(contract, ctx, SUPPLY_AMOUNT, coin)).context;
-  const next = (await flushCoin(contract, started, coin)).context;
+  const next = (await flushSupplyCoin(contract, started, coin)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).supplyEventMap,
   );
@@ -2253,7 +2401,7 @@ describe("redeem round-trip", () => {
       true,
     );
 
-    const { context: next } = await flushCoin(contract, started, coin);
+    const { context: next } = await flushRedeemCoin(contract, started, coin);
     const state = ledger(next.callContext.currentQueryContext.state);
 
     const index = toSignBidirectionalEventIndex(state.redeemEventMap);
@@ -2333,7 +2481,7 @@ const redeemRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const coin = vaultCoin(REDEEM_SHARES, STATA_COLOR);
   const started = (await redeem(contract, ctx, REDEEM_SHARES, coin)).context;
-  const next = (await flushCoin(contract, started, coin)).context;
+  const next = (await flushRedeemCoin(contract, started, coin)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).redeemEventMap,
   );
@@ -2721,6 +2869,57 @@ const replay = (
   }
 };
 
+// The four entry points, tested against EACH OTHER. Every describe above covers
+// one of them in isolation; what this covers is that an entry point leaves the
+// other kinds strictly alone. That is the property which makes splitting flush
+// by kind SAFE rather than merely cheaper: a caller proves one transaction
+// builder instead of four, and pays nothing — in EVM nonces or in lost entries
+// — for the kinds it did not ask for.
+describe("flush entry points drain only their own kind", () => {
+  it("skips an entry of ANOTHER kind, burning no EVM nonce and leaving it queued for its own entry point", async () => {
+    const { contract, ctx } = await deployInitialised();
+    // A swap coin with its own nonce: the queue key binds the coin nonce, so
+    // reusing VALID_SWAP's default would collide with the withdraw's key.
+    const swapCoin = vaultCoin(SWAP_AMOUNT_IN_MAX, VAULT_TOKEN_COLOR, bytes(32, 0x3c));
+    const afterWithdraw = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const afterSwap = (await swap(contract, afterWithdraw, { ...VALID_SWAP, coin: swapCoin }))
+      .context;
+    const withdrawKey = queueKey(SECRET_KEY, VALID_WITHDRAW.coin);
+    const swapKey = queueKey(SECRET_KEY, swapCoin);
+
+    // BOTH keys handed to the WITHDRAW entry point. The swap must be skipped
+    // exactly as a missing key is.
+    const drained = (await flushWithdraws(contract, afterSwap, [withdrawKey, swapKey])).context;
+
+    const state = ledger(drained.callContext.currentQueryContext.state);
+    expect(toSignBidirectionalEventIndex(state.signBidirectionalEventMap).size).toBe(1);
+    // Nothing was recorded on the swap map, and the swap is still QUEUED: a
+    // wrong-kind slot must not consume the entry, or the burn behind it would
+    // be stranded.
+    expect(state.swapEventMap.isEmpty()).toBe(true);
+    expect(state.pendingVaultRequests.member(withdrawKey)).toBe(false);
+    expect(state.pendingVaultRequests.member(swapKey)).toBe(true);
+    // ONE entry drained, so exactly ONE EVM nonce burned. A wrong-kind slot
+    // that consumed one would open the gap this whole design exists to avoid.
+    expect(state.vaultEvmNonce).toBe(1n);
+    // The request-id counter took the full width regardless, as always.
+    expect(state.signetRequestNonce).toBe(BigInt(FLUSH_BATCH));
+
+    // The swap's OWN entry point still drains it, at the very next EVM nonce.
+    const swapped = (await flushSwaps(contract, drained, [swapKey])).context;
+    const after = ledger(swapped.callContext.currentQueryContext.state);
+    const swapRecord = first(
+      toSignBidirectionalEventIndex(after.swapEventMap).values(),
+      "indexed swap request",
+    );
+    expect(swapRecord.txParams.nonce).toBe(1n);
+    expect(after.vaultEvmNonce).toBe(2n);
+    expect(after.pendingVaultRequests.isEmpty()).toBe(true);
+    // Two batches of the full width, for two entries drained.
+    expect(after.signetRequestNonce).toBe(BigInt(2 * FLUSH_BATCH));
+  });
+});
+
 describe("throughput: shared signetRequestNonce serializes vault requests", () => {
   it("CONTROL: a deposit applies against the state it was built on (harness sanity)", async () => {
     const { contract, ctx } = await deployInitialised();
@@ -2807,7 +3006,7 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
     expect(queued.signetRequestNonce).toBe(0n);
 
     // ONE flush, one read of the shared counter, two requests out.
-    const drained = (await flush(contract, afterBob, [aliceKey, bobKey])).context;
+    const drained = (await flushWithdraws(contract, afterBob, [aliceKey, bobKey])).context;
     const state = ledger(drained.callContext.currentQueryContext.state);
     const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
     expect(index.size).toBe(2);

@@ -28,7 +28,7 @@ import {
 import { EXACT_OUTPUT_SINGLE_SELECTOR, SWAP_MPC_ROUTING } from "../evm-swap.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
-import { flushVaultRequests, vaultQueueKey } from "./flush.ts";
+import { FlushKind, flushVaultRequests, vaultQueueKey } from "./flush.ts";
 
 /** Options for {@link startSwap}. */
 export interface StartSwapOptions {
@@ -134,7 +134,7 @@ export async function startSwap(
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  await flushVaultRequests(context, [vaultQueueKey(context, coin.nonce)]);
+  await flushVaultRequests(context, FlushKind.Swaps, [vaultQueueKey(context, coin.nonce)]);
 
   const after = await readVaultLedger(
     context.providers.publicDataProvider,

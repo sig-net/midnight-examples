@@ -28,7 +28,7 @@ import {
 import { STATA_DEPOSIT_SELECTOR, SUPPLY_MPC_ROUTING } from "../evm-stata.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
-import { flushVaultRequests, vaultQueueKey } from "./flush.ts";
+import { FlushKind, flushVaultRequests, vaultQueueKey } from "./flush.ts";
 
 /** Options for {@link startSupply}. */
 export interface StartSupplyOptions {
@@ -113,7 +113,7 @@ export async function startSupply(
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  await flushVaultRequests(context, [vaultQueueKey(context, coin.nonce)]);
+  await flushVaultRequests(context, FlushKind.Supplies, [vaultQueueKey(context, coin.nonce)]);
 
   const after = await readVaultLedger(
     context.providers.publicDataProvider,

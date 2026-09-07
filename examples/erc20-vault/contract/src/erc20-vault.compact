@@ -847,7 +847,7 @@ struct WithdrawRequest {
 // Starts a withdrawal, optimistically: burns the surrendered vault coin up front and
 // QUEUES transfer(destEvmAddress, amount) for `flush` to record and sign with the
 // VAULT's own account. The coin spend IS the auth, and the vault pays the gas, so the
-// fee envelope is contract-fixed (rebuilt verbatim by flushWithdraw).
+// fee envelope is contract-fixed (rebuilt verbatim by recordWithdraw).
 //
 // This circuit reads NO shared ledger cell: it appends under a key only this caller
 // can compute, so two callers' withdrawals proven against the same state both apply.
@@ -1321,11 +1321,17 @@ export circuit refundRedeem(
 
 // ==== Flush: the batched drain of pendingVaultRequests ===============================
 //
-// One circuit, callable by ANYONE (a user, a relayer, the MPC's own tooling),
-// that turns queued vault-signed requests into recorded SignBidirectionalEvents.
-// It is the ONLY place the four vault-signed flows touch signetRequestNonce, it
-// reads that cell exactly ONCE per call, and it hands slot i of the batch the
-// nonce base+i, so every request in a batch gets a distinct, monotonic id.
+// FOUR entry points — flushWithdraws, flushSwaps, flushSupplies, flushRedeems —
+// each callable by ANYONE (a user, a relayer, the MPC's own tooling), that turn
+// queued vault-signed requests into recorded SignBidirectionalEvents. One per
+// KIND, because a circuit contains every branch it might take: a single drain
+// with a four-way dispatch charges every flusher for all four transaction
+// builders in every slot, and that cost is what bounds the batch width. Each
+// entry point drains only its own kind and skips the rest.
+//
+// They are the ONLY place the four vault-signed flows touch signetRequestNonce,
+// each reads that cell exactly ONCE per call, and each hands slot i of the batch
+// the nonce base+i, so every request in a batch gets a distinct, monotonic id.
 //
 // TWO counters, opposite rules, both assigned here:
 //  - signetRequestNonce (the REQUEST-ID nonce) only has to keep otherwise
@@ -1338,17 +1344,20 @@ export circuit refundRedeem(
 //    is consumed inside the live branch, one per entry actually DRAINED, and
 //    a skipped slot advances it by nothing.
 //
-// BOUND: TWO entries per call, named by key. Compact has no unbounded
-// iteration and no way to enumerate a ledger Map, so a drain must be an unrolled
-// loop over caller-supplied keys. A slot whose key is not queued is skipped, so a
-// batch of one is a valid call; a key repeated inside one batch is processed once
-// (the first slot removes it, the rest see it gone).
+// BOUND: a FIXED number of entries per call, named by key. Compact has no
+// unbounded iteration and no way to enumerate a ledger Map, so a drain must be an
+// unrolled loop over caller-supplied keys. The width is declared exactly once,
+// on the four adjacent wrappers at the bottom of this file. A slot whose key is
+// not queued, or whose entry belongs to another kind, is skipped — so a batch of
+// one is a valid call; a key repeated inside one batch is processed once (the
+// first slot removes it, the rest see it gone).
 //
-// signetRequestNonce advances by 2 whether or not every slot was live. That is
-// deliberate: it makes the nonce a pure function of (base, slot index), so no two
-// requests can ever be handed the same nonce. The gaps it leaves cost nothing:
-// the nonce exists to keep otherwise identical requests hashing apart, not to
-// count anything. vaultEvmNonce does the opposite, for the reason above.
+// signetRequestNonce advances by the full width whether or not every slot was
+// live. That is deliberate: it makes the nonce a pure function of (base, slot
+// index), so no two requests can ever be handed the same nonce. The gaps it
+// leaves cost nothing: the nonce exists to keep otherwise identical requests
+// hashing apart, not to count anything. vaultEvmNonce does the opposite, for the
+// reason above.
 //
 // KNOWN LIMITS, stated plainly:
 //  - Concurrent flushes still conflict with each other and with approveStata /
@@ -1356,7 +1365,9 @@ export circuit refundRedeem(
 //    the whole point; what had to stop serialising was users' start* calls.
 //    approveStata/approveRouter had to move onto vaultEvmNonce too: they sign
 //    from the SAME vault account, so a caller-chosen nonce there would collide
-//    with (or leave a gap ahead of) the values flush hands out.
+//    with (or leave a gap ahead of) the values the drains hand out. The four
+//    entry points also conflict with EACH OTHER, since all four touch both
+//    counters; splitting by kind buys proof size, not concurrency.
 //  - The flusher chooses the batch and its order, so it chooses the order request
 //    ids are minted in. It cannot forge, alter, drop or steal an entry: every
 //    field comes from the queue and the settle view keeps the requester's own
@@ -1364,12 +1375,12 @@ export circuit refundRedeem(
 //  - A queued entry is inert until someone flushes it, and the requester's coin is
 //    already burned by then, so an entry nobody flushes is refundable by nobody.
 //    A client should flush its own request rather than trust a relayer to.
-//  - The circuit carries all four kinds, so every flusher pays for all four in
-//    proof size even when the batch is homogeneous.
+//  - A batch is homogeneous by construction: a caller with a mixed set of keys
+//    calls more than one entry point, and pays for each separately.
 
 // Records a queued withdraw as a signBidirectionalEventMap event under the
 // batch-assigned nonce, pins the settle view and notifies the MPC.
-circuit flushWithdraw(
+circuit recordWithdraw(
   key: Bytes<32>,
   pending: PendingVaultRequest,
   requestNonce: Uint<64>,
@@ -1434,8 +1445,8 @@ circuit flushWithdraw(
   );
 }
 
-// Records a queued swap on the pinned router. Same shape as flushWithdraw.
-circuit flushSwap(
+// Records a queued swap on the pinned router. Same shape as recordWithdraw.
+circuit recordSwap(
   key: Bytes<32>,
   pending: PendingVaultRequest,
   requestNonce: Uint<64>,
@@ -1505,7 +1516,7 @@ circuit flushSwap(
 }
 
 // Records a queued supply: stataToken.deposit(amount, vault).
-circuit flushSupply(
+circuit recordSupply(
   key: Bytes<32>,
   pending: PendingVaultRequest,
   requestNonce: Uint<64>,
@@ -1556,7 +1567,7 @@ circuit flushSupply(
 }
 
 // Records a queued redeem: stataToken.redeem(shares, vault, vault).
-circuit flushRedeem(
+circuit recordRedeem(
   key: Bytes<32>,
   pending: PendingVaultRequest,
   requestNonce: Uint<64>,
@@ -1607,40 +1618,44 @@ circuit flushRedeem(
   );
 }
 
-// Drains up to 2 queued vault-signed requests, in the order given. The batch size
-// is a literal because Compact has no top-level constants; raising it means
-// widening the Vector, the range and the increment together (all three below).
+// ==== The four per-kind drains =====================================================
+//
+// One drain per request kind, NOT one drain with a four-way dispatch. A circuit
+// physically contains every branch it might take, so a single dispatching drain
+// makes every flusher prove all four transaction builders in every slot —
+// roughly 1,580 instructions per slot against 347 for withdraw alone. Splitting
+// by kind means a caller proves only the arm it actually uses.
+//
+// The four are otherwise identical, and identical to each other on purpose:
+// same key handling, same two counter rules, same skip behaviour. Compact
+// cannot abstract over which record* circuit a drain calls, so the shape is
+// written out four times rather than hidden.
+//
+// An entry of ANOTHER kind is skipped exactly as a missing key is, consuming no
+// EVM nonce and staying queued for the entry point that does own it.
+//
 // Permissionless: nothing here reads a secret, and every field of every request
 // comes from the queue the requester filled in.
-export circuit flush(keys: Vector<2, Bytes<32>>): [] {
+circuit drainWithdraws<#N>(keys: Vector<N, Bytes<32>>): [] {
   assert(initialised >= 1, "Not initialised");
 
   // The ONE read of the shared REQUEST-ID counter. Slot i gets base+i, so the
   // ids in a batch are distinct without reading the cell again per entry.
   const base = signetRequestNonce as Uint<64>;
 
-  for (const slot of 0..2) {
+  for (const slot of 0..N) {
     const key = disclose(keys[slot]);
     if (pendingVaultRequests.member(key)) {
       const pending = pendingVaultRequests.lookup(key);
-      const requestNonce = (base + slot) as Uint<64>;
-      // The EVM nonce is read and consumed INSIDE the live branch, one per
-      // entry actually drained, so the values a batch hands out are
-      // contiguous (see vaultEvmNonce). A skipped slot consumes nothing:
-      // a gap here would stall every later vault transaction behind it.
-      const evmNonce = vaultEvmNonce as Uint<64>;
-      vaultEvmNonce.increment(1);
       if (pending.kind == PendingRequestKind.withdraw) {
-        flushWithdraw(key, pending, requestNonce, evmNonce);
-      }
-      if (pending.kind == PendingRequestKind.swap) {
-        flushSwap(key, pending, requestNonce, evmNonce);
-      }
-      if (pending.kind == PendingRequestKind.supply) {
-        flushSupply(key, pending, requestNonce, evmNonce);
-      }
-      if (pending.kind == PendingRequestKind.redeem) {
-        flushRedeem(key, pending, requestNonce, evmNonce);
+        // The EVM nonce is read and consumed INSIDE the live branch, one per
+        // entry actually drained, so the values a batch hands out are
+        // contiguous (see vaultEvmNonce). A slot that is empty OR of another
+        // kind consumes nothing: a gap here would stall every later vault
+        // transaction behind it.
+        const evmNonce = vaultEvmNonce as Uint<64>;
+        vaultEvmNonce.increment(1);
+        recordWithdraw(key, pending, (base + slot) as Uint<64>, evmNonce);
       }
     }
   }
@@ -1649,5 +1664,82 @@ export circuit flush(keys: Vector<2, Bytes<32>>): [] {
   // otherwise identical requests hashing apart, so advancing by the batch
   // WIDTH makes the nonce a pure function of (base, slot) and the gaps a
   // partly empty batch leaves are harmless.
-  signetRequestNonce.increment(2);
+  signetRequestNonce.increment(N);
 }
+
+// The swap drain. Same shape and same two counter rules as drainWithdraws.
+circuit drainSwaps<#N>(keys: Vector<N, Bytes<32>>): [] {
+  assert(initialised >= 1, "Not initialised");
+  const base = signetRequestNonce as Uint<64>;
+  for (const slot of 0..N) {
+    const key = disclose(keys[slot]);
+    if (pendingVaultRequests.member(key)) {
+      const pending = pendingVaultRequests.lookup(key);
+      if (pending.kind == PendingRequestKind.swap) {
+        const evmNonce = vaultEvmNonce as Uint<64>;
+        vaultEvmNonce.increment(1);
+        recordSwap(key, pending, (base + slot) as Uint<64>, evmNonce);
+      }
+    }
+  }
+  signetRequestNonce.increment(N);
+}
+
+// The supply drain. Same shape and same two counter rules as drainWithdraws.
+circuit drainSupplies<#N>(keys: Vector<N, Bytes<32>>): [] {
+  assert(initialised >= 1, "Not initialised");
+  const base = signetRequestNonce as Uint<64>;
+  for (const slot of 0..N) {
+    const key = disclose(keys[slot]);
+    if (pendingVaultRequests.member(key)) {
+      const pending = pendingVaultRequests.lookup(key);
+      if (pending.kind == PendingRequestKind.supply) {
+        const evmNonce = vaultEvmNonce as Uint<64>;
+        vaultEvmNonce.increment(1);
+        recordSupply(key, pending, (base + slot) as Uint<64>, evmNonce);
+      }
+    }
+  }
+  signetRequestNonce.increment(N);
+}
+
+// The redeem drain. Same shape and same two counter rules as drainWithdraws.
+circuit drainRedeems<#N>(keys: Vector<N, Bytes<32>>): [] {
+  assert(initialised >= 1, "Not initialised");
+  const base = signetRequestNonce as Uint<64>;
+  for (const slot of 0..N) {
+    const key = disclose(keys[slot]);
+    if (pendingVaultRequests.member(key)) {
+      const pending = pendingVaultRequests.lookup(key);
+      if (pending.kind == PendingRequestKind.redeem) {
+        const evmNonce = vaultEvmNonce as Uint<64>;
+        vaultEvmNonce.increment(1);
+        recordRedeem(key, pending, (base + slot) as Uint<64>, evmNonce);
+      }
+    }
+  }
+  signetRequestNonce.increment(N);
+}
+
+// ==== THE BATCH WIDTH ================================================================
+//
+// The four exported entry points, kept ADJACENT because the 5 in them is the
+// SINGLE PLACE the flush batch width is defined. All four carry the same width
+// and MUST be changed together: a caller pads every batch to exactly this many
+// keys, and the flow layer holds one mirror of the number for all four.
+//
+// Changing it is NOT a hot config change. The width is baked into each circuit
+// and therefore into its proving key, so a new width needs a RECOMPILE
+// (`yarn compile:zk`) and a REDEPLOY; existing deployments keep the width they
+// were compiled with. Cost grows per slot and differs per kind (swap is the
+// dearest by some margin), so raise it against measured proving cost, not by
+// feel.
+//
+// A slot whose key is not queued, or whose entry is of another kind, is skipped
+// — so a batch of one is a valid call (pad the rest with a key nothing is queued
+// under), and a key repeated inside one batch is processed once, because the
+// first slot removes it and the rest see it gone.
+export circuit flushWithdraws(keys: Vector<5, Bytes<32>>): [] { drainWithdraws<5>(keys); }
+export circuit flushSwaps(keys: Vector<5, Bytes<32>>): [] { drainSwaps<5>(keys); }
+export circuit flushSupplies(keys: Vector<5, Bytes<32>>): [] { drainSupplies<5>(keys); }
+export circuit flushRedeems(keys: Vector<5, Bytes<32>>): [] { drainRedeems<5>(keys); }
