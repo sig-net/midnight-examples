@@ -11,10 +11,11 @@ import { join } from "node:path";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
 import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
-import type {
-  AccountKeys,
-  MidnightNodeConfig,
-  WalletFacade,
+import {
+  type AccountKeys,
+  type MidnightNodeConfig,
+  signetContractManagedPath,
+  type WalletFacade,
 } from "@sig-net/midnight-contract-deploy";
 import type {
   VaultCircuitId,
@@ -26,7 +27,7 @@ import {
   type ProofServerObserver,
 } from "@sig-net/midnight-examples-lib";
 
-import { SIGNET_SIGNER_MANAGED_PATH, VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
+import { VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
 
 /**
  * Build the midnight-js provider set for the vault. Proving reads the vault's
@@ -46,8 +47,8 @@ export function buildVaultProviders(
   config: MidnightNodeConfig,
   proofObserver?: ProofServerObserver,
 ): VaultProviders {
-  // Fail here, naming the fix, rather than as an ENOENT inside the proof
-  // provider on the first circuit call.
+  // Without this check the missing keys surface as an ENOENT inside the proof
+  // provider on the first circuit call, with no hint at the fix.
   if (!existsSync(join(VAULT_MANAGED_PATH, "keys"))) {
     throw new Error(
       `no prover keys under ${VAULT_MANAGED_PATH}: run \`yarn compile:erc20-vault:zk\` first`,
@@ -61,7 +62,7 @@ export function buildVaultProviders(
 
   // The callee (signet contract) circuits, resolved for the cross-contract
   // proof provider so deposit's whole call tree proves.
-  const signetZkConfigProvider = new NodeZkConfigProvider<string>(SIGNET_SIGNER_MANAGED_PATH);
+  const signetZkConfigProvider = new NodeZkConfigProvider<string>(signetContractManagedPath);
 
   // The wallet, adapted to midnight-js's balancer + submitter interfaces
   // (the facade itself does not implement WalletProvider/MidnightProvider).

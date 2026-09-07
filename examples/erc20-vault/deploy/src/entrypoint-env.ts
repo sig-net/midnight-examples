@@ -6,6 +6,7 @@
 import {
   envOrUndefined,
   getMidnightNodeConfig,
+  MidnightNetwork,
   type NetworkId,
 } from "@sig-net/midnight-contract-deploy";
 import { buildBaseEnv, loadRepoDotEnv } from "@sig-net/midnight-examples-lib";
@@ -56,9 +57,9 @@ export function assertEnvFileMatchesNetwork(
   processEnv: Record<string, string | undefined>,
   networkId: NetworkId,
 ): void {
-  // Read the file's own NETWORK_ID rather than resolving a whole config from
-  // it: the network name is the only thing being compared.
-  const fileNetworkId = envOrUndefined(fileEnv, "NETWORK_ID") ?? "undeployed";
+  // Only the network name is compared, so the file's own NETWORK_ID is all
+  // that is read from it.
+  const fileNetworkId = envOrUndefined(fileEnv, "NETWORK_ID") ?? MidnightNetwork.Undeployed;
   if (fileNetworkId === networkId) return;
 
   const stale = NETWORK_SCOPED_KEYS.filter(

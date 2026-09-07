@@ -3,10 +3,10 @@
 // contract package's real compiled output (skipped without `compile:zk` keys,
 // visibly, via the describe title).
 
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { computeSha256Hex } from "@midnight-ntwrk/midnight-js/utils";
 import { expectedVk } from "@sig-net/midnight-examples-erc20-vault-contract";
 import type { DeferredCircuit } from "@sig-net/midnight-examples-lib";
 import { describe, expect, it } from "vitest";
@@ -70,7 +70,7 @@ describe.skipIf(!HAS_VERIFIER_KEYS)(
         expect(verifierKey).toEqual(
           new Uint8Array(readFileSync(join(KEYS_DIR, `${circuitId}.verifier`))),
         );
-        expect(createHash("sha256").update(verifierKey).digest("hex")).toBe(expectedVk[circuitId]);
+        expect(computeSha256Hex(verifierKey)).toBe(expectedVk[circuitId]);
       }
     });
 

@@ -1,7 +1,6 @@
 // Vault ledger reads: raw contract state from a public data provider, decoded
-// with the generated `ledger()`. Takes the provider and address rather than any
-// session or context object, so a browser client, the deploy tooling and a
-// read-only script all drive it the same way.
+// with the generated `ledger()`. Takes the provider and address, so a browser
+// client, the deploy tooling and a read-only script all drive it the same way.
 
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import { bytesToHex, hexToBytes, toSignBidirectionalEventIndex } from "@sig-net/midnight";

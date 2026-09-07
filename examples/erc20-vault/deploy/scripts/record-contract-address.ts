@@ -3,9 +3,8 @@
 // <hex>`, run by tsx). The deploy workflow calls it on a checkout of dev and
 // opens a PR with the one-line diff, so the address reaches npm consumers only
 // after a human reviews it. The rewrite is recordContractAddress in
-// src/record-contract-address.ts, which throws rather than guess, so this
-// shell writes the file only after a successful rewrite and a bad run never
-// touches it.
+// src/record-contract-address.ts, so this shell writes the file only after a
+// successful rewrite and a bad run never touches it.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";

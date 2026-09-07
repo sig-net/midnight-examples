@@ -57,21 +57,10 @@ const operationIdToString = (id: string | Uint8Array): string =>
   typeof id === "string" ? id : new TextDecoder().decode(id);
 
 /**
- * Phase marker a split-deploy entrypoint prints, on a line of its own, the
- * instant its base deploy transaction is submitted. Everything after that
- * line installs circuits INTO the deployed contract, so a log showing this
- * line and then a failure describes a LIVE contract: rerunning the entrypoint
- * from the top deploys a second one, and the recovery is the example's
- * resume entrypoint against the address printed right after the marker.
- */
-export const SPLIT_DEPLOY_BASE_SUBMITTED_MARKER = "[split-deploy] base deploy tx submitted";
-
-/**
  * Thrown by a split-deploy flow that fails AFTER its base deploy transaction
  * was submitted, so the caller knows a contract is live and a rerun from the
  * top would deploy a second one: recovery is the example's resume entrypoint
- * against the live address, never a retry of the flow. The in-process
- * counterpart of {@link SPLIT_DEPLOY_BASE_SUBMITTED_MARKER}.
+ * against the live address, never a retry of the flow.
  */
 export class SplitDeployAfterBaseSubmitError extends Error {}
 

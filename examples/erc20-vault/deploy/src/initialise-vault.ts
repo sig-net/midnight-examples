@@ -2,8 +2,8 @@
 // configuration into the contract: the vault's own EVM address, the EVM chain
 // it operates on, the contracts it trades and lends through, and the MPC
 // RESPONSE key. The EVM address and the response key both derive from the
-// vault's own contract address, so neither can be a constructor argument;
-// the circuit gates the call on the deployer identity sealed at deploy time,
+// vault's own contract address, so neither can be a constructor argument.
+// The circuit gates the call on the deployer identity sealed at deploy time,
 // which is what stops anyone else pointing a fresh vault at their own address.
 
 import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
@@ -117,8 +117,8 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
     );
   }
 
-  // Parse the targets here rather than at the circuit call: a malformed
-  // override must fail before anything is submitted, not mid-initialise.
+  // Parse the targets up front: a malformed override must fail before
+  // anything is submitted, not mid-initialise.
   const targets = resolveEvmTargets(env);
   evmAddressBytes(targets.routerAddress);
   evmAddressBytes(targets.stataUnderlyingAddress);
@@ -132,7 +132,7 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
  * The vault's EVM address and MPC response key are DERIVED from the MPC's
  * secp256k1 public key plus that contract address, so a fresh deploy needs no
  * new configuration. Values already pinned in the environment are verified
- * against the derivation rather than trusted, since a stale pin would seal an
+ * against the derivation, since a stale pin would seal an
  * account the MPC never signs from.
  *
  * @param env - The environment providing `MPC_SECP256K1_PUBKEY`, `EVM_CHAIN_ID` and the
@@ -267,8 +267,8 @@ export async function initialiseVaultContract(
  * the caller and the commitment sealed at deploy agree by construction.
  *
  * @param env - The environment: the deploy SDK's Midnight node configuration, `DEPLOYER_SEED`,
- *   `VAULT_DEPLOYER_SECRET_KEY`, and everything {@link resolveInitialiseConfig} reads;
- *   defaults to `process.env`.
+ *   `VAULT_DEPLOYER_SECRET_KEY`, and everything {@link resolveInitialiseConfig} reads.
+ *   Defaults to `process.env`.
  * @param contractAddress - The vault to initialise. Defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
  * @returns Whether this call initialised the vault or found it already initialised.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor

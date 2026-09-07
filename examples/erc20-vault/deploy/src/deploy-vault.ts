@@ -8,10 +8,11 @@
 // contract's own address, so the deployer-gated initialise circuit pins it
 // right after deploy (see {@link file://./initialise-vault.ts}).
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { computeSha256Hex } from "@midnight-ntwrk/midnight-js/utils";
 import {
   type IndexerPublicDataProvider,
   indexerPublicDataProvider,
@@ -43,7 +44,6 @@ import {
   buildMaintenanceInsertTransaction,
   type DeferredCircuit,
   installedCircuitIds,
-  SPLIT_DEPLOY_BASE_SUBMITTED_MARKER,
   SplitDeployAfterBaseSubmitError,
 } from "@sig-net/midnight-examples-lib";
 
@@ -331,10 +331,9 @@ export async function deployVault(
       );
     },
   );
-  // First line printed once submission returns: a driver watching this
-  // entrypoint's output stops retrying here, and the maintenance adds below
-  // are what it must not restart from the top.
-  console.log(SPLIT_DEPLOY_BASE_SUBMITTED_MARKER);
+  // From here the contract is live: a failure below is reported as
+  // SplitDeployAfterBaseSubmitError, and the address line is what a resume
+  // takes.
   console.log(`submitted base deploy tx ${txId}`);
   console.log(`deployed erc20-vault base at ${contractAddress}`);
 
@@ -395,7 +394,7 @@ export function readDeferredCircuits(circuitIds: readonly string[]): DeferredCir
         },
       );
     }
-    const digest = createHash("sha256").update(verifierKey).digest("hex");
+    const digest = computeSha256Hex(verifierKey);
     const expected = expectedVk[circuitId];
     if (digest !== expected) {
       throw new Error(
@@ -437,7 +436,7 @@ export async function resumeVaultDeploy(
   if (!vaultContractAddress) {
     throw new Error(
       "MIDNIGHT_VAULT_CONTRACT_ADDRESS is required to resume a deploy: the interrupted run printed " +
-        `it after "${SPLIT_DEPLOY_BASE_SUBMITTED_MARKER}"`,
+        'it as "deployed erc20-vault base at <address>"',
     );
   }
   if (!envOrUndefined(env, "MAINTENANCE_SIGNING_KEY")) {

@@ -4,6 +4,7 @@
 // signet address permanently, so a stagenet deploy that silently picked those
 // up would produce a contract that can never work.
 
+import { MidnightNetwork } from "@sig-net/midnight";
 import { describe, expect, it } from "vitest";
 
 import { assertEnvFileMatchesNetwork } from "../src/entrypoint-env.ts";
@@ -22,7 +23,7 @@ interface GuardCase {
   readonly name: string;
   readonly fileEnv: Record<string, string | undefined>;
   readonly processEnv: Record<string, string | undefined>;
-  readonly networkId: "undeployed" | "stagenet";
+  readonly networkId: MidnightNetwork;
 }
 
 const ACCEPTED: readonly GuardCase[] = [
@@ -30,7 +31,7 @@ const ACCEPTED: readonly GuardCase[] = [
     name: "a local run against the local values that produced it",
     fileEnv: LOCAL_ENV_FILE,
     processEnv: {},
-    networkId: "undeployed",
+    networkId: MidnightNetwork.Undeployed,
   },
   {
     name: "a remote run overriding both sealed inputs, whatever else the file holds",
@@ -40,7 +41,7 @@ const ACCEPTED: readonly GuardCase[] = [
       MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "cc".repeat(32),
       MPC_SECP256K1_PUBKEY: "0x04cd",
     },
-    networkId: "stagenet",
+    networkId: MidnightNetwork.Stagenet,
   },
   {
     name: "a remote run inheriting only values no entrypoint seals",
@@ -51,19 +52,19 @@ const ACCEPTED: readonly GuardCase[] = [
       MPC_RESPONSE_KEY: `04${"cd".repeat(64)}`,
     },
     processEnv: { NETWORK_ID: "stagenet" },
-    networkId: "stagenet",
+    networkId: MidnightNetwork.Stagenet,
   },
   {
     name: "a remote run whose file carries only network-agnostic values",
     fileEnv: { ROOT_SEED: LOCAL_ENV_FILE.ROOT_SEED, FUND_CHILD_NIGHT: "1000" },
     processEnv: { NETWORK_ID: "stagenet" },
-    networkId: "stagenet",
+    networkId: MidnightNetwork.Stagenet,
   },
   {
     name: "a blank value in the file, which counts as unset",
     fileEnv: { MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "   " },
     processEnv: { NETWORK_ID: "stagenet" },
-    networkId: "stagenet",
+    networkId: MidnightNetwork.Stagenet,
   },
 ];
 
@@ -77,21 +78,21 @@ const REFUSED: readonly RefusedCase[] = [
     name: "a remote run inheriting the local run's network-scoped values",
     fileEnv: LOCAL_ENV_FILE,
     processEnv: { NETWORK_ID: "stagenet" },
-    networkId: "stagenet",
+    networkId: MidnightNetwork.Stagenet,
     names: ["MIDNIGHT_SIGNET_CONTRACT_ADDRESS", "MPC_SECP256K1_PUBKEY"],
   },
   {
     name: "a local run against a file pinned to a remote network",
     fileEnv: { ...LOCAL_ENV_FILE, NETWORK_ID: "stagenet" },
     processEnv: {},
-    networkId: "undeployed",
+    networkId: MidnightNetwork.Undeployed,
     names: ["MIDNIGHT_SIGNET_CONTRACT_ADDRESS"],
   },
   {
     name: "a remote run overriding only some of what it inherits",
     fileEnv: LOCAL_ENV_FILE,
     processEnv: { NETWORK_ID: "stagenet", MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "cc".repeat(32) },
-    networkId: "stagenet",
+    networkId: MidnightNetwork.Stagenet,
     names: ["MPC_SECP256K1_PUBKEY"],
   },
 ];
@@ -107,18 +108,7 @@ describe("assertEnvFileMatchesNetwork", () => {
     const check = (): void => {
       assertEnvFileMatchesNetwork(fileEnv, processEnv, networkId);
     };
-    expect(check).toThrow(new RegExp(names.join("|")));
     // The error names every stale variable, so one run fixes them all.
-    expect(names.every((name) => String(getError(check)).includes(name))).toBe(true);
+    for (const name of names) expect(check).toThrow(name);
   });
 });
-
-// The error a throwing call produced, for assertions about its whole message.
-function getError(call: () => void): unknown {
-  try {
-    call();
-  } catch (error) {
-    return error;
-  }
-  throw new Error("expected the call to throw");
-}
