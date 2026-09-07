@@ -132,9 +132,10 @@ sealed ledger deployer: Bytes<32>;
 // both apply against the same proving state. The counter stays
 // contract-controlled and monotonic per caller, so a caller still cannot replay
 // their own settled request. Only deposit binds the caller into the request id
-// (path = caller), so only deposit can safely key uniqueness on the caller; the
-// vault-signed flows (approve*, withdraw, swap, supply, redeem) sign with the
-// constant path "vault" and keep the global signetRequestNonce for now.
+// (path = caller), so only deposit can safely key uniqueness on the caller. The
+// vault-signed flows (approve*, withdraw, swap, supply, redeem) all sign with
+// the constant path "vault" from ONE account, so they take their nonces from
+// the EVM nonce allocator below instead.
 //
 // Declared HERE (immediately before depositEventMap), not appended at the end,
 // on purpose. The compiler chunks this 28-field state as [chunk 0: the first 13
