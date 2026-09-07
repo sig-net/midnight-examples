@@ -252,7 +252,8 @@ export async function compileContractZk(
  * @param what - Step label for the error message.
  * @param action - The fee-paying call.
  * @returns Whatever `action` resolves to.
- * @throws {Error} Node error 1010 / "Custom error: 170" (InvalidDustSpendProof)
+ * @throws {Error} The node's `Custom error: 170` rejection (`InvalidDustSpendProof`,
+ *   which the node reports as `1010: Invalid Transaction: Custom error: 170`)
  *   wrapped with the stack-reset hint, as the raw message is opaque. Any
  *   other error passes through unchanged.
  */
@@ -264,11 +265,7 @@ export async function explainDustSpendRejection<T>(
     return await action();
   } catch (error) {
     const message = String(error);
-    if (
-      message.includes("Custom error: 170") ||
-      message.includes("InvalidDustSpendProof") ||
-      /\b1010\b/.test(message)
-    ) {
+    if (message.includes("Custom error: 170") || message.includes("InvalidDustSpendProof")) {
       throw new Error(
         `${what}: node rejected the dust spend (error 170 = InvalidDustSpendProof). ` +
           "The local chain has diverged from the wallet's dust state: reset the stack " +
