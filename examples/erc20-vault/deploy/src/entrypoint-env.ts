@@ -10,18 +10,14 @@ import {
 } from "@sig-net/midnight-contract-deploy";
 import { buildBaseEnv, loadRepoDotEnv } from "@sig-net/midnight-examples-lib";
 
-// Values that only mean anything on the network that produced them. The e2e
-// setup pipeline appends the first two to the repo-root `.env` on every local
-// run and prints the rest for the operator to paste in, so on a working local
-// stack the file legitimately holds local-chain values for all of them.
-const NETWORK_SCOPED_KEYS = [
-  "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
-  "MPC_ROOT_KEY",
-  "MPC_SECP256K1_PUBKEY",
-  "MPC_RESPONSE_KEY",
-  "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
-  "EVM_VAULT_ADDRESS",
-] as const;
+// The inputs an operator supplies per network that a deploy entrypoint seals
+// into the contract: the signet address at deploy, the MPC public key at
+// initialise. The e2e setup pipeline writes both to the repo-root `.env` on
+// every local run, so on a working local stack the file legitimately holds
+// local-chain values for them. Values a deploy MINTS (the vault address and
+// the two derived from it) are not here: nobody exports those for a network,
+// and `assertNoVaultBoundPresets` refuses them before a fresh deploy.
+const NETWORK_SCOPED_KEYS = ["MIDNIGHT_SIGNET_CONTRACT_ADDRESS", "MPC_SECP256K1_PUBKEY"] as const;
 
 /**
  * The environment for a deploy entrypoint: the repo-root `.env` overlaid with

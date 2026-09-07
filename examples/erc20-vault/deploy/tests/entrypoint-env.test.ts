@@ -33,15 +33,24 @@ const ACCEPTED: readonly GuardCase[] = [
     networkId: "undeployed",
   },
   {
-    name: "a remote run overriding every network-scoped value it inherits",
+    name: "a remote run overriding both sealed inputs, whatever else the file holds",
     fileEnv: LOCAL_ENV_FILE,
     processEnv: {
       NETWORK_ID: "stagenet",
-      MPC_ROOT_KEY: "999",
       MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "cc".repeat(32),
-      MIDNIGHT_VAULT_CONTRACT_ADDRESS: "dd".repeat(32),
       MPC_SECP256K1_PUBKEY: "0x04cd",
     },
+    networkId: "stagenet",
+  },
+  {
+    name: "a remote run inheriting only values no entrypoint seals",
+    fileEnv: {
+      MPC_ROOT_KEY: LOCAL_ENV_FILE.MPC_ROOT_KEY,
+      MIDNIGHT_VAULT_CONTRACT_ADDRESS: LOCAL_ENV_FILE.MIDNIGHT_VAULT_CONTRACT_ADDRESS,
+      EVM_VAULT_ADDRESS: `0x${"ab".repeat(20)}`,
+      MPC_RESPONSE_KEY: `04${"cd".repeat(64)}`,
+    },
+    processEnv: { NETWORK_ID: "stagenet" },
     networkId: "stagenet",
   },
   {
@@ -69,12 +78,7 @@ const REFUSED: readonly RefusedCase[] = [
     fileEnv: LOCAL_ENV_FILE,
     processEnv: { NETWORK_ID: "stagenet" },
     networkId: "stagenet",
-    names: [
-      "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
-      "MPC_ROOT_KEY",
-      "MPC_SECP256K1_PUBKEY",
-      "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
-    ],
+    names: ["MIDNIGHT_SIGNET_CONTRACT_ADDRESS", "MPC_SECP256K1_PUBKEY"],
   },
   {
     name: "a local run against a file pinned to a remote network",
@@ -88,7 +92,7 @@ const REFUSED: readonly RefusedCase[] = [
     fileEnv: LOCAL_ENV_FILE,
     processEnv: { NETWORK_ID: "stagenet", MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "cc".repeat(32) },
     networkId: "stagenet",
-    names: ["MPC_ROOT_KEY"],
+    names: ["MPC_SECP256K1_PUBKEY"],
   },
 ];
 
