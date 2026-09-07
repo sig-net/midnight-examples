@@ -49,10 +49,12 @@ import {
 
 import { VAULT_MANAGED_PATH, vaultCompiledContract } from "./vault-contract-binding.ts";
 
-// The full 17-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
+// The full 25-circuit deploy overflows a block. Even the core circuits overflow it (the
 // post-burn keys are large), so the base registers just ONE small circuit and every other
 // circuit is added by a maintenance update right after (each a tiny, fitting tx).
-const BASE_DEPLOY_CIRCUITS: readonly string[] = ["approveRouter"];
+// These ids are matched against the COMPILED circuit names at deploy time and nothing
+// typechecks them, so renaming a circuit means editing this list in the same change.
+const BASE_DEPLOY_CIRCUITS: readonly string[] = ["requestApproveRouter"];
 
 const MINUTE_MS = 60_000;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
