@@ -127,7 +127,9 @@ services:
       MIDNIGHT_NETWORK_ID: '${MIDNIGHT_NETWORK_ID:-undeployed}'
       MIDNIGHT_INDEXER_URL: '${MIDNIGHT_INDEXER_URL:-http://indexer:8088/api/v3/graphql}'
       MIDNIGHT_INDEXER_WS_URL: '${MIDNIGHT_INDEXER_WS_URL:-ws://indexer:8088/api/v3/graphql/ws}'
-      MIDNIGHT_NODE_URL: '${MIDNIGHT_NODE_URL:-http://node:9944}'
+      # Container-side twin of the host's MIDNIGHT_NODE_URL override, which
+      # points at 127.0.0.1 and would not resolve in here.
+      MIDNIGHT_NODE_URL: '${FAKENET_MIDNIGHT_NODE_URL:-http://node:9944}'
       MIDNIGHT_PROOF_SERVER_URL: '${MIDNIGHT_PROOF_SERVER_URL:-http://proof-server:6300}'
       # The responder's fee-paying wallet: the mpc_responder role seed the
       # test-harness setup generates and funds from root (falls back to the

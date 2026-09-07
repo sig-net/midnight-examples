@@ -10,9 +10,9 @@
 
 import "./provided-context.ts";
 
+import { buildBaseEnv } from "@sig-net/midnight-examples-lib";
 import type { TestProject } from "vitest/node";
 
-import { buildBaseEnv } from "./e2e-env.ts";
 import { testHeader } from "./output.ts";
 import { waitForGo } from "./waitForGo.ts";
 

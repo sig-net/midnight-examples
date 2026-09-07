@@ -14,6 +14,11 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
+import {
+  readVaultLedger,
+  STATA_USDC,
+  VAULT_PATH_BYTES,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import {
   REDEEM_MPC_ROUTING,
@@ -21,11 +26,8 @@ import {
   STATA_MAX_FEE_PER_GAS,
   STATA_MAX_PRIORITY_FEE_PER_GAS,
   STATA_REDEEM_SELECTOR,
-  STATA_USDC,
 } from "../evm-stata.ts";
-import { VAULT_PATH_BYTES } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
 
 /** Options for {@link startRedeem}. */

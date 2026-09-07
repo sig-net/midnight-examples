@@ -1,8 +1,8 @@
 // The full swap journey as one arrange-stage helper: approve, quote, startSwap, MPC
 // signature, broadcast, completeSwap.
-import { VAULT_SWAP_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import { getTransactionNonce } from "@midnight-examples/test-harness";
 import type { RequestIdHex } from "@sig-net/midnight";
+import { VAULT_SWAP_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
 import { quoteExactOutputSingle } from "../evm-swap.ts";
 import type { VaultSession } from "../vault-session.ts";

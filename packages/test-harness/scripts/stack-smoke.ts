@@ -2,16 +2,16 @@
 // wait until every endpoint answers, then tear the stack down again.
 // Verifies docker-compose.yaml and the harness preflight agree on the
 // stack's shape without running any protocol traffic. Run via
-// `yarn workspace @midnight-examples/test-harness smoke:stack`.
+// `yarn workspace @sig-net/midnight-examples-test-harness smoke:stack`.
 //
 // NOTE: `docker compose down` DESTROYS the containers — and with them the
 // dev chain's state (deployed contracts, funded accounts). This script is
 // for verifying the stack machinery, not for managing a stack you are
 // testing against.
 
-import { getMidnightNodeConfig } from "@midnight-examples/lib";
+import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
+import { buildBaseEnv } from "@sig-net/midnight-examples-lib";
 
-import { buildBaseEnv } from "../src/e2e-env.ts";
 import { getEvmChainId } from "../src/evm.ts";
 import { runCommand } from "../src/exec.ts";
 import { assertHttpReachable } from "../src/preflight.ts";

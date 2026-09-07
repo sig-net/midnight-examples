@@ -14,6 +14,11 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
+import {
+  evmAddressBytes,
+  readVaultLedger,
+  VAULT_PATH_BYTES,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import {
   EXACT_OUTPUT_SINGLE_SELECTOR,
@@ -22,10 +27,7 @@ import {
   SWAP_MAX_PRIORITY_FEE_PER_GAS,
   SWAP_MPC_ROUTING,
 } from "../evm-swap.ts";
-import { evmAddressBytes } from "../evm-transfer.ts";
-import { VAULT_PATH_BYTES } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
 
 /** Options for {@link startSwap}. */

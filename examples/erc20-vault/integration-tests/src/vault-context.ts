@@ -3,22 +3,11 @@
 // flow file (inside a synced wallet session — see
 // {@link file://./vault-session.ts createVaultSession}) and handed to the
 // flow functions. The pieces come from where they belong: generic wallet
-// construction from the harness session, the vault-specific providers /
-// witnesses / compiled-contract binding from this example's own modules.
+// construction from the harness session, the contract's types and witnesses
+// from its own package, and the provider set + compiled-contract binding from
+// the example's deploy package, which its deploy flows build on too.
 
-import {
-  type Contract as VaultContract,
-  createVaultPrivateState,
-  VAULT_REQUESTS_PATH,
-  type VaultPrivateState,
-} from "@midnight-examples/erc20-vault-contract";
-import {
-  getMidnightNodeConfig,
-  type MidnightNodeConfig,
-  type ProofServerObserver,
-} from "@midnight-examples/lib";
-import { requireEnv, type SessionWallet } from "@midnight-examples/test-harness";
-import { findDeployedContract, type FoundContract } from "@midnight-ntwrk/midnight-js/contracts";
+import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
 // midnight-js reads a process-global network id (unlike compact-js, which
 // takes it explicitly). createVaultContext sets it once per construction.
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
@@ -26,21 +15,24 @@ import {
   signetEventSourceFromPublicDataProvider,
   SignetRequestResponseReader,
 } from "@sig-net/midnight";
-
-import { resolveUserIdentity, type UserIdentity } from "./vault-identity.ts";
+import { getMidnightNodeConfig, type MidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
+import {
+  createVaultPrivateState,
+  VAULT_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  type DeployedVaultContract,
+  VAULT_PRIVATE_STATE_ID,
+  type VaultProviders,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   buildVaultProviders,
-  VAULT_PRIVATE_STATE_ID,
   vaultCompiledContract,
-  type VaultProviders,
-} from "./vault-providers.ts";
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
+import type { ProofServerObserver } from "@sig-net/midnight-examples-lib";
+import { requireEnv, type SessionWallet } from "@sig-net/midnight-examples-test-harness";
 
-/**
- * The joined vault contract handle — midnight-js's found-contract shape typed
- * to the vault's generated contract, so `callTx.initialise(...)` /
- * `callTx.startDeposit(...)` carry the real circuit signatures.
- */
-export type DeployedVaultContract = FoundContract<VaultContract<VaultPrivateState>>;
+import { resolveUserIdentity, type UserIdentity } from "./vault-identity.ts";
 
 /**
  * Everything a flow needs: the resolved configuration (all fields REQUIRED —

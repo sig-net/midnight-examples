@@ -2,7 +2,6 @@
 // verification, then settle through the circuit the output selects (completeSwap mints the
 // exact amountOut of tokenOut plus the unspent tokenIn as change, refundSwap re-mints the
 // surrendered amountInMaximum).
-import { VAULT_SWAP_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
 import {
   deserializeEvmOutput,
   MPC_FAILURE_OUTPUT,
@@ -14,11 +13,12 @@ import {
   serializeRespondOutput,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
+import { VAULT_SWAP_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { SWAP_OUTPUT_SCHEMA, SWAP_RESPOND_SCHEMA } from "../evm-swap.ts";
 import { type FakenetResponse, fetchFakenetResponse } from "../fakenet-responses.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import { warnOnce } from "../warn-once.ts";
 
 /** The resolved attested outcome of a swap (uint64 amountIn spent, or the failure output). */

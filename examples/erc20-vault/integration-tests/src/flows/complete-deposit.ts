@@ -6,8 +6,6 @@
 // to the caller (or a recipient the caller names) under a fresh RANDOM mint
 // nonce, so the minted coin cannot be linked back to the request.
 
-import { VAULT_DEPOSIT_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
-import type { EncPublicKey } from "@midnight-examples/lib";
 import { type CoinPublicKey, encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
 import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
 import {
@@ -15,6 +13,8 @@ import {
   type RequestIdHex,
   respondBidirectionalEventToCircuitInput,
 } from "@sig-net/midnight";
+import type { EncPublicKey } from "@sig-net/midnight-contract-deploy";
+import { VAULT_DEPOSIT_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import type { VaultContext } from "../vault-context.ts";
 import { pollRespondBidirectional } from "./poll-respond-bidirectional.ts";

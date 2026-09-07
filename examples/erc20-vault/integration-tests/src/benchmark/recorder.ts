@@ -10,7 +10,7 @@ import {
   type ProofServerObservation,
   type ProofServerObserver,
   ProofServerPhase,
-} from "@midnight-examples/lib";
+} from "@sig-net/midnight-examples-lib";
 
 import {
   type BenchmarkLeg,

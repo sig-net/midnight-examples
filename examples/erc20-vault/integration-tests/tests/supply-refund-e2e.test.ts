@@ -3,16 +3,15 @@
 // so the MPC attests failure and completeSupply routes to refund, re-minting the surrendered
 // underlying. The lending twin of swap-refund-e2e / deposit-withdrawal-failure-refund. It runs
 // against the Sepolia fork the setup pipeline verifies, where the stataUSDC wrapper is deployed.
-import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
+import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { AAVE_USDC } from "../src/evm-stata.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runSupplyRoundTrip } from "../src/flows/supply-round-trip.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -33,15 +32,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
     async () => {
       const context = await session.vaultContext();
 
-      // Seal the config before any flow unless a kept contract address is already initialised.
-      const readLedger = () =>
-        readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      if (!(await readLedger()).initialised) {
-        await initialise(context, {
-          vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
-        });
-      }
+      // Seal the config before any flow. A kept contract address that is already initialised
+      // is left untouched.
+      await initialise(context, resolveInitialiseConfig(env, context.vaultContractAddress));
 
       // Fund: deposit Aave USDC, minting the caller a shielded Aave-USDC coin and funding the
       // vault's EVM Aave-USDC balance (which the drain below then removes).

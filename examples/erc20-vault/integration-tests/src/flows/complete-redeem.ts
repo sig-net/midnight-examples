@@ -1,7 +1,6 @@
 // Settle side of the redeem flow: resolve the MPC's attested outcome by signature
 // verification, then settle through the circuit the output selects (completeRedeem mints the
 // attested USDC assets, refundRedeem re-mints the surrendered shares).
-import { VAULT_REDEEM_REQUESTS_PATH } from "@midnight-examples/erc20-vault-contract";
 import {
   deserializeEvmOutput,
   MPC_FAILURE_OUTPUT,
@@ -13,11 +12,12 @@ import {
   serializeRespondOutput,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
+import { VAULT_REDEEM_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { REDEEM_OUTPUT_SCHEMA, REDEEM_RESPOND_SCHEMA } from "../evm-stata.ts";
 import { type FakenetResponse, fetchFakenetResponse } from "../fakenet-responses.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import { warnOnce } from "../warn-once.ts";
 
 /** The resolved attested outcome of a redeem (uint64 assets minted, or the failure output). */

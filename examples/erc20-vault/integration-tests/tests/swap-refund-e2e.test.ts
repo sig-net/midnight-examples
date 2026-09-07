@@ -3,15 +3,14 @@
 // attests the failure output and completeSwap routes to refund, re-minting the surrendered
 // amountInMaximum of tokenIn. The swap-side twin of deposit-withdrawal-failure-refund. It runs
 // against the Sepolia fork the setup pipeline verifies, where the Uniswap router is deployed.
-import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
+import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { quoteExactOutputSingle } from "../src/evm-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -36,15 +35,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
     async () => {
       const context = await session.vaultContext();
 
-      // Seal the config before any flow unless a kept contract address is already initialised.
-      const readLedger = () =>
-        readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      if (!(await readLedger()).initialised) {
-        await initialise(context, {
-          vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
-        });
-      }
+      // Seal the config before any flow. A kept contract address that is already initialised
+      // is left untouched.
+      await initialise(context, resolveInitialiseConfig(env, context.vaultContractAddress));
 
       // Cap the spend at HALF the live quote — guaranteed under the real cost, so the swap
       // reverts. The deposited coin IS the surrendered cap, so deposit exactly it.

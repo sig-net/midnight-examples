@@ -2,15 +2,14 @@
 // verifies: the Uniswap router is deployed there, and the derived accounts hold ETH + real USDC.
 // Here we deposit to fund the vault + mint the caller a shielded tokenIn coin, then swap it for
 // tokenOut.
-import { requireEnv as requireEnvOf } from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
+import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { quoteExactOutputSingle } from "../src/evm-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -38,16 +37,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
       const context = await session.vaultContext();
 
       // The setup pipeline deploys the vault but does not initialise it (the key it pins
-      // derives from the vault address), so seal the config here before any flow — unless a
-      // kept contract address is already initialised.
-      const readLedger = () =>
-        readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-      if (!(await readLedger()).initialised) {
-        await initialise(context, {
-          vaultEvmAddress: context.evmVaultAddress,
-          mpcResponseKey: requireEnvOf(env, "MPC_RESPONSE_KEY"),
-        });
-      }
+      // derives from the vault address), so seal the config here before any flow. A kept
+      // contract address that is already initialised is left untouched.
+      await initialise(context, resolveInitialiseConfig(env, context.vaultContractAddress));
 
       // Size the deposit/cap from a LIVE exactOutput quote (the fork pool price is arbitrary),
       // with generous headroom so the on-chain swap fits and leaves change. The deposited coin IS

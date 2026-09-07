@@ -1,13 +1,11 @@
 // Uniswap V3 constants for the swap flow: the pinned SwapRouter02 + QuoterV2 (Sepolia
 // canonical, present on the pinned fork), the exactOutputSingle/approve ABI shapes, and a
 // read-only QuoterV2 quote. Mirrors evm-transfer.ts for the swap leg.
-import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
-import type { ContractReadMethod } from "@midnight-examples/test-harness";
 import { MPC_PARAMS_BYTES, MPCDestination, MPCSignatureAlgorithm } from "@sig-net/midnight";
+import { pureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { UNISWAP_SWAP_ROUTER_02 } from "@sig-net/midnight-examples-erc20-vault-contract";
+import type { ContractReadMethod } from "@sig-net/midnight-examples-test-harness";
 import { ethers } from "ethers";
-
-/** Uniswap V3 SwapRouter02 on Sepolia (also present on a Sepolia fork). */
-export const UNISWAP_SWAP_ROUTER_02 = "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E";
 
 /** Uniswap V3 QuoterV2 on Sepolia — a read-only price oracle. */
 export const UNISWAP_QUOTER_V2 = "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3";

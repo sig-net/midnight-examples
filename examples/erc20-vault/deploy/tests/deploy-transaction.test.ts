@@ -1,26 +1,22 @@
 // Deploy-tx build test: runs the Compact constructor against the REAL
 // compiled output and wraps the resulting state in an unproven deploy
-// transaction. No network, no wallet, no proof server — but attaching
+// transaction. No network, no wallet, no proof server, but attaching
 // verifier keys needs `yarn compile:zk` output, so with the default
 // --skip-zk output the suite skips (visibly, via the describe title).
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
-import { buildDeployTransaction, makeCompiledContract } from "@midnight-examples/lib";
-import { describe, expect, it } from "vitest";
-
+import { buildDeployTransaction } from "@sig-net/midnight-contract-deploy";
 import {
-  Contract,
   createVaultPrivateState,
   pureCircuits,
-  type VaultPrivateState,
-  witnesses,
-} from "../src/index.ts";
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { describe, expect, it } from "vitest";
 
-const MANAGED_DIR = fileURLToPath(new URL("../src/managed/erc20-vault", import.meta.url));
-const HAS_VERIFIER_KEYS = existsSync(join(MANAGED_DIR, "keys"));
+import { VAULT_MANAGED_PATH, vaultCompiledContract } from "../src/vault-contract-binding.ts";
+
+const HAS_VERIFIER_KEYS = existsSync(join(VAULT_MANAGED_PATH, "keys"));
 
 // The deployer's identity secret; its commitment is the constructor arg.
 const SECRET_KEY = new Uint8Array(32).fill(7);
@@ -32,18 +28,11 @@ const SIGNET_CONTRACT_REF = { bytes: new Uint8Array(32).fill(0x5e) };
 const CPK = "0".repeat(64);
 
 describe.skipIf(!HAS_VERIFIER_KEYS)(
-  "vault deploy tx (SKIPPED without src/managed/keys — run `yarn workspace @midnight-examples/erc20-vault-contract compile:zk`)",
+  "vault deploy tx (SKIPPED without the contract's src/managed/keys: run `yarn compile:erc20-vault:zk`)",
   () => {
-    const compiledContract = makeCompiledContract<Contract<VaultPrivateState>, VaultPrivateState>(
-      "erc20-vault",
-      Contract,
-      witnesses,
-      MANAGED_DIR,
-    );
-
     it("builds an unproven deploy transaction from the real managed output", async () => {
       const deployTransaction = await buildDeployTransaction(
-        compiledContract,
+        vaultCompiledContract,
         "undeployed",
         CPK,
         createVaultPrivateState(SECRET_KEY),
@@ -62,7 +51,7 @@ describe.skipIf(!HAS_VERIFIER_KEYS)(
       // proves the arg reaches the constructor.
       await expect(
         buildDeployTransaction(
-          compiledContract,
+          vaultCompiledContract,
           "undeployed",
           CPK,
           createVaultPrivateState(SECRET_KEY),

@@ -6,25 +6,10 @@
 
 import {
   asciiPadded,
-  bytesToHex,
   MPC_PARAMS_BYTES,
   MPCDestination,
   MPCSignatureAlgorithm,
-  PATH_BYTES,
 } from "@sig-net/midnight";
-
-/**
- * The vault's own derivation path as the ledger stores it: the withdraw
- * circuit sets every record's `path` to `pad(32, "vault")`.
- */
-export const VAULT_PATH_BYTES = asciiPadded("vault", PATH_BYTES);
-
-/**
- * The derivation-string rendering of {@link VAULT_PATH_BYTES}: the MPC
- * renders a record's path as the lowercase hex of the full 32 bytes,
- * padding included, and `deriveEvmAddress` takes the same rendering.
- */
-export const VAULT_PATH_HEX = bytesToHex(VAULT_PATH_BYTES);
 
 /**
  * What the MPC reports back about the EVM call: an ERC20 `transfer` returns

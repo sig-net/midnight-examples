@@ -1,5 +1,5 @@
 {
-  "name": "@midnight-examples/test-harness",
+  "name": "@sig-net/midnight-examples-test-harness",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,10 +14,10 @@
     "smoke:stack": "tsx scripts/stack-smoke.ts"
   },
   "dependencies": {
-    "@midnight-examples/lib": "*",
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.6",
-    "@sig-net/midnight": "0.21.0-rc.2",
-    "@sig-net/midnight-contract-deploy": "0.21.0-rc.2",
+    "@sig-net/midnight": "0.21.0-rc.6",
+    "@sig-net/midnight-contract-deploy": "0.21.0-rc.6",
+    "@sig-net/midnight-examples-lib": "workspace:*",
     "ethers": "^6.17.0"
   },
   "devDependencies": {

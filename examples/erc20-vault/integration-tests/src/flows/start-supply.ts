@@ -15,18 +15,20 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
-
 import {
   AAVE_USDC,
+  readVaultLedger,
+  VAULT_PATH_BYTES,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+
+import {
   STATA_DEPOSIT_SELECTOR,
   STATA_GAS_LIMIT,
   STATA_MAX_FEE_PER_GAS,
   STATA_MAX_PRIORITY_FEE_PER_GAS,
   SUPPLY_MPC_ROUTING,
 } from "../evm-stata.ts";
-import { VAULT_PATH_BYTES } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
-import { readVaultLedger } from "../vault-ledger.ts";
 import { vaultTokenType } from "../vault-token.ts";
 
 /** Options for {@link startSupply}. */
