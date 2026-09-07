@@ -24,11 +24,7 @@ import {
   UNISWAP_SWAP_ROUTER_02,
   vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
-  type ContractReadMethod,
-  getTransactionNonce,
-  logSkip,
-} from "@sig-net/midnight-examples-test-harness";
+import { type ContractReadMethod, logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-swap.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
@@ -42,14 +38,14 @@ const MINUTE = 60_000;
 /**
  * Record the approveRouter request and return its id.
  *
+ * The vault EVM account's nonce is NOT an argument: approveRouter signs from the same shared
+ * vault account as the queued flows, so the contract's own `vaultEvmNonce` counter assigns it
+ * (see ./flush.ts). It is read here only to recompute the record off-chain.
+ *
  * @param context - The flow context.
- * @param evmNonce - The vault EVM account nonce for the approve transaction.
  * @returns The recorded request id.
  */
-export async function approveRouter(
-  context: VaultContext,
-  evmNonce: bigint,
-): Promise<RequestIdHex> {
+export async function approveRouter(context: VaultContext): Promise<RequestIdHex> {
   const erc20 = evmAddressBytes(context.erc20Address);
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
@@ -77,7 +73,7 @@ export async function approveRouter(
     txParams: {
       to: erc20,
       chainId: before.evmChainId,
-      nonce: evmNonce,
+      nonce: before.vaultEvmNonce,
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -98,11 +94,7 @@ export async function approveRouter(
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
-  const result = await context.vault.callTx.approveRouter(
-    erc20,
-    evmNonce,
-    SIGNET_DEFAULT_KEY_VERSION,
-  );
+  const result = await context.vault.callTx.approveRouter(erc20, SIGNET_DEFAULT_KEY_VERSION);
   console.log(`approveRouter finalized in tx ${result.public.txId}`);
 
   const after = await readVaultLedger(
@@ -142,8 +134,7 @@ export async function ensureRouterApproved(session: VaultSession): Promise<void>
     return;
   }
 
-  const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await approveRouter(context, evmNonce);
+  const requestId = await approveRouter(context);
   // approve is signed by the VAULT's account, then broadcast; no attestation/settle.
   const signed = await pollSignatureResponse(context, {
     requestId,

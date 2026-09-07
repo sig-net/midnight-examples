@@ -496,19 +496,20 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
       const context = await session.vaultContext();
 
-      // The withdraw tx sender is the VAULT's derived EVM account; its next
-      // nonce comes from the chain, exactly as a wallet would fetch it. The
-      // destination is the user's derived account, so the suite's funds cycle.
-      const evmNonce = await getTransactionNonce(
-        requireEnv("EVM_RPC_URL"),
-        requireEnv("EVM_VAULT_ADDRESS"),
-      );
+      // The withdraw tx sender is the VAULT's derived EVM account. Its nonce is
+      // no longer fetched from the chain: the vault account is signed only by
+      // contract calls, so the CONTRACT owns that sequence (vaultEvmNonce) and
+      // the flush inside startWithdraw assigns it. Read back below off the
+      // recorded request. The destination is the user's derived account, so the
+      // suite's funds cycle.
       const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
+      const evmNonce = (
+        await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)
+      ).vaultEvmNonce;
 
       withdrawTransactionSignatureRequestId = await startWithdraw(context, {
         amount: WITHDRAW_AMOUNT,
         destEvmAddress,
-        evmNonce,
       });
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 

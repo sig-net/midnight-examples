@@ -31,7 +31,6 @@ import {
   banner,
   getErc20Balance,
   getEthBalance,
-  getTransactionNonce,
   logSkip,
   requireEnv as requireEnvOf,
 } from "@sig-net/midnight-examples-test-harness";
@@ -214,17 +213,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const context = await session.vaultContext();
 
-        // Nonce fetched AFTER the drain mined (the drain consumed one), so the
-        // signed transfer is the vault account's next expected tx.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
+        // No nonce is fetched from the chain any more: the vault account's
+        // transaction nonce comes from the contract's own vaultEvmNonce counter,
+        // assigned by the flush inside startWithdraw.
         withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-          evmNonce,
         });
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
 

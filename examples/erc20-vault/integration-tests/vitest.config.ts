@@ -17,6 +17,7 @@ import { BaseSequencer, type TestSpecification } from "vitest/node";
 // cycles the funds later flows build on.
 const FILE_ORDER = [
   "happy-day-e2e.test.ts",
+  "vault-evm-nonce-e2e.test.ts",
   "deposit-withdrawal-failure-refund.test.ts",
   "deposit-claimant-not-caller.test.ts",
   "benchmark.test.ts",

@@ -52,18 +52,20 @@ export function deriveVaultEvmAddress(
 // `signetRequestNonce` keeps otherwise identical requests hashing apart. Only
 // `approveStata`, `approveRouter` and `flush` read that counter now: the four
 // vault-signed flows queue in `pendingVaultRequests` and `flush` assigns them
-// one nonce each per batch. A
+// one nonce each per batch. `vaultEvmNonce` is the SEPARATE, CONTIGUOUS nonce
+// sequence of the shared vault EVM account, likewise assigned by
+// `approveStata`, `approveRouter` and `flush`. A
 // client contract is free to place its event maps at any field: every raw
 // reader takes the resolved ledger-tree path explicitly, and the path must
 // match the `requestsPath` the contract packs into its notifications. The
 // compiler records each field's path as its "index" in
 // managed/erc20-vault/compiler/contract-info.json.
 
-// The vault has 26 ledger fields, past the 15-field flat limit, so the compiler
+// The vault has 27 ledger fields, past the 15-field flat limit, so the compiler
 // chunks the state tree two levels deep. Every path below is therefore
 // [chunk, offset] (depth 2), and the request circuits pack the same as
 // requestsPathDepth 2. Chunk 1 holds the LAST 15 fields (declaration indexes
-// 11-25) and chunk 0 holds the rest (0-10), which is why a new ledger field
+// 12-26) and chunk 0 holds the rest (0-11), which is why a new ledger field
 // must be declared BEFORE depositEventMap, never appended: appending re-chunks
 // the tree and moves every path below. Two chunks hold 30 fields at most, and
 // field 31 opens a THIRD chunk that re-splits the tree and moves every path at
@@ -83,7 +85,7 @@ export const VAULT_REQUESTS_PATH: readonly number[] = [0, 0];
 export const VAULT_NONCE_PATH: readonly number[] = [0, 3];
 
 /**
- * Resolved ledger-tree path of `depositEventMap` (ledger field 14). Deposits
+ * Resolved ledger-tree path of `depositEventMap` (ledger field 15). Deposits
  * register their notification in this SEPARATE map, so the deposit flow reads
  * MPC responses from this path. Matches the depth 2 + `requestsPath`
  * [1, 3, 0, 0] the `startDeposit` circuit packs.
@@ -91,15 +93,15 @@ export const VAULT_NONCE_PATH: readonly number[] = [0, 3];
 export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [1, 3];
 
 /**
- * Resolved ledger-tree path of `swapEventMap` (ledger field 18). Swaps register
+ * Resolved ledger-tree path of `swapEventMap` (ledger field 19). Swaps register
  * their notification in this SEPARATE map (sized for a 7-word exactOutputSingle),
  * so the swap flow reads MPC responses from this path. Matches the depth 2 +
  * `requestsPath` [1, 7, 0, 0] `flush` packs when it records a queued swap.
  */
 export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [1, 7];
 
-/** Resolved ledger-tree path of `supplyEventMap` (ledger field 22). */
+/** Resolved ledger-tree path of `supplyEventMap` (ledger field 23). */
 export const VAULT_SUPPLY_REQUESTS_PATH: readonly number[] = [1, 11];
 
-/** Resolved ledger-tree path of `redeemEventMap` (ledger field 24). */
+/** Resolved ledger-tree path of `redeemEventMap` (ledger field 25). */
 export const VAULT_REDEEM_REQUESTS_PATH: readonly number[] = [1, 13];

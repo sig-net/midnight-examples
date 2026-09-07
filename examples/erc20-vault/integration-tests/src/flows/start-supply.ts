@@ -1,7 +1,10 @@
-// `startSupply`: record a stataToken.deposit(amount, vault) SignBidirectionalEvent on the
-// vault's SUPPLY ledger map, surrendering `amount` of the underlying (USDC) vault coin
-// (burned), to be signed with the VAULT's account and broadcast. Exact-input, so there is no
+// `startSupply`: surrender `amount` of the underlying (USDC) vault coin (burned) and QUEUE a
+// stataToken.deposit(amount, vault) request; `flush` then records it on the vault's SUPPLY
+// ledger map, to be signed with the VAULT's account and broadcast. Exact-input, so there is no
 // change. The settle side lives in complete-supply.ts.
+//
+// The circuit no longer takes an EVM nonce: the shared vault EVM account's nonces come from
+// the contract's own `vaultEvmNonce` counter at flush time. See ./flush.ts.
 import {
   calculateRequestId,
   evmAddressAbiWord,
@@ -25,19 +28,19 @@ import {
 import { STATA_DEPOSIT_SELECTOR, SUPPLY_MPC_ROUTING } from "../evm-stata.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
+import { flushVaultRequests, vaultQueueKey } from "./flush.ts";
 
 /** Options for {@link startSupply}. */
 export interface StartSupplyOptions {
   readonly amount: bigint;
-  readonly evmNonce: bigint;
 }
 
 /**
- * Record the supply request (stataToken.deposit(amount, vault)) and return its id. The burned
- * coin is the underlying (USDC) vault token of exactly `amount`.
+ * Queue the supply request (stataToken.deposit(amount, vault)), flush it, and return the id
+ * the flush minted. The burned coin is the underlying (USDC) vault token of exactly `amount`.
  *
  * @param context - The flow context.
- * @param options - The supply parameters (amount, evmNonce).
+ * @param options - The supply parameters (amount).
  * @returns The recorded supply request id.
  */
 export async function startSupply(
@@ -65,9 +68,24 @@ export async function startSupply(
 
   // The record the contract composes: vault path/sender, stataToken `to`, contract-fixed gas,
   // deposit(amount, receiver=vault).
+  const result = await context.vault.callTx.startSupply(
+    SIGNET_DEFAULT_KEY_VERSION,
+    options.amount,
+    coin,
+  );
+  console.log(`supply queued in tx ${result.public.txId}`);
+
+  // Both nonces are read BETWEEN the queue and the drain, because both are the
+  // contract's to assign: this flush drains one entry in slot 0, so it is handed
+  // exactly these values.
+  const beforeFlush = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: beforeFlush.signetRequestNonce,
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...SUPPLY_MPC_ROUTING,
@@ -76,7 +94,7 @@ export async function startSupply(
     txParams: {
       to: before.stataToken,
       chainId: before.evmChainId,
-      nonce: options.evmNonce,
+      nonce: beforeFlush.vaultEvmNonce,
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -95,13 +113,7 @@ export async function startSupply(
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  const result = await context.vault.callTx.startSupply(
-    options.evmNonce,
-    SIGNET_DEFAULT_KEY_VERSION,
-    options.amount,
-    coin,
-  );
-  console.log(`supply finalized in tx ${result.public.txId}`);
+  await flushVaultRequests(context, [vaultQueueKey(context, coin.nonce)]);
 
   const after = await readVaultLedger(
     context.providers.publicDataProvider,
