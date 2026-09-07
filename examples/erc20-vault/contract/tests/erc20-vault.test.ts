@@ -606,6 +606,36 @@ describe("deposit validation", () => {
     expect(nonces).toEqual([0n, 1n]);
   });
 
+  it("the SAME caller depositing twice advances THEIR slot and leaves signetRequestNonce at 0", async () => {
+    // The ledger-side facts the off-chain twin (`depositRequestNonce` in
+    // src/vault-ledger.ts) reads to predict a request id. A twin reading the
+    // shared signetRequestNonce instead agrees only on the first deposit,
+    // when both cells read 0; this pins the divergence so that accident can
+    // never silently return.
+    const { contract, ctx } = await deployInitialised();
+
+    const stateBefore = ledger(ctx.callContext.currentQueryContext.state);
+    expect(stateBefore.depositRequestNonces.member(DEPLOYER_COMMITMENT)).toBe(false);
+    expect(stateBefore.signetRequestNonce).toBe(0n);
+
+    const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
+    const stateAfterFirst = ledger(afterFirst.callContext.currentQueryContext.state);
+    expect(stateAfterFirst.depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(1n);
+
+    const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
+    const stateAfterSecond = ledger(afterSecond.callContext.currentQueryContext.state);
+
+    // The caller's own counter is what advanced...
+    expect(stateAfterSecond.depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(2n);
+    // ...and the shared vault-path nonce never moved: deposits do not touch it.
+    expect(stateAfterSecond.signetRequestNonce).toBe(0n);
+
+    // So the SECOND deposit hashed nonce 1, which the twin can only predict
+    // from the per-caller slot.
+    const index = toSignBidirectionalEventIndex(stateAfterSecond.depositEventMap);
+    expect([...index.values()].map((record) => record.requestNonce).sort()).toEqual([0n, 1n]);
+  });
+
   it("two identities depositing identical requests get DISTINCT ids: the path differentiates them", async () => {
     // The derivation path (the caller's commitment) is part of the hashed
     // record too, so the same deposit by two different identities can never
