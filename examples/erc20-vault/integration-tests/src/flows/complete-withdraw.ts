@@ -33,10 +33,17 @@ import type { RespondOutcome } from "./respond-output.ts";
  * linked to the request. The coin handling is midnight-js's job: the callTx
  * balances the resulting offer like any other call.
  *
+ * Both circuits take `commitmentNonce`: the withdraw's settle-view commitment
+ * is the phase-1 request key `requestCommitment(secret, coinNonce)`, so the
+ * only way to prove withdrawer-hood on a refund route is to re-present the
+ * surrendered coin's nonce. `startWithdraw` returns it for exactly this.
+ *
  * @param context - The flow context.
  * @param requestId - The withdraw request id being settled.
  * @param outcome - The attested outcome from
  *   {@link file://./poll-respond-bidirectional.ts pollRespondBidirectional}.
+ * @param commitmentNonce - The surrendered coin's nonce, from
+ *   {@link file://./start-withdraw.ts startWithdraw}.
  * @throws {Error} If the withdrawal was already settled (no pending marker on
  *   the ledger), or this wallet is not the withdrawer on a refund route.
  */
@@ -44,6 +51,7 @@ export async function settleWithdraw(
   context: VaultContext,
   requestId: RequestIdHex,
   outcome: RespondOutcome,
+  commitmentNonce: Uint8Array,
 ): Promise<void> {
   console.log(`vault contract:  ${context.vaultContractAddress}`);
   console.log(`request id:      ${requestId}`);
@@ -61,6 +69,7 @@ export async function settleWithdraw(
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
       mintNonce,
+      commitmentNonce,
     );
     console.log(`refundWithdraw settled in tx ${result.public.txId}`);
     return;
@@ -76,6 +85,7 @@ export async function settleWithdraw(
     respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
     mintNonce,
+    commitmentNonce,
   );
   console.log(`completeWithdraw settled in tx ${result.public.txId}`);
 }
@@ -84,6 +94,12 @@ export async function settleWithdraw(
 export interface CompleteWithdrawOptions {
   /** The withdraw request id to settle. */
   readonly requestId: RequestIdHex;
+  /**
+   * The surrendered coin's nonce the request was keyed on, from
+   * {@link file://./start-withdraw.ts startWithdraw}. Proves withdrawer-hood
+   * on the refund routes.
+   */
+  readonly commitmentNonce: Uint8Array;
 }
 
 const MINUTE = 60_000;
@@ -94,7 +110,7 @@ const MINUTE = 60_000;
  * {@link settleWithdraw}.
  *
  * @param context - The flow context.
- * @param options - The request id to settle.
+ * @param options - The request id to settle and the coin nonce it was keyed on.
  * @throws {Error} If no verifying attestation posts within the poll's
  *   deadline, plus whatever {@link settleWithdraw} throws.
  */
@@ -107,5 +123,5 @@ export async function completeWithdraw(
     intervalMs: 1000,
     timeoutMs: 6 * MINUTE,
   });
-  await settleWithdraw(context, options.requestId, outcome);
+  await settleWithdraw(context, options.requestId, outcome, options.commitmentNonce);
 }

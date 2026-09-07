@@ -185,15 +185,22 @@ export async function pollRedeemOutcome(
  * `completeRedeem` for attested assets (mints the USDC), `refundRedeem` for
  * the fixed MPC failure output (re-mints the surrendered shares).
  *
+ * Both circuits take `commitmentNonce`: the redeem's settle-view commitment is the phase-1
+ * request key `requestCommitment(secret, coinNonce)`, so the only way to prove redeemer-hood
+ * is to re-present the surrendered coin's nonce. `startRedeem` returns it for exactly this.
+ *
  * @param context - The flow context.
  * @param requestId - The redeem request id being settled.
  * @param outcome - The attested outcome from {@link pollRedeemOutcome}.
+ * @param commitmentNonce - The surrendered coin's nonce, from
+ *   {@link file://./start-redeem.ts startRedeem}.
  * @returns The attested assets minted (0 on refund) and whether the redeem was refunded.
  */
 export async function settleRedeem(
   context: VaultContext,
   requestId: RequestIdHex,
   outcome: RedeemOutcome,
+  commitmentNonce: Uint8Array,
 ): Promise<{ assets: bigint; refunded: boolean }> {
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
   if (outcome.matchedFailureOutput) {
@@ -203,6 +210,7 @@ export async function settleRedeem(
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
       mintNonce,
+      commitmentNonce,
     );
     console.log(`refund settled in tx ${r.public.txId}`);
     return { assets: 0n, refunded: true };
@@ -212,6 +220,7 @@ export async function settleRedeem(
     respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
     mintNonce,
+    commitmentNonce,
   );
   console.log(
     `completeRedeem settled in tx ${r.public.txId} (minted ${String(outcome.assets)} USDC)`,
@@ -225,12 +234,15 @@ export async function settleRedeem(
  *
  * @param context - The flow context.
  * @param requestId - The redeem request id to settle.
+ * @param commitmentNonce - The surrendered coin's nonce, from
+ *   {@link file://./start-redeem.ts startRedeem}.
  * @returns The attested assets minted (0 on refund) and whether the redeem was refunded.
  */
 export async function completeRedeem(
   context: VaultContext,
   requestId: RequestIdHex,
+  commitmentNonce: Uint8Array,
 ): Promise<{ assets: bigint; refunded: boolean }> {
   const outcome = await pollRedeemOutcome(context, { requestId });
-  return settleRedeem(context, requestId, outcome);
+  return settleRedeem(context, requestId, outcome, commitmentNonce);
 }

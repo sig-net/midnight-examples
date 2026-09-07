@@ -185,15 +185,22 @@ export async function pollSupplyOutcome(
  * `completeSupply` for attested shares (mints the stataUSDC), `refundSupply`
  * for the fixed MPC failure output (re-mints the surrendered underlying).
  *
+ * Both circuits take `commitmentNonce`: the supply's settle-view commitment is the phase-1
+ * request key `requestCommitment(secret, coinNonce)`, so the only way to prove supplier-hood
+ * is to re-present the surrendered coin's nonce. `startSupply` returns it for exactly this.
+ *
  * @param context - The flow context.
  * @param requestId - The supply request id being settled.
  * @param outcome - The attested outcome from {@link pollSupplyOutcome}.
+ * @param commitmentNonce - The surrendered coin's nonce, from
+ *   {@link file://./start-supply.ts startSupply}.
  * @returns The attested shares minted (0 on refund) and whether the supply was refunded.
  */
 export async function settleSupply(
   context: VaultContext,
   requestId: RequestIdHex,
   outcome: SupplyOutcome,
+  commitmentNonce: Uint8Array,
 ): Promise<{ shares: bigint; refunded: boolean }> {
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
   if (outcome.matchedFailureOutput) {
@@ -203,6 +210,7 @@ export async function settleSupply(
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
       mintNonce,
+      commitmentNonce,
     );
     console.log(`refund settled in tx ${r.public.txId}`);
     return { shares: 0n, refunded: true };
@@ -212,6 +220,7 @@ export async function settleSupply(
     respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
     mintNonce,
+    commitmentNonce,
   );
   console.log(
     `completeSupply settled in tx ${r.public.txId} (minted ${String(outcome.shares)} stataUSDC)`,
@@ -225,12 +234,15 @@ export async function settleSupply(
  *
  * @param context - The flow context.
  * @param requestId - The supply request id to settle.
+ * @param commitmentNonce - The surrendered coin's nonce, from
+ *   {@link file://./start-supply.ts startSupply}.
  * @returns The attested shares minted (0 on refund) and whether the supply was refunded.
  */
 export async function completeSupply(
   context: VaultContext,
   requestId: RequestIdHex,
+  commitmentNonce: Uint8Array,
 ): Promise<{ shares: bigint; refunded: boolean }> {
   const outcome = await pollSupplyOutcome(context, { requestId });
-  return settleSupply(context, requestId, outcome);
+  return settleSupply(context, requestId, outcome, commitmentNonce);
 }
