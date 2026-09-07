@@ -1071,6 +1071,16 @@ describe("withdraw validation", () => {
     const { contract, ctx } = await deployContract();
     await expect(withdraw(contract, ctx, VALID_WITHDRAW)).rejects.toThrow(/Not initialised/);
   });
+
+  it("rejects the legacy key version in PHASE 1, before the coin is burned", async () => {
+    // Phase 1 burns the coin, and slot i's EVM nonce is only ever consumed by
+    // slot i, so anything phase 2 would reject has to be caught here or the
+    // caller loses the coin AND the account stalls behind the stranded nonce.
+    const { contract, ctx } = await deployInitialised();
+    await expect(
+      requestWithdrawOnly(contract, ctx, { ...VALID_WITHDRAW, keyVersion: 0n }),
+    ).rejects.toThrow(/keyVersion must be >= 1/);
+  });
 });
 
 // ---- Response fixtures (shared by every settle and refund suite) ----

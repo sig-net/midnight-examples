@@ -374,6 +374,12 @@ circuit accumulateSlotIndexBit(acc: SlotIndexAcc, entry: MerkleTreePathEntry): S
 // key K' != K), and HistoricMerkleTree.insert emits no popeq at all.
 circuit parkRequest(key: Bytes<32>, params: PendingRequest): [] {
   assert(initialised >= 1, "Not initialised");
+  // Validated HERE, not in phase 2. constructSignBidirectionalEvent rejects
+  // keyVersion 0, and phase 1 has already burned the caller's coin by the time
+  // phase 2 runs: a request that can never be assigned would strand its slot,
+  // and slot i's EVM nonce is only ever consumed by slot i. Every phase-2
+  // failure mode must therefore be unreachable once phase 1 has applied.
+  assert(params.keyVersion >= 1, "keyVersion must be >= 1");
   assert(!pendingParams.member(key), "Request already pending");
   pendingParams.insert(key, params);
   slots.insert(key);
