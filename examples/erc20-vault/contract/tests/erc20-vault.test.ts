@@ -2844,38 +2844,48 @@ describe("throughput: the two-phase allocator lets concurrent requests apply", (
   it("CORRECTNESS: assigned EVM nonces are distinct, contiguous and evmNonceBase + slot", async () => {
     const { contract, ctx } = await deployInitialised();
     const nonces: bigint[] = [];
-    let threaded = ctx;
 
-    // Five requests across THREE flows, all signing from the one vault EVM
-    // account, so all five must draw from the one allocator.
+    // Five requests across THREE flows plus BOTH approves, all signing from
+    // the one vault EVM account, so all five must draw from the one allocator.
     const runs: TwoPhaseRun[] = [];
-    runs.push(await approveStata(contract, threaded));
-    threaded = runs[0]!.context;
-    runs.push(await approveRouter(contract, threaded, ERC20, bytes(32, 0x5b)));
-    threaded = runs[1]!.context;
-    runs.push(
-      await withdraw(contract, threaded, {
-        ...VALID_WITHDRAW,
-        coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x11)),
-      }),
+    const step = async (
+      run: (threaded: CircuitContext<VaultPrivateState>) => Promise<TwoPhaseRun>,
+      threaded: CircuitContext<VaultPrivateState>,
+    ): Promise<CircuitContext<VaultPrivateState>> => {
+      const done = await run(threaded);
+      runs.push(done);
+      return done.context;
+    };
+
+    let threaded = ctx;
+    threaded = await step((c) => approveStata(contract, c), threaded);
+    threaded = await step((c) => approveRouter(contract, c, ERC20, bytes(32, 0x5b)), threaded);
+    threaded = await step(
+      (c) =>
+        withdraw(contract, c, {
+          ...VALID_WITHDRAW,
+          coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x11)),
+        }),
+      threaded,
     );
-    threaded = runs[2]!.context;
-    runs.push(
-      await withdraw(contract, threaded, {
-        ...VALID_WITHDRAW,
-        coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x12)),
-      }),
+    threaded = await step(
+      (c) =>
+        withdraw(contract, c, {
+          ...VALID_WITHDRAW,
+          coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x12)),
+        }),
+      threaded,
     );
-    threaded = runs[3]!.context;
-    runs.push(
-      await supply(
-        contract,
-        threaded,
-        SUPPLY_AMOUNT,
-        vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR, bytes(32, 0x13)),
-      ),
+    threaded = await step(
+      (c) =>
+        supply(
+          contract,
+          c,
+          SUPPLY_AMOUNT,
+          vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR, bytes(32, 0x13)),
+        ),
+      threaded,
     );
-    threaded = runs[4]!.context;
 
     // Slot indexes are 0..4 in request order.
     expect(runs.map((r) => r.slotIndex)).toEqual([0n, 1n, 2n, 3n, 4n]);
