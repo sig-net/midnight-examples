@@ -277,7 +277,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "TEST A: two callers queue concurrently, ONE flush drains both, and BOTH Ethereum transactions mine at distinct contiguous nonces",
+      "TEST A: two callers queue in flight together, ONE flush drains both, and BOTH Ethereum transactions mine at distinct contiguous nonces",
       async () => {
         const rpcUrl = requireEnv("EVM_RPC_URL");
         const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
@@ -287,11 +287,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const contextB = await callerBSession.vaultContext();
 
         // Neither call supplies an EVM nonce, and neither reads a shared ledger
-        // cell: each only appends under a key derived from its own secret. This
-        // is the concurrency the change buys — under the old design each caller
-        // would have had to guess the vault account's next nonce, both would
-        // have guessed the SAME live value, and only one of the two Ethereum
-        // transactions could ever have mined.
+        // cell: each only appends under a key derived from its own secret.
+        //
+        // The two calls are submitted back to back rather than literally in
+        // parallel (two simultaneous proofs would OOM a 16 GB proof server, and
+        // the contract-level "both apply against one state" property is what
+        // the unit suite replays). That loses nothing HERE, because what made
+        // the old design collide was not simultaneity but the fact that BOTH
+        // withdrawals are in flight before either Ethereum transaction mines:
+        // each caller would have fetched the vault account's live nonce, both
+        // would have got the SAME value, and only one could ever have mined.
+        // Every step below happens in exactly that window.
         const queuedA = await queueWithdraw(contextA, { amount: UNIT, destEvmAddress });
         const queuedB = await queueWithdraw(contextB, { amount: UNIT, destEvmAddress });
         expect(queuedA.queueKey).not.toEqual(queuedB.queueKey);

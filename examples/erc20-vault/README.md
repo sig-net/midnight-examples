@@ -826,6 +826,7 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | Spec | Tests | What it proves | Resume var(s) |
 |---|---|---|---|
 | `happy-day-e2e` | 15 | Full deposit + withdraw round trips, every leg asserted (incl. the MPC-convention reads a responder does) | `DEPOSIT_REQUEST_ID`, `WITHDRAW_REQUEST_ID` |
+| `vault-evm-nonce-e2e` | 4 | The shared vault EVM account's nonce is the CONTRACT's to assign: two callers drained by one flush both mine at distinct contiguous nonces, and a deliberately withheld transaction stalls the two behind it until a third party reconstructs it from public data alone and clears the gap | `EVM_NONCE_DEPOSIT_REQUEST_ID` |
 | `deposit-withdrawal-failure-refund` | 9 | A withdraw whose EVM transfer reverts ends in an in-circuit REFUND of the escrowed shielded value | `FAILURE_REFUND_DEPOSIT_REQUEST_ID`, `FAILURE_REFUND_WITHDRAW_REQUEST_ID` |
 | `deposit-claimant-not-caller` | 6 | `completeDeposit` can direct the mint to a different wallet's coin public key, discovered from chain data alone | `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID` |
 | `benchmark` | 43 | Per-leg wall-clock report covering every vault circuit: initialise (fresh deploys), approveRouter, startDeposit/completeDeposit, startWithdraw/completeWithdraw, startSwap/completeSwap, approveStata, startSupply/completeSupply, startRedeem/completeRedeem, and forced-revert refunds (`BENCHMARK_TIMINGS_JSON` greppable line) | `BENCHMARK_DEPOSIT_REQUEST_ID`, `BENCHMARK_WITHDRAW_REQUEST_ID`, `BENCHMARK_SWAP_REQUEST_ID`, `BENCHMARK_SUPPLY_REQUEST_ID`, `BENCHMARK_REDEEM_REQUEST_ID`, `BENCHMARK_REFUND_DEPOSIT_REQUEST_ID`, `BENCHMARK_REFUND_WITHDRAW_REQUEST_ID` |
@@ -838,7 +839,7 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `redeem-refund-e2e` | 1 | A redeem whose wrapper burn reverts on-chain (drained vault stataUSDC balance) ends in an in-circuit REFUND of the surrendered shares | none |
 | `admin-replace-nonce-e2e` | 1 | A signed-but-unbroadcast vault transaction strands the account's nonce, and `adminReplaceEvmNonce` replaces it with an empty self-transfer so the transaction queued behind it mines | none |
 
-96 tests total. The suite runs against a Sepolia fork, and the setup pipeline
+100 tests total. The suite runs against a Sepolia fork, and the setup pipeline
 verifies that the Uniswap router and the stataUSDC wrapper are deployed on it
 before any spec runs, so a fork missing either fails the run at setup with an
 error naming the missing contract. A rerun
