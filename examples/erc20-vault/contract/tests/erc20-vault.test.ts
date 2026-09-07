@@ -745,17 +745,20 @@ describe("withdraw round-trip", () => {
     expect(record.path).toEqual(asciiPadded("vault", 32));
 
     // The envelope is contract-composed end to end: the withdraw's token on
-    // the initialise-pinned chain, the caller's account nonce, and the
-    // CONTRACT-FIXED gas envelope. The gas literals here are the lockstep
-    // check for any off-chain code that rebuilds this record (the example's
-    // withdraw flow ERC20_TRANSFER_* constants).
+    // the initialise-pinned chain, the caller's account nonce, and the gas
+    // envelope the CONTRACT reads from its own ledger. The gas literals here
+    // are the lockstep check for any off-chain code that rebuilds this record
+    // (the example's withdraw flow, via `vaultGasEnvelope`).
     const { calldata, ...envelope } = record.txParams;
     expect(envelope).toEqual({
       to: ERC20,
       chainId: CHAIN_ID,
       nonce: VALID_WITHDRAW.evmNonce,
       gasLimit: 100_000n,
-      maxFeePerGas: 30_000_000_000n,
+      // The initialise-time defaults, now ledger values a deployer can move
+      // with setGasParams (see the "gas parameters" describes at the end of
+      // this file). 150 gwei, the ceiling initialise sets.
+      maxFeePerGas: 150_000_000_000n,
       maxPriorityFeePerGas: 1_000_000_000n,
       value: 0n,
       accessListEntryCount: 0n,
@@ -1626,7 +1629,10 @@ describe("swap round-trip", () => {
       chainId: CHAIN_ID,
       nonce: VALID_SWAP.evmNonce,
       gasLimit: 700_000n,
-      maxFeePerGas: 30_000_000_000n,
+      // The initialise-time defaults, now ledger values a deployer can move
+      // with setGasParams (see the "gas parameters" describes at the end of
+      // this file). 150 gwei, the ceiling initialise sets.
+      maxFeePerGas: 150_000_000_000n,
       maxPriorityFeePerGas: 1_000_000_000n,
       value: 0n,
       accessListEntryCount: 0n,
@@ -2525,5 +2531,357 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
     const fresh = idsOf(afterSecond).filter((k) => !before.includes(k));
     expect(fresh.length).toBe(1);
     expect(before).not.toContain(fresh[0]);
+  });
+});
+
+// ===========================================================================
+// Admin-updateable gas parameters
+//
+// Every VAULT-signed transaction (approve*, withdraw, swap, supply, redeem)
+// used to carry a hardcoded 30 gwei maxFeePerGas. maxFeePerGas is a CEILING,
+// not a price: under EIP-1559 you pay base fee + tip and are refunded the
+// difference, so a high cap costs nothing while the market is calm. A 30 gwei
+// cap instead means every vault transaction becomes unincludable the moment
+// the base fee crosses 30 gwei, and because the vault signs against one
+// sequential EVM nonce, the stalled transaction blocks every transaction
+// queued behind it. These tests pin the fee envelope as ledger state a
+// deployer can move, and pin which gas limit belongs to which kind.
+//
+// startDeposit is deliberately excluded: it is signed by the USER's own
+// derived EVM account and already takes all three parameters as arguments.
+// ===========================================================================
+
+/** The initialise-time defaults, mirrored from erc20-vault.compact. */
+const DEFAULT_MAX_FEE_PER_GAS = 150_000_000_000n; // 150 gwei
+const DEFAULT_MAX_PRIORITY_FEE_PER_GAS = 1_000_000_000n; // 1 gwei
+const DEFAULT_WITHDRAW_GAS_LIMIT = 100_000n;
+const DEFAULT_APPROVE_GAS_LIMIT = 100_000n;
+const DEFAULT_SWAP_GAS_LIMIT = 700_000n;
+const DEFAULT_SUPPLY_GAS_LIMIT = 500_000n;
+const DEFAULT_REDEEM_GAS_LIMIT = 500_000n;
+
+// Deliberately distinct from each other AND from every default, so a circuit
+// reading the wrong ledger cell cannot pass by coincidence.
+const NEW_MAX_FEE_PER_GAS = 750_000_000_000n;
+const NEW_MAX_PRIORITY_FEE_PER_GAS = 3_000_000_000n;
+const NEW_WITHDRAW_GAS_LIMIT = 111_000n;
+const NEW_APPROVE_GAS_LIMIT = 122_000n;
+const NEW_SWAP_GAS_LIMIT = 733_000n;
+const NEW_SUPPLY_GAS_LIMIT = 544_000n;
+const NEW_REDEEM_GAS_LIMIT = 555_000n;
+
+interface GasParamArgs {
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  withdrawGasLimit: bigint;
+  approveGasLimit: bigint;
+  swapGasLimit: bigint;
+  supplyGasLimit: bigint;
+  redeemGasLimit: bigint;
+}
+
+const NEW_GAS_PARAMS: GasParamArgs = {
+  maxFeePerGas: NEW_MAX_FEE_PER_GAS,
+  maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
+  withdrawGasLimit: NEW_WITHDRAW_GAS_LIMIT,
+  approveGasLimit: NEW_APPROVE_GAS_LIMIT,
+  swapGasLimit: NEW_SWAP_GAS_LIMIT,
+  supplyGasLimit: NEW_SUPPLY_GAS_LIMIT,
+  redeemGasLimit: NEW_REDEEM_GAS_LIMIT,
+};
+
+/** Call setGasParams with its flat args spread in circuit order. */
+const setGasParams = (
+  contract: Contract<VaultPrivateState>,
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["setGasParams"]>[0],
+  args: GasParamArgs,
+) =>
+  contract.circuits.setGasParams(
+    ctx,
+    args.maxFeePerGas,
+    args.maxPriorityFeePerGas,
+    args.withdrawGasLimit,
+    args.approveGasLimit,
+    args.swapGasLimit,
+    args.supplyGasLimit,
+    args.redeemGasLimit,
+  );
+
+/**
+ * The fee/gas envelope the vault stamped on the ONE request recorded in `map`,
+ * failing when the map does not hold exactly one.
+ */
+const envelopeOf = (
+  map: Parameters<typeof toSignBidirectionalEventIndex>[0],
+): { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; gasLimit: bigint } => {
+  const index = toSignBidirectionalEventIndex(map);
+  expect(index.size).toBe(1);
+  const { txParams } = first(index.values(), "recorded request");
+  return {
+    maxFeePerGas: txParams.maxFeePerGas,
+    maxPriorityFeePerGas: txParams.maxPriorityFeePerGas,
+    gasLimit: txParams.gasLimit,
+  };
+};
+
+describe("gas parameters: initialise defaults", () => {
+  it("stores a fee ceiling and a gas limit per kind", async () => {
+    const { ctx } = await deployInitialised();
+    const state = ledger(ctx.callContext.currentQueryContext.state);
+
+    expect(state.vaultMaxFeePerGas).toBe(DEFAULT_MAX_FEE_PER_GAS);
+    expect(state.vaultMaxPriorityFeePerGas).toBe(DEFAULT_MAX_PRIORITY_FEE_PER_GAS);
+    expect(state.vaultWithdrawGasLimit).toBe(DEFAULT_WITHDRAW_GAS_LIMIT);
+    expect(state.vaultApproveGasLimit).toBe(DEFAULT_APPROVE_GAS_LIMIT);
+    expect(state.vaultSwapGasLimit).toBe(DEFAULT_SWAP_GAS_LIMIT);
+    expect(state.vaultSupplyGasLimit).toBe(DEFAULT_SUPPLY_GAS_LIMIT);
+    expect(state.vaultRedeemGasLimit).toBe(DEFAULT_REDEEM_GAS_LIMIT);
+  });
+
+  it("the default cap clears the highest base fee of the last year", async () => {
+    // L1 runs at single-digit gwei day to day and spikes a little past 100 during
+    // major launches, so 150 clears the year without the vault stalling in
+    // conditions an operator should not have to watch. Anything rarer than that
+    // is what the setter is for.
+    const { ctx } = await deployInitialised();
+    const state = ledger(ctx.callContext.currentQueryContext.state);
+
+    expect(state.vaultMaxFeePerGas).toBeGreaterThan(100_000_000_000n);
+    // A cap is only ever paid in full during a genuine spike, so it also
+    // bounds the worst case: cap * the largest gas limit (the swap).
+    expect(state.vaultMaxFeePerGas * state.vaultSwapGasLimit).toBeLessThan(10n ** 18n);
+  });
+
+  it("the cap is at or above the tip, as EIP-1559 requires", async () => {
+    const { ctx } = await deployInitialised();
+    const state = ledger(ctx.callContext.currentQueryContext.state);
+
+    expect(state.vaultMaxFeePerGas).toBeGreaterThanOrEqual(state.vaultMaxPriorityFeePerGas);
+  });
+});
+
+describe("setGasParams", () => {
+  it("is deployer-gated", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const stranger = await strangerContext("setGasParams", ctx);
+
+    await expect(setGasParams(contract, stranger, NEW_GAS_PARAMS)).rejects.toThrow(
+      /Not the deployer/,
+    );
+  });
+
+  it("leaves the stored values untouched when a non-deployer is rejected", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const stranger = await strangerContext("setGasParams", ctx);
+
+    await expect(setGasParams(contract, stranger, NEW_GAS_PARAMS)).rejects.toThrow();
+
+    const state = ledger(ctx.callContext.currentQueryContext.state);
+    expect(state.vaultMaxFeePerGas).toBe(DEFAULT_MAX_FEE_PER_GAS);
+    expect(state.vaultSwapGasLimit).toBe(DEFAULT_SWAP_GAS_LIMIT);
+  });
+
+  it("rejects before initialise", async () => {
+    const { contract, ctx } = await deployContract();
+
+    await expect(setGasParams(contract, ctx, NEW_GAS_PARAMS)).rejects.toThrow(/Not initialised/);
+  });
+
+  it("the deployer updates every value", async () => {
+    const { contract, ctx } = await deployInitialised();
+
+    const next = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+    const state = ledger(next.callContext.currentQueryContext.state);
+
+    expect(state.vaultMaxFeePerGas).toBe(NEW_MAX_FEE_PER_GAS);
+    expect(state.vaultMaxPriorityFeePerGas).toBe(NEW_MAX_PRIORITY_FEE_PER_GAS);
+    expect(state.vaultWithdrawGasLimit).toBe(NEW_WITHDRAW_GAS_LIMIT);
+    expect(state.vaultApproveGasLimit).toBe(NEW_APPROVE_GAS_LIMIT);
+    expect(state.vaultSwapGasLimit).toBe(NEW_SWAP_GAS_LIMIT);
+    expect(state.vaultSupplyGasLimit).toBe(NEW_SUPPLY_GAS_LIMIT);
+    expect(state.vaultRedeemGasLimit).toBe(NEW_REDEEM_GAS_LIMIT);
+  });
+
+  it("is repeatable: the fee envelope tracks the market, unlike one-shot initialise", async () => {
+    const { contract, ctx } = await deployInitialised();
+
+    const once = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+    const twice = (
+      await setGasParams(contract, once, { ...NEW_GAS_PARAMS, maxFeePerGas: 900_000_000_000n })
+    ).context;
+
+    expect(ledger(twice.callContext.currentQueryContext.state).vaultMaxFeePerGas).toBe(
+      900_000_000_000n,
+    );
+  });
+
+  it.each([
+    ["a zero withdraw gas limit", { withdrawGasLimit: 0n }, /Gas limit must be positive/],
+    ["a zero approve gas limit", { approveGasLimit: 0n }, /Gas limit must be positive/],
+    ["a zero swap gas limit", { swapGasLimit: 0n }, /Gas limit must be positive/],
+    ["a zero supply gas limit", { supplyGasLimit: 0n }, /Gas limit must be positive/],
+    ["a zero redeem gas limit", { redeemGasLimit: 0n }, /Gas limit must be positive/],
+    ["a zero fee cap", { maxFeePerGas: 0n }, /maxFeePerGas must be positive/],
+    [
+      "a tip above the cap",
+      { maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 2_000_000_000n },
+      /maxPriorityFeePerGas cannot exceed maxFeePerGas/,
+    ],
+  ] as const)("rejects %s", async (_name, delta, throws) => {
+    const { contract, ctx } = await deployInitialised();
+
+    await expect(setGasParams(contract, ctx, { ...NEW_GAS_PARAMS, ...delta })).rejects.toThrow(
+      throws,
+    );
+  });
+});
+
+describe("gas parameters reach the constructed transaction", () => {
+  it("withdraw carries the updated fee envelope and the WITHDRAW gas limit", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+
+    const next = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
+
+    expect(
+      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+    ).toEqual({
+      maxFeePerGas: NEW_MAX_FEE_PER_GAS,
+      maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit: NEW_WITHDRAW_GAS_LIMIT,
+    });
+  });
+
+  it("approveRouter carries the APPROVE gas limit", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+
+    const next = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+
+    expect(
+      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+    ).toEqual({
+      maxFeePerGas: NEW_MAX_FEE_PER_GAS,
+      maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit: NEW_APPROVE_GAS_LIMIT,
+    });
+  });
+
+  it("approveStata carries the APPROVE gas limit", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+
+    const next = (await contract.circuits.approveStata(configured, 0n, 1n)).context;
+
+    expect(
+      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+    ).toEqual({
+      maxFeePerGas: NEW_MAX_FEE_PER_GAS,
+      maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit: NEW_APPROVE_GAS_LIMIT,
+    });
+  });
+
+  it("swap carries the SWAP gas limit", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+
+    const next = (await swap(contract, configured, VALID_SWAP)).context;
+
+    expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).swapEventMap)).toEqual({
+      maxFeePerGas: NEW_MAX_FEE_PER_GAS,
+      maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit: NEW_SWAP_GAS_LIMIT,
+    });
+  });
+
+  it("supply carries the SUPPLY gas limit", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+
+    const next = (
+      await supply(
+        contract,
+        configured,
+        SUPPLY_AMOUNT,
+        vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
+      )
+    ).context;
+
+    expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).supplyEventMap)).toEqual({
+      maxFeePerGas: NEW_MAX_FEE_PER_GAS,
+      maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit: NEW_SUPPLY_GAS_LIMIT,
+    });
+  });
+
+  it("redeem carries the REDEEM gas limit", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+
+    const next = (
+      await redeem(contract, configured, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_COLOR))
+    ).context;
+
+    expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).redeemEventMap)).toEqual({
+      maxFeePerGas: NEW_MAX_FEE_PER_GAS,
+      maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit: NEW_REDEEM_GAS_LIMIT,
+    });
+  });
+
+  it("the five kinds get FIVE different gas limits off one setGasParams call", async () => {
+    // The whole point of per-kind limits: one call, five distinct values, each
+    // landing on its own kind. A single shared cell would collapse these.
+    const { contract, ctx } = await deployInitialised();
+    const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+
+    const stateOf = (c: typeof configured) => ledger(c.callContext.currentQueryContext.state);
+
+    const afterWithdraw = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
+    const afterSwap = (await swap(contract, configured, VALID_SWAP)).context;
+    const afterApprove = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+    const afterSupply = (
+      await supply(
+        contract,
+        configured,
+        SUPPLY_AMOUNT,
+        vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
+      )
+    ).context;
+    const afterRedeem = (
+      await redeem(contract, configured, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_COLOR))
+    ).context;
+
+    expect({
+      withdraw: envelopeOf(stateOf(afterWithdraw).signBidirectionalEventMap).gasLimit,
+      approve: envelopeOf(stateOf(afterApprove).signBidirectionalEventMap).gasLimit,
+      swap: envelopeOf(stateOf(afterSwap).swapEventMap).gasLimit,
+      supply: envelopeOf(stateOf(afterSupply).supplyEventMap).gasLimit,
+      redeem: envelopeOf(stateOf(afterRedeem).redeemEventMap).gasLimit,
+    }).toEqual({
+      withdraw: NEW_WITHDRAW_GAS_LIMIT,
+      approve: NEW_APPROVE_GAS_LIMIT,
+      swap: NEW_SWAP_GAS_LIMIT,
+      supply: NEW_SUPPLY_GAS_LIMIT,
+      redeem: NEW_REDEEM_GAS_LIMIT,
+    });
+  });
+
+  it("startDeposit is UNAFFECTED: it still stamps the CALLER's own gas arguments", async () => {
+    // A deposit's transaction is signed by the user's own derived EVM account
+    // and pays out of it, so its envelope stays a caller argument. Configure
+    // the vault's ledger values to something else entirely and check none of
+    // them leak into the deposit.
+    const { contract, ctx } = await deployInitialised();
+    const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+
+    const next = (await deposit(contract, configured, VALID_DEPOSIT)).context;
+
+    expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).depositEventMap)).toEqual({
+      maxFeePerGas: VALID_DEPOSIT.maxFeePerGas,
+      maxPriorityFeePerGas: VALID_DEPOSIT.maxPriorityFeePerGas,
+      gasLimit: VALID_DEPOSIT.gasLimit,
+    });
   });
 });
