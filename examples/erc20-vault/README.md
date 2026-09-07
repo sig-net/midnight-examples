@@ -316,7 +316,9 @@ signing key. Every circuit added after the base transaction is signed by it.
 Set it to a 32-byte hex key you keep: it is the only way to add or replace a
 circuit later, so a deploy to any network other than the local standalone chain
 REQUIRES it and fails fast when it is unset. On the local chain, which is
-throwaway, an unset key makes the deploy generate an ephemeral one and say so.
+throwaway, an unset key makes the deploy generate an ephemeral one and print it,
+so a `yarn resume-deploy:erc20-vault` after a failed maintenance add can export
+it.
 
 ### Deploying from CI
 

@@ -205,8 +205,9 @@ async function addDeferredCircuitsThrough(
  * deployed network `MAINTENANCE_SIGNING_KEY` is REQUIRED, since it is the only way to add or
  * replace a circuit afterwards and an ephemeral one would leave the contract unmaintainable
  * forever. The local standalone chain is throwaway, so an ephemeral key is generated into a COPY
- * of `env` (never `process.env`, and never the caller's map): the deploy and its adds all run
- * inside this one call, so it need not outlive them.
+ * of `env` (never `process.env`, and never the caller's map) and printed: the deploy and its adds
+ * all run inside this one call, and the printed value is what a {@link resumeVaultDeploy} after a
+ * failed add exports, since the adds must be signed by the authority the base deploy sealed.
  *
  * @param env - The caller's environment.
  * @param networkId - The network the deploy targets.
@@ -226,8 +227,14 @@ function resolveMaintenanceEnv(
         "bytes of hex (0x optional) and KEEP it.",
     );
   }
-  console.log("generated an ephemeral MAINTENANCE_SIGNING_KEY for the local split deploy");
-  return { ...env, MAINTENANCE_SIGNING_KEY: randomBytes(32).toString("hex") };
+  const maintenanceSigningKey = randomBytes(32).toString("hex");
+  console.log(
+    `generated an ephemeral MAINTENANCE_SIGNING_KEY for the local split deploy: ${maintenanceSigningKey}`,
+  );
+  console.log(
+    "  (export it as MAINTENANCE_SIGNING_KEY to `yarn resume-deploy:erc20-vault` if a maintenance add fails)",
+  );
+  return { ...env, MAINTENANCE_SIGNING_KEY: maintenanceSigningKey };
 }
 
 /** The outcome of a successful vault deployment. */
@@ -436,7 +443,8 @@ export async function resumeVaultDeploy(
   if (!envOrUndefined(env, "MAINTENANCE_SIGNING_KEY")) {
     throw new Error(
       "MAINTENANCE_SIGNING_KEY is required to resume a deploy: the maintenance adds must be signed " +
-        "by the authority sealed at the base deploy.",
+        "by the authority sealed at the base deploy. A local run printed the ephemeral key it " +
+        "generated just before the base deploy.",
     );
   }
 
