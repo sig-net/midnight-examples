@@ -905,6 +905,9 @@ describe("withdraw round-trip", () => {
       EXPECTED_ROUTING.outputDeserializationSchema,
     );
     expect(record.respondSerializationSchema).toEqual(EXPECTED_ROUTING.respondSerializationSchema);
+    // A constant, not this request's slot index: every vault-signed flow hashes
+    // 0 here, because txParams.nonce below already makes the id unique. The
+    // UNIQUENESS test in the throughput block is what holds that claim up.
     expect(record.requestNonce).toBe(0n);
 
     // Contract-built calldata: transfer(destEvmAddress, amount) as ABI-ready
@@ -2946,6 +2949,61 @@ describe("throughput: the two-phase allocator lets concurrent requests apply", (
     expect(new Set(nonces).size).toBe(nonces.length);
   });
 
+  it("UNIQUENESS: identical vault-signed requests at different slots get different ids, and the EVM nonce is the only thing holding them apart", async () => {
+    // What carries request-id uniqueness now that every vault-signed flow hashes
+    // a CONSTANT 0 as its request nonce. calculateRequestId hashes the whole
+    // SignBidirectionalEvent, txParams included, so the EVM nonce the allocator
+    // issued is already inside every id; the vault signs from ONE EVM account,
+    // and Ethereum spends an account's nonce exactly once.
+    //
+    // These two withdrawals agree on everything the id is built from -- same
+    // caller, same amount, same recipient, same key version, same gas envelope.
+    // They differ only in the coin surrendered, and the coin is not hashed into
+    // the id at all: it only decides the request KEY, hence the slot.
+    const { contract, ctx } = await deployInitialised();
+    const one = await withdraw(contract, ctx, VALID_WITHDRAW);
+    const two = await withdraw(contract, one.context, {
+      ...VALID_WITHDRAW,
+      coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x31)),
+    });
+
+    expect([one.slotIndex, two.slotIndex]).toEqual([0n, 1n]);
+
+    const index = toSignBidirectionalEventIndex(
+      ledger(stateOf(two.context) as Parameters<typeof ledger>[0]).signBidirectionalEventMap,
+    );
+
+    // BOTH records landed, under two DIFFERENT ids: the map is keyed by request
+    // id, so a size of 2 IS the ids differing, and neither request was lost to
+    // the duplicate-id assert.
+    expect(index.size).toBe(2);
+
+    const records = [...index.values()];
+    const recordA = first(records, "recorded request");
+    const recordB = first(
+      records.filter((candidate) => candidate !== recordA),
+      "second recorded request",
+    );
+
+    // The request nonce cannot be what separates them: it is the same constant
+    // in both. This is the assertion that would have hidden the bug when the
+    // nonce still mirrored the slot index.
+    expect([recordA.requestNonce, recordB.requestNonce]).toEqual([0n, 0n]);
+
+    // The EVM nonce is what separates them, one per slot.
+    expect(
+      [recordA.txParams.nonce, recordB.txParams.nonce].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+    ).toEqual([EVM_NONCE_BASE, EVM_NONCE_BASE + 1n]);
+
+    // ...and it is the ONLY difference. Normalise the EVM nonce away and the two
+    // hashed events are identical, so nothing else in the payload is quietly
+    // doing the separating.
+    expect({ ...recordA, txParams: { ...recordA.txParams, nonce: 0n } }).toEqual({
+      ...recordB,
+      txParams: { ...recordB.txParams, nonce: 0n },
+    });
+  });
+
   // ---- BINDING ----
 
   it("BINDING: a phase-2 path whose leaf is not the key is rejected", async () => {
@@ -3666,5 +3724,43 @@ describe("adminReplaceEvmNonce", () => {
       1n,
     );
     expect(issuedIn(replaced.context)).toBe(2n);
+  });
+
+  it("bounds the count and nothing else: a repeat the moved count used to let through is now refused", async () => {
+    // The counter is the issuance BOUND and is not this event's request nonce:
+    // that is the constant 0 every vault-signed flow passes. The difference is
+    // observable exactly here. Two replacements at the same nonce for the same
+    // fees are the same request, but the count between them used to move, so
+    // salting the id with it used to give the repeat a different id and record
+    // it twice.
+    const { contract, ctx, stuckNonce } = await stranded();
+    const replaced = (await contract.circuits.adminReplaceEvmNonce(ctx, stuckNonce, 1n)).context;
+
+    // A real request issues a slot in between, moving issuedSlots.
+    const meanwhile = await withdraw(contract, replaced, {
+      ...VALID_WITHDRAW,
+      coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x41)),
+    });
+
+    // Refusing this is right, not a lost capability: the MPC would sign the very
+    // same transaction bytes, and a node drops an identically-priced replacement
+    // of a transaction it already holds.
+    await expect(
+      contract.circuits.adminReplaceEvmNonce(meanwhile.context, stuckNonce, 1n),
+    ).rejects.toThrow(/Request already exists/);
+
+    // A genuine re-send raises the fees first -- which is what a node demands
+    // before it will evict anyway -- and the envelope is hashed, so the re-send
+    // lands under a fresh id.
+    const raised = (await setGasParams(contract, meanwhile.context, NEW_GAS_PARAMS)).context;
+    const resent = (await contract.circuits.adminReplaceEvmNonce(raised, stuckNonce, 1n)).context;
+
+    // The stranded withdraw, the first replacement, the interleaved withdraw,
+    // and the re-send.
+    expect(
+      toSignBidirectionalEventIndex(
+        ledger(resent.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ).size,
+    ).toBe(4);
   });
 });

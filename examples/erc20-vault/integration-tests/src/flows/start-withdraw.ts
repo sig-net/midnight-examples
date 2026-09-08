@@ -149,14 +149,17 @@ export async function startWithdraw(
 
   // The record the contract will store, reconstructed byte for byte: the
   // event's own sender (the vault contract, kernel.self() in-circuit), the
-  // request nonce and EVM nonce the slot proves, the fully contract-composed
+  // EVM nonce the slot proves, the fully contract-composed
   // envelope (the pinned chain, the contract-fixed gas), the contract-built
   // `transfer(destination, amount)` calldata (the raw selector, the ABI-ready
   // big-endian address and amount words, as broadcast), the vault's own
   // 32-byte derivation path, and the contract-fixed routing.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: slot.index,
+    // A constant, for every VAULT-signed flow: the EVM nonce inside txParams is
+    // already unique per request (one vault account, one nonce each), so the
+    // circuit hashes a 0 here rather than a second copy of that uniqueness.
+    requestNonce: 0n,
     keyVersion,
     path: VAULT_PATH_BYTES,
     ...VAULT_MPC_ROUTING,

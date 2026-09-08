@@ -103,7 +103,10 @@ export async function startSupply(
   // stataToken `to`, contract-fixed gas, deposit(amount, receiver=vault).
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: slot.index,
+    // A constant, for every VAULT-signed flow: the EVM nonce inside txParams is
+    // already unique per request (one vault account, one nonce each), so the
+    // circuit hashes a 0 here rather than a second copy of that uniqueness.
+    requestNonce: 0n,
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...SUPPLY_MPC_ROUTING,

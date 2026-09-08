@@ -532,12 +532,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         .responseReader(VAULT_REQUESTS_PATH)
         .getSignatureRequest(withdrawTransactionSignatureRequestId);
       // The EVM nonce the contract proved out of the allocator: slot i owns
-      // evmNonceBase + i, and the recorded request nonce IS that slot index.
+      // evmNonceBase + i, so the recorded nonce must fall inside the range the
+      // allocator has actually issued. The request nonce carries no slot index
+      // any more -- every vault-signed flow hashes a constant 0 there, because
+      // the EVM nonce above is what makes the request id unique.
       const state = await readVaultLedger(
         context.providers.publicDataProvider,
         context.vaultContractAddress,
       );
-      expect(record.txParams.nonce).toBe(state.evmNonceBase + record.requestNonce);
+      expect(record.requestNonce).toBe(0n);
+      expect(record.txParams.nonce).toBeGreaterThanOrEqual(state.evmNonceBase);
+      expect(record.txParams.nonce).toBeLessThan(state.evmNonceBase + state.issuedSlots);
       expect(record.txParams.calldata.is_some).toBe(true);
       expect(abiWordToUint128(calldataWordAt(record.txParams.calldata.value.words, 1))).toBe(
         WITHDRAW_AMOUNT,

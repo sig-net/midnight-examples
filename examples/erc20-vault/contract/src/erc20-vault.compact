@@ -53,18 +53,22 @@ sealed ledger signetSigner: SignetSigner;
 // Verifies every attestation (the Signet singleton emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
-// HOW MANY ALLOCATOR SLOTS HAVE BEEN ISSUED. Every assign* bumps it by one as it
-// claims a slot, so evmNonceBase + this is the first EVM nonce the vault has NOT yet
-// promised to anyone. adminReplaceEvmNonce is the only circuit that reads it, and it
-// reads it to refuse a nonce outside that range.
+// HOW MANY ALLOCATOR SLOTS HAVE BEEN ISSUED, and nothing else. Every assign* bumps it
+// by one as it claims a slot, so evmNonceBase + this is the first EVM nonce the vault
+// has NOT yet promised to anyone.
 //
-// This is NOT the request nonce any more: every request nonce is the allocator slot
-// index (see the EVM nonce allocator below), unique by construction. The counter is
-// written on the per-user path and read only on the admin one, which is the whole
-// reason it costs no contention: Counter.increment emits no popeq, so two concurrent
-// assign* calls both apply; only a READ pins, and the sole reader is deployer-gated
-// and used about once a year, so serializing it against a concurrent assign* costs
-// nothing anyone notices.
+// THAT BOUND IS ITS ONLY PURPOSE. adminReplaceEvmNonce is the sole circuit that reads
+// it, and it reads it for exactly one reason: to refuse an evmNonce argument the
+// allocator has not handed out, which would otherwise burn a nonce a future request is
+// owed and stall the vault's whole EVM account. Nothing else in this contract reads it,
+// and no request id is derived from it — the request nonce every vault-signed flow
+// sends is a constant 0, because the EVM nonce inside the hashed txParams already makes
+// each request id unique (see SlotClaim). Do not reintroduce a reader on the per-user
+// path: a READ is what pins a counter, and pinning this one would serialize every
+// assign* against every other, which is the throughput problem the allocator exists to
+// solve. Counter.increment emits no popeq, so COUNTING stays free and two concurrent
+// assign* calls both apply; the one reader is deployer-gated and used about once a
+// year, so serializing it against a concurrent assign* costs nothing anyone notices.
 //
 // The field also has to stay HERE because the MPC and src/index.ts pin its compiled
 // path [0, 3]; deleting it, or moving it, would renumber the state tree and take
@@ -414,24 +418,37 @@ circuit parkRequest(key: Bytes<32>, params: PendingRequest): [] {
 
 // What phase 2 proves out of a slot: everything the signature request needs, with
 // nothing read from a cell that another request can move.
+//
+// NO requestNonce. calculateRequestId hashes the WHOLE SignBidirectionalEvent, and
+// txParams — the EVM transaction the MPC will sign — is one of the hashed fields. So
+// the EVM nonce is already inside every request id, every vault-signed transaction
+// comes from the ONE vault EVM account, and Ethereum spends an account's nonce exactly
+// once. Two vault-signed requests therefore cannot collide however identical the rest
+// of them is: the allocator gives each its own slot, each slot its own EVM nonce, and
+// that nonce alone separates their ids. A request nonce would be a second, weaker copy
+// of a uniqueness the EVM nonce already carries, so the vault-signed flows pass a
+// constant 0 and this struct does not carry one.
+//
+// It USED to be needed, and the reason it stopped is worth keeping: the EVM nonce was
+// once a CALLER argument, so two callers could name the same one and only the request
+// nonce kept their ids apart. Phase 2 now derives it as evmNonceBase + the slot index,
+// unique by construction, which is exactly the job the request nonce was doing.
+//
+// startDeposit is the one flow this reasoning does NOT cover, and it keeps its
+// per-caller nonce: its transaction is signed by the USER's own derived EVM account,
+// where the EVM nonce is a caller argument again and nothing in the contract makes it
+// unique. See depositRequestNonces.
 struct SlotClaim {
   evmNonce: Uint<64>;
-  requestNonce: Uint<64>;
   params: PendingRequest;
 }
 
-// Phase 2. Proves which slot `key` owns and hands back the nonces derived from it.
+// Phase 2. Proves which slot `key` owns and hands back the EVM nonce derived from it.
 //
 // checkRoot lowers to `member` against the append-only root history, so this pinned
 // TRUE is monotone: a concurrent insert can only ADD roots, never invalidate the one
 // proven here. `path.leaf == key` binds the proven index to THIS request, so a caller
 // cannot present some other leaf's (cheaper or already-spent) position.
-//
-// requestNonce is the slot index, not a counter read. Its only job is to keep
-// otherwise identical requests hashing apart, and a slot is consumed once, so the
-// index already does that. (The design sketch said "the first 8 bytes of key": Compact
-// 0.25 has no byte slicing, and `key as Field as Uint<64>` is a range-CHECKED cast
-// that aborts for all but a vanishing fraction of keys, so it is not expressible.)
 //
 // The one thing this DOES write to shared state is issuedSlots, bumped by one
 // per issued slot so adminReplaceEvmNonce can tell an issued nonce from an unissued
@@ -465,7 +482,6 @@ circuit claimSlot(
 
   return SlotClaim {
     evmNonce: (evmNonceBase + index) as Uint<64>,
-    requestNonce: index,
     params: params,
   };
 }
@@ -682,7 +698,7 @@ export circuit adminReplaceEvmNonce(
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
-    issued,                                         // salt only; see the note below
+    0,                                              // requestNonce: unused, see the note below
     keyVersion,
     path,
     MPCSignatureAlgorithm.ecdsa,
@@ -699,11 +715,21 @@ export circuit adminReplaceEvmNonce(
   // Deliberately does NOT advance issuedSlots: it counts slots the ALLOCATOR
   // issued, and a replacement issues none. Bumping it here would raise the bound above
   // by one and let the NEXT admin call name an unissued nonce, which is precisely what
-  // that bound exists to prevent. The count still serves as this event's request nonce,
-  // whose only job is to keep otherwise identical requests hashing apart; two
-  // replacements differ in `nonce` anyway, and a genuine re-replacement of the same
-  // nonce has to raise the fees first, which changes the hash too. An exact repeat is
-  // the same request and the duplicate-id assert above is right to refuse it.
+  // that bound exists to prevent.
+  //
+  // The counter is not this event's request nonce either — that is the constant 0 the
+  // vault-signed flows all pass. It does not need to be anything else. Two replacements
+  // at DIFFERENT nonces differ in txParams.nonce and hash apart on their own. Two at the
+  // SAME nonce are the same replacement unless something else about them changed, and
+  // the only things that can change are the fee envelope (which the admin MUST raise
+  // before re-sending: a node demands about 10% more on both fee fields before it will
+  // evict what is already in its mempool) and keyVersion — both hashed, so both give a
+  // fresh id. What is left over is the byte-identical repeat, which the duplicate-id
+  // assert above refuses. That refusal is correct, not a lost capability: the MPC would
+  // sign the very same transaction bytes, and the node would drop it as an underpriced
+  // replacement of a transaction it already holds. Salting the id with a live counter
+  // would only buy the right to record a second event for a transaction that can never
+  // be included.
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
@@ -779,7 +805,7 @@ export circuit assignApproveStata(
   const path32 = pad(32, "vault");
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), claim.requestNonce, claim.params.keyVersion, path32,
+    kernel.self(), 0, claim.params.keyVersion, path32,   // 0 = requestNonce, see SlotClaim
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, caip2Id, schema, schema
   );
@@ -862,7 +888,7 @@ export circuit assignApproveRouter(
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
-    claim.requestNonce,
+    0,                                       // requestNonce: unused, see SlotClaim
     claim.params.keyVersion,
     path32,
     MPCSignatureAlgorithm.ecdsa,
@@ -1126,7 +1152,7 @@ export circuit assignWithdraw(
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
-    claim.requestNonce,
+    0,                                       // requestNonce: unused, see SlotClaim
     claim.params.keyVersion,
     path32,
     MPCSignatureAlgorithm.ecdsa,
@@ -1343,7 +1369,7 @@ export circuit assignSwap(
   const path32 = pad(32, "vault");
   const request = constructSignBidirectionalEvent<EvmType2TxParams<7, 0, 0>, 38, 37>(
     kernel.self(),
-    claim.requestNonce,
+    0,                                       // requestNonce: unused, see SlotClaim
     claim.params.keyVersion,
     path32,
     MPCSignatureAlgorithm.ecdsa,
@@ -1539,7 +1565,7 @@ export circuit assignSupply(
 
   const path32 = pad(32, "vault");
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 36, 35>(
-    kernel.self(), claim.requestNonce, claim.params.keyVersion, path32,
+    kernel.self(), 0, claim.params.keyVersion, path32,   // 0 = requestNonce, see SlotClaim
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, caip2Id, supplyOutputSchema(), supplyRespondSchema()
   );
@@ -1710,7 +1736,7 @@ export circuit assignRedeem(
 
   const path32 = pad(32, "vault");
   const request = constructSignBidirectionalEvent<EvmType2TxParams<3, 0, 0>, 36, 35>(
-    kernel.self(), claim.requestNonce, claim.params.keyVersion, path32,
+    kernel.self(), 0, claim.params.keyVersion, path32,   // 0 = requestNonce, see SlotClaim
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, caip2Id, redeemOutputSchema(), redeemRespondSchema()
   );

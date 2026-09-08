@@ -88,7 +88,14 @@ function printRequestMap(
   const index = toSignBidirectionalEventIndex(map);
   console.log(`pending ${kinds} signature requests: ${String(index.size)}`);
   for (const [requestIdHex, request] of index) {
-    console.log(`- ${requestIdHex} (requestNonce ${String(request.requestNonce)})`);
+    // The EVM nonce, not the request nonce: the vault-signed flows all hash a
+    // constant 0 as their request nonce (the EVM nonce is what separates their
+    // ids), so it distinguishes nothing here. Only deposits still carry a real
+    // per-caller request nonce, so print both.
+    console.log(
+      `- ${requestIdHex} (evm nonce ${String(request.txParams.nonce)}, ` +
+        `requestNonce ${String(request.requestNonce)})`,
+    );
   }
 }
 
