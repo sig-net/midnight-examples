@@ -75,19 +75,21 @@ export function deriveVaultEvmAddress(
 export const VAULT_REQUESTS_PATH: readonly number[] = [0, 0];
 
 /**
- * Resolved ledger-tree path of `signetRequestNonce` (ledger field 3).
+ * Resolved ledger-tree path of `issuedSlots` (ledger field 3), the count of
+ * allocator slots phase 2 has handed out.
  *
- * No longer a request nonce: every request nonce is the allocator slot index.
- * The cell now counts the slots the allocator has ISSUED — each `assign*` bumps
- * it by one — so `evmNonceBase` plus it is the first EVM nonce the vault has not
- * yet promised, which is the bound `adminReplaceEvmNonce` refuses to replace
- * past. Incrementing a counter pins nothing, so phase 2 stays concurrent; the
- * only circuit that READS it is that deployer-gated break-glass.
+ * Not a request nonce: every request nonce is the allocator slot index. Each
+ * `assign*` bumps this by one, so `evmNonceBase` plus it is the first EVM nonce
+ * the vault has not yet promised, which is the bound `adminReplaceEvmNonce`
+ * refuses to replace past. Incrementing a counter pins nothing, so phase 2 stays
+ * concurrent; the only circuit that READS it is that deployer-gated break-glass.
  *
- * The field stays declared, and this path exported, because the MPC pins it;
- * removing the field would renumber the state tree.
+ * This is also the path the SDK's raw request-ledger reader takes as its nonce
+ * path: it reads whatever counter sits here, and for this contract that counter
+ * is the issued-slot count. The field stays at field 3 because the MPC pins the
+ * position; moving it would renumber the state tree.
  */
-export const VAULT_NONCE_PATH: readonly number[] = [0, 3];
+export const VAULT_ISSUED_SLOTS_PATH: readonly number[] = [0, 3];
 
 /**
  * Resolved ledger-tree path of `depositEventMap` (ledger field 16). Deposits
