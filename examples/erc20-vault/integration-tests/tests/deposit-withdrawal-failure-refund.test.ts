@@ -22,6 +22,12 @@
 // FAILURE_REFUND_DEPOSIT_REQUEST_ID / FAILURE_REFUND_WITHDRAW_REQUEST_ID set
 // to the ids the failed run printed.
 //
+// The drain sends a transfer from the vault's pooled EVM account, whose nonces
+// come from the contract's own counter. `drainVaultErc20` therefore rewinds the
+// account nonce once its transfer has mined, so the doomed withdraw below still
+// signs the nonce the contract assigned it and its transfer really does mine
+// and revert.
+//
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
 
