@@ -359,6 +359,91 @@ export circuit setGasParams(
   vaultRedeemGasLimit = disclose(newRedeemGasLimit);
 }
 
+// Break-glass: replace whatever the vault signed at `evmNonce` with an empty
+// self-transfer, so a transaction that can never be included stops blocking the
+// queue behind it.
+//
+// WHY REPLACEMENT AND NOT A HIGHER CEILING. The vault signs from ONE EVM account
+// with a single sequential nonce, so a transaction that cannot be included blocks
+// every later one. Raising the ceiling with setGasParams does NOT rescue a
+// transaction already signed under the old one: the old maxFeePerGas is baked into
+// the signed bytes and the signature covers it, so the old transaction sits in the
+// mempool forever exactly as signed. The only Ethereum remedy is REPLACEMENT: send
+// another transaction at the SAME nonce paying meaningfully more, which evicts the
+// stuck one. An empty self-transfer — to the vault itself, zero value, no calldata,
+// the 21000 gas an EVM value transfer with no calldata costs exactly — is the
+// minimal form of that.
+//
+// ORDERING. Raise the fee values with setGasParams FIRST, then call this. A
+// replacement must pay meaningfully more than what it replaces (nodes typically
+// demand about 10% more on BOTH fee fields before they will evict the original),
+// and this circuit takes its fees from the ledger, so calling it before the raise
+// re-sends the same fees the stuck transaction already carries and the node drops
+// the replacement.
+//
+// CONSEQUENCE, PLAINLY. This CANCELS whatever was at that nonce; it does not retry
+// it. The original request's record stays in the event map unsettled and its
+// operation — the approve, withdraw, swap, supply or redeem it was — does not
+// happen. This is a break-glass for unblocking the queue at the cost of ONE
+// request, not a retry mechanism. Whoever owned the cancelled request must start it
+// again at a later nonce.
+//
+// Records into the EXISTING signBidirectionalEventMap (calldata capacity 2, unused
+// here) rather than a map of its own: a new ledger field would re-chunk the state
+// tree and move the six compiled paths the MPC notifications pin.
+export circuit adminReplaceEvmNonce(
+  evmNonce: Uint<64>,
+  keyVersion: Uint<8>
+): [] {
+  assert(initialised >= 1, "Not initialised");
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+
+  const txParams = EvmType2TxParams<2, 0, 0> {
+    chainId: evmChainId,
+    nonce: evmNonce,                                // the caller names the stuck nonce
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: 21000 as Uint<64>,                    // exact cost of a value transfer with no calldata
+    to: vaultEvmAddress,                            // the vault sends to ITSELF
+    value: 0 as Uint<128>,
+    calldata: none<EvmCalldata<2>>(),               // no calldata: the whole point of a replacement
+    accessListEntryCount: 0,
+    accessList: []
+  };
+
+  const path = pad(32, "vault");
+  const schema = vaultResponseSchema();
+  const requestNonce = signetRequestNonce as Uint<64>;
+  const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
+    kernel.self(),
+    requestNonce,
+    keyVersion,
+    path,
+    MPCSignatureAlgorithm.ecdsa,
+    MPCDestination.unused,
+    pad(64, ""),
+    TxParamType.evmType2,
+    txParams,
+    caip2Id,
+    schema,
+    schema
+  );
+  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
+  assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
+  signetRequestNonce.increment(1);
+  signBidirectionalEventMap.insert(requestId, disclose(request));
+
+  // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
+  signetSigner.signBidirectional(
+    requestId,
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(),
+      2 as Uint<8>,
+      [0, 0, 0, 0] as Vector<4, Uint<8>>,
+    ),
+  );
+}
+
 // One-time MPC-signed approve(stataToken, unlimitedAllowance()) on the underlying
 // USDC, so the wrapper can pull it during a supply. Signed with the VAULT account.
 export circuit approveStata(
