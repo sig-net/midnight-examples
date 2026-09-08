@@ -2632,11 +2632,11 @@ describe("gas parameters: initialise defaults", () => {
 
     expect(state.vaultMaxFeePerGas).toBe(DEFAULT_MAX_FEE_PER_GAS);
     expect(state.vaultMaxPriorityFeePerGas).toBe(DEFAULT_MAX_PRIORITY_FEE_PER_GAS);
-    expect(state.vaultWithdrawGasLimit).toBe(DEFAULT_WITHDRAW_GAS_LIMIT);
-    expect(state.vaultApproveGasLimit).toBe(DEFAULT_APPROVE_GAS_LIMIT);
-    expect(state.vaultSwapGasLimit).toBe(DEFAULT_SWAP_GAS_LIMIT);
-    expect(state.vaultSupplyGasLimit).toBe(DEFAULT_SUPPLY_GAS_LIMIT);
-    expect(state.vaultRedeemGasLimit).toBe(DEFAULT_REDEEM_GAS_LIMIT);
+    expect(state.vaultGasLimits.withdraw).toBe(DEFAULT_WITHDRAW_GAS_LIMIT);
+    expect(state.vaultGasLimits.approve).toBe(DEFAULT_APPROVE_GAS_LIMIT);
+    expect(state.vaultGasLimits.swap).toBe(DEFAULT_SWAP_GAS_LIMIT);
+    expect(state.vaultGasLimits.supply).toBe(DEFAULT_SUPPLY_GAS_LIMIT);
+    expect(state.vaultGasLimits.redeem).toBe(DEFAULT_REDEEM_GAS_LIMIT);
   });
 
   it("the default cap clears the highest base fee of the last year", async () => {
@@ -2650,7 +2650,7 @@ describe("gas parameters: initialise defaults", () => {
     expect(state.vaultMaxFeePerGas).toBeGreaterThan(100_000_000_000n);
     // A cap is only ever paid in full during a genuine spike, so it also
     // bounds the worst case: cap * the largest gas limit (the swap).
-    expect(state.vaultMaxFeePerGas * state.vaultSwapGasLimit).toBeLessThan(10n ** 18n);
+    expect(state.vaultMaxFeePerGas * state.vaultGasLimits.swap).toBeLessThan(10n ** 18n);
   });
 
   it("the cap is at or above the tip, as EIP-1559 requires", async () => {
@@ -2679,7 +2679,7 @@ describe("setGasParams", () => {
 
     const state = ledger(ctx.callContext.currentQueryContext.state);
     expect(state.vaultMaxFeePerGas).toBe(DEFAULT_MAX_FEE_PER_GAS);
-    expect(state.vaultSwapGasLimit).toBe(DEFAULT_SWAP_GAS_LIMIT);
+    expect(state.vaultGasLimits.swap).toBe(DEFAULT_SWAP_GAS_LIMIT);
   });
 
   it("rejects before initialise", async () => {
@@ -2696,11 +2696,11 @@ describe("setGasParams", () => {
 
     expect(state.vaultMaxFeePerGas).toBe(NEW_MAX_FEE_PER_GAS);
     expect(state.vaultMaxPriorityFeePerGas).toBe(NEW_MAX_PRIORITY_FEE_PER_GAS);
-    expect(state.vaultWithdrawGasLimit).toBe(NEW_WITHDRAW_GAS_LIMIT);
-    expect(state.vaultApproveGasLimit).toBe(NEW_APPROVE_GAS_LIMIT);
-    expect(state.vaultSwapGasLimit).toBe(NEW_SWAP_GAS_LIMIT);
-    expect(state.vaultSupplyGasLimit).toBe(NEW_SUPPLY_GAS_LIMIT);
-    expect(state.vaultRedeemGasLimit).toBe(NEW_REDEEM_GAS_LIMIT);
+    expect(state.vaultGasLimits.withdraw).toBe(NEW_WITHDRAW_GAS_LIMIT);
+    expect(state.vaultGasLimits.approve).toBe(NEW_APPROVE_GAS_LIMIT);
+    expect(state.vaultGasLimits.swap).toBe(NEW_SWAP_GAS_LIMIT);
+    expect(state.vaultGasLimits.supply).toBe(NEW_SUPPLY_GAS_LIMIT);
+    expect(state.vaultGasLimits.redeem).toBe(NEW_REDEEM_GAS_LIMIT);
   });
 
   it("is repeatable: the fee envelope tracks the market, unlike one-shot initialise", async () => {

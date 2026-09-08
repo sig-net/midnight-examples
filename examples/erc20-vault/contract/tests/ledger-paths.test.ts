@@ -58,27 +58,62 @@ describe("the admin-updateable gas parameters sit in chunk 0", () => {
   // These have no exported path constant: nothing reads them by ledger-tree
   // path, only through the generated `ledger()`. They are pinned anyway
   // because WHERE they sit is the whole reason they were declared immediately
-  // after signetRequestNonce rather than appended at the end. Seven fields
-  // inserted there push the chunk-1 base seven slots later too, which is what
-  // leaves the six notification paths above untouched. Appending them instead
-  // would have moved all four chunk-1 event maps.
+  // after signetRequestNonce rather than appended at the end. Fields inserted
+  // there push the chunk-1 base down by the same count, which is what leaves
+  // the six notification paths above untouched. Appending them instead would
+  // have moved all four chunk-1 event maps.
+  //
+  // The five per-kind gas limits are ONE struct cell, not five fields, and
+  // this is where that is enforced: `vaultGasLimits` is a single index.
   it.each([
     ["vaultMaxFeePerGas", [0, 4]],
     ["vaultMaxPriorityFeePerGas", [0, 5]],
-    ["vaultWithdrawGasLimit", [0, 6]],
-    ["vaultApproveGasLimit", [0, 7]],
-    ["vaultSwapGasLimit", [0, 8]],
-    ["vaultSupplyGasLimit", [0, 9]],
-    ["vaultRedeemGasLimit", [0, 10]],
+    ["vaultGasLimits", [0, 6]],
   ] as const)("%s", (fieldName, compiledPath) => {
     expect(compiledFieldIndex(fieldName)).toEqual(compiledPath);
   });
 });
 
-describe("the chunk-1 block is byte-identical to its pre-gas-parameter layout", () => {
+describe("the state tree stays TWO chunks deep", () => {
+  // THE CEILING, and the reason vaultGasLimits is one struct cell rather than
+  // five separate ledger fields.
+  //
+  // The compiler packs ledger fields 15 to a node. Up to 30 fields that is two
+  // chunks, every compiled index is [chunk, offset], and the request circuits
+  // pack the matching requestsPathDepth 2. Field 31 does not extend the second
+  // chunk -- it opens a THIRD, and the compiler re-splits from the top: the
+  // first chunk keeps ONE field and everything else slides one chunk along.
+  // Verified against this compiler by adding six scratch fields: [0,0] stayed,
+  // signetRequestNonce moved [0,3] -> [1,2], and all four event maps moved from
+  // chunk 1 to chunk 2. Every one of the six paths the MPC notifications pin
+  // moves at once.
+  //
+  // That failure is SILENT. The contract still compiles, the circuits still
+  // prove, and the off-chain signer simply stops seeing requests at the paths
+  // it watches, with no error raised anywhere. The path assertions above catch
+  // the moved paths; these catch the CAUSE, and name it.
+  //
+  // If a change lands here: do not raise the number. Group related values into
+  // one struct cell, the way `vaultGasLimits` holds five gas limits in one
+  // field, and the count comes back down.
+  it("holds at most 30 fields, the two chunks' worth", () => {
+    expect(contractInfo.ledger.length).toBeLessThanOrEqual(30);
+  });
+
+  it("uses exactly two chunks, at depth 2", () => {
+    const chunks = new Set(contractInfo.ledger.map((field) => field.index[0]));
+    const depths = new Set(contractInfo.ledger.map((field) => field.index.length));
+
+    expect([...chunks].sort()).toEqual([0, 1]);
+    expect([...depths]).toEqual([2]);
+  });
+});
+
+describe("the chunk-1 block holds the event maps at their pinned offsets", () => {
   // The sharper tripwire: not just the six notified paths, but the whole of
   // chunk 1 in order. Any ledger field appended at the end, or inserted after
-  // caip2Id, shifts this list and fails here first, naming exactly what moved.
+  // evmChainId, shifts this list and fails here first, naming exactly what
+  // moved.
   it("holds the same 15 fields at the same offsets", () => {
     const chunkOne = contractInfo.ledger
       .filter((field) => field.index[0] === 1)
