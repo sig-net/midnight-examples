@@ -23,10 +23,7 @@
 
 import type { MerkleTreePath } from "@midnight-ntwrk/compact-runtime";
 import { bytesToHex } from "@sig-net/midnight";
-import {
-  pureCircuits,
-  readVaultLedger,
-} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { pureCircuits, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import type { VaultContext } from "./vault-context.ts";
 

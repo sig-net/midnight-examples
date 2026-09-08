@@ -3276,7 +3276,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+    const next = (await approveRouter(contract, configured)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -3291,7 +3291,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveStata(configured, 0n, 1n)).context;
+    const next = (await approveStata(contract, configured)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -3360,7 +3360,7 @@ describe("gas parameters reach the constructed transaction", () => {
 
     const afterWithdraw = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
     const afterSwap = (await swap(contract, configured, VALID_SWAP)).context;
-    const afterApprove = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+    const afterApprove = (await approveRouter(contract, configured)).context;
     const afterSupply = (
       await supply(
         contract,

@@ -31,11 +31,7 @@ import {
   UNISWAP_SWAP_ROUTER_02,
   vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
-  type ContractReadMethod,
-  getTransactionNonce,
-  logSkip,
-} from "@sig-net/midnight-examples-test-harness";
+import { type ContractReadMethod, logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-swap.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
