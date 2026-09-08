@@ -70,27 +70,36 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault admin-replace-n
       const minedNonce = (): Promise<number> =>
         provider.getTransactionCount(context.evmVaultAddress, "latest");
 
-      // 1. n — the vault account's next nonce on chain.
-      const n = await minedNonce();
+      // 1. Where the account actually sits on chain, before anything is signed.
+      const minedBefore = await minedNonce();
 
-      // 2. A real vault-signed request takes nonce n and is signed, then
-      //    deliberately NOT broadcast. That is the outage in miniature: nonce
-      //    n is spoken for by a transaction nothing can include, and it cannot
-      //    be re-signed at another nonce because the signature covers it.
-      const blockingId = await approveRouter(context, BigInt(n));
+      // 2. A real vault-signed request is signed, then deliberately NOT
+      //    broadcast. That is the outage in miniature: its nonce is spoken for
+      //    by a transaction nothing can include, and it cannot be re-signed at
+      //    another nonce because the signature covers it.
+      //
+      //    No caller picks that nonce any more — the allocator does, as
+      //    evmNonceBase + the slot phase 1 landed in — so `n` is read back off
+      //    the transaction the MPC signed rather than chosen here.
+      const blockingRequest = await approveRouter(context);
       const blocking = await pollSignatureResponse(context, {
-        requestId: blockingId,
+        requestId: blockingRequest.requestId,
         intervalMs: 1000,
         timeoutMs: 2 * MINUTE,
         expectedSigner: context.evmVaultAddress,
       });
-      expect(blocking.nonce).toBe(n);
+      const n = blocking.nonce;
+      // The allocator issues contiguous nonces from evmNonceBase and every one
+      // it has issued so far has mined, so the one it strands here is exactly
+      // the account's next. If this fails the allocator and the account have
+      // already drifted, and nothing below would mean what it says.
+      expect(n).toBe(minedBefore);
 
       // 3. The next request, at n+1, IS broadcast. EVM nonces are strictly
       //    sequential, so the node can only queue it behind the empty slot.
-      const queuedId = await approveRouter(context, BigInt(n + 1));
+      const queuedRequest = await approveRouter(context);
       const queued = await pollSignatureResponse(context, {
-        requestId: queuedId,
+        requestId: queuedRequest.requestId,
         intervalMs: 1000,
         timeoutMs: 2 * MINUTE,
         expectedSigner: context.evmVaultAddress,

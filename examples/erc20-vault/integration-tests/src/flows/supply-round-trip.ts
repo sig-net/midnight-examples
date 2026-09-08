@@ -2,7 +2,6 @@
 // signature, broadcast, completeSupply.
 import type { RequestIdHex } from "@sig-net/midnight";
 import { VAULT_SUPPLY_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
 import type { VaultSession } from "../vault-session.ts";
 import { ensureStataApproved } from "./approve-stata.ts";

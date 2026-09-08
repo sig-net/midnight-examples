@@ -32,11 +32,7 @@ import {
   STATA_USDC,
   vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
-  type ContractReadMethod,
-  getTransactionNonce,
-  logSkip,
-} from "@sig-net/midnight-examples-test-harness";
+import { type ContractReadMethod, logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-stata.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";

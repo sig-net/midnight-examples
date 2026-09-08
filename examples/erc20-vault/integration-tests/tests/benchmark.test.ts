@@ -63,7 +63,7 @@
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
 
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { bytesToHex, hexToBytes, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
   VAULT_DEPOSIT_REQUESTS_PATH,
   VAULT_REDEEM_REQUESTS_PATH,
