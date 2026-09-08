@@ -65,7 +65,7 @@ import {
   ledger,
   pureCircuits,
   VAULT_DEPOSIT_REQUESTS_PATH,
-  VAULT_NONCE_PATH,
+  VAULT_ISSUED_SLOTS_PATH,
   VAULT_REQUESTS_PATH,
   type VaultPrivateState,
   witnesses,
@@ -405,7 +405,7 @@ describe("erc20-vault ledger shape", () => {
     const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(
       rawState,
       VAULT_REQUESTS_PATH,
-      VAULT_NONCE_PATH,
+      VAULT_ISSUED_SLOTS_PATH,
     );
     const typedIndex = toSignBidirectionalEventIndex(
       ledger(ctx.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -535,13 +535,13 @@ describe("deposit round-trip", () => {
     const rawLedger = readSignetRequestsLedgerFromState(
       state,
       VAULT_DEPOSIT_REQUESTS_PATH,
-      VAULT_NONCE_PATH,
+      VAULT_ISSUED_SLOTS_PATH,
     );
 
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
-    // The raw counter read matches the generated one.
-    expect(rawLedger.nonce).toBe(ledger(state).signetRequestNonce);
+    // The raw counter read at the nonce path matches the generated one.
+    expect(rawLedger.nonce).toBe(ledger(state).issuedSlots);
 
     const [idHex, record] = first(typedIndex.entries(), "indexed signBidirectional request");
 
@@ -624,12 +624,12 @@ describe("deposit round-trip", () => {
       amount: AMOUNT,
     });
 
-    // This caller's OWN deposit nonce slot bumped for their next request,
-    // while the global signetRequestNonce (which the vault-signed flows still
-    // use) is left untouched: deposits no longer read or move the shared cell,
-    // which is what lets two different callers' deposits apply concurrently.
+    // This caller's OWN deposit nonce slot bumped for their next request, while
+    // the vault-path counter issuedSlots is left untouched: a deposit allocates
+    // no slot, and it reads no shared cell at all, which is what lets two
+    // different callers' deposits apply concurrently.
     expect(ledger(state).depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(1n);
-    expect(ledger(state).signetRequestNonce).toBe(0n);
+    expect(ledger(state).issuedSlots).toBe(0n);
   });
 });
 
@@ -699,17 +699,17 @@ describe("deposit validation", () => {
     expect(nonces).toEqual([0n, 1n]);
   });
 
-  it("the SAME caller depositing twice advances THEIR slot and leaves signetRequestNonce at 0", async () => {
+  it("the SAME caller depositing twice advances THEIR slot and issues no allocator slot", async () => {
     // The ledger-side facts the off-chain twin (`depositRequestNonce` in
     // src/vault-ledger.ts) reads to predict a request id. A twin reading the
-    // shared signetRequestNonce instead agrees only on the first deposit,
+    // vault-path counter issuedSlots instead agrees only on the first deposit,
     // when both cells read 0; this pins the divergence so that accident can
     // never silently return.
     const { contract, ctx } = await deployInitialised();
 
     const stateBefore = ledger(ctx.callContext.currentQueryContext.state);
     expect(stateBefore.depositRequestNonces.member(DEPLOYER_COMMITMENT)).toBe(false);
-    expect(stateBefore.signetRequestNonce).toBe(0n);
+    expect(stateBefore.issuedSlots).toBe(0n);
 
     const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
     const stateAfterFirst = ledger(afterFirst.callContext.currentQueryContext.state);
@@ -720,8 +720,9 @@ describe("deposit validation", () => {
 
     // The caller's own counter is what advanced...
     expect(stateAfterSecond.depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(2n);
-    // ...and the shared vault-path nonce never moved: deposits do not touch it.
-    expect(stateAfterSecond.signetRequestNonce).toBe(0n);
+    // ...and the vault-path issued-slot count never moved: a deposit is signed
+    // by the caller's own EVM account, so it allocates nothing.
+    expect(stateAfterSecond.issuedSlots).toBe(0n);
 
     // So the SECOND deposit hashed nonce 1, which the twin can only predict
     // from the per-caller slot.
@@ -932,7 +933,7 @@ describe("withdraw round-trip", () => {
     // The shared counter is no longer a request nonce, it is the count of slots
     // the allocator has issued: one, this request's. Nothing on this path READ
     // it, which is why the increment costs no contention.
-    expect(ledger(state).signetRequestNonce).toBe(1n);
+    expect(ledger(state).issuedSlots).toBe(1n);
     // The slot was consumed: the parked parameters are replaced by a tombstone,
     // never removed, so the key can never be parked (and re-leafed) again.
     expect(ledger(state).pendingParams.size()).toBe(1n);
@@ -2669,10 +2670,12 @@ describe("cross-kind settle isolation", () => {
 
 // ===========================================================================
 // Throughput: the vault-signed flows used to read and increment ONE shared
-// cell, signetRequestNonce, for their request nonce, and take the EVM account
-// nonce from the caller. The counter read is pinned (popeq) and the cell moved
-// on every request, so two requests proven against the same state could not
-// both apply: the second failed on-chain reconciliation with a read mismatch.
+// counter for their request nonce — the cell now called issuedSlots — and take
+// the EVM account nonce from the caller. That READ is pinned (popeq) and the
+// cell moved on every request, so two requests proven against the same state
+// could not both apply: the second failed on-chain reconciliation with a read
+// mismatch. (The cell is still incremented today, once per issued slot, but
+// nothing on this path READS it, which is the whole difference.)
 // Measured against the shared-counter baseline this branch replaces, the pair
 // below produced
 //
@@ -3590,7 +3593,7 @@ describe("adminReplaceEvmNonce", () => {
   // would hand that same nonce to a real request later, and the network would
   // reject its signed transaction as a reused nonce: the exact stall this
   // circuit exists to clear, caused by the tool meant to clear it. The bound
-  // is signetRequestNonce, the count of slots issued.
+  // is issuedSlots, the count of slots issued.
 
   it("rejects a nonce the allocator has not issued yet", async () => {
     // Nothing has run either allocator phase, so NO nonce has been issued and
@@ -3642,7 +3645,7 @@ describe("adminReplaceEvmNonce", () => {
     // nonce.
     const { contract, ctx } = await deployInitialised();
     const issuedIn = (c: CircuitContext<VaultPrivateState>): bigint =>
-      ledger(c.callContext.currentQueryContext.state).signetRequestNonce;
+      ledger(c.callContext.currentQueryContext.state).issuedSlots;
 
     expect(issuedIn(ctx)).toBe(0n);
 

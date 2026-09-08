@@ -69,7 +69,7 @@ export ledger mpcResponseKey: Secp256k1Point;
 // The field also has to stay HERE because the MPC and src/index.ts pin its compiled
 // path [0, 3]; deleting it, or moving it, would renumber the state tree and take
 // every other pinned path with it.
-export ledger signetRequestNonce: Counter;
+export ledger issuedSlots: Counter;
 
 // ---- Gas parameters of VAULT-SIGNED transactions ------------------------------------
 //
@@ -92,7 +92,7 @@ export ledger signetRequestNonce: Counter;
 // The gas LIMIT is a property of the operation, not of the market, so it is per kind;
 // the fee cap and tip track the market, so they are global.
 //
-// DECLARED HERE (immediately after signetRequestNonce) ON PURPOSE, for the reason
+// DECLARED HERE (immediately after issuedSlots) ON PURPOSE, for the reason
 // spelled out over depositRequestNonces below: the compiler puts the LAST 15 ledger
 // fields in chunk 1, so APPENDING these at the end would re-chunk the state tree and
 // move the pinned MPC notification paths. Inserting fields here pushes the chunk-1
@@ -144,9 +144,9 @@ sealed ledger deployer: Bytes<32>;
 
 // Per-caller deposit request nonces, keyed by the caller's identity commitment
 // (startDeposit's `caller`). startDeposit sources its requestNonce from this
-// caller's own slot instead of the single global signetRequestNonce, so two
-// DIFFERENT callers' deposits no longer read one shared ledger cell and can
-// both apply against the same proving state. The counter stays
+// caller's own slot rather than from any single global cell, so two DIFFERENT
+// callers' deposits no longer read one shared ledger cell and can both apply
+// against the same proving state. The counter stays
 // contract-controlled and monotonic per caller, so a caller still cannot replay
 // their own settled request. Only deposit binds the caller into the request id
 // (path = caller), so only deposit can safely key uniqueness on the caller. The
@@ -196,11 +196,21 @@ export ledger depositRequestNonces: Map<Bytes<32>, Counter>;
 // only conflicts when someone else moves the cell, and nothing ever moves this one.
 export ledger evmNonceBase: Uint<64>;
 
-// The allocator itself: leaf i owns EVM account nonce evmNonceBase + i. Depth 20 caps
-// the vault at 1,048,576 lifetime vault-signed requests. Leaves are unique because a
+// The allocator itself: leaf i owns EVM account nonce evmNonceBase + i. Depth 24 caps
+// the vault at 16,777,216 lifetime vault-signed requests. Leaves are unique because a
 // leaf is requestCommitment(callerSecretKey(), nonce): distinct secrets under a
 // collision-resistant hash, and phase 1 rejects a key already parked.
-export ledger slots: HistoricMerkleTree<20, Bytes<32>>;
+//
+// THE DEPTH IS THE ONLY DIAL. There is deliberately no rotation, reset or compaction
+// utility, and adding one would be a mistake rather than a feature: an outstanding
+// request's proof is a path against a root in this tree's history, and a request that
+// has been assigned owns an EVM nonce derived from its POSITION in it. Emptying the
+// tree invalidates every proof not yet spent, and refilling it hands positions --
+// and so EVM nonces -- to leaves that already belong to someone. The cap is a lifetime
+// cap because it has to be; the answer to running low is a deeper tree, which costs
+// 8 ZKIR instructions per extra level in every assign* (measured going 20 -> 24) and
+// nothing at all in phase 1, which never touches a path.
+export ledger slots: HistoricMerkleTree<24, Bytes<32>>;
 
 // Parameters parked by phase 1 for phase 2 to build the signature request from. ONE
 // map for every flow, discriminated by `kind`, so the allocator costs three ledger
@@ -423,7 +433,7 @@ struct SlotClaim {
 // 0.25 has no byte slicing, and `key as Field as Uint<64>` is a range-CHECKED cast
 // that aborts for all but a vanishing fraction of keys, so it is not expressible.)
 //
-// The one thing this DOES write to shared state is signetRequestNonce, bumped by one
+// The one thing this DOES write to shared state is issuedSlots, bumped by one
 // per issued slot so adminReplaceEvmNonce can tell an issued nonce from an unissued
 // one. It is safe here for the same reason the tree is: Counter.increment emits no
 // popeq, so it is a blind add that commutes with every other assign*'s. Counting is
@@ -432,11 +442,11 @@ struct SlotClaim {
 // and forget to count it.
 circuit claimSlot(
   key: Bytes<32>,
-  path: MerkleTreePath<20, Bytes<32>>,
+  path: MerkleTreePath<24, Bytes<32>>,
   kind: RequestKind
 ): SlotClaim {
   assert(initialised >= 1, "Not initialised");
-  assert(slots.checkRoot(merkleTreePathRoot<20, Bytes<32>>(path)), "Unknown slots root");
+  assert(slots.checkRoot(merkleTreePathRoot<24, Bytes<32>>(path)), "Unknown slots root");
   assert(path.leaf == key, "Path leaf is not the request key");
 
   const index = fold(
@@ -451,7 +461,7 @@ circuit claimSlot(
   // RequestKind.consumed, which matches no flow's expected kind.
   assert(params.kind == kind, "Wrong request kind for this key");
 
-  signetRequestNonce.increment(1);
+  issuedSlots.increment(1);
 
   return SlotClaim {
     evmNonce: (evmNonceBase + index) as Uint<64>,
@@ -629,7 +639,7 @@ export circuit setGasParams(
 // has not handed out yet, the allocator would later hand that same nonce to a real
 // request, and the network would reject that request's signed transaction as a reused
 // nonce — the exact stall this circuit exists to clear, caused by the tool meant to
-// clear it. The assert below rules it out, because signetRequestNonce counts the slots
+// clear it. The assert below rules it out, because issuedSlots counts the slots
 // the allocator has issued, so evmNonceBase + it is the first nonce not yet promised.
 //
 // Reading that counter PINS it, so this call cannot apply alongside a concurrent
@@ -652,7 +662,7 @@ export circuit adminReplaceEvmNonce(
   // Only a nonce the allocator has ALREADY issued can be replaced. See the note above:
   // burning an issued nonce cancels one request, burning an unissued one strands the
   // whole account.
-  const issued = signetRequestNonce as Uint<64>;
+  const issued = issuedSlots as Uint<64>;
   assert(evmNonce < (evmNonceBase + issued) as Uint<64>, "Nonce not issued yet");
 
   const txParams = EvmType2TxParams<2, 0, 0> {
@@ -686,7 +696,7 @@ export circuit adminReplaceEvmNonce(
   );
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
-  // Deliberately does NOT advance signetRequestNonce: it counts slots the ALLOCATOR
+  // Deliberately does NOT advance issuedSlots: it counts slots the ALLOCATOR
   // issued, and a replacement issues none. Bumping it here would raise the bound above
   // by one and let the NEXT admin call name an unissued nonce, which is precisely what
   // that bound exists to prevent. The count still serves as this event's request nonce,
@@ -740,7 +750,7 @@ export circuit requestApproveStata(
 // nonce can never be patched in afterwards.
 export circuit assignApproveStata(
   key: Bytes<32>,
-  path: MerkleTreePath<20, Bytes<32>>
+  path: MerkleTreePath<24, Bytes<32>>
 ): [] {
   const disclosedKey = disclose(key);
   const claim = claimSlot(disclosedKey, disclose(path), RequestKind.approveStata);
@@ -821,7 +831,7 @@ export circuit requestApproveRouter(
 // Phase 2: permissionless, one request per call.
 export circuit assignApproveRouter(
   key: Bytes<32>,
-  path: MerkleTreePath<20, Bytes<32>>
+  path: MerkleTreePath<24, Bytes<32>>
 ): [] {
   const disclosedKey = disclose(key);
   const claim = claimSlot(disclosedKey, disclose(path), RequestKind.approveRouter);
@@ -941,8 +951,8 @@ export circuit startDeposit(
 
   const schema = vaultResponseSchema();
   // Per-caller nonce: read THIS caller's slot (default 0 for a first deposit),
-  // never the shared signetRequestNonce, so a concurrent deposit by another
-  // caller reads a different slot and does not conflict at apply time.
+  // never a shared cell, so a concurrent deposit by another caller reads a
+  // different slot and does not conflict at apply time.
   if (!depositRequestNonces.member(caller)) {
     depositRequestNonces.insertDefault(caller);
   }
@@ -1085,7 +1095,7 @@ export circuit requestWithdraw(
 // id from the stored record and drops it on a mismatch.
 export circuit assignWithdraw(
   key: Bytes<32>,
-  path: MerkleTreePath<20, Bytes<32>>
+  path: MerkleTreePath<24, Bytes<32>>
 ): [] {
   const disclosedKey = disclose(key);
   const claim = claimSlot(disclosedKey, disclose(path), RequestKind.withdraw);
@@ -1297,7 +1307,7 @@ export circuit requestSwap(
 // account at the EVM nonce this request's slot owns.
 export circuit assignSwap(
   key: Bytes<32>,
-  path: MerkleTreePath<20, Bytes<32>>
+  path: MerkleTreePath<24, Bytes<32>>
 ): [] {
   const disclosedKey = disclose(key);
   const claim = claimSlot(disclosedKey, disclose(path), RequestKind.swap);
@@ -1501,7 +1511,7 @@ export circuit requestSupply(
 // the EVM nonce this request's slot owns.
 export circuit assignSupply(
   key: Bytes<32>,
-  path: MerkleTreePath<20, Bytes<32>>
+  path: MerkleTreePath<24, Bytes<32>>
 ): [] {
   const disclosedKey = disclose(key);
   const claim = claimSlot(disclosedKey, disclose(path), RequestKind.supply);
@@ -1671,7 +1681,7 @@ export circuit requestRedeem(
 // at the EVM nonce this request's slot owns.
 export circuit assignRedeem(
   key: Bytes<32>,
-  path: MerkleTreePath<20, Bytes<32>>
+  path: MerkleTreePath<24, Bytes<32>>
 ): [] {
   const disclosedKey = disclose(key);
   const claim = claimSlot(disclosedKey, disclose(path), RequestKind.redeem);
