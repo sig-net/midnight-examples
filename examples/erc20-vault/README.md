@@ -817,7 +817,7 @@ failure recovery) and will drive it for you.
 
 # The e2e suite
 
-Eleven specs run serially in a pinned order (see
+Twelve specs run serially in a pinned order (see
 `integration-tests/vitest.config.ts`). `happy-day-e2e` runs first because it
 initialises the vault and cycles the funds that the later flows build on.
 Each spec is rerun-tolerant against kept contract addresses and prints resume
@@ -836,8 +836,9 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `supply-refund-e2e` | 1 | A supply whose wrapper deposit reverts on-chain (drained vault balance) ends in an in-circuit REFUND of the surrendered USDC | none |
 | `swap-refund-e2e` | 1 | A swap whose `amountInMaximum` is below the real cost reverts on-chain and the settle re-mints the surrendered tokenIn | none |
 | `redeem-refund-e2e` | 1 | A redeem whose wrapper burn reverts on-chain (drained vault stataUSDC balance) ends in an in-circuit REFUND of the surrendered shares | none |
+| `admin-replace-nonce-e2e` | 1 | A signed-but-unbroadcast vault transaction strands the account's nonce, and `adminReplaceEvmNonce` replaces it with an empty self-transfer so the transaction queued behind it mines | none |
 
-95 tests total. The suite runs against a Sepolia fork, and the setup pipeline
+96 tests total. The suite runs against a Sepolia fork, and the setup pipeline
 verifies that the Uniswap router and the stataUSDC wrapper are deployed on it
 before any spec runs, so a fork missing either fails the run at setup with an
 error naming the missing contract. A rerun
