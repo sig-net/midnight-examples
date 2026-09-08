@@ -140,15 +140,8 @@ export interface VaultGasEnvelope {
  * @returns The gas limit for that kind plus the global fee ceiling and tip.
  */
 export function vaultGasEnvelope(state: VaultLedgerState, kind: VaultGasKind): VaultGasEnvelope {
-  const gasLimits: Record<VaultGasKind, bigint> = {
-    withdraw: state.vaultWithdrawGasLimit,
-    approve: state.vaultApproveGasLimit,
-    swap: state.vaultSwapGasLimit,
-    supply: state.vaultSupplyGasLimit,
-    redeem: state.vaultRedeemGasLimit,
-  };
   return {
-    gasLimit: gasLimits[kind],
+    gasLimit: state.vaultGasLimits[kind],
     maxFeePerGas: state.vaultMaxFeePerGas,
     maxPriorityFeePerGas: state.vaultMaxPriorityFeePerGas,
   };

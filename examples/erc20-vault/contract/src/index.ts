@@ -56,13 +56,16 @@ export function deriveVaultEvmAddress(
 // compiler records each field's path as its "index" in
 // managed/erc20-vault/compiler/contract-info.json.
 
-// The vault has 29 ledger fields, past the 15-field flat limit, so the compiler
+// The vault has 25 ledger fields, past the 15-field flat limit, so the compiler
 // chunks the state tree two levels deep. Every path below is therefore
 // [chunk, offset] (depth 2), and the request circuits pack the same as
 // requestsPathDepth 2. Chunk 1 holds the LAST 15 fields (declaration indexes
-// 14-28) and chunk 0 holds the rest (0-13), which is why a new ledger field
+// 10-24) and chunk 0 holds the rest (0-9), which is why a new ledger field
 // must be declared BEFORE depositEventMap, never appended: appending re-chunks
-// the tree and moves every path below. See the CAUTION over the ledger block in
+// the tree and moves every path below. Two chunks hold 30 fields at most, and
+// field 31 opens a THIRD chunk that re-splits the tree and moves every path at
+// once, which is why the five per-kind gas limits are one `vaultGasLimits`
+// struct cell rather than five fields. See the CAUTION over the ledger block in
 // erc20-vault.compact, and tests/ledger-paths.test.ts, which fails if it moves.
 
 /**

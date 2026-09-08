@@ -22,11 +22,13 @@ import { vaultGasEnvelope, type VaultLedgerState } from "../src/vault-ledger.ts"
 const STORED = {
   vaultMaxFeePerGas: 150_000_000_000n,
   vaultMaxPriorityFeePerGas: 1_000_000_000n,
-  vaultWithdrawGasLimit: 100_000n,
-  vaultApproveGasLimit: 122_000n,
-  vaultSwapGasLimit: 700_000n,
-  vaultSupplyGasLimit: 500_000n,
-  vaultRedeemGasLimit: 555_000n,
+  vaultGasLimits: {
+    withdraw: 100_000n,
+    approve: 122_000n,
+    swap: 700_000n,
+    supply: 500_000n,
+    redeem: 555_000n,
+  },
 };
 
 const ledgerState = (overrides: Partial<typeof STORED> = {}): VaultLedgerState =>
@@ -34,11 +36,11 @@ const ledgerState = (overrides: Partial<typeof STORED> = {}): VaultLedgerState =
 
 describe("vaultGasEnvelope", () => {
   it.each([
-    ["withdraw", STORED.vaultWithdrawGasLimit],
-    ["approve", STORED.vaultApproveGasLimit],
-    ["swap", STORED.vaultSwapGasLimit],
-    ["supply", STORED.vaultSupplyGasLimit],
-    ["redeem", STORED.vaultRedeemGasLimit],
+    ["withdraw", STORED.vaultGasLimits.withdraw],
+    ["approve", STORED.vaultGasLimits.approve],
+    ["swap", STORED.vaultGasLimits.swap],
+    ["supply", STORED.vaultGasLimits.supply],
+    ["redeem", STORED.vaultGasLimits.redeem],
   ] as const)("reads the %s gas limit", (kind, gasLimit) => {
     expect(vaultGasEnvelope(ledgerState(), kind)).toEqual({
       gasLimit,
