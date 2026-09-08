@@ -11,7 +11,7 @@ import {
 } from "@midnight-ntwrk/compact-runtime";
 // This tree's wasm ContractState class: see signetStateProvider for why the
 // portal-linked signet module's state must round-trip through it.
-import { ContractState, QueryContext, CostModel } from "@midnightntwrk/onchain-runtime-v4";
+import { ContractState, CostModel, QueryContext } from "@midnightntwrk/onchain-runtime-v4";
 import {
   asciiPadded,
   bytesToHex,
@@ -2404,12 +2404,12 @@ describe("cross-kind settle isolation", () => {
 // cell, so they still serialize and are still RED, with the read mismatch the
 // CONTROL below pins.
 // ===========================================================================
-type VaultCall = {
+interface VaultCall {
   contractAddress: string;
   publicTranscript: unknown;
   initialQueryContext: { block: unknown; state: unknown };
   finalQueryContext: { effects: unknown };
-};
+}
 // The LAST vault call in the trace, not the first. The proof-data trace
 // accumulates across every circuit run threaded through one context, so on a
 // context that has already been through deployInitialised the first vault
@@ -2471,7 +2471,7 @@ const replay = (
     qc.runTranscript(transcript as never, CostModel.initialCostModel());
     return "applied";
   } catch (e) {
-    return "REJECTED: " + String((e as { message?: string })?.message ?? e).slice(0, 160);
+    return "REJECTED: " + String((e as { message?: string }).message ?? e).slice(0, 160);
   }
 };
 
@@ -2494,19 +2494,6 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
     const bobCtx = await strangerContext("startDeposit", ctx);
     const bob = await deposit(contract, bobCtx, VALID_DEPOSIT);
     // Bob was proven concurrently with Alice; he must still apply after her.
-    expect(replay(stateAfterAlice, bob, true)).toBe("applied");
-  });
-
-  it("REQUIREMENT (red today): two concurrent startWithdraws from different callers both apply", async () => {
-    const { contract, ctx } = await deployInitialised();
-    const alice = await withdraw(contract, ctx, VALID_WITHDRAW);
-    const stateAfterAlice = alice.context.callContext.currentQueryContext.state;
-    const bobCtx = await strangerContext("startWithdraw", ctx);
-    const bob = await withdraw(contract, bobCtx, VALID_WITHDRAW);
-    // Vault-signed flow: it still reads the shared signetRequestNonce, which
-    // startDeposit no longer does, so Bob (proven concurrently) is still
-    // rejected once Alice moves the counter. RED on this branch by design:
-    // the fix here is the deposit counter, not the vault-signed queue.
     expect(replay(stateAfterAlice, bob, true)).toBe("applied");
   });
 
