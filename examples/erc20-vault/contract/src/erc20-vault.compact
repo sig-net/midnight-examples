@@ -53,14 +53,22 @@ sealed ledger signetSigner: SignetSigner;
 // Verifies every attestation (the Signet singleton emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
-// OFF THE REQUEST PATH. No request circuit reads or increments it any more: every
-// request nonce is now derived from the allocator slot index (see the EVM nonce
-// allocator below), which is unique by construction. The one remaining reader is
-// adminReplaceEvmNonce, the deployer-gated break-glass, which is rare and serial by
-// nature, so the shared read that would serialize ordinary requests costs it nothing.
-// The field also stays declared because the MPC and src/index.ts pin its compiled
-// path [0, 3]; deleting it would renumber the state tree and move every other pinned
-// path with it.
+// HOW MANY ALLOCATOR SLOTS HAVE BEEN ISSUED. Every assign* bumps it by one as it
+// claims a slot, so evmNonceBase + this is the first EVM nonce the vault has NOT yet
+// promised to anyone. adminReplaceEvmNonce is the only circuit that reads it, and it
+// reads it to refuse a nonce outside that range.
+//
+// This is NOT the request nonce any more: every request nonce is the allocator slot
+// index (see the EVM nonce allocator below), unique by construction. The counter is
+// written on the per-user path and read only on the admin one, which is the whole
+// reason it costs no contention: Counter.increment emits no popeq, so two concurrent
+// assign* calls both apply; only a READ pins, and the sole reader is deployer-gated
+// and used about once a year, so serializing it against a concurrent assign* costs
+// nothing anyone notices.
+//
+// The field also has to stay HERE because the MPC and src/index.ts pin its compiled
+// path [0, 3]; deleting it, or moving it, would renumber the state tree and take
+// every other pinned path with it.
 export ledger signetRequestNonce: Counter;
 
 // ---- Gas parameters of VAULT-SIGNED transactions ------------------------------------
@@ -414,6 +422,14 @@ struct SlotClaim {
 // index already does that. (The design sketch said "the first 8 bytes of key": Compact
 // 0.25 has no byte slicing, and `key as Field as Uint<64>` is a range-CHECKED cast
 // that aborts for all but a vanishing fraction of keys, so it is not expressible.)
+//
+// The one thing this DOES write to shared state is signetRequestNonce, bumped by one
+// per issued slot so adminReplaceEvmNonce can tell an issued nonce from an unissued
+// one. It is safe here for the same reason the tree is: Counter.increment emits no
+// popeq, so it is a blind add that commutes with every other assign*'s. Counting is
+// free; only READING a counter pins, and nothing on this path reads it. It lives in
+// claimSlot rather than in the six assign* bodies so a new flow cannot issue a slot
+// and forget to count it.
 circuit claimSlot(
   key: Bytes<32>,
   path: MerkleTreePath<20, Bytes<32>>,
@@ -434,6 +450,8 @@ circuit claimSlot(
   // Also the anti-replay gate: a second assign for this key sees the tombstone
   // RequestKind.consumed, which matches no flow's expected kind.
   assert(params.kind == kind, "Wrong request kind for this key");
+
+  signetRequestNonce.increment(1);
 
   return SlotClaim {
     evmNonce: (evmNonceBase + index) as Uint<64>,
@@ -606,16 +624,20 @@ export circuit setGasParams(
 // a fresh slot at a LATER nonce. The burnt slot's index stays in the tree and its
 // nonce stays spent; nothing reuses it, so no later request is stranded by it.
 //
-// The caller MUST name a nonce the allocator has already issued — in practice the
-// nonce of the transaction that is actually stuck. Naming one it has NOT issued yet
-// looks harmless and is not: the allocator keeps counting from the tree and will hand
-// that same nonce to a future request, whose signed transaction the network then
-// rejects as a reused nonce — the exact stall this circuit exists to clear, caused by
-// the tool meant to clear it. There is deliberately no in-circuit guard, because the
-// only way to bound `evmNonce` in-circuit is to read how many slots the tree has
-// issued, and that read is the shared, every-request-moves-it cell the allocator was
-// built to remove. The bound is an operator check against the vault EVM account's
-// on-chain nonce instead.
+// NAMING AN UNISSUED NONCE IS IMPOSSIBLE, not merely discouraged. It would be the
+// worse mistake of the two: the empty transaction would consume a nonce the allocator
+// has not handed out yet, the allocator would later hand that same nonce to a real
+// request, and the network would reject that request's signed transaction as a reused
+// nonce — the exact stall this circuit exists to clear, caused by the tool meant to
+// clear it. The assert below rules it out, because signetRequestNonce counts the slots
+// the allocator has issued, so evmNonceBase + it is the first nonce not yet promised.
+//
+// Reading that counter PINS it, so this call cannot apply alongside a concurrent
+// assign* that moved it. That is the one place in this contract where serialization
+// is the right trade: the circuit is deployer-gated, single-caller and used about once
+// a year, and the alternative is an unbounded argument that can strand the account.
+// Counting on the issuing side stays free — Counter.increment emits no popeq — so
+// phase 2 keeps applying concurrently.
 //
 // Records into the EXISTING signBidirectionalEventMap (calldata capacity 2, unused
 // here) rather than a map of its own: a new ledger field would re-chunk the state
@@ -626,6 +648,12 @@ export circuit adminReplaceEvmNonce(
 ): [] {
   assert(initialised >= 1, "Not initialised");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+
+  // Only a nonce the allocator has ALREADY issued can be replaced. See the note above:
+  // burning an issued nonce cancels one request, burning an unissued one strands the
+  // whole account.
+  const issued = signetRequestNonce as Uint<64>;
+  assert(evmNonce < (evmNonceBase + issued) as Uint<64>, "Nonce not issued yet");
 
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
@@ -642,10 +670,9 @@ export circuit adminReplaceEvmNonce(
 
   const path = pad(32, "vault");
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
-    requestNonce,
+    issued,                                         // salt only; see the note below
     keyVersion,
     path,
     MPCSignatureAlgorithm.ecdsa,
@@ -659,7 +686,14 @@ export circuit adminReplaceEvmNonce(
   );
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
-  signetRequestNonce.increment(1);
+  // Deliberately does NOT advance signetRequestNonce: it counts slots the ALLOCATOR
+  // issued, and a replacement issues none. Bumping it here would raise the bound above
+  // by one and let the NEXT admin call name an unissued nonce, which is precisely what
+  // that bound exists to prevent. The count still serves as this event's request nonce,
+  // whose only job is to keep otherwise identical requests hashing apart; two
+  // replacements differ in `nonce` anyway, and a genuine re-replacement of the same
+  // nonce has to raise the fees first, which changes the hash too. An exact repeat is
+  // the same request and the duplicate-id assert above is right to refuse it.
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).

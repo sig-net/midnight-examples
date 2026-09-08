@@ -929,8 +929,10 @@ describe("withdraw round-trip", () => {
       erc20: ERC20,
       amount: AMOUNT,
     });
-    // The shared counter is dead: nothing reads or increments it any more.
-    expect(ledger(state).signetRequestNonce).toBe(0n);
+    // The shared counter is no longer a request nonce, it is the count of slots
+    // the allocator has issued: one, this request's. Nothing on this path READ
+    // it, which is why the increment costs no contention.
+    expect(ledger(state).signetRequestNonce).toBe(1n);
     // The slot was consumed: the parked parameters are replaced by a tombstone,
     // never removed, so the key can never be parked (and re-leafed) again.
     expect(ledger(state).pendingParams.size()).toBe(1n);
@@ -3421,8 +3423,55 @@ describe("gas parameters reach the constructed transaction", () => {
 // 21000 gas), and the fees come from the ledger the admin just raised.
 // ===========================================================================
 
-/** The EVM nonce these tests name as the stuck one. Arbitrary and non-zero. */
-const STUCK_NONCE = 7n;
+/**
+ * The EVM nonce these tests name as the stuck one: EVM_NONCE_BASE itself, so it
+ * is the nonce allocator slot 0 owns. The circuit refuses a nonce the allocator
+ * has not issued, so this is only replaceable after {@link stranded} has run a
+ * real request through both phases.
+ */
+const STUCK_NONCE = EVM_NONCE_BASE;
+
+/**
+ * Arrange one genuinely stuck nonce: deploy, initialise, and run a real
+ * withdraw through both allocator phases, so slot 0 — and with it
+ * EVM_NONCE_BASE — has actually been issued.
+ *
+ * @returns The contract, the context after phase 2, and the issued nonce.
+ */
+const stranded = async (): Promise<{
+  contract: Contract<VaultPrivateState>;
+  ctx: CircuitContext<VaultPrivateState>;
+  stuckNonce: bigint;
+}> => {
+  const { contract, ctx } = await deployInitialised();
+  const run = await withdraw(contract, ctx, VALID_WITHDRAW);
+  return { contract, ctx: run.context, stuckNonce: EVM_NONCE_BASE + run.slotIndex };
+};
+
+/** The exact gas an EVM value transfer carrying no calldata costs. */
+const REPLACEMENT_GAS_LIMIT = 21_000n;
+
+/**
+ * The fee/gas envelope of the REPLACEMENT the admin circuit recorded, picked
+ * out of the shared map by the 21000-gas limit only an empty self-transfer
+ * carries. The stranded request it replaces sits in the same map at the SAME
+ * EVM nonce — that is what a replacement is — so the nonce cannot tell the two
+ * apart.
+ */
+const replacementEnvelopeOf = (
+  map: Parameters<typeof toSignBidirectionalEventIndex>[0],
+): { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; gasLimit: bigint } => {
+  const replacements = [...toSignBidirectionalEventIndex(map).values()].filter(
+    (record) => record.txParams.gasLimit === REPLACEMENT_GAS_LIMIT,
+  );
+  expect(replacements).toHaveLength(1);
+  const { txParams } = first(replacements, "recorded replacement request");
+  return {
+    maxFeePerGas: txParams.maxFeePerGas,
+    maxPriorityFeePerGas: txParams.maxPriorityFeePerGas,
+    gasLimit: txParams.gasLimit,
+  };
+};
 
 describe("adminReplaceEvmNonce", () => {
   it("is deployer-gated, with initialise's own gate", async () => {
@@ -3450,15 +3499,21 @@ describe("adminReplaceEvmNonce", () => {
   });
 
   it("builds an empty 21000-gas self-transfer at the nonce the caller named", async () => {
-    const { contract, ctx } = await deployInitialised();
+    const { contract, ctx, stuckNonce } = await stranded();
 
-    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
+    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, stuckNonce, 1n)).context;
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
-    expect(index.size).toBe(1);
-    const record = first(index.values(), "recorded replacement request");
+    // The stranded withdraw's own record, plus the replacement.
+    expect(index.size).toBe(2);
+    const record = first(
+      [...index.values()].filter(
+        (candidate) => candidate.txParams.gasLimit === REPLACEMENT_GAS_LIMIT,
+      ),
+      "recorded replacement request",
+    );
     const { txParams } = record;
 
     expect({
@@ -3479,7 +3534,7 @@ describe("adminReplaceEvmNonce", () => {
       to: VAULT_EVM,
       value: 0n,
       // The exact cost of an EVM value transfer carrying no calldata.
-      gasLimit: 21_000n,
+      gasLimit: REPLACEMENT_GAS_LIMIT,
       // Empty calldata, reusing the shared map's 2-word capacity unused.
       calldataPresent: false,
       data: "0x",
@@ -3488,16 +3543,18 @@ describe("adminReplaceEvmNonce", () => {
   });
 
   it("takes its fee values from the ledger, defaulting to initialise's", async () => {
-    const { contract, ctx } = await deployInitialised();
+    const { contract, ctx, stuckNonce } = await stranded();
 
-    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
+    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, stuckNonce, 1n)).context;
 
     expect(
-      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+      replacementEnvelopeOf(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ),
     ).toEqual({
       maxFeePerGas: DEFAULT_MAX_FEE_PER_GAS,
       maxPriorityFeePerGas: DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
-      gasLimit: 21_000n,
+      gasLimit: REPLACEMENT_GAS_LIMIT,
     });
   });
 
@@ -3508,20 +3565,103 @@ describe("adminReplaceEvmNonce", () => {
     // them with setGasParams and only then calls this; if the raise did not
     // reach the transaction, the replacement would re-offer the very fees that
     // got the original stuck and the node would drop it.
-    const { contract, ctx } = await deployInitialised();
+    const { contract, ctx, stuckNonce } = await stranded();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.adminReplaceEvmNonce(configured, STUCK_NONCE, 1n))
-      .context;
+    const next = (await contract.circuits.adminReplaceEvmNonce(configured, stuckNonce, 1n)).context;
 
     expect(
-      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+      replacementEnvelopeOf(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ),
     ).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
       maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
       // The gas limit is a property of the operation, never of the market, so
       // the per-kind limits setGasParams moved leave this one at 21000.
-      gasLimit: 21_000n,
+      gasLimit: REPLACEMENT_GAS_LIMIT,
     });
+  });
+
+  // ---- The issuance bound ----
+  //
+  // The circuit takes the nonce as an argument, so without a bound the admin
+  // could burn a nonce the allocator has NOT handed out yet. The allocator
+  // would hand that same nonce to a real request later, and the network would
+  // reject its signed transaction as a reused nonce: the exact stall this
+  // circuit exists to clear, caused by the tool meant to clear it. The bound
+  // is signetRequestNonce, the count of slots issued.
+
+  it("rejects a nonce the allocator has not issued yet", async () => {
+    // Nothing has run either allocator phase, so NO nonce has been issued and
+    // even slot 0's is out of bounds.
+    const { contract, ctx } = await deployInitialised();
+
+    await expect(contract.circuits.adminReplaceEvmNonce(ctx, EVM_NONCE_BASE, 1n)).rejects.toThrow(
+      /Nonce not issued yet/,
+    );
+  });
+
+  it("rejects the nonce one past the last issued one", async () => {
+    // The off-by-one that matters: one slot issued means one nonce replaceable.
+    const { contract, ctx, stuckNonce } = await stranded();
+
+    await expect(contract.circuits.adminReplaceEvmNonce(ctx, stuckNonce + 1n, 1n)).rejects.toThrow(
+      /Nonce not issued yet/,
+    );
+  });
+
+  it("accepts every nonce below the issued count", async () => {
+    // Three slots issued across two different flows, so nonces base..base+2
+    // are all replaceable — not just the most recent one, because any of them
+    // can be the stuck one.
+    const { contract, ctx } = await deployInitialised();
+    const first0 = await withdraw(contract, ctx, VALID_WITHDRAW);
+    const second = await withdraw(contract, first0.context, {
+      ...VALID_WITHDRAW,
+      coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x21)),
+    });
+    const third = await swap(contract, second.context, {
+      ...VALID_SWAP,
+      coin: vaultCoin(SWAP_AMOUNT_IN_MAX, VAULT_TOKEN_COLOR, bytes(32, 0x22)),
+    });
+
+    expect([first0.slotIndex, second.slotIndex, third.slotIndex]).toEqual([0n, 1n, 2n]);
+    for (const index of [0n, 1n, 2n]) {
+      await expect(
+        contract.circuits.adminReplaceEvmNonce(third.context, EVM_NONCE_BASE + index, 1n),
+      ).resolves.toBeDefined();
+    }
+  });
+
+  it("the issued count tracks assign* calls, and only assign* calls", async () => {
+    // What the bound is made of. Phase 1 alone issues nothing: the slot index
+    // is not decided until phase 2 proves it, so parking must not advance the
+    // count. A replacement issues nothing either — bumping it there would
+    // raise the bound by one and let the NEXT admin call name an unissued
+    // nonce.
+    const { contract, ctx } = await deployInitialised();
+    const issuedIn = (c: CircuitContext<VaultPrivateState>): bigint =>
+      ledger(c.callContext.currentQueryContext.state).signetRequestNonce;
+
+    expect(issuedIn(ctx)).toBe(0n);
+
+    const parked = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    expect(issuedIn(parked.context)).toBe(0n);
+
+    const key = requestKeyOf(ctx, VALID_WITHDRAW.coin.nonce);
+    const path = slotPathOf(parked.context.callContext.currentQueryContext.state, key);
+    const assigned = await contract.circuits.assignWithdraw(parked.context, key, path);
+    expect(issuedIn(assigned.context)).toBe(1n);
+
+    const approved = await approveRouter(contract, assigned.context);
+    expect(issuedIn(approved.context)).toBe(2n);
+
+    const replaced = await contract.circuits.adminReplaceEvmNonce(
+      approved.context,
+      EVM_NONCE_BASE,
+      1n,
+    );
+    expect(issuedIn(replaced.context)).toBe(2n);
   });
 });

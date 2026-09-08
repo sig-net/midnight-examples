@@ -322,9 +322,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const context = await session.vaultContext();
         // The allocator's occupancy is the trace a recorded request leaves now:
         // phase 1 appends the request key as a leaf, so `firstFree` moves by
-        // one per request that actually applied. (The old shared
-        // signetRequestNonce counter is dead — no circuit reads or increments
-        // it since the allocator landed.)
+        // one per request that actually applied. (signetRequestNonce would not
+        // do: it counts slots phase 2 has ISSUED, so a request that parked and
+        // was never assigned leaves it untouched, and this test is about phase
+        // 1 never happening at all.)
         const readSlotsUsed = async () =>
           (
             await readVaultLedger(
