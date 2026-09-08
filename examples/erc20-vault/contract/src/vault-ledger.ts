@@ -88,10 +88,10 @@ function printRequestMap(
  * in lockstep with it: the nonce is hashed into the request id, so predicting
  * it wrong makes the recomputed id miss the ledger map key and the whole flow
  * fail. Deposits deliberately do NOT read the shared `signetRequestNonce` --
- * that cell belongs to the vault-path flows (approve/withdraw/swap/supply/
- * redeem). The two agree only on a vault's first-ever deposit, when both read
- * 0, which is exactly how a twin reading the wrong cell passes an e2e suite
- * that never deposits twice as one caller.
+ * that cell is dormant (the vault-path flows carry a constant request nonce and
+ * take their uniqueness from `vaultEvmNonce`), so it reads 0 forever, which is
+ * exactly how a twin reading the wrong cell passes an e2e suite that never
+ * deposits twice as one caller.
  *
  * @param state - The decoded vault ledger state, read before the call.
  * @param callerCommitment - The caller's 32-byte identity commitment.

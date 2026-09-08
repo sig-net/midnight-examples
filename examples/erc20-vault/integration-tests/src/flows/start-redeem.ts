@@ -19,6 +19,7 @@ import {
   TxParamType,
 } from "@sig-net/midnight";
 import {
+  pureCircuits,
   readVaultLedger,
   STATA_USDC,
   VAULT_PATH_BYTES,
@@ -73,9 +74,10 @@ export async function startRedeem(
   );
   console.log(`redeem queued in tx ${result.public.txId}`);
 
-  // Both nonces are read BETWEEN the queue and the drain, because both are the
+  // The EVM nonce is read BETWEEN the queue and the drain, because it is the
   // contract's to assign: this flush drains one entry in slot 0, so it is handed
-  // exactly these values.
+  // exactly this value. The request nonce is not read at all — every
+  // vault-signed request carries the constant vaultSignedRequestNonce().
   const beforeFlush = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
@@ -83,7 +85,7 @@ export async function startRedeem(
 
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: beforeFlush.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...REDEEM_MPC_ROUTING,

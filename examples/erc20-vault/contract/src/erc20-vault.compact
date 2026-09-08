@@ -25,7 +25,30 @@ sealed ledger signetSigner: SignetSigner;
 // Verifies every attestation (the Signet singleton emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
-// Nonce to keep otherwise identical requests hashing to distinct request ids.
+// RETAINED, NOT READ. No circuit reads or increments this counter any more,
+// and it stays at 0 forever.
+//
+// It existed to keep otherwise identical requests hashing to DISTINCT request
+// ids, back when the vault's EVM transaction nonce was CALLER-supplied and two
+// callers could name the same one. The vault EVM nonce is now assigned by the
+// contract (see vaultEvmNonce), and it is part of every vault-signed request's
+// txParams, which the request id hashes. Every vault-signed transaction comes
+// from ONE EVM account, and Ethereum spends each of that account's nonces
+// once, so the EVM nonce ALREADY makes each request id unique and there is
+// nothing left for a second counter to disambiguate. The vault-signed flows
+// pass the constant vaultSignedRequestNonce() instead.
+//
+// The FIELD stays because two things depend on a Counter sitting at ledger
+// path [0,3], neither of them this contract:
+//   - it is one of the SIX pinned paths. Deleting it would shrink chunk 0,
+//     move chunk 1's base up by one and take every event-map path with it
+//     (see the CAUTION below and tests/ledger-paths.test.ts).
+//   - VAULT_NONCE_PATH exports that path for the SDK's raw request-ledger
+//     reader, readSignetRequestsLedgerFromState, which throws unless the path
+//     holds a Uint<64> Cell.
+// So it is here to hold its position and to answer that reader, not because
+// the contract needs it. Removing it is a path-moving change and belongs in
+// its own commit.
 export ledger signetRequestNonce: Counter;
 
 // ---- Gas parameters of VAULT-SIGNED transactions ------------------------------------
@@ -106,7 +129,8 @@ sealed ledger deployer: Bytes<32>;
 // their own settled request. Only deposit binds the caller into the request id
 // (path = caller), so only deposit can safely key uniqueness on the caller; the
 // vault-signed flows (approve*, withdraw, swap, supply, redeem) sign with the
-// constant path "vault" and keep the global signetRequestNonce for now.
+// constant path "vault" and take their uniqueness from the contract-assigned
+// vaultEvmNonce instead.
 //
 // Declared HERE (immediately before depositEventMap), not appended at the end,
 // on purpose. The compiler chunks this 25-field state as [chunk 0: the first 10
@@ -133,12 +157,17 @@ export ledger depositRequestNonces: Map<Bytes<32>, Counter>;
 // the caller-supplied nonce an end-to-end throughput bottleneck, so start*
 // no longer takes one and `flush` hands out the next value per drained entry.
 //
-// CONTIGUITY, the OPPOSITE rule from signetRequestNonce: Ethereum executes an
-// account's transactions in nonce order, so a transaction at nonce 7 cannot
-// mine until 5 and 6 have. This counter therefore advances by the number of
-// entries ACTUALLY PROCESSED (see `flush`), never by the batch width, and a
-// skipped slot consumes nothing. signetRequestNonce is free to skip because
-// it only has to keep otherwise identical requests hashing apart.
+// CONTIGUITY: Ethereum executes an account's transactions in nonce order, so
+// a transaction at nonce 7 cannot mine until 5 and 6 have. This counter
+// therefore advances by the number of entries ACTUALLY PROCESSED (see
+// `flush`), never by the batch width, and a skipped slot consumes nothing.
+//
+// It is ALSO the whole of a vault-signed request's UNIQUENESS. The nonce sits
+// in txParams, which the request id hashes, and one account spends each of its
+// nonces once — so two byte-identical withdrawals drained in the same batch
+// hash to different ids on their EVM nonces alone. That is why the separate
+// request-id counter is gone: see signetRequestNonce, retained only for its
+// pinned ledger path.
 //
 // Why the contract may own this at all: the vault EVM account can only be
 // signed by a contract call, so the contract knows exactly how many
@@ -182,12 +211,12 @@ struct PendingVaultRequest {
 
 // The pending queue the four VAULT-SIGNED flows append to.
 //
-// Those flows used to read the single global signetRequestNonce inside start*,
-// and that read is pinned by a popeq: two requests proven against the same
-// state could not both apply. They now validate, burn the coin and APPEND
-// here. `flush` (bottom of this file, callable by anyone) is the only circuit
-// that reads the shared counter, and it hands out one distinct nonce per
-// queued entry per batch. The shared read is out of the per-user path.
+// Those flows used to read a shared global counter inside start*, and that
+// read is pinned by a popeq: two requests proven against the same state could
+// not both apply. They now validate, burn the coin and APPEND here. `flush`
+// (bottom of this file, callable by anyone) is the only circuit that touches a
+// shared counter, and it hands out one distinct vaultEvmNonce per queued entry
+// it drains. The shared read is out of the per-user path.
 //
 // KEY: refundCommitment(callerSecretKey(), coin.nonce) — the caller's secret
 // bound to the nonce of the ONE coin each of these flows surrenders. Two
@@ -196,7 +225,7 @@ struct PendingVaultRequest {
 // coin is spendable once, so its nonce appears in one request). Nothing about
 // the key is derivable from public state, so a front-runner cannot squat a
 // victim's slot and strand their burned coin. Making REQUESTS unique is not
-// this key's job: the flush-assigned monotonic nonce still does that. The key
+// this key's job: the flush-assigned EVM nonce still does that. The key
 // doubles as the settle view's refund commitment, which is why start can pin
 // an ownership gate for a request id that does not exist yet.
 //
@@ -304,6 +333,18 @@ export pure circuit vaultResponseSchema(): Bytes<34> {
 // vaultResponseSchema()'s output decoded: transfer()'s bool, packed by the MPC to 1 byte.
 struct VaultResponse {
   success: Boolean;
+}
+
+// The requestNonce every VAULT-SIGNED request carries: a CONSTANT, not a
+// counter. The request id hashes the whole record, txParams included, and
+// txParams holds the vault EVM account's transaction nonce, which this
+// contract assigns and Ethereum spends once per account. So the EVM nonce
+// alone already separates two otherwise identical requests, and a second
+// counter would only be repeating work. Exported so off-chain code reading
+// the same records reads the value from the compiled circuit rather than
+// re-declaring it. See signetRequestNonce for what this replaced.
+export pure circuit vaultSignedRequestNonce(): Uint<64> {
+  return 0;
 }
 
 // The allowance both approve circuits grant: 2^128-1, so one approve per spender
@@ -514,6 +555,23 @@ export circuit setGasParams(
 // request, not a retry mechanism. Whoever owned the cancelled request must start it
 // again at a later nonce.
 //
+// NOT REPEATABLE AT THE SAME NONCE AND THE SAME FEES, and that is the intended
+// behaviour. Like every vault-signed flow this now carries the constant
+// vaultSignedRequestNonce(), so the id is a hash of (this nonce, these fees, this
+// key version) and the duplicate-id assert below rejects a second call that
+// changes none of them. Nothing is lost by that. A replacement only evicts the
+// stuck transaction if it pays meaningfully more, so a genuine retry MUST come
+// after a setGasParams raise and mints a different id anyway; and a byte-identical
+// re-request would only re-derive a signature that already exists and is already
+// public in the singleton's SignatureRespondedEvent, so anyone can simply
+// rebroadcast the first one. The assert turns a useless second call into an error
+// instead of a second signature over identical bytes.
+//
+// Unlike the queued flows, this circuit's EVM nonce is NAMED BY THE CALLER rather
+// than drawn from vaultEvmNonce — naming the stuck value is the entire point — so
+// it is the one vault-signed circuit whose uniqueness does not come from the
+// contract's own counter.
+//
 // Records into the EXISTING signBidirectionalEventMap (calldata capacity 2, unused
 // here) rather than a map of its own: a new ledger field would re-chunk the state
 // tree and move the six compiled paths the MPC notifications pin.
@@ -539,7 +597,7 @@ export circuit adminReplaceEvmNonce(
 
   const path = pad(32, "vault");
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
+  const requestNonce = vaultSignedRequestNonce();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
     requestNonce,
@@ -556,7 +614,6 @@ export circuit adminReplaceEvmNonce(
   );
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
-  signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
@@ -607,7 +664,7 @@ export circuit approveStata(
 
   const path = pad(32, "vault");
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
+  const requestNonce = vaultSignedRequestNonce();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(), requestNonce, keyVersion, path,
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
@@ -615,7 +672,6 @@ export circuit approveStata(
   );
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
-  signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
@@ -665,7 +721,7 @@ export circuit approveRouter(
 
   const path = pad(32, "vault");
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
+  const requestNonce = vaultSignedRequestNonce();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
     requestNonce,
@@ -682,7 +738,6 @@ export circuit approveRouter(
   );
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
-  signetRequestNonce.increment(1);
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
@@ -747,8 +802,15 @@ export circuit startDeposit(
 
   const schema = vaultResponseSchema();
   // Per-caller nonce: read THIS caller's slot (default 0 for a first deposit),
-  // never the shared signetRequestNonce, so a concurrent deposit by another
-  // caller reads a different slot and does not conflict at apply time.
+  // never a shared cell, so a concurrent deposit by another caller reads a
+  // different slot and does not conflict at apply time.
+  //
+  // Deposit needs a REAL counter, unlike the vault-signed flows. Its EVM nonce
+  // comes from the CALLER's own derived account, not from vaultEvmNonce, so the
+  // contract cannot lean on that nonce to separate two identical requests the
+  // way vaultSignedRequestNonce() does: two callers can hold the same account
+  // nonce on their own accounts. Here the path (the caller's commitment) and
+  // this slot do that job.
   if (!depositRequestNonces.member(caller)) {
     depositRequestNonces.insertDefault(caller);
   }
@@ -1329,20 +1391,20 @@ export circuit refundRedeem(
 // builders in every slot, and that cost is what bounds the batch width. Each
 // entry point drains only its own kind and skips the rest.
 //
-// They are the ONLY place the four vault-signed flows touch signetRequestNonce,
-// each reads that cell exactly ONCE per call, and each hands slot i of the batch
-// the nonce base+i, so every request in a batch gets a distinct, monotonic id.
+// They are the ONLY place the four vault-signed flows touch vaultEvmNonce, and
+// each hands the entry it drains the next value of it.
 //
-// TWO counters, opposite rules, both assigned here:
-//  - signetRequestNonce (the REQUEST-ID nonce) only has to keep otherwise
-//    identical requests hashing apart. Gaps are free, so it is read once and
-//    advanced by the batch WIDTH: nonce = base + slot, a pure function no two
-//    requests can share.
-//  - vaultEvmNonce (the shared vault EVM account's transaction nonce) must be
-//    CONTIGUOUS, because Ethereum executes an account's transactions in nonce
-//    order and one skipped value stalls every later vault transaction. So it
-//    is consumed inside the live branch, one per entry actually DRAINED, and
-//    a skipped slot advances it by nothing.
+// ONE counter, doing BOTH jobs. vaultEvmNonce is the shared vault EVM account's
+// transaction nonce, so it must be CONTIGUOUS: Ethereum executes an account's
+// transactions in nonce order and one skipped value stalls every later vault
+// transaction. It is therefore consumed inside the live branch, one per entry
+// actually DRAINED, and a skipped slot advances it by nothing.
+//
+// That same nonce is also what keeps two otherwise identical requests hashing
+// to DISTINCT ids: it sits in the request's txParams, which the id hashes, and
+// one account spends each of its nonces once. So `requestNonce` is the
+// constant vaultSignedRequestNonce() here, and there is no second counter to
+// assign. See signetRequestNonce, kept only for its pinned ledger path.
 //
 // BOUND: a FIXED number of entries per call, named by key. Compact has no
 // unbounded iteration and no way to enumerate a ledger Map, so a drain must be an
@@ -1352,22 +1414,15 @@ export circuit refundRedeem(
 // one is a valid call; a key repeated inside one batch is processed once (the
 // first slot removes it, the rest see it gone).
 //
-// signetRequestNonce advances by the full width whether or not every slot was
-// live. That is deliberate: it makes the nonce a pure function of (base, slot
-// index), so no two requests can ever be handed the same nonce. The gaps it
-// leaves cost nothing: the nonce exists to keep otherwise identical requests
-// hashing apart, not to count anything. vaultEvmNonce does the opposite, for the
-// reason above.
-//
 // KNOWN LIMITS, stated plainly:
 //  - Concurrent flushes still conflict with each other and with approveStata /
-//    approveRouter, which read the same two counters. Serialising the BATCHES is
+//    approveRouter, which read the same counter. Serialising the BATCHES is
 //    the whole point; what had to stop serialising was users' start* calls.
 //    approveStata/approveRouter had to move onto vaultEvmNonce too: they sign
 //    from the SAME vault account, so a caller-chosen nonce there would collide
 //    with (or leave a gap ahead of) the values the drains hand out. The four
-//    entry points also conflict with EACH OTHER, since all four touch both
-//    counters; splitting by kind buys proof size, not concurrency.
+//    entry points also conflict with EACH OTHER, since all four touch that one
+//    counter; splitting by kind buys proof size, not concurrency.
 //  - The flusher chooses the batch and its order, so it chooses the order request
 //    ids are minted in. It cannot forge, alter, drop or steal an entry: every
 //    field comes from the queue and the settle view keeps the requester's own
@@ -1627,7 +1682,7 @@ circuit recordRedeem(
 // by kind means a caller proves only the arm it actually uses.
 //
 // The four are otherwise identical, and identical to each other on purpose:
-// same key handling, same two counter rules, same skip behaviour. Compact
+// same key handling, same counter rule, same skip behaviour. Compact
 // cannot abstract over which record* circuit a drain calls, so the shape is
 // written out four times rather than hidden.
 //
@@ -1639,38 +1694,31 @@ circuit recordRedeem(
 circuit drainWithdraws<#N>(keys: Vector<N, Bytes<32>>): [] {
   assert(initialised >= 1, "Not initialised");
 
-  // The ONE read of the shared REQUEST-ID counter. Slot i gets base+i, so the
-  // ids in a batch are distinct without reading the cell again per entry.
-  const base = signetRequestNonce as Uint<64>;
-
   for (const slot of 0..N) {
     const key = disclose(keys[slot]);
     if (pendingVaultRequests.member(key)) {
       const pending = pendingVaultRequests.lookup(key);
       if (pending.kind == PendingRequestKind.withdraw) {
-        // The EVM nonce is read and consumed INSIDE the live branch, one per
-        // entry actually drained, so the values a batch hands out are
-        // contiguous (see vaultEvmNonce). A slot that is empty OR of another
-        // kind consumes nothing: a gap here would stall every later vault
-        // transaction behind it.
+        // The ONE counter, read and consumed INSIDE the live branch, one value
+        // per entry actually drained, so a batch hands out contiguous values
+        // (see vaultEvmNonce). A slot that is empty OR of another kind consumes
+        // nothing: a gap here would stall every later vault transaction behind
+        // it.
+        //
+        // It is also all the uniqueness a request id needs. The nonce is in
+        // txParams, so two byte-identical withdrawals drained by the same call
+        // still hash to different ids, and `requestNonce` can be a constant.
         const evmNonce = vaultEvmNonce as Uint<64>;
         vaultEvmNonce.increment(1);
-        recordWithdraw(key, pending, (base + slot) as Uint<64>, evmNonce);
+        recordWithdraw(key, pending, vaultSignedRequestNonce(), evmNonce);
       }
     }
   }
-
-  // Unconditional, unlike vaultEvmNonce: this counter only has to keep
-  // otherwise identical requests hashing apart, so advancing by the batch
-  // WIDTH makes the nonce a pure function of (base, slot) and the gaps a
-  // partly empty batch leaves are harmless.
-  signetRequestNonce.increment(N);
 }
 
-// The swap drain. Same shape and same two counter rules as drainWithdraws.
+// The swap drain. Same shape and same counter rule as drainWithdraws.
 circuit drainSwaps<#N>(keys: Vector<N, Bytes<32>>): [] {
   assert(initialised >= 1, "Not initialised");
-  const base = signetRequestNonce as Uint<64>;
   for (const slot of 0..N) {
     const key = disclose(keys[slot]);
     if (pendingVaultRequests.member(key)) {
@@ -1678,17 +1726,15 @@ circuit drainSwaps<#N>(keys: Vector<N, Bytes<32>>): [] {
       if (pending.kind == PendingRequestKind.swap) {
         const evmNonce = vaultEvmNonce as Uint<64>;
         vaultEvmNonce.increment(1);
-        recordSwap(key, pending, (base + slot) as Uint<64>, evmNonce);
+        recordSwap(key, pending, vaultSignedRequestNonce(), evmNonce);
       }
     }
   }
-  signetRequestNonce.increment(N);
 }
 
-// The supply drain. Same shape and same two counter rules as drainWithdraws.
+// The supply drain. Same shape and same counter rule as drainWithdraws.
 circuit drainSupplies<#N>(keys: Vector<N, Bytes<32>>): [] {
   assert(initialised >= 1, "Not initialised");
-  const base = signetRequestNonce as Uint<64>;
   for (const slot of 0..N) {
     const key = disclose(keys[slot]);
     if (pendingVaultRequests.member(key)) {
@@ -1696,17 +1742,15 @@ circuit drainSupplies<#N>(keys: Vector<N, Bytes<32>>): [] {
       if (pending.kind == PendingRequestKind.supply) {
         const evmNonce = vaultEvmNonce as Uint<64>;
         vaultEvmNonce.increment(1);
-        recordSupply(key, pending, (base + slot) as Uint<64>, evmNonce);
+        recordSupply(key, pending, vaultSignedRequestNonce(), evmNonce);
       }
     }
   }
-  signetRequestNonce.increment(N);
 }
 
-// The redeem drain. Same shape and same two counter rules as drainWithdraws.
+// The redeem drain. Same shape and same counter rule as drainWithdraws.
 circuit drainRedeems<#N>(keys: Vector<N, Bytes<32>>): [] {
   assert(initialised >= 1, "Not initialised");
-  const base = signetRequestNonce as Uint<64>;
   for (const slot of 0..N) {
     const key = disclose(keys[slot]);
     if (pendingVaultRequests.member(key)) {
@@ -1714,11 +1758,10 @@ circuit drainRedeems<#N>(keys: Vector<N, Bytes<32>>): [] {
       if (pending.kind == PendingRequestKind.redeem) {
         const evmNonce = vaultEvmNonce as Uint<64>;
         vaultEvmNonce.increment(1);
-        recordRedeem(key, pending, (base + slot) as Uint<64>, evmNonce);
+        recordRedeem(key, pending, vaultSignedRequestNonce(), evmNonce);
       }
     }
   }
-  signetRequestNonce.increment(N);
 }
 
 // ==== THE BATCH WIDTH ================================================================

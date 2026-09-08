@@ -20,6 +20,7 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
   UNISWAP_SWAP_ROUTER_02,
   vaultGasEnvelope,
@@ -64,7 +65,7 @@ export async function approveRouter(context: VaultContext): Promise<RequestIdHex
   // 2-word map + bool schema as a transfer.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: asciiPadded("vault", PATH_BYTES),
     ...VAULT_MPC_ROUTING,

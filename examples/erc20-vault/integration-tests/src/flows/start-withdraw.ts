@@ -6,8 +6,8 @@
 // and QUEUES: it mints no request id, records no event and notifies nobody, so
 // it reads no shared ledger cell and two callers' withdrawals no longer
 // conflict at apply time. `flush` — permissionless, batched — mints the id,
-// assigns BOTH nonces (the request-id nonce and the shared vault EVM account's
-// transaction nonce) and records the event. The id is therefore only knowable
+// assigns the shared vault EVM account's transaction nonce and records the
+// event. The id is therefore only knowable
 // after the flush, and this module's {@link startWithdraw} does both halves and
 // returns it. Callers that need to batch (two requesters, ONE flush) use
 // {@link queueWithdraw} + {@link flushVaultRequests} +
@@ -28,6 +28,7 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -140,15 +141,16 @@ export async function queueWithdraw(
  * big-endian address and amount words, as broadcast), the vault's own 32-byte
  * derivation path, and the contract-fixed routing.
  *
- * Both nonces are arguments because both are the CONTRACT's to assign: slot i
- * of a batch gets request nonce `signetRequestNonce + i`, and the i-th entry a
- * batch actually drains gets EVM nonce `vaultEvmNonce + i` (skipped slots
- * consume nothing — the EVM nonce sequence must have no gaps).
+ * The EVM nonce is an argument because it is the CONTRACT's to assign: the i-th
+ * entry a batch actually drains gets `vaultEvmNonce + i` (skipped slots consume
+ * nothing — the EVM nonce sequence must have no gaps). The `requestNonce` is
+ * not an argument: every vault-signed request carries the constant
+ * `vaultSignedRequestNonce()`, because the EVM nonce is itself in the hashed
+ * envelope and one account spends each of its nonces once.
  *
  * @param context - The flow context.
  * @param state - The vault ledger state read BEFORE the flush.
  * @param queued - The queued withdrawal.
- * @param requestNonce - The request-id nonce the flush assigns this entry.
  * @param evmNonce - The vault EVM account nonce the flush assigns this entry.
  * @returns The expected record.
  */
@@ -156,7 +158,6 @@ export function withdrawRequestRecord(
   context: VaultContext,
   state: VaultLedgerState,
   queued: QueuedWithdraw,
-  requestNonce: bigint,
   evmNonce: bigint,
 ): SignBidirectionalEvent {
   // The gas envelope the circuit itself will stamp, read from the ledger the
@@ -166,7 +167,7 @@ export function withdrawRequestRecord(
   const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(state, "withdraw");
   return {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...VAULT_MPC_ROUTING,
@@ -201,7 +202,6 @@ export function withdrawRequestRecord(
  * @param context - The flow context.
  * @param state - The vault ledger state read BEFORE the flush.
  * @param queued - The queued withdrawal.
- * @param requestNonce - The request-id nonce the flush assigns this entry.
  * @param evmNonce - The vault EVM account nonce the flush assigns this entry.
  * @returns The request id as 64-char lowercase hex.
  */
@@ -209,19 +209,16 @@ export function predictWithdrawRequestId(
   context: VaultContext,
   state: VaultLedgerState,
   queued: QueuedWithdraw,
-  requestNonce: bigint,
   evmNonce: bigint,
 ): RequestIdHex {
-  return requestIdHex(
-    calculateRequestId(withdrawRequestRecord(context, state, queued, requestNonce, evmNonce)),
-  );
+  return requestIdHex(calculateRequestId(withdrawRequestRecord(context, state, queued, evmNonce)));
 }
 
 /**
  * Queue a withdrawal and immediately flush it, returning the request id the
  * flush minted.
  *
- * The id is recomputed off-chain from the two counters read just before the
+ * The id is recomputed off-chain from the EVM nonce read just before the
  * flush and asserted present as a ledger map key afterwards: the map key IS
  * the record's transientHash digest, so finding it there proves both sides
  * agree on every byte of the event — including the EVM nonce the contract,
@@ -240,8 +237,8 @@ export async function startWithdraw(
 ): Promise<RequestIdHex> {
   const queued = await queueWithdraw(context, options);
 
-  // Read the two counters between the queue and the drain: this call flushes a
-  // single entry in slot 0, so it is handed exactly these values.
+  // Read the EVM nonce between the queue and the drain: this call flushes a
+  // single entry in slot 0, so it is handed exactly this value.
   const beforeFlush = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
@@ -250,7 +247,6 @@ export async function startWithdraw(
     context,
     beforeFlush,
     queued,
-    beforeFlush.signetRequestNonce,
     beforeFlush.vaultEvmNonce,
   );
 

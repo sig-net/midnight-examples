@@ -181,7 +181,7 @@ sealed ledger signetSigner: SignetSigner;
 export ledger mpcResponseKey: Secp256k1Point;
 
 // The vault's own state.
-export ledger signetRequestNonce: Counter;  // keeps identical requests' ids distinct
+export ledger signetRequestNonce: Counter;  // dormant: kept for its pinned path [0,3]
 export ledger initialised: Counter;         // one-shot initialise marker
 export ledger vaultEvmAddress: Bytes<20>;   // the vault's derived EVM account
 export ledger evmChainId: Uint<64>;         // the pinned EVM chain, numeric...

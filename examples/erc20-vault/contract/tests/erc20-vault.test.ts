@@ -448,7 +448,10 @@ describe("deposit round-trip", () => {
 
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
-    // The raw counter read matches the generated one.
+    // The raw counter read matches the generated one. The counter is dormant
+    // (both read 0 forever), but the read still has to RESOLVE: the SDK reader
+    // throws unless VAULT_NONCE_PATH lands on a Uint<64> Cell, which is one of
+    // the two reasons the field is still declared.
     expect(rawLedger.nonce).toBe(ledger(state).signetRequestNonce);
 
     const [idHex, record] = first(typedIndex.entries(), "indexed signBidirectional request");
@@ -533,9 +536,11 @@ describe("deposit round-trip", () => {
     });
 
     // This caller's OWN deposit nonce slot bumped for their next request,
-    // while the global signetRequestNonce (which the vault-signed flows still
-    // use) is left untouched: deposits no longer read or move the shared cell,
-    // which is what lets two different callers' deposits apply concurrently.
+    // while the global signetRequestNonce is left untouched: deposits no longer
+    // read or move the shared cell, which is what lets two different callers'
+    // deposits apply concurrently. (Nothing moves that cell now — the
+    // vault-signed flows carry a constant request nonce — so this is the
+    // dormant 0 every path agrees on.)
     expect(ledger(state).depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(1n);
     expect(ledger(state).signetRequestNonce).toBe(0n);
   });
@@ -611,8 +616,9 @@ describe("deposit validation", () => {
     // The ledger-side facts the off-chain twin (`depositRequestNonce` in
     // src/vault-ledger.ts) reads to predict a request id. A twin reading the
     // shared signetRequestNonce instead agrees only on the first deposit,
-    // when both cells read 0; this pins the divergence so that accident can
-    // never silently return.
+    // when both cells read 0 (that cell is dormant now, so it reads 0
+    // forever); this pins the divergence so that accident can never silently
+    // return.
     const { contract, ctx } = await deployInitialised();
 
     const stateBefore = ledger(ctx.callContext.currentQueryContext.state);
@@ -828,7 +834,7 @@ describe("withdraw round-trip", () => {
 
     // startWithdraw now only VALIDATES, BURNS and QUEUES. The event, the request
     // id and the MPC notification moved to flush, which is what takes the read
-    // of the shared signetRequestNonce out of this caller's transaction.
+    // of the shared vaultEvmNonce out of this caller's transaction.
     const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
     const afterStart = ledger(started.callContext.currentQueryContext.state);
     const key = queueKey(SECRET_KEY, VALID_WITHDRAW.coin);
@@ -837,8 +843,9 @@ describe("withdraw round-trip", () => {
     expect(afterStart.withdrawSettleViews.isEmpty()).toBe(true);
     // No cross-contract call at all now: start notifies nobody.
     expect(decodeSignetLogEvents(started.events, SIGNET_ADDRESS)).toHaveLength(0);
-    // And it left the shared counter alone, which is the whole point.
-    expect(afterStart.signetRequestNonce).toBe(0n);
+    // And it left the shared EVM-nonce counter alone, which is the whole point:
+    // start* reads no shared cell, so two callers' withdrawals do not conflict.
+    expect(afterStart.vaultEvmNonce).toBe(0n);
 
     const { context: next } = await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin);
     const state = next.callContext.currentQueryContext.state;
@@ -906,6 +913,9 @@ describe("withdraw round-trip", () => {
       EXPECTED_ROUTING.outputDeserializationSchema,
     );
     expect(record.respondSerializationSchema).toEqual(EXPECTED_ROUTING.respondSerializationSchema);
+    // A CONSTANT for every vault-signed request, not a counter: the EVM nonce
+    // above is already unique per request, so nothing is left to disambiguate.
+    expect(record.requestNonce).toBe(pureCircuits.vaultSignedRequestNonce());
     expect(record.requestNonce).toBe(0n);
 
     // Contract-built calldata: transfer(destEvmAddress, amount) as ABI-ready
@@ -932,11 +942,12 @@ describe("withdraw round-trip", () => {
       erc20: ERC20,
       amount: AMOUNT,
     });
-    // The queue entry is consumed, and the shared counter moved by the batch
-    // width, not by one: flush hands slot i the nonce base+i and advances by
-    // the full width, so two batches can never hand out the same nonce.
+    // The queue entry is consumed, one EVM nonce was spent for the one entry
+    // drained, and the dormant request-id counter did not move: flush no longer
+    // touches it.
     expect(ledger(state).pendingVaultRequests.isEmpty()).toBe(true);
-    expect(ledger(state).signetRequestNonce).toBe(BigInt(FLUSH_BATCH));
+    expect(ledger(state).vaultEvmNonce).toBe(1n);
+    expect(ledger(state).signetRequestNonce).toBe(0n);
 
     // The burn, observable in the START call's zswap local state (flush moves no
     // coins): the coin is received (a contract-owned output) and spent as the
@@ -1016,8 +1027,10 @@ describe("withdraw round-trip", () => {
     expect(index.size).toBe(2);
     expect(ledger(state).withdrawSettleViews.size()).toBe(2n);
     expect(ledger(state).pendingVaultRequests.isEmpty()).toBe(true);
-    // Slot 0 got nonce base+0, slot 1 got base+1: distinct ids from ONE read.
-    expect([...index.values()].map((record) => record.requestNonce).sort()).toEqual([0n, 1n]);
+    // Both records carry the SAME (constant) request nonce; what separates them
+    // is the EVM nonce flush handed each live slot.
+    expect([...index.values()].map((record) => record.requestNonce)).toEqual([0n, 0n]);
+    expect([...index.values()].map((record) => record.txParams.nonce).sort()).toEqual([0n, 1n]);
   });
 });
 
@@ -1126,9 +1139,8 @@ describe("flush, via the withdraw entry point", () => {
     // accumulate on the threaded context, so the count must not have grown.)
     expect(decodeSignetLogEvents(drained.events, SIGNET_ADDRESS)).toHaveLength(1);
     expect(decodeSignetLogEvents(again.events, SIGNET_ADDRESS)).toHaveLength(1);
-    // It still advanced the counter by the batch width. Gaps are deliberate:
-    // the nonce is a pure function of (base, slot) so ids can never repeat.
-    expect(state.signetRequestNonce).toBe(BigInt(2 * FLUSH_BATCH));
+    // And it consumed no EVM nonce: an empty batch is free.
+    expect(state.vaultEvmNonce).toBe(1n);
   });
 
   it("refuses a second request under a coin nonce already queued", async () => {
@@ -1140,6 +1152,69 @@ describe("flush, via the withdraw entry point", () => {
     await expect(withdraw(contract, started, VALID_WITHDRAW)).rejects.toThrow(
       /Request already queued/,
     );
+  });
+
+  it("gives two IDENTICAL withdrawals in ONE batch DIFFERENT ids, on the EVM nonce alone", async () => {
+    // THE uniqueness property, now that `requestNonce` is a constant for every
+    // vault-signed flow. Same caller, same ERC20, same amount, same
+    // destination, same key version: every field of the two recorded events
+    // matches except the EVM nonce flush handed each of them.
+    //
+    // The two surrendered coins necessarily differ in nonce (the queue key
+    // binds it), but a coin nonce reaches only the SETTLE VIEW, never the
+    // hashed request record, so it contributes nothing to the ids. If a second
+    // counter were still needed, this is the test that would fail: the two
+    // records would hash to one id and the "Request already exists" assert
+    // would turn the second slot away.
+    const { contract, ctx } = await deployInitialised();
+    const twinCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x4a));
+    const afterFirst = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const afterSecond = (
+      await withdraw(contract, afterFirst, { ...VALID_WITHDRAW, coin: twinCoin })
+    ).context;
+
+    const drained = (
+      await flushWithdraws(contract, afterSecond, [
+        queueKey(SECRET_KEY, VALID_WITHDRAW.coin),
+        queueKey(SECRET_KEY, twinCoin),
+      ])
+    ).context;
+
+    const state = ledger(drained.callContext.currentQueryContext.state);
+    const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
+
+    // BOTH records landed, under DIFFERENT ids: neither slot was turned away by
+    // the duplicate-id assert, and both settle views were pinned.
+    expect(index.size).toBe(2);
+    expect(state.withdrawSettleViews.size()).toBe(2n);
+    expect(state.pendingVaultRequests.isEmpty()).toBe(true);
+
+    const records = [...index.values()].sort((a, b) =>
+      a.txParams.nonce < b.txParams.nonce ? -1 : 1,
+    );
+    const [recordA, recordB] = records;
+    if (recordA === undefined || recordB === undefined) {
+      throw new Error("expected two recorded withdraw requests");
+    }
+
+    // The EVM nonce is the ONLY difference: normalise it away and the two
+    // records are equal field for field, request nonce included.
+    expect({ ...recordA, txParams: { ...recordA.txParams, nonce: 0n } }).toEqual({
+      ...recordB,
+      txParams: { ...recordB.txParams, nonce: 0n },
+    });
+    expect([recordA.requestNonce, recordB.requestNonce]).toEqual([
+      pureCircuits.vaultSignedRequestNonce(),
+      pureCircuits.vaultSignedRequestNonce(),
+    ]);
+    expect([recordA.txParams.nonce, recordB.txParams.nonce]).toEqual([0n, 1n]);
+
+    // And that single difference is what the ids hang on, confirmed through the
+    // TS twin of the id circuit as well as the map keys.
+    const idA = requestIdHex(calculateRequestId(recordA));
+    const idB = requestIdHex(calculateRequestId(recordB));
+    expect(idA).not.toBe(idB);
+    expect([...index.keys()].sort()).toEqual([idA, idB].sort());
   });
 
   it("assigns the vault EVM nonce from the contract counter, CONTIGUOUSLY across a FULL batch", async () => {
@@ -1185,16 +1260,19 @@ describe("flush, via the withdraw entry point", () => {
     ]);
     // The counter advanced by exactly the number of entries drained.
     expect(state.vaultEvmNonce).toBe(BigInt(FLUSH_BATCH));
-    // The request-id counter advanced by the width, which here is the same
-    // number only because the batch happened to be full.
-    expect(state.signetRequestNonce).toBe(BigInt(FLUSH_BATCH));
+    // The dormant request-id counter did not move, and every record carries
+    // the same constant request nonce: the EVM nonces above are what keep the
+    // FLUSH_BATCH ids apart.
+    expect(state.signetRequestNonce).toBe(0n);
+    expect([...index.values()].map((record) => record.requestNonce)).toEqual(
+      Array.from({ length: FLUSH_BATCH }, () => 0n),
+    );
   });
 
-  it("leaves NO EVM-nonce gap when a slot is skipped, unlike signetRequestNonce", async () => {
+  it("leaves NO EVM-nonce gap when a slot is skipped", async () => {
     // Ethereum executes an account's transactions in nonce order, so a skipped
     // value would stall every later vault transaction behind it. vaultEvmNonce
-    // therefore advances per entry DRAINED; signetRequestNonce advances by the
-    // batch width and its gaps are harmless.
+    // therefore advances per entry DRAINED, never by the batch width.
     const { contract, ctx } = await deployInitialised();
     const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
     // A nearly empty batch: one live key, and FLUSH_BATCH - 1 dead slots the
@@ -1216,9 +1294,8 @@ describe("flush, via the withdraw entry point", () => {
     // of the ten slots drained nothing.
     expect(nonces.sort()).toEqual([0n, 1n]);
     expect(state.vaultEvmNonce).toBe(2n);
-    // The request-id counter DID skip: two batches of the full width, for two
-    // entries drained.
-    expect(state.signetRequestNonce).toBe(BigInt(2 * FLUSH_BATCH));
+    // Eight dead slots across two batches moved nothing.
+    expect(state.signetRequestNonce).toBe(0n);
   });
 
   it("burns an EVM nonce only for the LIVE slots of a partly filled batch, wherever they sit", async () => {
@@ -1247,17 +1324,17 @@ describe("flush, via the withdraw entry point", () => {
       ...toSignBidirectionalEventIndex(afterBatch.signBidirectionalEventMap).values(),
     ];
     expect(firstRecords).toHaveLength(2);
-    // The whole asymmetry, in two assertions on ONE batch. The request-id
-    // nonce is a pure function of (base, slot), so the dead slot 1 leaves a
-    // hole in it...
-    expect(firstRecords.map((record) => record.requestNonce).sort()).toEqual([0n, 2n]);
-    // ...while the EVM nonce is consumed only inside the live branch, so the
-    // two drained entries got 0 and 1 with nothing between them.
+    // The request nonce is the same constant in both, so it carries no
+    // information about which slot a record came from...
+    expect(firstRecords.map((record) => record.requestNonce)).toEqual([0n, 0n]);
+    // ...and the EVM nonce, consumed only inside the live branch, is what
+    // separates them: the two drained entries got 0 and 1 with nothing
+    // between them, even though a DEAD slot sits between the live ones.
     expect(firstRecords.map((record) => record.txParams.nonce).sort()).toEqual([0n, 1n]);
     // Three dead slots burned no EVM nonce at all.
     expect(afterBatch.vaultEvmNonce).toBe(2n);
-    // The request-id counter still took the FULL width.
-    expect(afterBatch.signetRequestNonce).toBe(BigInt(FLUSH_BATCH));
+    // And nothing moved the dormant request-id counter.
+    expect(afterBatch.signetRequestNonce).toBe(0n);
 
     // A second partly filled batch continues the EVM sequence with no gap,
     // which is the property Ethereum actually requires of it.
@@ -1273,8 +1350,6 @@ describe("flush, via the withdraw entry point", () => {
     );
     expect(nonces.sort()).toEqual([0n, 1n, 2n]);
     expect(state.vaultEvmNonce).toBe(3n);
-    // Two batches of the full width, for three entries drained.
-    expect(state.signetRequestNonce).toBe(BigInt(2 * FLUSH_BATCH));
   });
 
   it("shares the counter with approveRouter, which signs from the same vault account", async () => {
@@ -2793,10 +2868,11 @@ describe("cross-kind settle isolation", () => {
 // requests from DIFFERENT callers must both apply.
 //
 // Where this stands now: startDeposit sources its nonce per caller, and the
-// four vault-signed flows queue and let `flush` read the counter once per
-// batch, so NO start* circuit reads a shared cell any more. The approve
-// CONTROL below still does, and still fails with the read mismatch, which is
-// exactly what the requirement tests no longer fail with.
+// four vault-signed flows queue and let `flush` hand out vaultEvmNonce values
+// at drain time, so NO start* circuit reads a shared cell any more. The
+// approve CONTROL below still does (it consumes a vaultEvmNonce inline), and
+// still fails with the read mismatch, which is exactly what the requirement
+// tests no longer fail with.
 // ===========================================================================
 interface VaultCall {
   contractAddress: string;
@@ -2902,8 +2978,6 @@ describe("flush entry points drain only their own kind", () => {
     // ONE entry drained, so exactly ONE EVM nonce burned. A wrong-kind slot
     // that consumed one would open the gap this whole design exists to avoid.
     expect(state.vaultEvmNonce).toBe(1n);
-    // The request-id counter took the full width regardless, as always.
-    expect(state.signetRequestNonce).toBe(BigInt(FLUSH_BATCH));
 
     // The swap's OWN entry point still drains it, at the very next EVM nonce.
     const swapped = (await flushSwaps(contract, drained, [swapKey])).context;
@@ -2915,12 +2989,12 @@ describe("flush entry points drain only their own kind", () => {
     expect(swapRecord.txParams.nonce).toBe(1n);
     expect(after.vaultEvmNonce).toBe(2n);
     expect(after.pendingVaultRequests.isEmpty()).toBe(true);
-    // Two batches of the full width, for two entries drained.
-    expect(after.signetRequestNonce).toBe(BigInt(2 * FLUSH_BATCH));
+    // And neither batch moved the dormant request-id counter.
+    expect(after.signetRequestNonce).toBe(0n);
   });
 });
 
-describe("throughput: shared signetRequestNonce serializes vault requests", () => {
+describe("throughput: a shared counter read serializes vault requests", () => {
   it("CONTROL: a deposit applies against the state it was built on (harness sanity)", async () => {
     const { contract, ctx } = await deployInitialised();
     // The state the call is proven against is the one on the context it is
@@ -2943,10 +3017,11 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
   });
 
   it("CONTROL: the still-shared approve path fails exactly as the vault flows used to", async () => {
-    // approveStata and approveRouter deliberately keep the global counter, so
-    // they still serialize. This is the failure shape the four vault-signed
-    // flows had before the queue, proven here so the tests below are read
-    // against a harness that demonstrably detects a shared-cell conflict.
+    // approveStata and approveRouter read and increment vaultEvmNonce inline —
+    // they sign from the same one EVM account, so they must — and so they still
+    // serialize. This is the failure shape the four vault-signed flows had
+    // before the queue, proven here so the tests below are read against a
+    // harness that demonstrably detects a shared-cell conflict.
     // Replayed WITH headroom, exactly like the REQUIREMENTs above: a gas
     // artefact cannot be the reason this one is turned away, so the only thing
     // left is the pinned read of a cell Alice moved.
@@ -2990,19 +3065,22 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
     expect(queued.pendingVaultRequests.member(aliceKey)).toBe(true);
     expect(queued.pendingVaultRequests.member(bobKey)).toBe(true);
     expect(queued.signBidirectionalEventMap.isEmpty()).toBe(true);
-    expect(queued.signetRequestNonce).toBe(0n);
+    // Neither start* spent an EVM nonce: only a flush does.
+    expect(queued.vaultEvmNonce).toBe(0n);
 
-    // ONE flush, one read of the shared counter, two requests out.
+    // ONE flush, two EVM nonces handed out, two requests out.
     const drained = (await flushWithdraws(contract, afterBob, [aliceKey, bobKey])).context;
     const state = ledger(drained.callContext.currentQueryContext.state);
     const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
     expect(index.size).toBe(2);
     expect(state.pendingVaultRequests.isEmpty()).toBe(true);
 
-    // Distinct ids, from the distinct nonces slot 0 and slot 1 were handed.
+    // Distinct ids, carried by the distinct EVM nonces slot 0 and slot 1 were
+    // handed. The request nonce is the same constant in both records.
     const ids = [...index.keys()];
     expect(new Set(ids).size).toBe(2);
-    expect([...index.values()].map((record) => record.requestNonce).sort()).toEqual([0n, 1n]);
+    expect([...index.values()].map((record) => record.requestNonce)).toEqual([0n, 0n]);
+    expect([...index.values()].map((record) => record.txParams.nonce).sort()).toEqual([0n, 1n]);
 
     // Both were announced to the MPC, each notification naming its own id.
     const notified = decodeSignetLogEvents(drained.events, SIGNET_ADDRESS).map((event) =>
@@ -3497,6 +3575,51 @@ describe("adminReplaceEvmNonce", () => {
       maxPriorityFeePerGas: DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
       gasLimit: 21_000n,
     });
+  });
+
+  it("rejects a byte-identical repeat, but allows the retry that follows a fee raise", async () => {
+    // The one behavioural consequence of dropping the request-id counter. This
+    // circuit's EVM nonce is NAMED BY THE CALLER, not drawn from vaultEvmNonce,
+    // so with a constant requestNonce the id is a hash of (nonce, fees, key
+    // version) and a second call changing none of them collides with the first.
+    //
+    // Rejecting it is right, not a regression. A byte-identical re-request
+    // would only re-derive a signature that already exists and is already
+    // public in the singleton's SignatureRespondedEvent, so anyone can
+    // rebroadcast the first one instead. And a real retry cannot be
+    // byte-identical anyway: a replacement only evicts the stuck transaction if
+    // it pays meaningfully more, so it must follow a setGasParams raise — which
+    // changes the hashed envelope and mints a fresh id, as the second half of
+    // this test shows.
+    const { contract, ctx } = await deployInitialised();
+    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
+
+    await expect(contract.circuits.adminReplaceEvmNonce(next, STUCK_NONCE, 1n)).rejects.toThrow(
+      /Request already exists/,
+    );
+
+    // Raise the fees, which is the only way a replacement evicts anything, and
+    // the same stuck nonce records a SECOND, distinct request.
+    const raised = (await setGasParams(contract, next, NEW_GAS_PARAMS)).context;
+    const retried = (await contract.circuits.adminReplaceEvmNonce(raised, STUCK_NONCE, 1n)).context;
+
+    const index = toSignBidirectionalEventIndex(
+      ledger(retried.callContext.currentQueryContext.state).signBidirectionalEventMap,
+    );
+    expect(index.size).toBe(2);
+    // Both name the same stuck EVM nonce and the same constant request nonce;
+    // the fee raise is the whole of the difference.
+    expect([...index.values()].map((record) => record.txParams.nonce)).toEqual([
+      STUCK_NONCE,
+      STUCK_NONCE,
+    ]);
+    expect([...index.values()].map((record) => record.requestNonce)).toEqual([
+      pureCircuits.vaultSignedRequestNonce(),
+      pureCircuits.vaultSignedRequestNonce(),
+    ]);
+    expect([...index.values()].map((record) => record.txParams.maxFeePerGas).sort()).toEqual(
+      [DEFAULT_MAX_FEE_PER_GAS, NEW_MAX_FEE_PER_GAS].sort(),
+    );
   });
 
   it("reflects a prior setGasParams, which is why the admin raises the fees FIRST", async () => {

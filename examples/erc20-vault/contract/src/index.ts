@@ -49,12 +49,12 @@ export function deriveVaultEvmAddress(
 
 // THIS contract's signet ledger layout (declaration order in
 // erc20-vault.compact): each request kind owns a SignBidirectionalEventMap, and
-// `signetRequestNonce` keeps otherwise identical requests hashing apart. Only
-// `approveStata`, `approveRouter` and `flush` read that counter now: the four
-// vault-signed flows queue in `pendingVaultRequests` and `flush` assigns them
-// one nonce each per batch. `vaultEvmNonce` is the SEPARATE, CONTIGUOUS nonce
-// sequence of the shared vault EVM account, likewise assigned by
-// `approveStata`, `approveRouter` and `flush`. A
+// `vaultEvmNonce` is the CONTIGUOUS nonce sequence of the shared vault EVM
+// account, assigned by `approveStata`, `approveRouter` and `flush`. That nonce
+// is in every vault-signed request's txParams, so it is also what keeps two
+// otherwise identical requests hashing apart; `requestNonce` is the constant
+// `pureCircuits.vaultSignedRequestNonce()` for those flows. `signetRequestNonce`
+// is no longer read by any circuit -- see VAULT_NONCE_PATH below. A
 // client contract is free to place its event maps at any field: every raw
 // reader takes the resolved ledger-tree path explicitly, and the path must
 // match the `requestsPath` the contract packs into its notifications. The
@@ -81,7 +81,21 @@ export function deriveVaultEvmAddress(
  */
 export const VAULT_REQUESTS_PATH: readonly number[] = [0, 0];
 
-/** Resolved ledger-tree path of `signetRequestNonce` (ledger field 3). */
+/**
+ * Resolved ledger-tree path of `signetRequestNonce` (ledger field 3).
+ *
+ * The counter itself is dormant: no circuit reads or increments it any more,
+ * because the vault EVM nonce in a request's txParams already makes each
+ * vault-signed request id unique (see the contract's comment over the field).
+ * The path is still exported, and the field still declared, for two reasons
+ * that have nothing to do with the contract's own logic:
+ *
+ *   - the SDK's raw request-ledger reader,
+ *     `readSignetRequestsLedgerFromState(raw, requestsPath, noncePath)`, takes
+ *     a nonce path and throws unless it resolves to a `Uint<64>` Cell;
+ *   - it is one of the six pinned paths. Removing the field would shrink
+ *     chunk 0 and move chunk 1's base, taking every event-map path with it.
+ */
 export const VAULT_NONCE_PATH: readonly number[] = [0, 3];
 
 /**

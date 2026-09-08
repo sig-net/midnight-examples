@@ -304,9 +304,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const queuedB = await queueWithdraw(contextB, { amount: UNIT, destEvmAddress });
         expect(queuedA.queueKey).not.toEqual(queuedB.queueKey);
 
-        // Read both counters between the queue and the drain: slot i of the
-        // batch gets request nonce base+i, and — because both slots are live —
-        // EVM nonce evmBase+i.
+        // Read the EVM nonce between the queue and the drain: both slots are
+        // live, so slot i is handed evmBase+i. That nonce is also the ONLY
+        // thing separating the two ids — the two records are otherwise
+        // identical, and both carry the constant vaultSignedRequestNonce().
         const beforeFlush = await readVaultLedger(
           contextA.providers.publicDataProvider,
           contextA.vaultContractAddress,
@@ -314,20 +315,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const evmBase = beforeFlush.vaultEvmNonce;
         expect(await minedNonce(rpcUrl, vaultAddress)).toBe(evmBase);
 
-        const idA = predictWithdrawRequestId(
-          contextA,
-          beforeFlush,
-          queuedA,
-          beforeFlush.signetRequestNonce,
-          evmBase,
-        );
-        const idB = predictWithdrawRequestId(
-          contextA,
-          beforeFlush,
-          queuedB,
-          beforeFlush.signetRequestNonce + 1n,
-          evmBase + 1n,
-        );
+        const idA = predictWithdrawRequestId(contextA, beforeFlush, queuedA, evmBase);
+        const idB = predictWithdrawRequestId(contextA, beforeFlush, queuedB, evmBase + 1n);
 
         // ONE flush, drained by caller A on behalf of both. flush is
         // permissionless and reads no secret; A gains no claim on B's refund.
@@ -418,20 +407,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         );
         const evmBase = before1.vaultEvmNonce;
         expect(await minedNonce(rpcUrl, vaultAddress)).toBe(evmBase);
-        const id1 = predictWithdrawRequestId(
-          contextA,
-          before1,
-          queued1,
-          before1.signetRequestNonce,
-          evmBase,
-        );
-        const id2 = predictWithdrawRequestId(
-          contextA,
-          before1,
-          queued2,
-          before1.signetRequestNonce + 1n,
-          evmBase + 1n,
-        );
+        const id1 = predictWithdrawRequestId(contextA, before1, queued1, evmBase);
+        const id2 = predictWithdrawRequestId(contextA, before1, queued2, evmBase + 1n);
         await flushVaultRequests(contextA, FlushKind.Withdraws, [
           queued1.queueKey,
           queued2.queueKey,
@@ -442,13 +419,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           contextA.vaultContractAddress,
         );
         expect(before2.vaultEvmNonce).toBe(evmBase + 2n);
-        const id3 = predictWithdrawRequestId(
-          contextA,
-          before2,
-          queued3,
-          before2.signetRequestNonce,
-          evmBase + 2n,
-        );
+        const id3 = predictWithdrawRequestId(contextA, before2, queued3, evmBase + 2n);
         await flushVaultRequests(contextA, FlushKind.Withdraws, [queued3.queueKey]);
 
         const afterFlush = await readVaultLedger(

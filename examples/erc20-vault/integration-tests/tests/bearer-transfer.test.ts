@@ -323,7 +323,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
               context.providers.publicDataProvider,
               context.vaultContractAddress,
             )
-          ).signetRequestNonce;
+          ).vaultEvmNonce;
         const nonceBefore = await readNonce();
 
         // The `startWithdraw` circuit demands a surrendered coin of the full amount;
@@ -336,7 +336,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           }),
         ).rejects.toThrow(/[Ii]nsufficient funds/);
 
-        // Client-side death leaves no trace: the request counter is unchanged.
+        // Client-side death leaves no trace: the vault EVM nonce, which a flush
+        // consumes one of per recorded request, is unchanged.
         expect(
           await readNonce(),
           "the failed withdraw must not record a request on the ledger",

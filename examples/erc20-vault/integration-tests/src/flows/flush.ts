@@ -5,9 +5,8 @@
 // a request id inside `start*`: they validate, burn the surrendered coin and
 // append to the contract's `pendingVaultRequests` map. A flush — callable by
 // ANYONE, and reading no secret — is what turns a queued entry into a recorded
-// SignBidirectionalEvent: it assigns the request-id nonce, assigns the shared
-// vault EVM account's transaction nonce, records the event, pins the settle
-// view and notifies the MPC.
+// SignBidirectionalEvent: it assigns the shared vault EVM account's transaction
+// nonce, records the event, pins the settle view and notifies the MPC.
 //
 // There is one entry point per KIND, not one that dispatches. A circuit
 // contains every branch it might take, so a dispatching drain would charge
@@ -49,7 +48,7 @@ export enum FlushKind {
 /**
  * The padding key. Queue keys are `refundCommitment` digests, so an all-`0xff`
  * key is one no honest request can ever occupy; a slot holding it is skipped,
- * consuming neither a request nonce nor — crucially — an EVM nonce.
+ * consuming no EVM nonce.
  */
 const DEAD_SLOT_KEY = new Uint8Array(32).fill(0xff);
 

@@ -21,6 +21,7 @@ import {
 import {
   AAVE_USDC,
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
   STATA_USDC,
   vaultGasEnvelope,
@@ -64,7 +65,7 @@ export async function approveStata(context: VaultContext): Promise<RequestIdHex>
   // "vault"), the same 2-word map + bool schema as a transfer.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: asciiPadded("vault", PATH_BYTES),
     ...VAULT_MPC_ROUTING,
