@@ -77,11 +77,15 @@ export const VAULT_REQUESTS_PATH: readonly number[] = [0, 0];
 /**
  * Resolved ledger-tree path of `signetRequestNonce` (ledger field 3).
  *
- * The counter is off the request path: every request nonce is the allocator
- * slot index, so no request circuit reads or increments this cell. Only
- * `adminReplaceEvmNonce`, the deployer-gated break-glass, still does. The field
- * stays declared, and this path exported, because the MPC pins it; removing the
- * field would renumber the state tree.
+ * No longer a request nonce: every request nonce is the allocator slot index.
+ * The cell now counts the slots the allocator has ISSUED — each `assign*` bumps
+ * it by one — so `evmNonceBase` plus it is the first EVM nonce the vault has not
+ * yet promised, which is the bound `adminReplaceEvmNonce` refuses to replace
+ * past. Incrementing a counter pins nothing, so phase 2 stays concurrent; the
+ * only circuit that READS it is that deployer-gated break-glass.
+ *
+ * The field stays declared, and this path exported, because the MPC pins it;
+ * removing the field would renumber the state tree.
  */
 export const VAULT_NONCE_PATH: readonly number[] = [0, 3];
 
