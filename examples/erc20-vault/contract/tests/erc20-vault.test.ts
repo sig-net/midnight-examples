@@ -14,6 +14,7 @@ import {
 import { ContractState, CostModel, QueryContext } from "@midnightntwrk/onchain-runtime-v4";
 import {
   asciiPadded,
+  assembleCalldata,
   bytesToHex,
   calculateRequestId,
   decodeSignBidirectionalEventNotificationPayload,
@@ -2882,6 +2883,126 @@ describe("gas parameters reach the constructed transaction", () => {
       maxFeePerGas: VALID_DEPOSIT.maxFeePerGas,
       maxPriorityFeePerGas: VALID_DEPOSIT.maxPriorityFeePerGas,
       gasLimit: VALID_DEPOSIT.gasLimit,
+    });
+  });
+});
+
+// ===========================================================================
+// adminReplaceEvmNonce: break-glass replacement of a stuck vault transaction
+//
+// Raising the ceiling with setGasParams does not rescue a transaction the
+// vault already signed under the old one: the old maxFeePerGas is inside the
+// signed bytes. Because the vault signs from ONE EVM account with a single
+// sequential nonce, that transaction blocks every later one forever. The
+// Ethereum remedy is replacement — another transaction at the SAME nonce
+// paying meaningfully more — and its minimal form is an empty self-transfer.
+//
+// These tests pin the three things that make the replacement valid: the nonce
+// is the caller's, the transaction is empty (self, zero value, no calldata,
+// 21000 gas), and the fees come from the ledger the admin just raised.
+// ===========================================================================
+
+/** The EVM nonce these tests name as the stuck one. Arbitrary and non-zero. */
+const STUCK_NONCE = 7n;
+
+describe("adminReplaceEvmNonce", () => {
+  it("is deployer-gated, with initialise's own gate", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const stranger = await strangerContext("adminReplaceEvmNonce", ctx);
+
+    await expect(contract.circuits.adminReplaceEvmNonce(stranger, STUCK_NONCE, 1n)).rejects.toThrow(
+      /Not the deployer/,
+    );
+  });
+
+  it("records nothing when a non-deployer is rejected", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const stranger = await strangerContext("adminReplaceEvmNonce", ctx);
+
+    await expect(
+      contract.circuits.adminReplaceEvmNonce(stranger, STUCK_NONCE, 1n),
+    ).rejects.toThrow();
+
+    expect(
+      toSignBidirectionalEventIndex(
+        ledger(ctx.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ).size,
+    ).toBe(0);
+  });
+
+  it("builds an empty 21000-gas self-transfer at the nonce the caller named", async () => {
+    const { contract, ctx } = await deployInitialised();
+
+    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
+
+    const index = toSignBidirectionalEventIndex(
+      ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+    );
+    expect(index.size).toBe(1);
+    const record = first(index.values(), "recorded replacement request");
+    const { txParams } = record;
+
+    expect({
+      path: record.path,
+      nonce: txParams.nonce,
+      to: txParams.to,
+      value: txParams.value,
+      gasLimit: txParams.gasLimit,
+      calldataPresent: txParams.calldata.is_some,
+      data: assembleCalldata(txParams.calldata),
+      accessListEntryCount: txParams.accessListEntryCount,
+    }).toEqual({
+      // Signed with the VAULT account, the account whose nonce is stuck.
+      path: asciiPadded("vault", 32),
+      // The caller names the stuck nonce; replacing it is the entire point.
+      nonce: STUCK_NONCE,
+      // The vault sends to ITSELF, so the replacement moves no value anywhere.
+      to: VAULT_EVM,
+      value: 0n,
+      // The exact cost of an EVM value transfer carrying no calldata.
+      gasLimit: 21_000n,
+      // Empty calldata, reusing the shared map's 2-word capacity unused.
+      calldataPresent: false,
+      data: "0x",
+      accessListEntryCount: 0n,
+    });
+  });
+
+  it("takes its fee values from the ledger, defaulting to initialise's", async () => {
+    const { contract, ctx } = await deployInitialised();
+
+    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
+
+    expect(
+      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+    ).toEqual({
+      maxFeePerGas: DEFAULT_MAX_FEE_PER_GAS,
+      maxPriorityFeePerGas: DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit: 21_000n,
+    });
+  });
+
+  it("reflects a prior setGasParams, which is why the admin raises the fees FIRST", async () => {
+    // A replacement only evicts the stuck transaction if it pays meaningfully
+    // more than it (nodes typically demand about 10% more on both fee fields),
+    // and this circuit reads its fees from the ledger. So the operator raises
+    // them with setGasParams and only then calls this; if the raise did not
+    // reach the transaction, the replacement would re-offer the very fees that
+    // got the original stuck and the node would drop it.
+    const { contract, ctx } = await deployInitialised();
+    const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
+
+    const next = (await contract.circuits.adminReplaceEvmNonce(configured, STUCK_NONCE, 1n))
+      .context;
+
+    expect(
+      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+    ).toEqual({
+      maxFeePerGas: NEW_MAX_FEE_PER_GAS,
+      maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
+      // The gas limit is a property of the operation, never of the market, so
+      // the per-kind limits setGasParams moved leave this one at 21000.
+      gasLimit: 21_000n,
     });
   });
 });
