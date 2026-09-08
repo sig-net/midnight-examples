@@ -2943,21 +2943,6 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
   });
 
   it("CONTROL: the still-shared approve path fails exactly as the vault flows used to", async () => {
-    // approveRouter deliberately keeps the global counter, so it still
-    // serializes. Replayed WITH headroom, so a gas artefact cannot be the
-    // reason it is turned away: the only thing left that can reject it is the
-    // pinned read of a cell Alice moved. This is the negative control for the
-    // harness above — it is what proves `replay` still DETECTS a conflict,
-    // rather than waving everything through now that it budgets generously.
-    const { contract, ctx } = await deployInitialised();
-    const alice = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
-    const stateAfterAlice = stateOf(alice.context);
-    const bobCtx = await strangerContext("approveRouter", ctx);
-    const bob = await contract.circuits.approveRouter(bobCtx, ERC20, 0n, 1n);
-    expect(replay(stateAfterAlice, bob, true)).toMatch(/mismatch between expected .* read/);
-  });
-
-  it("CONTROL: the still-shared approve path fails exactly as the vault flows used to", async () => {
     // approveStata and approveRouter deliberately keep the global counter, so
     // they still serialize. This is the failure shape the four vault-signed
     // flows had before the queue, proven here so the tests below are read
@@ -3256,7 +3241,9 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
+    // The envelope is stamped by the FLUSH, not the start: start only queues.
+    const queued = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
+    const next = (await flushWithdrawCoin(contract, queued, VALID_WITHDRAW.coin)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -3271,7 +3258,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+    const next = (await contract.circuits.approveRouter(configured, ERC20, 1n)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -3286,7 +3273,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveStata(configured, 0n, 1n)).context;
+    const next = (await contract.circuits.approveStata(configured, 1n)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -3301,7 +3288,8 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await swap(contract, configured, VALID_SWAP)).context;
+    const queued = (await swap(contract, configured, VALID_SWAP)).context;
+    const next = (await flushSwapCoin(contract, queued, VALID_SWAP.coin)).context;
 
     expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).swapEventMap)).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
@@ -3314,14 +3302,9 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (
-      await supply(
-        contract,
-        configured,
-        SUPPLY_AMOUNT,
-        vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
-      )
-    ).context;
+    const coin = vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR);
+    const queued = (await supply(contract, configured, SUPPLY_AMOUNT, coin)).context;
+    const next = (await flushSupplyCoin(contract, queued, coin)).context;
 
     expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).supplyEventMap)).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
@@ -3334,9 +3317,9 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (
-      await redeem(contract, configured, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_COLOR))
-    ).context;
+    const coin = vaultCoin(REDEEM_SHARES, STATA_COLOR);
+    const queued = (await redeem(contract, configured, REDEEM_SHARES, coin)).context;
+    const next = (await flushRedeemCoin(contract, queued, coin)).context;
 
     expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).redeemEventMap)).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
@@ -3353,19 +3336,39 @@ describe("gas parameters reach the constructed transaction", () => {
 
     const stateOf = (c: typeof configured) => ledger(c.callContext.currentQueryContext.state);
 
-    const afterWithdraw = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
-    const afterSwap = (await swap(contract, configured, VALID_SWAP)).context;
-    const afterApprove = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
-    const afterSupply = (
-      await supply(
+    const supplyCoin = vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR);
+    const redeemCoin = vaultCoin(REDEEM_SHARES, STATA_COLOR);
+
+    // Each kind is started and then flushed on its own branch of the state, so
+    // the four maps below each hold exactly the one request of their kind.
+    const afterWithdraw = (
+      await flushWithdrawCoin(
         contract,
-        configured,
-        SUPPLY_AMOUNT,
-        vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
+        (await withdraw(contract, configured, VALID_WITHDRAW)).context,
+        VALID_WITHDRAW.coin,
+      )
+    ).context;
+    const afterSwap = (
+      await flushSwapCoin(
+        contract,
+        (await swap(contract, configured, VALID_SWAP)).context,
+        VALID_SWAP.coin,
+      )
+    ).context;
+    const afterApprove = (await contract.circuits.approveRouter(configured, ERC20, 1n)).context;
+    const afterSupply = (
+      await flushSupplyCoin(
+        contract,
+        (await supply(contract, configured, SUPPLY_AMOUNT, supplyCoin)).context,
+        supplyCoin,
       )
     ).context;
     const afterRedeem = (
-      await redeem(contract, configured, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_COLOR))
+      await flushRedeemCoin(
+        contract,
+        (await redeem(contract, configured, REDEEM_SHARES, redeemCoin)).context,
+        redeemCoin,
+      )
     ).context;
 
     expect({
