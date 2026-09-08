@@ -63,7 +63,7 @@ describe.skipIf(!HAS_VERIFIER_KEYS)(
   () => {
     it("reads every provable circuit's verifier key, matching the generated module's digest", () => {
       const circuitIds = Object.keys(expectedVk);
-      expect(circuitIds).toHaveLength(19);
+      expect(circuitIds).toHaveLength(25);
       const deferred = readDeferredCircuits(circuitIds);
       expect(deferred.map((c) => c.circuitId)).toEqual(circuitIds);
       for (const { circuitId, verifierKey } of deferred) {
