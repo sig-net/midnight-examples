@@ -3,13 +3,13 @@
 // MPC never exposes its root key, so this can never be a flow capability —
 // it stays in test-support code.
 //
-// The vault's EVM account nonces belong to the contract's allocator: slot i of
-// the `slots` tree is PROMISED nonce `evmNonceBase + i`, and nothing on chain
-// re-reads the account. A transaction sent from that account out of band
-// therefore steals a nonce the allocator has already promised, and the request
-// holding that slot signs a nonce the account has already spent — its transfer
-// can never mine, so it is never attested and never settles. (Exactly one
-// request dies per out-of-band transaction; the allocator realigns after it.)
+// The vault's EVM account nonces come from the contract's own `vaultEvmNonce`
+// counter, and nothing on chain re-reads the account. A transaction sent from
+// that account out of band therefore steals a nonce the contract has already
+// handed out, and the request holding it signs a nonce the account has already
+// spent — its transfer can never mine, so it is never attested and never
+// settles. (Exactly one request dies per out-of-band transaction; the counter
+// realigns after it.)
 // So the drain below puts the account nonce back where it found it, with an
 // anvil cheatcode, once its transfer has mined. That is bookkeeping only: the
 // transfer really is signed by the vault's own key and really does move the
