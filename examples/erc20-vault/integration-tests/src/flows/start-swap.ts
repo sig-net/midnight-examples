@@ -18,15 +18,10 @@ import {
   evmAddressBytes,
   readVaultLedger,
   VAULT_PATH_BYTES,
+  vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
-import {
-  EXACT_OUTPUT_SINGLE_SELECTOR,
-  SWAP_GAS_LIMIT,
-  SWAP_MAX_FEE_PER_GAS,
-  SWAP_MAX_PRIORITY_FEE_PER_GAS,
-  SWAP_MPC_ROUTING,
-} from "../evm-swap.ts";
+import { EXACT_OUTPUT_SINGLE_SELECTOR, SWAP_MPC_ROUTING } from "../evm-swap.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
 
@@ -59,6 +54,12 @@ export async function startSwap(
   if (!before.initialised)
     throw new Error("vault is not initialised, run the initialise flow first");
 
+  // The gas envelope the circuit itself will stamp, read from the ledger the
+  // deployer's setGasParams writes. Read, never mirrored as a constant: the
+  // envelope is hashed into the request id, so a stale copy recomputes the
+  // wrong id the moment the cap is raised.
+  const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "swap");
+
   // Surrender the tokenIn vault coin of exactly amountInMaximum (burned; completeSwap returns
   // the unspent remainder as change).
   const coin = {
@@ -81,9 +82,9 @@ export async function startSwap(
       to: before.uniswapRouter,
       chainId: before.evmChainId,
       nonce: options.evmNonce,
-      gasLimit: SWAP_GAS_LIMIT,
-      maxFeePerGas: SWAP_MAX_FEE_PER_GAS,
-      maxPriorityFeePerGas: SWAP_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
       value: 0n,
       accessListEntryCount: 0n,
       accessList: [],

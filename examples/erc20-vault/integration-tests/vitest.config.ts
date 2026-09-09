@@ -27,6 +27,9 @@ const FILE_ORDER = [
   "supply-refund-e2e.test.ts",
   "swap-refund-e2e.test.ts",
   "redeem-refund-e2e.test.ts",
+  // Last: it strands a vault EVM nonce mid-test and only unblocks it at the
+  // end, so nothing that shares the vault account may run behind it.
+  "admin-replace-nonce-e2e.test.ts",
 ];
 
 const rank = (moduleId: string): number => {

@@ -105,3 +105,44 @@ export function depositRequestNonce(state: VaultLedgerState, callerCommitment: U
     ? state.depositRequestNonces.lookup(callerCommitment).read()
     : 0n;
 }
+
+/**
+ * The kinds of transaction the VAULT signs with its own derived EVM account.
+ * Deposits are absent on purpose: their transaction is signed by the user's
+ * own account and carries a caller-supplied envelope.
+ */
+export type VaultGasKind = "withdraw" | "approve" | "swap" | "supply" | "redeem";
+
+/** The EIP-1559 gas envelope of one vault-signed transaction. */
+export interface VaultGasEnvelope {
+  /** Gas limit for this kind of operation. */
+  readonly gasLimit: bigint;
+  /** Fee ceiling, shared by every kind. */
+  readonly maxFeePerGas: bigint;
+  /** Miner tip, shared by every kind. */
+  readonly maxPriorityFeePerGas: bigint;
+}
+
+/**
+ * The gas envelope the vault's circuits will stamp on a `kind` transaction,
+ * read from the ledger the deployer's `setGasParams` writes.
+ *
+ * This is the off-chain twin of the circuits' own reads, and it must stay in
+ * lockstep with them: the envelope is hashed into the request id, so a stale
+ * value makes the recomputed id miss the ledger map key and the flow fail.
+ * It is read rather than mirrored as a constant precisely because these
+ * values move -- `maxFeePerGas` is a ceiling that has to be raised when the
+ * base fee climbs, and a constant would be right only until the first
+ * `setGasParams` call.
+ *
+ * @param state - The decoded vault ledger state, read before the call.
+ * @param kind - The vault-signed operation whose gas limit applies.
+ * @returns The gas limit for that kind plus the global fee ceiling and tip.
+ */
+export function vaultGasEnvelope(state: VaultLedgerState, kind: VaultGasKind): VaultGasEnvelope {
+  return {
+    gasLimit: state.vaultGasLimits[kind],
+    maxFeePerGas: state.vaultMaxFeePerGas,
+    maxPriorityFeePerGas: state.vaultMaxPriorityFeePerGas,
+  };
+}
