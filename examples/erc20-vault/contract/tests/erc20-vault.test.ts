@@ -11,7 +11,7 @@ import {
 } from "@midnight-ntwrk/compact-runtime";
 // This tree's wasm ContractState class: see signetStateProvider for why the
 // portal-linked signet module's state must round-trip through it.
-import { ContractState } from "@midnightntwrk/onchain-runtime-v4";
+import { ContractState, CostModel, QueryContext } from "@midnightntwrk/onchain-runtime-v4";
 import {
   asciiPadded,
   bytesToHex,
@@ -531,8 +531,12 @@ describe("deposit round-trip", () => {
       amount: AMOUNT,
     });
 
-    // Nonce bumped for the next request.
-    expect(ledger(state).signetRequestNonce).toBe(1n);
+    // This caller's OWN deposit nonce slot bumped for their next request,
+    // while the global signetRequestNonce (which the vault-signed flows still
+    // use) is left untouched: deposits no longer read or move the shared cell,
+    // which is what lets two different callers' deposits apply concurrently.
+    expect(ledger(state).depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(1n);
+    expect(ledger(state).signetRequestNonce).toBe(0n);
   });
 });
 
@@ -600,6 +604,36 @@ describe("deposit validation", () => {
     expect(index.size).toBe(2);
     const nonces = [...index.values()].map((r) => r.requestNonce).sort();
     expect(nonces).toEqual([0n, 1n]);
+  });
+
+  it("the SAME caller depositing twice advances THEIR slot and leaves signetRequestNonce at 0", async () => {
+    // The ledger-side facts the off-chain twin (`depositRequestNonce` in
+    // src/vault-ledger.ts) reads to predict a request id. A twin reading the
+    // shared signetRequestNonce instead agrees only on the first deposit,
+    // when both cells read 0; this pins the divergence so that accident can
+    // never silently return.
+    const { contract, ctx } = await deployInitialised();
+
+    const stateBefore = ledger(ctx.callContext.currentQueryContext.state);
+    expect(stateBefore.depositRequestNonces.member(DEPLOYER_COMMITMENT)).toBe(false);
+    expect(stateBefore.signetRequestNonce).toBe(0n);
+
+    const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
+    const stateAfterFirst = ledger(afterFirst.callContext.currentQueryContext.state);
+    expect(stateAfterFirst.depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(1n);
+
+    const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
+    const stateAfterSecond = ledger(afterSecond.callContext.currentQueryContext.state);
+
+    // The caller's own counter is what advanced...
+    expect(stateAfterSecond.depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(2n);
+    // ...and the shared vault-path nonce never moved: deposits do not touch it.
+    expect(stateAfterSecond.signetRequestNonce).toBe(0n);
+
+    // So the SECOND deposit hashed nonce 1, which the twin can only predict
+    // from the per-caller slot.
+    const index = toSignBidirectionalEventIndex(stateAfterSecond.depositEventMap);
+    expect([...index.values()].map((record) => record.requestNonce).sort()).toEqual([0n, 1n]);
   });
 
   it("two identities depositing identical requests get DISTINCT ids: the path differentiates them", async () => {
@@ -2354,4 +2388,142 @@ describe("cross-kind settle isolation", () => {
       await expect(settle(await approveRouterRequested())).rejects.toThrow(throws);
     },
   );
+});
+
+// ===========================================================================
+// Throughput: every start* circuit reads and increments ONE shared cell,
+// signetRequestNonce. The read is pinned (popeq) and the cell changes on every
+// request, so two requests proven against the same state cannot both apply:
+// the second fails on-chain reconciliation with a read mismatch. These tests
+// reproduce that in verifying mode and pin the requirement that concurrent
+// requests from DIFFERENT callers must both apply.
+//
+// Where this stands on THIS branch: startDeposit sources its nonce from a
+// per-caller counter, so the deposit REQUIREMENT is green. The vault-signed
+// flows (startWithdraw and friends) and the approves still read the shared
+// cell, so they still serialize and are still RED, with the read mismatch the
+// CONTROL below pins.
+// ===========================================================================
+interface VaultCall {
+  contractAddress: string;
+  publicTranscript: unknown;
+  initialQueryContext: { block: unknown; state: unknown };
+  finalQueryContext: { effects: unknown };
+}
+// The LAST vault call in the trace, not the first. The proof-data trace
+// accumulates across every circuit run threaded through one context, so on a
+// context that has already been through deployInitialised the first vault
+// entry is `initialise` — replaying that instead of the call under test makes
+// a contention assertion vacuous.
+const vaultCallOf = (run: { context: CircuitContext<VaultPrivateState> }): VaultCall => {
+  const trace = run.context.callProofDataTrace as unknown as VaultCall[];
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const call = trace[i];
+    if (call?.contractAddress === VAULT_ADDRESS) return call;
+  }
+  throw new Error("no vault call in the proof-data trace");
+};
+const gasOf = (run: { context: CircuitContext<VaultPrivateState> }): Record<string, unknown> => {
+  const gas = (run.context.gasCosts as Record<string, Record<string, unknown> | undefined>)[
+    VAULT_ADDRESS
+  ];
+  if (!gas) throw new Error("no vault gas cost on the run");
+  return gas;
+};
+
+/** The state a threaded context currently sits on. */
+const stateOf = (ctx: CircuitContext<VaultPrivateState>): unknown =>
+  ctx.callContext.currentQueryContext.state;
+
+/**
+ * A transcript's execution budget, scaled.
+ *
+ * The captured budget is the EXACT cost the transcript ran up against the
+ * state it was built on. Replayed against a state another request has already
+ * grown, the same program costs a little more (a bigger map is a deeper read),
+ * and the simulator aborts with "ran out of gas budget" — a budget artefact,
+ * not a conflict. A real transaction declares a budget with headroom for
+ * precisely this reason, so the concurrency tests replay with headroom too.
+ * The thing that CANNOT be worked around, and the thing these tests are
+ * actually about, is a pinned-read mismatch.
+ */
+const withHeadroom = (gas: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(gas).map(([k, v]) => [k, typeof v === "bigint" ? v * 8n : v]));
+
+// Replay a captured vault transcript in verifying mode against `state`, using
+// the SAME block context it was built under, so the only thing that can
+// mismatch is a ledger cell that moved. Returns "applied" or the failure text.
+const replay = (
+  state: unknown,
+  run: { context: CircuitContext<VaultPrivateState> },
+  headroom = false,
+): string => {
+  const call = vaultCallOf(run);
+  const qc = new QueryContext(state as never, VAULT_ADDRESS);
+  (qc as unknown as { block: unknown }).block = call.initialQueryContext.block;
+  const gas = gasOf(run);
+  const transcript = {
+    gas: headroom ? withHeadroom(gas) : gas,
+    effects: call.finalQueryContext.effects,
+    program: call.publicTranscript,
+  };
+  try {
+    qc.runTranscript(transcript as never, CostModel.initialCostModel());
+    return "applied";
+  } catch (e) {
+    return "REJECTED: " + String((e as { message?: string }).message ?? e).slice(0, 160);
+  }
+};
+
+describe("throughput: shared signetRequestNonce serializes vault requests", () => {
+  it("CONTROL: a deposit applies against the state it was built on (harness sanity)", async () => {
+    const { contract, ctx } = await deployInitialised();
+    // The state the call is proven against is the one on the context it is
+    // given. (The trace entry's own initialQueryContext is NOT it: entries in
+    // one accumulated trace share that field, so it still points at the
+    // pre-initialise state.)
+    const builtOn = stateOf(ctx);
+    const run = await deposit(contract, ctx, VALID_DEPOSIT);
+    expect(replay(builtOn, run)).toBe("applied");
+  });
+
+  it("REQUIREMENT (red today): two concurrent startDeposits from different callers both apply", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const alice = await deposit(contract, ctx, VALID_DEPOSIT);
+    const stateAfterAlice = alice.context.callContext.currentQueryContext.state;
+    const bobCtx = await strangerContext("startDeposit", ctx);
+    const bob = await deposit(contract, bobCtx, VALID_DEPOSIT);
+    // Bob was proven concurrently with Alice; he must still apply after her.
+    expect(replay(stateAfterAlice, bob, true)).toBe("applied");
+  });
+
+  it("CONTROL: the still-shared approve path fails exactly as the vault flows used to", async () => {
+    // approveRouter deliberately keeps the global counter, so it still
+    // serializes. Replayed WITH headroom, so a gas artefact cannot be the
+    // reason it is turned away: the only thing left that can reject it is the
+    // pinned read of a cell Alice moved. This is the negative control for the
+    // harness above — it is what proves `replay` still DETECTS a conflict,
+    // rather than waving everything through now that it budgets generously.
+    const { contract, ctx } = await deployInitialised();
+    const alice = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
+    const stateAfterAlice = stateOf(alice.context);
+    const bobCtx = await strangerContext("approveRouter", ctx);
+    const bob = await contract.circuits.approveRouter(bobCtx, ERC20, 0n, 1n);
+    expect(replay(stateAfterAlice, bob, true)).toMatch(/mismatch between expected .* read/);
+  });
+
+  it("ANTI-REPLAY GUARD (must stay green): a caller's identical repeat gets a fresh id", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const idsOf = (c: CircuitContext<VaultPrivateState>): string[] => [
+      ...toSignBidirectionalEventIndex(
+        ledger(c.callContext.currentQueryContext.state).depositEventMap,
+      ).keys(),
+    ];
+    const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
+    const before = idsOf(afterFirst);
+    const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
+    const fresh = idsOf(afterSecond).filter((k) => !before.includes(k));
+    expect(fresh.length).toBe(1);
+    expect(before).not.toContain(fresh[0]);
+  });
 });

@@ -17,7 +17,11 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
-import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  depositRequestNonce,
+  evmAddressBytes,
+  readVaultLedger,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import {
   ERC20_TRANSFER_GAS_LIMIT,
@@ -82,7 +86,7 @@ export async function startDeposit(
   );
   console.log(`caller commitment: ${context.identity.commitmentHex}`);
 
-  // Pre-call ledger read: the request nonce the contract will use, the sealed
+  // Pre-call ledger read: this caller's own deposit request nonce, the sealed
   // vault EVM address its calldata will pay to, and the pinned chain config.
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
@@ -91,7 +95,7 @@ export async function startDeposit(
   if (!before.initialised) {
     throw new Error("vault is not initialised, run the initialise flow first");
   }
-  const requestNonce = before.signetRequestNonce;
+  const requestNonce = depositRequestNonce(before, context.identity.commitment);
   const vaultEvmAddress = before.vaultEvmAddress;
 
   const gasLimit = ERC20_TRANSFER_GAS_LIMIT;
