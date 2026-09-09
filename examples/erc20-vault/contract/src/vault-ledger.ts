@@ -31,9 +31,10 @@ export async function readVaultLedger(
 
 /**
  * Read and print the vault's public ledger state: initialisation status, the
- * configured vault EVM address, the pinned EVM chain, and the pending signet
- * signature requests of the deposit and approve/withdraw maps. No proving keys
- * or transactions involved.
+ * configured vault EVM address, the pinned EVM chain, the EVM nonce
+ * allocator's base and occupancy, and the pending signet signature requests of
+ * the deposit and approve/withdraw maps. No proving keys or transactions
+ * involved.
  *
  * @param publicDataProvider - The provider to query raw contract state through.
  * @param vaultContractAddress - The deployed vault contract address, as bare hex.
@@ -57,6 +58,18 @@ export async function printVaultState(
     `EVM chain:         ${String(state.evmChainId)} (${new TextDecoder().decode(state.caip2Id).replace(/\0+$/u, "")})`,
   );
 
+  // The EVM nonce allocator: `slots` leaf i owns EVM nonce evmNonceBase + i,
+  // so firstFree() is both the next slot a phase-1 call takes and the next EVM
+  // nonce the vault account will be promised. `pendingParams` holds the
+  // requests that have run phase 1 but not yet phase 2 — anything lingering
+  // there is a request whose `assign*` never landed.
+  console.log(`EVM nonce base:    ${String(state.evmNonceBase)}`);
+  console.log(
+    `allocator slots:   ${String(state.slots.firstFree())} used ` +
+      `(next EVM nonce ${String(state.evmNonceBase + state.slots.firstFree())})`,
+  );
+  console.log(`parked requests:   ${String(state.pendingParams.size())} awaiting phase 2`);
+
   printRequestMap("deposit", state.depositEventMap);
   printRequestMap("approve/withdraw", state.signBidirectionalEventMap);
 }
@@ -75,7 +88,14 @@ function printRequestMap(
   const index = toSignBidirectionalEventIndex(map);
   console.log(`pending ${kinds} signature requests: ${String(index.size)}`);
   for (const [requestIdHex, request] of index) {
-    console.log(`- ${requestIdHex} (requestNonce ${String(request.requestNonce)})`);
+    // The EVM nonce, not the request nonce: the vault-signed flows all hash a
+    // constant 0 as their request nonce (the EVM nonce is what separates their
+    // ids), so it distinguishes nothing here. Only deposits still carry a real
+    // per-caller request nonce, so print both.
+    console.log(
+      `- ${requestIdHex} (evm nonce ${String(request.txParams.nonce)}, ` +
+        `requestNonce ${String(request.requestNonce)})`,
+    );
   }
 }
 
@@ -87,11 +107,11 @@ function printRequestMap(
  * This is the off-chain twin of the circuit's own nonce read, and it must stay
  * in lockstep with it: the nonce is hashed into the request id, so predicting
  * it wrong makes the recomputed id miss the ledger map key and the whole flow
- * fail. Deposits deliberately do NOT read the shared `signetRequestNonce` --
- * that cell belongs to the vault-path flows (approve/withdraw/swap/supply/
- * redeem). The two agree only on a vault's first-ever deposit, when both read
- * 0, which is exactly how a twin reading the wrong cell passes an e2e suite
- * that never deposits twice as one caller.
+ * fail. Deposits deliberately do NOT read any shared cell -- not `issuedSlots`,
+ * which counts what the vault-path flows (approve/withdraw/swap/supply/redeem)
+ * have been allocated. The two agree only on a vault's first-ever deposit, when
+ * both read 0, which is exactly how a twin reading the wrong cell passes an e2e
+ * suite that never deposits twice as one caller.
  *
  * @param state - The decoded vault ledger state, read before the call.
  * @param callerCommitment - The caller's 32-byte identity commitment.

@@ -10,9 +10,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   VAULT_DEPOSIT_REQUESTS_PATH,
-  VAULT_NONCE_PATH,
+  VAULT_ISSUED_SLOTS_PATH,
   VAULT_REDEEM_REQUESTS_PATH,
   VAULT_REQUESTS_PATH,
+  VAULT_SLOTS_PATH,
   VAULT_SUPPLY_REQUESTS_PATH,
   VAULT_SWAP_REQUESTS_PATH,
 } from "../src/index.ts";
@@ -40,7 +41,8 @@ const compiledFieldIndex = (name: string): readonly number[] => {
 describe("exported ledger paths match the compiled contract-info.json", () => {
   it.each([
     ["signBidirectionalEventMap", VAULT_REQUESTS_PATH, [0, 0]],
-    ["signetRequestNonce", VAULT_NONCE_PATH, [0, 3]],
+    ["issuedSlots", VAULT_ISSUED_SLOTS_PATH, [0, 3]],
+    ["slots", VAULT_SLOTS_PATH, [1, 1]],
     ["depositEventMap", VAULT_DEPOSIT_REQUESTS_PATH, [1, 3]],
     ["swapEventMap", VAULT_SWAP_REQUESTS_PATH, [1, 7]],
     ["supplyEventMap", VAULT_SUPPLY_REQUESTS_PATH, [1, 11]],
@@ -58,7 +60,7 @@ describe("the admin-updateable gas parameters sit in chunk 0", () => {
   // These have no exported path constant: nothing reads them by ledger-tree
   // path, only through the generated `ledger()`. They are pinned anyway
   // because WHERE they sit is the whole reason they were declared immediately
-  // after signetRequestNonce rather than appended at the end. Fields inserted
+  // after issuedSlots rather than appended at the end. Fields inserted
   // there push the chunk-1 base down by the same count, which is what leaves
   // the six notification paths above untouched. Appending them instead would
   // have moved all four chunk-1 event maps.
@@ -84,7 +86,7 @@ describe("the state tree stays TWO chunks deep", () => {
   // chunk -- it opens a THIRD, and the compiler re-splits from the top: the
   // first chunk keeps ONE field and everything else slides one chunk along.
   // Verified against this compiler by adding six scratch fields: [0,0] stayed,
-  // signetRequestNonce moved [0,3] -> [1,2], and all four event maps moved from
+  // issuedSlots moved [0,3] -> [1,2], and all four event maps moved from
   // chunk 1 to chunk 2. Every one of the six paths the MPC notifications pin
   // moves at once.
   //
@@ -112,17 +114,17 @@ describe("the state tree stays TWO chunks deep", () => {
 describe("the chunk-1 block holds the event maps at their pinned offsets", () => {
   // The sharper tripwire: not just the six notified paths, but the whole of
   // chunk 1 in order. Any ledger field appended at the end, or inserted after
-  // evmChainId, shifts this list and fails here first, naming exactly what
-  // moved.
+  // depositRequestNonces, shifts this list and fails here first, naming
+  // exactly what moved.
   it("holds the same 15 fields at the same offsets", () => {
     const chunkOne = contractInfo.ledger
       .filter((field) => field.index[0] === 1)
       .map((field) => [field.name, [...field.index]] as const);
 
     expect(chunkOne).toEqual([
-      ["caip2Id", [1, 0]],
-      ["deployer", [1, 1]],
-      ["depositRequestNonces", [1, 2]],
+      ["evmNonceBase", [1, 0]],
+      ["slots", [1, 1]],
+      ["pendingParams", [1, 2]],
       ["depositEventMap", [1, 3]],
       ["depositSettleViews", [1, 4]],
       ["withdrawSettleViews", [1, 5]],

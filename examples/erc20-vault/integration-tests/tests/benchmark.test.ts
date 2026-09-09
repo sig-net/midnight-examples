@@ -1,19 +1,25 @@
 // The benchmark e2e flow: the merged report (yarn benchmark:report:erc20-vault)
-// carries a prove row for each of the 14 circuits the sequences below prove
-// (of the contract's 17: refundSwap, refundSupply and refundRedeem are proved
-// by the swap-refund, supply-refund and redeem-refund specs). The sequences, in order:
+// carries a prove row for each of the 20 circuits the sequences below prove
+// (of the contract's 23: refundSwap, refundSupply and refundRedeem are proved
+// by the swap-refund, supply-refund and redeem-refund specs). Every
+// vault-signed request is TWO circuits since the EVM nonce allocator landed —
+// a `request*` that parks the request and takes an allocator slot, then an
+// `assign*` that proves the slot and records the event — and the flow function
+// each leg times runs both, so one leg's wall clock covers both proves while
+// the per-circuit rows still split them. The sequences, in order:
 //
 //   initialise     : timed when THIS run initialises the vault (fresh
 //                    deploy); the circuit is one-shot per contract, so a
 //                    vault initialised by an earlier flow file logs a skip.
-//   approve        : approveRouter request + MPC signature + broadcast.
-//                    Permissionless and repeatable, so it always runs.
+//   approve        : approveRouter (request + assign) + MPC signature +
+//                    broadcast. Permissionless and repeatable, so it always runs.
 //   deposit        : full round trip ending in completeDeposit.
 //   withdraw       : full round trip ending in completeWithdraw.
 //   swap           : arrange deposit (untimed), then the swap round trip
 //                    ending in completeSwap. The setup pipeline verifies the
 //                    Uniswap router is on the fork, so it always runs.
-//   approveStata   : approveStata request + MPC signature + broadcast, the
+//   approveStata   : approveStata (request + assign) + MPC signature +
+//                    broadcast, the
 //                    aave twin of the approve sequence. The setup pipeline
 //                    verifies the stataUSDC wrapper is on the fork, so it and
 //                    the two sequences below always run.
@@ -49,12 +55,15 @@
 // puts happy-day before this one in a full-suite run. Recovery from a run that
 // died mid-flow (proof-server OOM): rerun this file with the
 // BENCHMARK_*_REQUEST_ID env var the failed run printed
-// (deposit/withdraw/swap/supply/redeem/refund-deposit/refund-withdraw).
+// (deposit/withdraw/swap/supply/redeem/refund-deposit/refund-withdraw). The
+// four coin-backed sequences need their BENCHMARK_*_COIN_NONCE too: the
+// settle proves ownership from the surrendered coin's nonce, and no public
+// ledger read recovers it.
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
 
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { bytesToHex, hexToBytes, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
   VAULT_DEPOSIT_REQUESTS_PATH,
   VAULT_REDEEM_REQUESTS_PATH,
@@ -299,16 +308,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "time approveRouter: record the router-allowance request on the vault ledger",
       async () => {
         const context = await session.vaultContext();
-        // The approve tx is sent FROM the vault's derived account; its next
-        // nonce comes from the chain, fetched outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // The approve tx is sent FROM the vault's derived account, at the EVM
+        // nonce its allocator slot owns — nothing is read from the chain. The
+        // timed span covers BOTH phases (requestApproveRouter then
+        // assignApproveRouter).
 
         recorder.setLeg(BenchmarkLeg.ApproveRouter);
         const stop = startTimer();
-        approveRequestId = await approveRouter(context, evmNonce);
+        ({ requestId: approveRequestId } = await approveRouter(context));
         const ms = stop();
         recorder.clearLeg();
         timings.approve.approveRouter = ms;
@@ -534,11 +541,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     // subsequent withdraw stages.
     let withdrawRequestId: RequestIdHex;
 
+    // The surrendered coin's nonce the withdraw was keyed on: the settle-view
+    // commitment is requestCommitment(secret, coinNonce), so completeWithdraw
+    // takes it back. A resumed run supplies BENCHMARK_WITHDRAW_COIN_NONCE.
+    let withdrawCommitmentNonce: Uint8Array;
+
     it(
       "time withdraw: escrow the claimed shielded vault tokens",
       async () => {
         if (env.BENCHMARK_WITHDRAW_REQUEST_ID) {
           withdrawRequestId = env.BENCHMARK_WITHDRAW_REQUEST_ID as RequestIdHex;
+          withdrawCommitmentNonce = hexToBytes(requireEnv("BENCHMARK_WITHDRAW_COIN_NONCE"));
           logSkip(
             "withdraw",
             `BENCHMARK_WITHDRAW_REQUEST_ID present, resuming withdraw '${withdrawRequestId}'`,
@@ -547,24 +560,22 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
 
         const context = await session.vaultContext();
-        // The withdraw tx sender is the VAULT's derived EVM account; the
-        // destination is the user's derived account, so the funds cycle. The
-        // nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // The withdraw tx sender is the VAULT's derived EVM account, at the
+        // nonce its allocator slot owns; the destination is the user's derived
+        // account, so the funds cycle. The timed span covers BOTH phases
+        // (requestWithdraw then assignWithdraw).
         const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
 
         recorder.setLeg(BenchmarkLeg.WithdrawStart);
         const stop = startTimer();
-        withdrawRequestId = await startWithdraw(context, {
+        const started = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress,
-          evmNonce,
         });
         const ms = stop();
         recorder.clearLeg();
+        withdrawRequestId = started.requestId;
+        withdrawCommitmentNonce = started.coinNonce;
         timings.withdraw.startWithdraw = ms;
         recorder.recordLeg(BenchmarkLeg.WithdrawStart, ms);
 
@@ -574,9 +585,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Benchmark withdraw request recorded on the vault ledger:`,
           "",
           `  request id: ${withdrawRequestId}`,
+          `  coin nonce: ${bytesToHex(withdrawCommitmentNonce)}`,
           "",
-          "If a later step dies (e.g. proof-server OOM), resume with",
+          "If a later step dies (e.g. proof-server OOM), resume with BOTH",
           `  BENCHMARK_WITHDRAW_REQUEST_ID=${withdrawRequestId}`,
+          `  BENCHMARK_WITHDRAW_COIN_NONCE=${bytesToHex(withdrawCommitmentNonce)}`,
         ]);
       },
       5 * MINUTE,
@@ -683,7 +696,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // cost), so this span is the prove-and-submit alone.
         recorder.setLeg(BenchmarkLeg.WithdrawComplete);
         const stop = startTimer();
-        await settleWithdraw(context, withdrawRequestId, withdrawOutcome);
+        await settleWithdraw(context, withdrawRequestId, withdrawOutcome, withdrawCommitmentNonce);
         const ms = stop();
         recorder.clearLeg();
         timings.withdraw.completeWithdraw = ms;
@@ -704,6 +717,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
     let swapAmountInMaximum: bigint;
     let swapRequestId: RequestIdHex;
+
+    // The surrendered coin's nonce the swap was keyed on: the settle-view
+    // commitment is requestCommitment(secret, coinNonce), so completeSwap
+    // takes it back. A resumed run supplies BENCHMARK_SWAP_COIN_NONCE.
+    let swapCommitmentNonce: Uint8Array;
 
     it(
       "swap arrange: quote the cap and deposit the tokenIn coin the swap will surrender (untimed)",
@@ -741,6 +759,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       async () => {
         if (env.BENCHMARK_SWAP_REQUEST_ID) {
           swapRequestId = env.BENCHMARK_SWAP_REQUEST_ID as RequestIdHex;
+          swapCommitmentNonce = hexToBytes(requireEnv("BENCHMARK_SWAP_COIN_NONCE"));
           logSkip("swap", `BENCHMARK_SWAP_REQUEST_ID present, resuming swap '${swapRequestId}'`);
           return;
         }
@@ -748,23 +767,21 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const context = await session.vaultContext();
         // The swap tx is sent FROM the vault's derived account (it holds the
-        // pooled funds); the nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // pooled funds), at the EVM nonce its allocator slot owns. The timed
+        // span covers BOTH phases (requestSwap then assignSwap).
 
         recorder.setLeg(BenchmarkLeg.SwapStart);
         const stop = startTimer();
-        swapRequestId = await startSwap(context, {
+        const started = await startSwap(context, {
           tokenOut: SWAP_TOKEN_OUT,
           fee: SWAP_FEE,
           amountOut: SWAP_AMOUNT_OUT,
           amountInMaximum: swapAmountInMaximum,
-          evmNonce,
         });
         const ms = stop();
         recorder.clearLeg();
+        swapRequestId = started.requestId;
+        swapCommitmentNonce = started.coinNonce;
         timings.swap.startSwap = ms;
         recorder.recordLeg(BenchmarkLeg.SwapStart, ms);
 
@@ -774,9 +791,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Benchmark swap request recorded on the vault ledger:`,
           "",
           `  request id: ${swapRequestId}`,
+          `  coin nonce: ${bytesToHex(swapCommitmentNonce)}`,
           "",
-          "If a later step dies (e.g. proof-server OOM), resume with",
+          "If a later step dies (e.g. proof-server OOM), resume with BOTH",
           `  BENCHMARK_SWAP_REQUEST_ID=${swapRequestId}`,
+          `  BENCHMARK_SWAP_COIN_NONCE=${bytesToHex(swapCommitmentNonce)}`,
         ]);
       },
       5 * MINUTE,
@@ -883,7 +902,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         recorder.setLeg(BenchmarkLeg.SwapComplete);
         const stop = startTimer();
-        const settled = await settleSwap(context, swapRequestId, swapOutcome);
+        const settled = await settleSwap(context, swapRequestId, swapOutcome, swapCommitmentNonce);
         const ms = stop();
         recorder.clearLeg();
         timings.swap.completeSwap = ms;
@@ -939,17 +958,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "time approveStata: record the wrapper-allowance request on the vault ledger",
       async () => {
         const context = await session.vaultContext();
-        // The approve tx is sent FROM the vault's derived account. Like
-        // approveRouter it is repeatable (a repeat re-sets the same
-        // allowance), so it always runs and always records a prove.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // The approve tx is sent FROM the vault's derived account, at the EVM
+        // nonce its allocator slot owns. Like approveRouter it is repeatable
+        // (a repeat re-sets the same allowance), so it always runs and always
+        // records both phases' proves.
 
         recorder.setLeg(BenchmarkLeg.ApproveStata);
         const stop = startTimer();
-        approveStataRequestId = await approveStata(context, evmNonce);
+        ({ requestId: approveStataRequestId } = await approveStata(context));
         const ms = stop();
         recorder.clearLeg();
         timings.approveStata.approveStata = ms;
@@ -1006,11 +1022,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     // subsequent supply stages.
     let supplyRequestId: RequestIdHex;
 
+    // The surrendered coin's nonce the supply was keyed on: the settle-view
+    // commitment is requestCommitment(secret, coinNonce), so completeSupply
+    // takes it back. A resumed run supplies BENCHMARK_SUPPLY_COIN_NONCE.
+    let supplyCommitmentNonce: Uint8Array;
+
     it(
       "time supply: record the supply request on the vault ledger",
       async () => {
         if (env.BENCHMARK_SUPPLY_REQUEST_ID) {
           supplyRequestId = env.BENCHMARK_SUPPLY_REQUEST_ID as RequestIdHex;
+          supplyCommitmentNonce = hexToBytes(requireEnv("BENCHMARK_SUPPLY_COIN_NONCE"));
           logSkip(
             "supply",
             `BENCHMARK_SUPPLY_REQUEST_ID present, resuming supply '${supplyRequestId}'`,
@@ -1020,17 +1042,16 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const context = await session.vaultContext();
         // The deposit tx is sent FROM the vault's derived account (it holds
-        // the pooled underlying), and the nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // the pooled underlying), at the EVM nonce its allocator slot owns.
+        // The timed span covers BOTH phases (requestSupply then assignSupply).
 
         recorder.setLeg(BenchmarkLeg.SupplyStart);
         const stop = startTimer();
-        supplyRequestId = await startSupply(context, { amount: SUPPLY_AMOUNT, evmNonce });
+        const started = await startSupply(context, { amount: SUPPLY_AMOUNT });
         const ms = stop();
         recorder.clearLeg();
+        supplyRequestId = started.requestId;
+        supplyCommitmentNonce = started.coinNonce;
         timings.supply.startSupply = ms;
         recorder.recordLeg(BenchmarkLeg.SupplyStart, ms);
 
@@ -1040,9 +1061,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Benchmark supply request recorded on the vault ledger:`,
           "",
           `  request id: ${supplyRequestId}`,
+          `  coin nonce: ${bytesToHex(supplyCommitmentNonce)}`,
           "",
-          "If a later step dies (e.g. proof-server OOM), resume with",
+          "If a later step dies (e.g. proof-server OOM), resume with BOTH",
           `  BENCHMARK_SUPPLY_REQUEST_ID=${supplyRequestId}`,
+          `  BENCHMARK_SUPPLY_COIN_NONCE=${bytesToHex(supplyCommitmentNonce)}`,
         ]);
       },
       5 * MINUTE,
@@ -1154,7 +1177,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         recorder.setLeg(BenchmarkLeg.SupplyComplete);
         const stop = startTimer();
-        const settled = await settleSupply(context, supplyRequestId, supplyOutcome);
+        const settled = await settleSupply(
+          context,
+          supplyRequestId,
+          supplyOutcome,
+          supplyCommitmentNonce,
+        );
         const ms = stop();
         recorder.clearLeg();
         timings.supply.completeSupply = ms;
@@ -1177,11 +1205,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     // subsequent redeem stages.
     let redeemRequestId: RequestIdHex;
 
+    // The surrendered coin's nonce the redeem was keyed on: the settle-view
+    // commitment is requestCommitment(secret, coinNonce), so completeRedeem
+    // takes it back. A resumed run supplies BENCHMARK_REDEEM_COIN_NONCE.
+    let redeemCommitmentNonce: Uint8Array;
+
     it(
       "time redeem: record the redeem request on the vault ledger",
       async () => {
         if (env.BENCHMARK_REDEEM_REQUEST_ID) {
           redeemRequestId = env.BENCHMARK_REDEEM_REQUEST_ID as RequestIdHex;
+          redeemCommitmentNonce = hexToBytes(requireEnv("BENCHMARK_REDEEM_COIN_NONCE"));
           logSkip(
             "redeem",
             `BENCHMARK_REDEEM_REQUEST_ID present, resuming redeem '${redeemRequestId}'`,
@@ -1202,18 +1236,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(shares, "no stataUSDC shares to redeem (run the supply sequence)").toBeGreaterThan(
           0n,
         );
-        // The redeem tx is sent FROM the vault's derived account, and the
-        // nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // The redeem tx is sent FROM the vault's derived account, at the EVM
+        // nonce its allocator slot owns. The timed span covers BOTH phases
+        // (requestRedeem then assignRedeem).
 
         recorder.setLeg(BenchmarkLeg.RedeemStart);
         const stop = startTimer();
-        redeemRequestId = await startRedeem(context, { shares, evmNonce });
+        const started = await startRedeem(context, { shares });
         const ms = stop();
         recorder.clearLeg();
+        redeemRequestId = started.requestId;
+        redeemCommitmentNonce = started.coinNonce;
         timings.redeem.startRedeem = ms;
         recorder.recordLeg(BenchmarkLeg.RedeemStart, ms);
 
@@ -1223,9 +1256,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Benchmark redeem request recorded on the vault ledger:`,
           "",
           `  request id: ${redeemRequestId}`,
+          `  coin nonce: ${bytesToHex(redeemCommitmentNonce)}`,
           "",
-          "If a later step dies (e.g. proof-server OOM), resume with",
+          "If a later step dies (e.g. proof-server OOM), resume with BOTH",
           `  BENCHMARK_REDEEM_REQUEST_ID=${redeemRequestId}`,
+          `  BENCHMARK_REDEEM_COIN_NONCE=${bytesToHex(redeemCommitmentNonce)}`,
         ]);
       },
       5 * MINUTE,
@@ -1328,7 +1363,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         recorder.setLeg(BenchmarkLeg.RedeemComplete);
         const stop = startTimer();
-        const settled = await settleRedeem(context, redeemRequestId, redeemOutcome);
+        const settled = await settleRedeem(
+          context,
+          redeemRequestId,
+          redeemOutcome,
+          redeemCommitmentNonce,
+        );
         const ms = stop();
         recorder.clearLeg();
         timings.redeem.completeRedeem = ms;
@@ -1411,11 +1451,18 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     // for the subsequent stages.
     let refundWithdrawRequestId: RequestIdHex;
 
+    // The surrendered coin's nonce the doomed withdraw was keyed on:
+    // refundWithdraw re-derives requestCommitment(secret, coinNonce) to prove
+    // this wallet is the withdrawer. A resumed run supplies
+    // BENCHMARK_REFUND_WITHDRAW_COIN_NONCE.
+    let refundCommitmentNonce: Uint8Array;
+
     it(
       "time withdraw (refund): escrow tokens for a transfer the vault cannot pay",
       async () => {
         if (env.BENCHMARK_REFUND_WITHDRAW_REQUEST_ID) {
           refundWithdrawRequestId = env.BENCHMARK_REFUND_WITHDRAW_REQUEST_ID as RequestIdHex;
+          refundCommitmentNonce = hexToBytes(requireEnv("BENCHMARK_REFUND_WITHDRAW_COIN_NONCE"));
           logSkip(
             "withdraw",
             `BENCHMARK_REFUND_WITHDRAW_REQUEST_ID present, resuming withdraw '${refundWithdrawRequestId}'`,
@@ -1424,21 +1471,22 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
 
         const context = await session.vaultContext();
-        // Nonce fetched AFTER the drain mined (the drain consumed one).
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // No nonce is fetched: the allocator proves the transfer's nonce out
+        // of the slot phase 1 takes. NOTE the drain above spent a vault-account
+        // nonce OUTSIDE the allocator, so the promised nonce and the account's
+        // real one diverge from here on — see the drain caution in
+        // tests/deposit-withdrawal-failure-refund.test.ts.
 
         recorder.setLeg(BenchmarkLeg.RefundStartWithdraw);
         const stop = startTimer();
-        refundWithdrawRequestId = await startWithdraw(context, {
+        const started = await startWithdraw(context, {
           amount: REFUND_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-          evmNonce,
         });
         const ms = stop();
         recorder.clearLeg();
+        refundWithdrawRequestId = started.requestId;
+        refundCommitmentNonce = started.coinNonce;
         timings.refund.startWithdraw = ms;
         recorder.recordLeg(BenchmarkLeg.RefundStartWithdraw, ms);
 
@@ -1448,9 +1496,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Doomed withdraw request recorded on the vault ledger:`,
           "",
           `  request id: ${refundWithdrawRequestId}`,
+          `  coin nonce: ${bytesToHex(refundCommitmentNonce)}`,
           "",
-          "If a later step dies (e.g. proof-server OOM), resume with",
+          "If a later step dies (e.g. proof-server OOM), resume with BOTH",
           `  BENCHMARK_REFUND_WITHDRAW_REQUEST_ID=${refundWithdrawRequestId}`,
+          `  BENCHMARK_REFUND_WITHDRAW_COIN_NONCE=${bytesToHex(refundCommitmentNonce)}`,
         ]);
       },
       5 * MINUTE,
@@ -1563,7 +1613,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // owns that cost), so this span is the prove-and-submit alone.
         recorder.setLeg(BenchmarkLeg.RefundWithdraw);
         const stop = startTimer();
-        await settleWithdraw(context, refundWithdrawRequestId, refundOutcome);
+        await settleWithdraw(
+          context,
+          refundWithdrawRequestId,
+          refundOutcome,
+          refundCommitmentNonce,
+        );
         const ms = stop();
         recorder.clearLeg();
         timings.refund.refundWithdraw = ms;

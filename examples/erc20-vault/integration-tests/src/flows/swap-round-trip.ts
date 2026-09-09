@@ -2,7 +2,6 @@
 // signature, broadcast, completeSwap.
 import type { RequestIdHex } from "@sig-net/midnight";
 import { VAULT_SWAP_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
 import { quoteExactOutputSingle } from "../evm-swap.ts";
 import type { VaultSession } from "../vault-session.ts";
@@ -27,7 +26,8 @@ export interface SwapRoundTripOptions {
 
 /**
  * Full swap round trip against the live stack: ensure the router is approved for tokenIn,
- * quote maxIn, submit the swap (vault-signed), poll the MPC signature, broadcast the swap tx,
+ * quote maxIn, submit the swap (vault-signed, both allocator phases), poll the MPC signature,
+ * broadcast the swap tx,
  * poll the attestation, and settle (completeSwap mints the exact amountOut of tokenOut plus
  * the unspent tokenIn as change). The setup pipeline verifies the Uniswap router is deployed on
  * the fork before any flow runs. Requires the caller to already HOLD amountInMaximum of the
@@ -64,13 +64,13 @@ export async function runSwapRoundTrip(
     `quote: ~${String(quoted)} ${context.erc20Address} -> ${String(opts.amountOut)} ${opts.tokenOut} (max ${String(amountInMaximum)})`,
   );
 
-  const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await startSwap(context, {
+  // No EVM nonce is read from the chain: startSwap runs both phases and the vault's allocator
+  // proves the tx nonce out of the slot phase 1 landed in.
+  const { requestId, coinNonce } = await startSwap(context, {
     tokenOut: opts.tokenOut,
     fee: opts.fee,
     amountOut: opts.amountOut,
     amountInMaximum,
-    evmNonce,
   });
 
   // The swap tx is signed by the VAULT's account (it holds the pooled funds). tolerateRevert:
@@ -84,6 +84,8 @@ export async function runSwapRoundTrip(
     requestsPath: VAULT_SWAP_REQUESTS_PATH,
   });
   await broadcastEvm(context, { transaction: signed, tolerateRevert: true });
-  const { amountIn, refunded } = await completeSwap(context, requestId);
+  // The surrendered coin's nonce is what proves swapper-hood at settle time: the settle-view
+  // commitment is the phase-1 request key, requestCommitment(secret, coinNonce).
+  const { amountIn, refunded } = await completeSwap(context, requestId, coinNonce);
   return { requestId, amountOut: opts.amountOut, amountIn, refunded };
 }

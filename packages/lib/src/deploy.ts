@@ -83,7 +83,7 @@ export function installedCircuitIds(contractStateBytes: Uint8Array): string[] {
  * ONLY the circuits in `baseCircuitIds` in the initial contract state,
  * returning the REST so the caller can add them with
  * {@link buildMaintenanceInsertTransaction}. A contract whose full
- * verifier-key set overflows a block (the 17-circuit vault) deploys as a small base
+ * verifier-key set overflows a block (the 25-circuit vault) deploys as a small base
  * plus per-circuit maintenance adds. Keep `baseCircuitIds` minimal (one small circuit
  * is enough) so the base tx is well under the block limit; every other circuit is
  * deferred. The constructor runs once over the full assets (every key must be present);

@@ -4,9 +4,9 @@
 // The nonce is hashed into the request id, so the twin has to agree with the
 // circuit on every call, not just the first. The circuit takes the nonce from
 // THIS caller's slot in `depositRequestNonces` (defaulting to 0 when the
-// caller has never deposited) and leaves the shared `signetRequestNonce`
-// alone. A twin that reads `signetRequestNonce` instead agrees by accident on
-// a vault's very first deposit — both cells read 0 — and diverges on every
+// caller has never deposited) and touches no shared cell at all. A twin that
+// reads the vault-path counter `issuedSlots` instead agrees by accident on a
+// vault's very first deposit — both cells read 0 — and diverges on every
 // deposit after that. That accident is why the bug survived the e2e suite:
 // no flow ever deposited twice as the same caller.
 //
@@ -34,18 +34,19 @@ const hex = (bytes: Uint8Array): string =>
  *
  * @param options - The two cells under test.
  * @param options.depositNonces - Per-caller counters, keyed by commitment hex.
- * @param options.signetRequestNonce - The shared vault-path nonce.
+ * @param options.issuedSlots - The shared count of allocator slots issued to
+ *   the vault-path flows, which deposits must ignore.
  * @returns A ledger state stub typed as the real decoded state.
  */
 const ledgerState = ({
   depositNonces = {},
-  signetRequestNonce = 0n,
+  issuedSlots = 0n,
 }: {
   readonly depositNonces?: Readonly<Record<string, bigint>>;
-  readonly signetRequestNonce?: bigint;
+  readonly issuedSlots?: bigint;
 }): VaultLedgerState =>
   ({
-    signetRequestNonce,
+    issuedSlots,
     depositRequestNonces: {
       member: (key: Uint8Array) => hex(key) in depositNonces,
       lookup: (key: Uint8Array) => {
@@ -89,14 +90,14 @@ describe("depositRequestNonce", () => {
     expect(depositRequestNonce(state, BOB)).toBe(1n);
   });
 
-  it("ignores the shared signetRequestNonce entirely", () => {
+  it("ignores the shared issuedSlots count entirely", () => {
     // The vault-path flows (approve/withdraw/swap/supply/redeem) drive
-    // signetRequestNonce; deposits must not read it. Both cells are set to
+    // issuedSlots; deposits must not read it. Both cells are set to
     // values that differ from each other AND from 0, so a twin reading the
     // wrong one cannot pass by coincidence.
     const state = ledgerState({
       depositNonces: { [hex(ALICE)]: 2n },
-      signetRequestNonce: 9n,
+      issuedSlots: 9n,
     });
 
     expect(depositRequestNonce(state, ALICE)).toBe(2n);
@@ -105,7 +106,7 @@ describe("depositRequestNonce", () => {
   it("is 0 for a caller with no slot even when other callers have deposited", () => {
     const state = ledgerState({
       depositNonces: { [hex(BOB)]: 4n },
-      signetRequestNonce: 4n,
+      issuedSlots: 4n,
     });
 
     expect(depositRequestNonce(state, ALICE)).toBe(0n);

@@ -185,15 +185,22 @@ export async function pollSwapOutcome(
  * tokenOut plus the unspent tokenIn as change), `refundSwap` for the fixed
  * MPC failure output (re-mints the surrendered amountInMaximum).
  *
+ * Both circuits take `commitmentNonce`: the swap's settle-view commitment is the phase-1
+ * request key `requestCommitment(secret, coinNonce)`, so the only way to prove swapper-hood
+ * is to re-present the surrendered coin's nonce. `startSwap` returns it for exactly this.
+ *
  * @param context - The flow context.
  * @param requestId - The swap request id being settled.
  * @param outcome - The attested outcome from {@link pollSwapOutcome}.
+ * @param commitmentNonce - The surrendered coin's nonce, from
+ *   {@link file://./start-swap.ts startSwap}.
  * @returns The attested amountIn spent (0 on refund) and whether the swap was refunded.
  */
 export async function settleSwap(
   context: VaultContext,
   requestId: RequestIdHex,
   outcome: SwapOutcome,
+  commitmentNonce: Uint8Array,
 ): Promise<{ amountIn: bigint; refunded: boolean }> {
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
   if (outcome.matchedFailureOutput) {
@@ -203,6 +210,7 @@ export async function settleSwap(
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
       mintNonce,
+      commitmentNonce,
     );
     console.log(`refund settled in tx ${r.public.txId}`);
     return { amountIn: 0n, refunded: true };
@@ -216,6 +224,7 @@ export async function settleSwap(
     outcome.serializedOutput,
     mintNonce,
     changeNonce,
+    commitmentNonce,
   );
   console.log(
     `completeSwap settled in tx ${r.public.txId} (spent ${String(outcome.amountIn)} tokenIn)`,
@@ -229,12 +238,15 @@ export async function settleSwap(
  *
  * @param context - The flow context.
  * @param requestId - The swap request id to settle.
+ * @param commitmentNonce - The surrendered coin's nonce, from
+ *   {@link file://./start-swap.ts startSwap}.
  * @returns The attested amountIn spent (0 on refund) and whether the swap was refunded.
  */
 export async function completeSwap(
   context: VaultContext,
   requestId: RequestIdHex,
+  commitmentNonce: Uint8Array,
 ): Promise<{ amountIn: bigint; refunded: boolean }> {
   const outcome = await pollSwapOutcome(context, { requestId });
-  return settleSwap(context, requestId, outcome);
+  return settleSwap(context, requestId, outcome, commitmentNonce);
 }

@@ -18,6 +18,16 @@ export enum BenchRecordKind {
  * step names the flow function the leg calls, or, where a settle flow routes
  * between several circuits, the circuit that call proves. The values are the
  * keys of that file's `timings` report.
+ *
+ * Six of these legs are TWO-PHASE and prove two circuits under one wall
+ * clock: since the EVM nonce allocator landed, `startWithdraw`, `startSwap`,
+ * `startSupply`, `startRedeem`, `approveRouter` and `approveStata` each run a
+ * `request*` call (park the request, take an allocator slot) and then an
+ * `assign*` call (prove the slot, record the event for the MPC). Splitting
+ * them into two legs would mean splitting the flow functions, so the leg keeps
+ * naming the flow and the per-CIRCUIT prove rows carry the split: those key on
+ * the proving-key circuit id, so `requestWithdraw` and `assignWithdraw` report
+ * their own rows regardless of which leg they were observed under.
  */
 export enum BenchmarkLeg {
   Initialise = "initialise.initialise",

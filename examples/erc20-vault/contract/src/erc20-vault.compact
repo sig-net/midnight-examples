@@ -13,6 +13,34 @@ import CompactStandardLibrary;
 // Resolved through node_modules via COMPACT_PATH (see the compile scripts in package.json).
 import "@sig-net/midnight/src/Signet";
 
+// ---- Allocator types ----------------------------------------------------------------
+
+// Which flow parked a set of parameters. Phase 2 asserts the kind it expects, so an
+// assignSwap cannot be pointed at a key a requestWithdraw parked.
+//
+// `consumed` is the tombstone phase 2 leaves behind INSTEAD of removing the entry.
+// The tombstone is what keeps allocator leaves unique. For the value flows the key's
+// second preimage is the surrendered coin's nonce, and a coin is spendable once, so a
+// key cannot repeat. The approves surrender no coin and key on a caller-chosen salt:
+// remove the entry and the same caller could re-park the same salt, put a SECOND leaf
+// with the same value in the tree, and then present the path for whichever of the two
+// indices they preferred -- claiming an EVM nonce already spent and stranding the
+// other. The tombstone makes "Request already pending" permanent for a key.
+enum RequestKind { withdraw, swap, supply, redeem, approveStata, approveRouter, consumed }
+
+// The union of every flow's request parameters. Fields a flow does not use are left at
+// their default; phase 2 reads only the ones its own kind writes.
+struct PendingRequest {
+  kind: RequestKind;
+  keyVersion: Uint<8>;
+  tokenA: Bytes<20>;   // withdraw/approveRouter: the ERC20. swap: tokenIn.
+  tokenB: Bytes<20>;   // swap: tokenOut.
+  dest: Bytes<20>;     // withdraw: the EVM recipient.
+  fee: Uint<24>;       // swap: the Uniswap V3 pool fee tier.
+  amountA: Uint<128>;  // withdraw: amount. swap: amountOut. supply: amount. redeem: shares.
+  amountB: Uint<128>;  // swap: amountInMaximum.
+}
+
 // ---- Ledger state -------------------------------------------------------------------
 
 // Approve and withdraw requests (2-word ERC20 transfer, 34-byte schemas).
@@ -25,8 +53,27 @@ sealed ledger signetSigner: SignetSigner;
 // Verifies every attestation (the Signet singleton emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
-// Nonce to keep otherwise identical requests hashing to distinct request ids.
-export ledger signetRequestNonce: Counter;
+// HOW MANY ALLOCATOR SLOTS HAVE BEEN ISSUED, and nothing else. Every assign* bumps it
+// by one as it claims a slot, so evmNonceBase + this is the first EVM nonce the vault
+// has NOT yet promised to anyone.
+//
+// THAT BOUND IS ITS ONLY PURPOSE. adminReplaceEvmNonce is the sole circuit that reads
+// it, and it reads it for exactly one reason: to refuse an evmNonce argument the
+// allocator has not handed out, which would otherwise burn a nonce a future request is
+// owed and stall the vault's whole EVM account. Nothing else in this contract reads it,
+// and no request id is derived from it — the request nonce every vault-signed flow
+// sends is a constant 0, because the EVM nonce inside the hashed txParams already makes
+// each request id unique (see SlotClaim). Do not reintroduce a reader on the per-user
+// path: a READ is what pins a counter, and pinning this one would serialize every
+// assign* against every other, which is the throughput problem the allocator exists to
+// solve. Counter.increment emits no popeq, so COUNTING stays free and two concurrent
+// assign* calls both apply; the one reader is deployer-gated and used about once a
+// year, so serializing it against a concurrent assign* costs nothing anyone notices.
+//
+// The field also has to stay HERE because the MPC and src/index.ts pin its compiled
+// path [0, 3]; deleting it, or moving it, would renumber the state tree and take
+// every other pinned path with it.
+export ledger issuedSlots: Counter;
 
 // ---- Gas parameters of VAULT-SIGNED transactions ------------------------------------
 //
@@ -49,7 +96,7 @@ export ledger signetRequestNonce: Counter;
 // The gas LIMIT is a property of the operation, not of the market, so it is per kind;
 // the fee cap and tip track the market, so they are global.
 //
-// DECLARED HERE (immediately after signetRequestNonce) ON PURPOSE, for the reason
+// DECLARED HERE (immediately after issuedSlots) ON PURPOSE, for the reason
 // spelled out over depositRequestNonces below: the compiler puts the LAST 15 ledger
 // fields in chunk 1, so APPENDING these at the end would re-chunk the state tree and
 // move the pinned MPC notification paths. Inserting fields here pushes the chunk-1
@@ -64,12 +111,14 @@ export ledger signetRequestNonce: Counter;
 // slides one chunk along — which moves all six paths the MPC pins at once. And it
 // does that SILENTLY: the contract still compiles, the circuits still prove, and the
 // off-chain signer simply stops seeing requests with no error anywhere. Five separate
-// limit fields would have sat the vault at 29 of those 30, one slot from the edge.
+// limit fields would sit this vault at 32, past that edge outright — and at 29 of the
+// 30 even without the EVM nonce allocator below.
 // The five limits are only ever WRITTEN together, by initialise and setGasParams, and
 // only ever READ one at a time, by the circuit that needs its own kind, so
 // co-locating them costs nothing and buys four slots of headroom against that
-// ceiling. They are still five values, one per kind, just in one cell. Anything added
-// here in future spends headroom; past it, group rather than append.
+// ceiling — three of which the EVM nonce allocator below spends. They are still five
+// values, one per kind, just in one cell. Anything added here in future spends the
+// last of that headroom; past it, group rather than append.
 export ledger vaultMaxFeePerGas: Uint<128>;
 export ledger vaultMaxPriorityFeePerGas: Uint<128>;
 
@@ -99,29 +148,78 @@ sealed ledger deployer: Bytes<32>;
 
 // Per-caller deposit request nonces, keyed by the caller's identity commitment
 // (startDeposit's `caller`). startDeposit sources its requestNonce from this
-// caller's own slot instead of the single global signetRequestNonce, so two
-// DIFFERENT callers' deposits no longer read one shared ledger cell and can
-// both apply against the same proving state. The counter stays
+// caller's own slot rather than from any single global cell, so two DIFFERENT
+// callers' deposits no longer read one shared ledger cell and can both apply
+// against the same proving state. The counter stays
 // contract-controlled and monotonic per caller, so a caller still cannot replay
 // their own settled request. Only deposit binds the caller into the request id
-// (path = caller), so only deposit can safely key uniqueness on the caller; the
-// vault-signed flows (approve*, withdraw, swap, supply, redeem) sign with the
-// constant path "vault" and keep the global signetRequestNonce for now.
+// (path = caller), so only deposit can safely key uniqueness on the caller. The
+// vault-signed flows (approve*, withdraw, swap, supply, redeem) all sign with
+// the constant path "vault" from ONE account, so they take their nonces from
+// the EVM nonce allocator below instead.
 //
 // Declared HERE (immediately before depositEventMap), not appended at the end,
-// on purpose. The compiler chunks this 25-field state as [chunk 0: the first 10
+// on purpose. The compiler chunks this 28-field state as [chunk 0: the first 13
 // fields], [chunk 1: the last 15 fields], so the event maps below pin compiled
 // paths the MPC notifications and src/index.ts depend on ([1,3], [1,7], [1,11],
 // [1,13]). Inserting the new field just before depositEventMap shifts each of
 // those fields one slot later AND the chunk-1 base one slot later too, so their
 // offsets — and every pinned path — are unchanged.
 //
+// EVERY new ledger field must go here, between `deployer` and `depositEventMap`.
+// One appended after redeemSettleViews would move the chunk-1 base without moving
+// the event maps, and silently break all four notification paths.
+//
 // And there is a hard CEILING: two chunks hold 30 fields, 15 each. Field 31
 // opens a third chunk and re-splits the whole tree, which breaks all six pinned
-// paths at once however carefully the field was placed. At 25 the vault has
-// five slots left; past that, group related values into one struct cell the way
+// paths at once however carefully the field was placed. At 28 the vault has two
+// slots left; past that, group related values into one struct cell the way
 // vaultGasLimits does rather than adding a field.
 export ledger depositRequestNonces: Map<Bytes<32>, Counter>;
+
+// ---- EVM nonce allocator ------------------------------------------------------------
+// The vault signs every non-deposit EVM transaction from ONE shared account, so each
+// request needs its own contiguous EVM account nonce. Reading a counter to get one
+// pins it (popeq), which is exactly the throughput bottleneck this allocator removes.
+//
+// Instead the request is split in two. Phase 1 (request*) parks the parameters under a
+// per-caller key and appends that key to `slots`. HistoricMerkleTree.insert has NO
+// popeq: it stores the leaf at first_free, bumps it, and appends the new root to the
+// history map. Concurrent inserts therefore commute and land at consecutive indices.
+// Phase 2 (assign*) presents a Merkle path, and `checkRoot` lowers to `member` against
+// that append-only history map, so its pinned TRUE is monotone: nobody else's insert
+// can falsify it. The path's `goes_left` bits ARE the leaf index in binary, so proving
+// membership proves the position, and the EVM nonce is PROVEN rather than read.
+//
+// NEVER expose insertIndex, insertHashIndex, insertIndexDefault, resetHistory or
+// resetToDefault on `slots`: each of them can rebind or invalidate an index that some
+// outstanding request has already been promised.
+
+// The first EVM account nonce slot 0 owns. Written once by initialise() and never
+// again, so the popeq that reads it pins a value that CANNOT change: a pinned read
+// only conflicts when someone else moves the cell, and nothing ever moves this one.
+export ledger evmNonceBase: Uint<64>;
+
+// The allocator itself: leaf i owns EVM account nonce evmNonceBase + i. Depth 24 caps
+// the vault at 16,777,216 lifetime vault-signed requests. Leaves are unique because a
+// leaf is requestCommitment(callerSecretKey(), nonce): distinct secrets under a
+// collision-resistant hash, and phase 1 rejects a key already parked.
+//
+// THE DEPTH IS THE ONLY DIAL. There is deliberately no rotation, reset or compaction
+// utility, and adding one would be a mistake rather than a feature: an outstanding
+// request's proof is a path against a root in this tree's history, and a request that
+// has been assigned owns an EVM nonce derived from its POSITION in it. Emptying the
+// tree invalidates every proof not yet spent, and refilling it hands positions --
+// and so EVM nonces -- to leaves that already belong to someone. The cap is a lifetime
+// cap because it has to be; the answer to running low is a deeper tree, which costs
+// 8 ZKIR instructions per extra level in every assign* (measured going 20 -> 24) and
+// nothing at all in phase 1, which never touches a path.
+export ledger slots: HistoricMerkleTree<24, Bytes<32>>;
+
+// Parameters parked by phase 1 for phase 2 to build the signature request from. ONE
+// map for every flow, discriminated by `kind`, so the allocator costs three ledger
+// fields rather than eight (see the chunking note above).
+export ledger pendingParams: Map<Bytes<32>, PendingRequest>;
 
 // Deposit requests (2-word ERC20 transfer, 34-byte schemas).
 // Compiled path for MPC notification: [1, 3] (read from managed/erc20-vault/compiler/contract-info.json).
@@ -239,14 +337,23 @@ export pure circuit userCommitment(sk: Bytes<32>): Bytes<32> {
   return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([pad(32, "vault:user:"), sk]));
 }
 
-// Pinned into settle views and proven by requester gates. Deliberately NOT
-// userCommitment (reuse would link settle views to depositor identities). Before a
-// fork that changes transientHash, every pending request must be settled or refunded.
-export pure circuit refundCommitment(sk: Bytes<32>, requestId: RequestId): Bytes<32> {
+// The request key. It is the phase-1 allocator leaf, the phase-2 settle-view
+// commitment, and the gate every refund circuit proves. Deliberately NOT
+// userCommitment (reuse would link settle views to depositor identities).
+//
+// `nonce` is the surrendered coin's nonce for the coin-backed flows: a coin is
+// spendable once, so its nonce cannot repeat, which is what makes the allocator leaf
+// unique. The approve flows have no coin and pass a caller-chosen salt instead.
+//
+// The domain separator still reads "vault:refund:" on purpose: renaming the circuit
+// changed no hash, and the literal is the thing pending requests are committed under.
+// Before a fork that changes transientHash, every pending request must be settled or
+// refunded.
+export pure circuit requestCommitment(sk: Bytes<32>, nonce: Bytes<32>): Bytes<32> {
   return upgradeFromTransient(transientHash<Vector<3, Bytes<32>>>([
     pad(32, "vault:refund:"),
     sk,
-    requestId as Bytes<32>
+    nonce
   ]));
 }
 
@@ -272,6 +379,113 @@ circuit assertAttestedFailureOutput(
   assert(serializedOutput == failureOutput, "Not the MPC failure output");
 }
 
+// ---- The allocator ------------------------------------------------------------------
+
+// The running index while the path's goes_left bits are folded back into a number.
+// `fold` has no element index, so the accumulator carries the place value itself.
+struct SlotIndexAcc {
+  value: Uint<64>;
+  weight: Uint<64>;
+}
+
+// path.path[0] is the sibling at the LEAF level, so it is the LEAST significant bit of
+// the index, and goes_left == true means "this node is the left child", i.e. bit 0.
+// (Folding `acc * 2 + bit` in this order would reconstruct the index BIT-REVERSED,
+// which is a bijection but not contiguous, and would scatter EVM nonces across 2^20.)
+circuit accumulateSlotIndexBit(acc: SlotIndexAcc, entry: MerkleTreePathEntry): SlotIndexAcc {
+  return SlotIndexAcc {
+    value: (acc.value + (entry.goes_left ? 0 as Uint<64> : acc.weight)) as Uint<64>,
+    weight: (acc.weight * 2) as Uint<64>,
+  };
+}
+
+// Phase 1. Parks `params` under `key` and appends `key` to the allocator, which
+// allocates the slot AT APPLY TIME. Nothing here is read from a shared cell: the
+// member check is pinned per key (a false for key K survives anyone else's insert of
+// key K' != K), and HistoricMerkleTree.insert emits no popeq at all.
+circuit parkRequest(key: Bytes<32>, params: PendingRequest): [] {
+  assert(initialised >= 1, "Not initialised");
+  // Validated HERE, not in phase 2. constructSignBidirectionalEvent rejects
+  // keyVersion 0, and phase 1 has already burned the caller's coin by the time
+  // phase 2 runs: a request that can never be assigned would strand its slot,
+  // and slot i's EVM nonce is only ever consumed by slot i. Every phase-2
+  // failure mode must therefore be unreachable once phase 1 has applied.
+  assert(params.keyVersion >= 1, "keyVersion must be >= 1");
+  assert(!pendingParams.member(key), "Request already pending");
+  pendingParams.insert(key, params);
+  slots.insert(key);
+}
+
+// What phase 2 proves out of a slot: everything the signature request needs, with
+// nothing read from a cell that another request can move.
+//
+// NO requestNonce. calculateRequestId hashes the WHOLE SignBidirectionalEvent, and
+// txParams — the EVM transaction the MPC will sign — is one of the hashed fields. So
+// the EVM nonce is already inside every request id, every vault-signed transaction
+// comes from the ONE vault EVM account, and Ethereum spends an account's nonce exactly
+// once. Two vault-signed requests therefore cannot collide however identical the rest
+// of them is: the allocator gives each its own slot, each slot its own EVM nonce, and
+// that nonce alone separates their ids. A request nonce would be a second, weaker copy
+// of a uniqueness the EVM nonce already carries, so the vault-signed flows pass a
+// constant 0 and this struct does not carry one.
+//
+// It USED to be needed, and the reason it stopped is worth keeping: the EVM nonce was
+// once a CALLER argument, so two callers could name the same one and only the request
+// nonce kept their ids apart. Phase 2 now derives it as evmNonceBase + the slot index,
+// unique by construction, which is exactly the job the request nonce was doing.
+//
+// startDeposit is the one flow this reasoning does NOT cover, and it keeps its
+// per-caller nonce: its transaction is signed by the USER's own derived EVM account,
+// where the EVM nonce is a caller argument again and nothing in the contract makes it
+// unique. See depositRequestNonces.
+struct SlotClaim {
+  evmNonce: Uint<64>;
+  params: PendingRequest;
+}
+
+// Phase 2. Proves which slot `key` owns and hands back the EVM nonce derived from it.
+//
+// checkRoot lowers to `member` against the append-only root history, so this pinned
+// TRUE is monotone: a concurrent insert can only ADD roots, never invalidate the one
+// proven here. `path.leaf == key` binds the proven index to THIS request, so a caller
+// cannot present some other leaf's (cheaper or already-spent) position.
+//
+// The one thing this DOES write to shared state is issuedSlots, bumped by one
+// per issued slot so adminReplaceEvmNonce can tell an issued nonce from an unissued
+// one. It is safe here for the same reason the tree is: Counter.increment emits no
+// popeq, so it is a blind add that commutes with every other assign*'s. Counting is
+// free; only READING a counter pins, and nothing on this path reads it. It lives in
+// claimSlot rather than in the six assign* bodies so a new flow cannot issue a slot
+// and forget to count it.
+circuit claimSlot(
+  key: Bytes<32>,
+  path: MerkleTreePath<24, Bytes<32>>,
+  kind: RequestKind
+): SlotClaim {
+  assert(initialised >= 1, "Not initialised");
+  assert(slots.checkRoot(merkleTreePathRoot<24, Bytes<32>>(path)), "Unknown slots root");
+  assert(path.leaf == key, "Path leaf is not the request key");
+
+  const index = fold(
+    accumulateSlotIndexBit,
+    SlotIndexAcc { value: 0 as Uint<64>, weight: 1 as Uint<64> },
+    path.path
+  ).value;
+
+  assert(pendingParams.member(key), "No pending request for this key");
+  const params = pendingParams.lookup(key);
+  // Also the anti-replay gate: a second assign for this key sees the tombstone
+  // RequestKind.consumed, which matches no flow's expected kind.
+  assert(params.kind == kind, "Wrong request kind for this key");
+
+  issuedSlots.increment(1);
+
+  return SlotClaim {
+    evmNonce: (evmNonceBase + index) as Uint<64>,
+    params: params,
+  };
+}
+
 // Pins WHO may configure. Everything needing the contract's own address waits for
 // initialise().
 constructor(
@@ -293,7 +507,8 @@ export circuit initialise(
   stataTokenAddr: Bytes<20>,
   chainId: Uint<64>,
   chainCaip2Id: Bytes<32>,
-  responseKey: Secp256k1Point
+  responseKey: Secp256k1Point,
+  firstEvmNonce: Uint<64>
 ): [] {
   assert(initialised == 0, "Already initialised");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
@@ -309,6 +524,10 @@ export circuit initialise(
   evmChainId = disclose(chainId);
   caip2Id = disclose(chainCaip2Id);
   mpcResponseKey = disclose(responseKey);
+  // Write-once: allocator slot i owns EVM account nonce firstEvmNonce + i. Because
+  // nothing ever rewrites this cell, the popeq that reads it in phase 2 pins a value
+  // no concurrent request can move, so it cannot cause a conflict.
+  evmNonceBase = disclose(firstEvmNonce);
 
   // The fee ceiling of every vault-signed transaction: 150 gwei. This is the MOST
   // the vault will pay per unit of gas, not what it pays. EIP-1559 charges base fee
@@ -420,6 +639,32 @@ export circuit setGasParams(
 // request, not a retry mechanism. Whoever owned the cancelled request must start it
 // again at a later nonce.
 //
+// WHAT IT COSTS THE ALLOCATOR. `evmNonce` is a caller argument, but on this contract
+// EVM nonces are not caller-chosen anywhere else: phase 2 derives every one of them
+// as evmNonceBase + the slot index the allocator tree issued. So the nonce named here
+// is a nonce the ALLOCATOR owns, and naming an already-issued one is the intended
+// use — it burns that slot's nonce. The burn is permanent: the allocator never
+// reissues a slot, and the cancelled request's pendingParams entry is already
+// tombstoned `consumed` by the phase 2 that assigned it, so it can never be assigned
+// again. Its owner has to go back through phase 1, which parks a fresh key and draws
+// a fresh slot at a LATER nonce. The burnt slot's index stays in the tree and its
+// nonce stays spent; nothing reuses it, so no later request is stranded by it.
+//
+// NAMING AN UNISSUED NONCE IS IMPOSSIBLE, not merely discouraged. It would be the
+// worse mistake of the two: the empty transaction would consume a nonce the allocator
+// has not handed out yet, the allocator would later hand that same nonce to a real
+// request, and the network would reject that request's signed transaction as a reused
+// nonce — the exact stall this circuit exists to clear, caused by the tool meant to
+// clear it. The assert below rules it out, because issuedSlots counts the slots
+// the allocator has issued, so evmNonceBase + it is the first nonce not yet promised.
+//
+// Reading that counter PINS it, so this call cannot apply alongside a concurrent
+// assign* that moved it. That is the one place in this contract where serialization
+// is the right trade: the circuit is deployer-gated, single-caller and used about once
+// a year, and the alternative is an unbounded argument that can strand the account.
+// Counting on the issuing side stays free — Counter.increment emits no popeq — so
+// phase 2 keeps applying concurrently.
+//
 // Records into the EXISTING signBidirectionalEventMap (calldata capacity 2, unused
 // here) rather than a map of its own: a new ledger field would re-chunk the state
 // tree and move the six compiled paths the MPC notifications pin.
@@ -429,6 +674,12 @@ export circuit adminReplaceEvmNonce(
 ): [] {
   assert(initialised >= 1, "Not initialised");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+
+  // Only a nonce the allocator has ALREADY issued can be replaced. See the note above:
+  // burning an issued nonce cancels one request, burning an unissued one strands the
+  // whole account.
+  const issued = issuedSlots as Uint<64>;
+  assert(evmNonce < (evmNonceBase + issued) as Uint<64>, "Nonce not issued yet");
 
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
@@ -445,10 +696,9 @@ export circuit adminReplaceEvmNonce(
 
   const path = pad(32, "vault");
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
-    requestNonce,
+    0,                                              // requestNonce: unused, see the note below
     keyVersion,
     path,
     MPCSignatureAlgorithm.ecdsa,
@@ -462,7 +712,24 @@ export circuit adminReplaceEvmNonce(
   );
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
-  signetRequestNonce.increment(1);
+  // Deliberately does NOT advance issuedSlots: it counts slots the ALLOCATOR
+  // issued, and a replacement issues none. Bumping it here would raise the bound above
+  // by one and let the NEXT admin call name an unissued nonce, which is precisely what
+  // that bound exists to prevent.
+  //
+  // The counter is not this event's request nonce either — that is the constant 0 the
+  // vault-signed flows all pass. It does not need to be anything else. Two replacements
+  // at DIFFERENT nonces differ in txParams.nonce and hash apart on their own. Two at the
+  // SAME nonce are the same replacement unless something else about them changed, and
+  // the only things that can change are the fee envelope (which the admin MUST raise
+  // before re-sending: a node demands about 10% more on both fee fields before it will
+  // evict what is already in its mempool) and keyVersion — both hashed, so both give a
+  // fresh id. What is left over is the byte-identical repeat, which the duplicate-id
+  // assert above refuses. That refusal is correct, not a lost capability: the MPC would
+  // sign the very same transaction bytes, and the node would drop it as an underpriced
+  // replacement of a transaction it already holds. Salting the id with a live counter
+  // would only buy the right to record a second event for a transaction that can never
+  // be included.
   signBidirectionalEventMap.insert(requestId, disclose(request));
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
@@ -476,13 +743,43 @@ export circuit adminReplaceEvmNonce(
   );
 }
 
-// One-time MPC-signed approve(stataToken, unlimitedAllowance()) on the underlying
-// USDC, so the wrapper can pull it during a supply. Signed with the VAULT account.
-export circuit approveStata(
-  evmNonce: Uint<64>,
-  keyVersion: Uint<8>
+// The vault's own EVM account signs the approves too, so they MUST draw their nonce
+// from the same allocator as the four value flows. A second source of nonces (a
+// caller-supplied argument, say) desynchronises the counter the moment an approve and
+// a withdraw are in flight together: two requests claim one nonce, the EVM accepts
+// one, and every later nonce is stranded behind the gap. Hence both approves are
+// two-phase as well, even though neither surrenders a coin.
+
+// Phase 1 of the one-time approve(stataToken, unlimitedAllowance()) on the underlying
+// USDC, so the wrapper can pull it during a supply. `salt` stands in for the coin
+// nonce the value flows key on: any value the caller has not used before.
+export circuit requestApproveStata(
+  keyVersion: Uint<8>,
+  salt: Bytes<32>
 ): [] {
-  assert(initialised >= 1, "Not initialised");
+  const key = disclose(requestCommitment(callerSecretKey(), salt));
+  parkRequest(key, PendingRequest {
+    kind: RequestKind.approveStata,
+    keyVersion: disclose(keyVersion),
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
+}
+
+// Phase 2: permissionless, one request per call. Builds the WHOLE event here, with the
+// allocated EVM nonce already inside the hashed payload — the MPC recomputes the
+// request id from the stored record and drops anything that does not match, so the
+// nonce can never be patched in afterwards.
+export circuit assignApproveStata(
+  key: Bytes<32>,
+  path: MerkleTreePath<24, Bytes<32>>
+): [] {
+  const disclosedKey = disclose(key);
+  const claim = claimSlot(disclosedKey, disclose(path), RequestKind.approveStata);
 
   const calldata = EvmCalldata<2> {
     selector: Bytes [0x09, 0x5e, 0xa7, 0xb3], // approve(address,uint256)
@@ -494,7 +791,7 @@ export circuit approveStata(
   };
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: claim.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.approve,
@@ -505,18 +802,27 @@ export circuit approveStata(
     accessList: []
   };
 
-  const path = pad(32, "vault");
+  const path32 = pad(32, "vault");
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), requestNonce, keyVersion, path,
+    kernel.self(), 0, claim.params.keyVersion, path32,   // 0 = requestNonce, see SlotClaim
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, caip2Id, schema, schema
   );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
+  const requestId = calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request);
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
-  signetRequestNonce.increment(1);
-  signBidirectionalEventMap.insert(requestId, disclose(request));
+  signBidirectionalEventMap.insert(requestId, request);
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
   signetSigner.signBidirectional(
@@ -527,15 +833,34 @@ export circuit approveStata(
   );
 }
 
-// Permissionless per-token router allowance, signed with the VAULT account. Spender
-// and amount are contract-fixed, so the caller chooses ONLY the token.
-export circuit approveRouter(
+// Phase 1 of the permissionless per-token router allowance. Spender and amount are
+// contract-fixed, so the caller chooses ONLY the token.
+export circuit requestApproveRouter(
   erc20Address: Bytes<20>,
-  evmNonce: Uint<64>,
-  keyVersion: Uint<8>
+  keyVersion: Uint<8>,
+  salt: Bytes<32>
 ): [] {
-  assert(initialised >= 1, "Not initialised");
   assert(erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
+  const key = disclose(requestCommitment(callerSecretKey(), salt));
+  parkRequest(key, PendingRequest {
+    kind: RequestKind.approveRouter,
+    keyVersion: disclose(keyVersion),
+    tokenA: disclose(erc20Address),
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
+}
+
+// Phase 2: permissionless, one request per call.
+export circuit assignApproveRouter(
+  key: Bytes<32>,
+  path: MerkleTreePath<24, Bytes<32>>
+): [] {
+  const disclosedKey = disclose(key);
+  const claim = claimSlot(disclosedKey, disclose(path), RequestKind.approveRouter);
 
   const calldata = EvmCalldata<2> {
     selector: Bytes [0x09, 0x5e, 0xa7, 0xb3], // approve(address,uint256)
@@ -548,25 +873,24 @@ export circuit approveRouter(
 
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: claim.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.approve,
-    to: disclose(erc20Address),                    // approve is called ON the ERC20
+    to: claim.params.tokenA,                       // approve is called ON the ERC20
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
     accessListEntryCount: 0,
     accessList: []
   };
 
-  const path = pad(32, "vault");
+  const path32 = pad(32, "vault");
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
-    requestNonce,
-    keyVersion,
-    path,
+    0,                                       // requestNonce: unused, see SlotClaim
+    claim.params.keyVersion,
+    path32,
     MPCSignatureAlgorithm.ecdsa,
     MPCDestination.unused,
     pad(64, ""),
@@ -576,10 +900,20 @@ export circuit approveRouter(
     schema,
     schema
   );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
+  const requestId = calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request);
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
-  signetRequestNonce.increment(1);
-  signBidirectionalEventMap.insert(requestId, disclose(request));
+  signBidirectionalEventMap.insert(requestId, request);
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
   signetSigner.signBidirectional(
@@ -643,8 +977,8 @@ export circuit startDeposit(
 
   const schema = vaultResponseSchema();
   // Per-caller nonce: read THIS caller's slot (default 0 for a first deposit),
-  // never the shared signetRequestNonce, so a concurrent deposit by another
-  // caller reads a different slot and does not conflict at apply time.
+  // never a shared cell, so a concurrent deposit by another caller reads a
+  // different slot and does not conflict at apply time.
   if (!depositRequestNonces.member(caller)) {
     depositRequestNonces.insertDefault(caller);
   }
@@ -740,11 +1074,11 @@ struct WithdrawRequest {
   destEvmAddress: Bytes<20>; // EVM recipient of the vault's transfer
 }
 
-// Starts a withdrawal, optimistically: burns the surrendered vault coin up front and
-// records transfer(destEvmAddress, amount), signed with the VAULT's own account. The
-// coin spend IS the auth, and the vault pays the gas, so the fee envelope is contract-fixed.
-export circuit startWithdraw(
-  evmNonce: Uint<64>,
+// Phase 1 of a withdrawal: validates, burns the surrendered vault coin up front, and
+// parks the parameters under this caller's request key. The coin spend IS the auth, and
+// the vault pays the gas, so the fee envelope is contract-fixed. Reads nothing shared,
+// so any number of these prove against one state and all of them apply.
+export circuit requestWithdraw(
   keyVersion: Uint<8>,
   withdrawRequest: WithdrawRequest,
   coin: ShieldedCoinInfo
@@ -763,36 +1097,64 @@ export circuit startWithdraw(
   assert(coin.color == color, "Coin is not the vault token for this ERC20");
   assert(coin.value == withdrawRequest.amount, "Coin value must equal the withdraw amount");
 
+  // The coin's nonce is what makes this key unique: a coin is spendable once.
+  const key = disclose(requestCommitment(callerSecretKey(), coin.nonce));
+  parkRequest(key, PendingRequest {
+    kind: RequestKind.withdraw,
+    keyVersion: disclose(keyVersion),
+    tokenA: disclose(withdrawRequest.erc20Address),
+    tokenB: default<Bytes<20>>,
+    dest: disclose(withdrawRequest.destEvmAddress),
+    fee: default<Uint<24>>,
+    amountA: disclose(withdrawRequest.amount),
+    amountB: default<Uint<128>>,
+  });
+
+  // receiveShielded makes the coin the contract's, so the burn send can spend it.
+  receiveShielded(disclose(coin));
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
+}
+
+// Phase 2: permissionless, one request per call. Records transfer(destEvmAddress,
+// amount) signed with the VAULT's own account, at the EVM nonce this request's slot
+// owns. The nonce is inside the hashed payload because the MPC recomputes the request
+// id from the stored record and drops it on a mismatch.
+export circuit assignWithdraw(
+  key: Bytes<32>,
+  path: MerkleTreePath<24, Bytes<32>>
+): [] {
+  const disclosedKey = disclose(key);
+  const claim = claimSlot(disclosedKey, disclose(path), RequestKind.withdraw);
+
   const calldata = EvmCalldata<2> {
     selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
     noWords: 2 as Uint<16>,
     words: [
-      evmAddressAbiWord(withdrawRequest.destEvmAddress),
-      numericAbiWord(withdrawRequest.amount),
+      evmAddressAbiWord(claim.params.dest),
+      numericAbiWord(claim.params.amountA),
     ]
   };
 
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: claim.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.withdraw,
-    to: withdrawRequest.erc20Address,
+    to: claim.params.tokenA,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
     accessListEntryCount: 0,
     accessList: []
   };
 
-  const path = pad(32, "vault");
+  const path32 = pad(32, "vault");
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
-    requestNonce,
-    keyVersion,
-    path,
+    0,                                       // requestNonce: unused, see SlotClaim
+    claim.params.keyVersion,
+    path32,
     MPCSignatureAlgorithm.ecdsa,
     MPCDestination.unused,
     pad(64, ""),
@@ -802,23 +1164,32 @@ export circuit startWithdraw(
     schema,
     schema
   );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
+  const requestId = calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request);
   assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
 
-  // receiveShielded makes the coin the contract's, so the burn send can spend it.
-  receiveShielded(disclose(coin));
-  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
-
-  signetRequestNonce.increment(1);
-  signBidirectionalEventMap.insert(requestId, disclose(request));
+  signBidirectionalEventMap.insert(requestId, request);
   withdrawSettleViews.insert(
     requestId,
     WithdrawSettleView {
-      commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
-      erc20: disclose(withdrawRequest.erc20Address),
-      amount: disclose(withdrawRequest.amount as Uint<64>),
+      // The request key IS the refund gate now: phase 2 is permissionless, so it
+      // cannot recompute a commitment over the requester's secret and the request id.
+      // completeWithdraw/refundWithdraw re-derive this from (secret, coin nonce).
+      commitment: disclosedKey,
+      erc20: claim.params.tokenA,
+      amount: claim.params.amountA as Uint<64>,
     },
   );
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
+  });
 
   // Notify the MPC (signBidirectionalEventMap's compiled ledger path, [0,0]).
   signetSigner.signBidirectional(
@@ -839,6 +1210,7 @@ export circuit completeWithdraw(
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<1>,
   mintNonce: Bytes<32>,
+  commitmentNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
 
@@ -866,7 +1238,7 @@ export circuit completeWithdraw(
   // The withdrawer's secret is witnessed only on this branch: a succeeded withdrawal is
   // settleable by anyone and must not require (or consume) a secret to settle.
   if (!succeeded) {
-    const myCommitment = refundCommitment(callerSecretKey(), disclosedRequestId);
+    const myCommitment = requestCommitment(callerSecretKey(), commitmentNonce);
     assert(myCommitment == view.commitment, "Not the withdrawer");
     const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
     mintShieldedToken(domainSep, view.amount, disclose(mintNonce), recipient);
@@ -881,6 +1253,7 @@ export circuit refundWithdraw(
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<5>,
   mintNonce: Bytes<32>,
+  commitmentNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
   assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput);
@@ -888,7 +1261,7 @@ export circuit refundWithdraw(
   assert(withdrawSettleViews.member(disclosedRequestId), "Withdrawal not found");
   const view = withdrawSettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    requestCommitment(callerSecretKey(), commitmentNonce) == view.commitment,
     "Not the withdrawer"
   );
   signBidirectionalEventMap.remove(disclosedRequestId);
@@ -916,12 +1289,10 @@ struct SwapRequest {
   amountInMaximum: Uint<128>;  // max input to spend (slippage cap; router reverts above it)
 }
 
-// Starts a swap, optimistically: burns the surrendered amountInMaximum of tokenIn and
-// records exactOutputSingle on the pinned router, signed with the VAULT's account.
-// exactOutput (not exactInput) so the mint amount is known and bounded BEFORE the
-// burn: an oversized swap result would strand the already-burned coin.
-export circuit startSwap(
-  evmNonce: Uint<64>,
+// Phase 1 of a swap: burns the surrendered amountInMaximum of tokenIn and parks the
+// parameters. exactOutput (not exactInput) so the mint amount is known and bounded
+// BEFORE the burn: an oversized swap result would strand the already-burned coin.
+export circuit requestSwap(
   keyVersion: Uint<8>,
   swapRequest: SwapRequest,
   coin: ShieldedCoinInfo
@@ -942,24 +1313,49 @@ export circuit startSwap(
   assert(coin.color == color, "Coin is not the vault token for tokenIn");
   assert(coin.value == swapRequest.amountInMaximum, "Coin value must equal amountInMaximum");
 
+  const key = disclose(requestCommitment(callerSecretKey(), coin.nonce));
+  parkRequest(key, PendingRequest {
+    kind: RequestKind.swap,
+    keyVersion: disclose(keyVersion),
+    tokenA: disclose(swapRequest.tokenIn),
+    tokenB: disclose(swapRequest.tokenOut),
+    dest: default<Bytes<20>>,
+    fee: disclose(swapRequest.fee),
+    amountA: disclose(swapRequest.amountOut),
+    amountB: disclose(swapRequest.amountInMaximum),
+  });
+
+  receiveShielded(disclose(coin));
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
+}
+
+// Phase 2: records exactOutputSingle on the pinned router, signed with the VAULT's
+// account at the EVM nonce this request's slot owns.
+export circuit assignSwap(
+  key: Bytes<32>,
+  path: MerkleTreePath<24, Bytes<32>>
+): [] {
+  const disclosedKey = disclose(key);
+  const claim = claimSlot(disclosedKey, disclose(path), RequestKind.swap);
+
   // recipient is the vault EVM address so bought tokens return to the pool.
   const calldata = EvmCalldata<7> {
     selector: Bytes [0x50, 0x23, 0xb4, 0xdf], // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))
     noWords: 7 as Uint<16>,
     words: [
-      evmAddressAbiWord(disclose(swapRequest.tokenIn)),
-      evmAddressAbiWord(disclose(swapRequest.tokenOut)),
-      numericAbiWord(swapRequest.fee as Uint<128>),
+      evmAddressAbiWord(claim.params.tokenA),
+      evmAddressAbiWord(claim.params.tokenB),
+      numericAbiWord(claim.params.fee as Uint<128>),
       evmAddressAbiWord(vaultEvmAddress),
-      numericAbiWord(swapRequest.amountOut),
-      numericAbiWord(swapRequest.amountInMaximum),
+      numericAbiWord(claim.params.amountA),
+      numericAbiWord(claim.params.amountB),
       numericAbiWord(0 as Uint<128>),
     ]
   };
 
   const txParams = EvmType2TxParams<7, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: claim.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.swap,
@@ -970,13 +1366,12 @@ export circuit startSwap(
     accessList: []
   };
 
-  const path = pad(32, "vault");
-  const requestNonce = signetRequestNonce as Uint<64>;
+  const path32 = pad(32, "vault");
   const request = constructSignBidirectionalEvent<EvmType2TxParams<7, 0, 0>, 38, 37>(
     kernel.self(),
-    requestNonce,
-    keyVersion,
-    path,
+    0,                                       // requestNonce: unused, see SlotClaim
+    claim.params.keyVersion,
+    path32,
     MPCSignatureAlgorithm.ecdsa,
     MPCDestination.unused,
     pad(64, ""),
@@ -986,20 +1381,27 @@ export circuit startSwap(
     swapOutputSchema(),
     swapRespondSchema()
   );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<7, 0, 0>, 38, 37>(request));
+  const requestId = calculateRequestId<EvmType2TxParams<7, 0, 0>, 38, 37>(request);
   assert(!swapEventMap.member(requestId), "Request already exists");
 
-  receiveShielded(disclose(coin));
-  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
-
-  signetRequestNonce.increment(1);
-  swapEventMap.insert(requestId, disclose(request));
+  swapEventMap.insert(requestId, request);
   swapSettleViews.insert(requestId, SwapSettleView {
-    commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
-    tokenIn: disclose(swapRequest.tokenIn),
-    tokenOut: disclose(swapRequest.tokenOut),
-    amountOut: disclose(swapRequest.amountOut as Uint<64>),
-    amountInMaximum: disclose(swapRequest.amountInMaximum as Uint<64>),
+    commitment: disclosedKey,
+    tokenIn: claim.params.tokenA,
+    tokenOut: claim.params.tokenB,
+    amountOut: claim.params.amountA as Uint<64>,
+    amountInMaximum: claim.params.amountB as Uint<64>,
+  });
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
   });
 
   // Notify the MPC (swapEventMap's compiled ledger path, [1,7]).
@@ -1027,6 +1429,7 @@ export circuit completeSwap(
   serializedOutput: Bytes<8>,
   mintNonce: Bytes<32>,
   changeNonce: Bytes<32>,
+  commitmentNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
 
@@ -1050,7 +1453,7 @@ export circuit completeSwap(
   swapEventMap.remove(disclosedRequestId);
 
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    requestCommitment(callerSecretKey(), commitmentNonce) == view.commitment,
     "Not the swapper"
   );
   swapSettleViews.remove(disclosedRequestId);
@@ -1071,6 +1474,7 @@ export circuit refundSwap(
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<5>,
   mintNonce: Bytes<32>,
+  commitmentNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
   assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput);
@@ -1078,7 +1482,7 @@ export circuit refundSwap(
   assert(swapSettleViews.member(disclosedRequestId), "Swap not found");
   const view = swapSettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    requestCommitment(callerSecretKey(), commitmentNonce) == view.commitment,
     "Not the swapper"
   );
   swapEventMap.remove(disclosedRequestId);
@@ -1097,10 +1501,9 @@ export pure circuit supplyRespondSchema(): Bytes<35> {
   return "[{\"name\":\"shares\",\"type\":\"uint64\"}]" as Bytes<35>;
 }
 
-// Burns the surrendered USDC vault coin and records stataToken.deposit(amount, vault),
-// signed by the VAULT account (exact-input, so no change).
-export circuit startSupply(
-  evmNonce: Uint<64>,
+// Phase 1 of a supply: burns the surrendered USDC vault coin and parks the amount
+// (exact-input, so no change).
+export circuit requestSupply(
   keyVersion: Uint<8>,
   amount: Uint<128>,
   coin: ShieldedCoinInfo
@@ -1114,17 +1517,42 @@ export circuit startSupply(
   assert(coin.color == color, "Coin is not the vault token for the underlying");
   assert(coin.value == amount, "Coin value must equal amount");
 
+  const key = disclose(requestCommitment(callerSecretKey(), coin.nonce));
+  parkRequest(key, PendingRequest {
+    kind: RequestKind.supply,
+    keyVersion: disclose(keyVersion),
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: disclose(amount),
+    amountB: default<Uint<128>>,
+  });
+
+  receiveShielded(disclose(coin));
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
+}
+
+// Phase 2: records stataToken.deposit(amount, vault), signed by the VAULT account at
+// the EVM nonce this request's slot owns.
+export circuit assignSupply(
+  key: Bytes<32>,
+  path: MerkleTreePath<24, Bytes<32>>
+): [] {
+  const disclosedKey = disclose(key);
+  const claim = claimSlot(disclosedKey, disclose(path), RequestKind.supply);
+
   const calldata = EvmCalldata<2> {
     selector: Bytes [0x6e, 0x55, 0x3f, 0x65], // deposit(uint256,address)
     noWords: 2 as Uint<16>,
     words: [
-      numericAbiWord(amount),
+      numericAbiWord(claim.params.amountA),
       evmAddressAbiWord(vaultEvmAddress),
     ]
   };
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: claim.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.supply,
@@ -1135,24 +1563,30 @@ export circuit startSupply(
     accessList: []
   };
 
-  const path = pad(32, "vault");
-  const requestNonce = signetRequestNonce as Uint<64>;
+  const path32 = pad(32, "vault");
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 36, 35>(
-    kernel.self(), requestNonce, keyVersion, path,
+    kernel.self(), 0, claim.params.keyVersion, path32,   // 0 = requestNonce, see SlotClaim
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, caip2Id, supplyOutputSchema(), supplyRespondSchema()
   );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 36, 35>(request));
+  const requestId = calculateRequestId<EvmType2TxParams<2, 0, 0>, 36, 35>(request);
   assert(!supplyEventMap.member(requestId), "Request already exists");
 
-  receiveShielded(disclose(coin));
-  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
-
-  signetRequestNonce.increment(1);
-  supplyEventMap.insert(requestId, disclose(request));
+  supplyEventMap.insert(requestId, request);
   supplySettleViews.insert(requestId, SupplySettleView {
-    commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
-    amount: disclose(amount as Uint<64>),
+    commitment: disclosedKey,
+    amount: claim.params.amountA as Uint<64>,
+  });
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
   });
 
   // Notify the MPC (supplyEventMap's compiled ledger path, [1,11]).
@@ -1176,6 +1610,7 @@ export circuit completeSupply(
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
   mintNonce: Bytes<32>,
+  commitmentNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
   assert(initialised >= 1, "Not initialised");
@@ -1189,7 +1624,7 @@ export circuit completeSupply(
   assert(supplyEventMap.member(disclosedRequestId), "Supply not found");
   supplyEventMap.remove(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId)
+    requestCommitment(callerSecretKey(), commitmentNonce)
       == supplySettleViews.lookup(disclosedRequestId).commitment,
     "Not the supplier"
   );
@@ -1206,6 +1641,7 @@ export circuit refundSupply(
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<5>,
   mintNonce: Bytes<32>,
+  commitmentNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
   assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput);
@@ -1213,7 +1649,7 @@ export circuit refundSupply(
   assert(supplySettleViews.member(disclosedRequestId), "Supply not found");
   const view = supplySettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    requestCommitment(callerSecretKey(), commitmentNonce) == view.commitment,
     "Not the supplier"
   );
   supplyEventMap.remove(disclosedRequestId);
@@ -1232,10 +1668,8 @@ export pure circuit redeemRespondSchema(): Bytes<35> {
   return "[{\"name\":\"assets\",\"type\":\"uint64\"}]" as Bytes<35>;
 }
 
-// Burns the surrendered stataToken vault coin and records stataToken.redeem(shares,
-// vault, vault), signed by the VAULT account.
-export circuit startRedeem(
-  evmNonce: Uint<64>,
+// Phase 1 of a redeem: burns the surrendered stataToken vault coin and parks the shares.
+export circuit requestRedeem(
   keyVersion: Uint<8>,
   shares: Uint<128>,
   coin: ShieldedCoinInfo
@@ -1253,18 +1687,43 @@ export circuit startRedeem(
   assert(coin.color == color, "Coin is not the vault token for the wrapper");
   assert(coin.value == shares, "Coin value must equal shares");
 
+  const key = disclose(requestCommitment(callerSecretKey(), coin.nonce));
+  parkRequest(key, PendingRequest {
+    kind: RequestKind.redeem,
+    keyVersion: disclose(keyVersion),
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: disclose(shares),
+    amountB: default<Uint<128>>,
+  });
+
+  receiveShielded(disclose(coin));
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
+}
+
+// Phase 2: records stataToken.redeem(shares, vault, vault), signed by the VAULT account
+// at the EVM nonce this request's slot owns.
+export circuit assignRedeem(
+  key: Bytes<32>,
+  path: MerkleTreePath<24, Bytes<32>>
+): [] {
+  const disclosedKey = disclose(key);
+  const claim = claimSlot(disclosedKey, disclose(path), RequestKind.redeem);
+
   const calldata = EvmCalldata<3> {
     selector: Bytes [0xba, 0x08, 0x76, 0x52], // redeem(uint256,address,address)
     noWords: 3 as Uint<16>,
     words: [
-      numericAbiWord(shares),
+      numericAbiWord(claim.params.amountA),
       evmAddressAbiWord(vaultEvmAddress),
       evmAddressAbiWord(vaultEvmAddress),
     ]
   };
   const txParams = EvmType2TxParams<3, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: claim.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.redeem,
@@ -1275,24 +1734,30 @@ export circuit startRedeem(
     accessList: []
   };
 
-  const path = pad(32, "vault");
-  const requestNonce = signetRequestNonce as Uint<64>;
+  const path32 = pad(32, "vault");
   const request = constructSignBidirectionalEvent<EvmType2TxParams<3, 0, 0>, 36, 35>(
-    kernel.self(), requestNonce, keyVersion, path,
+    kernel.self(), 0, claim.params.keyVersion, path32,   // 0 = requestNonce, see SlotClaim
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, caip2Id, redeemOutputSchema(), redeemRespondSchema()
   );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<3, 0, 0>, 36, 35>(request));
+  const requestId = calculateRequestId<EvmType2TxParams<3, 0, 0>, 36, 35>(request);
   assert(!redeemEventMap.member(requestId), "Request already exists");
 
-  receiveShielded(disclose(coin));
-  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
-
-  signetRequestNonce.increment(1);
-  redeemEventMap.insert(requestId, disclose(request));
+  redeemEventMap.insert(requestId, request);
   redeemSettleViews.insert(requestId, RedeemSettleView {
-    commitment: disclose(refundCommitment(callerSecretKey(), requestId)),
-    shares: disclose(shares as Uint<64>),
+    commitment: disclosedKey,
+    shares: claim.params.amountA as Uint<64>,
+  });
+  // Tombstone, not remove: the key must never be parkable again (see RequestKind).
+  pendingParams.insert(disclosedKey, PendingRequest {
+    kind: RequestKind.consumed,
+    keyVersion: default<Uint<8>>,
+    tokenA: default<Bytes<20>>,
+    tokenB: default<Bytes<20>>,
+    dest: default<Bytes<20>>,
+    fee: default<Uint<24>>,
+    amountA: default<Uint<128>>,
+    amountB: default<Uint<128>>,
   });
 
   // Notify the MPC (redeemEventMap's compiled ledger path, [1,13]).
@@ -1316,6 +1781,7 @@ export circuit completeRedeem(
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
   mintNonce: Bytes<32>,
+  commitmentNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
   assert(initialised >= 1, "Not initialised");
@@ -1329,7 +1795,7 @@ export circuit completeRedeem(
   assert(redeemEventMap.member(disclosedRequestId), "Redeem not found");
   redeemEventMap.remove(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId)
+    requestCommitment(callerSecretKey(), commitmentNonce)
       == redeemSettleViews.lookup(disclosedRequestId).commitment,
     "Not the redeemer"
   );
@@ -1346,6 +1812,7 @@ export circuit refundRedeem(
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<5>,
   mintNonce: Bytes<32>,
+  commitmentNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
   assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput);
@@ -1353,7 +1820,7 @@ export circuit refundRedeem(
   assert(redeemSettleViews.member(disclosedRequestId), "Redeem not found");
   const view = redeemSettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), disclosedRequestId) == view.commitment,
+    requestCommitment(callerSecretKey(), commitmentNonce) == view.commitment,
     "Not the redeemer"
   );
   redeemEventMap.remove(disclosedRequestId);

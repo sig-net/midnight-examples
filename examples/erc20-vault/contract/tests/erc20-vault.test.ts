@@ -65,7 +65,7 @@ import {
   ledger,
   pureCircuits,
   VAULT_DEPOSIT_REQUESTS_PATH,
-  VAULT_NONCE_PATH,
+  VAULT_ISSUED_SLOTS_PATH,
   VAULT_REQUESTS_PATH,
   type VaultPrivateState,
   witnesses,
@@ -259,8 +259,15 @@ const strangerContext = async (
   );
 
 /**
- * Deploy + initialise(VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY) as
- * the deployer: the ready-to-use vault, with the MPC response key stored.
+ * The EVM account nonce allocator slot 0 owns, pinned by initialise(). Kept
+ * deliberately non-zero so every assigned-nonce assertion below would fail if
+ * the contract used the bare slot index instead of evmNonceBase + index.
+ */
+const EVM_NONCE_BASE = 7n;
+
+/**
+ * Deploy + initialise(...) as the deployer: the ready-to-use vault, with the
+ * MPC response key and the EVM nonce base stored.
  */
 const deployInitialised = async () => {
   const { contract, ctx } = await deployContract();
@@ -274,9 +281,86 @@ const deployInitialised = async () => {
       CHAIN_ID,
       CAIP2_ID,
       MPC_RESPONSE_KEY,
+      EVM_NONCE_BASE,
     )
   ).context;
   return { contract, ctx: next };
+};
+
+// ---- Two-phase harness ----
+//
+// Every vault-signed flow is now request* (park the parameters, allocate a
+// slot) then assign* (prove the slot, build and record the signature request).
+// These helpers drive both halves so the round-trip and settle suites read the
+// same as they did against the one-shot start* circuits, and expose each half
+// separately for the tests that assert on one of them.
+
+/** The caller's secret, read back out of a threaded context's private state. */
+const secretOf = (ctx: CircuitContext<VaultPrivateState>): Uint8Array => {
+  const secretKey = ctx.callContext.currentPrivateState?.secretKey;
+  if (!secretKey) {
+    throw new Error("expected a caller secret key on the circuit context");
+  }
+  return secretKey;
+};
+
+/**
+ * The allocator leaf (and settle-view commitment) a caller's request keys on:
+ * the surrendered coin's nonce for the value flows, a caller-chosen salt for
+ * the approves. Computed through the COMPILED circuit, never a TS re-mirror.
+ */
+const requestKeyOf = (ctx: CircuitContext<VaultPrivateState>, nonce: Uint8Array): Uint8Array =>
+  pureCircuits.requestCommitment(secretOf(ctx), nonce);
+
+/**
+ * The Merkle path proving `key`'s slot, read off the allocator exactly as an
+ * off-chain client would. `findPathForLeaf` is O(n) — fine for a unit test,
+ * and a real client remembers the index from its own phase-1 receipt.
+ */
+const slotPathOf = (state: Parameters<typeof ledger>[0], key: Uint8Array) => {
+  const path = ledger(state).slots.findPathForLeaf(key);
+  if (!path) {
+    throw new Error("the allocator holds no slot for this request key");
+  }
+  return path;
+};
+
+/** The slot index a path encodes: its goes_left bits, LSB first. */
+const slotIndexOfPath = (path: { path: readonly { goes_left: boolean }[] }): bigint =>
+  path.path.reduce((acc, entry, i) => acc + (entry.goes_left ? 0n : 1n << BigInt(i)), 0n);
+
+/** Both halves of a two-phase flow, plus the key and slot they used. */
+interface TwoPhaseRun {
+  /** The phase-2 context, threaded on from phase 1 (what callers keep going with). */
+  context: CircuitContext<VaultPrivateState>;
+  /** The phase-1 run: the burn and the slot allocation are observable here. */
+  request: CircuitResults<VaultPrivateState, []>;
+  /** The phase-2 run: the recorded event and the MPC notification are here. */
+  assign: CircuitResults<VaultPrivateState, []>;
+  /** The request key phase 1 parked under and phase 2 consumed. */
+  key: Uint8Array;
+  /** The allocator index the path proved, i.e. evmNonce - evmNonceBase. */
+  slotIndex: bigint;
+}
+
+const twoPhase = async (
+  key: Uint8Array,
+  request: () => Promise<CircuitResults<VaultPrivateState, []>>,
+  assign: (
+    ctx: CircuitContext<VaultPrivateState>,
+    path: unknown,
+  ) => Promise<CircuitResults<VaultPrivateState, []>>,
+): Promise<TwoPhaseRun> => {
+  const requestRun = await request();
+  const path = slotPathOf(requestRun.context.callContext.currentQueryContext.state, key);
+  const assignRun = await assign(requestRun.context, path);
+  return {
+    context: assignRun.context,
+    request: requestRun,
+    assign: assignRun,
+    key,
+    slotIndex: slotIndexOfPath(path),
+  };
 };
 
 /** Call deposit with its flat args spread in circuit order. */
@@ -321,7 +405,7 @@ describe("erc20-vault ledger shape", () => {
     const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(
       rawState,
       VAULT_REQUESTS_PATH,
-      VAULT_NONCE_PATH,
+      VAULT_ISSUED_SLOTS_PATH,
     );
     const typedIndex = toSignBidirectionalEventIndex(
       ledger(ctx.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -340,20 +424,21 @@ describe("userCommitment", () => {
   });
 });
 
-describe("refundCommitment", () => {
-  it("is domain-separated from userCommitment and unique per secret AND per request id", () => {
-    const requestIdA = bytes(32, 0x01);
-    const requestIdB = bytes(32, 0x02);
-    const commitment = pureCircuits.refundCommitment(SECRET_KEY, requestIdA);
+describe("requestCommitment", () => {
+  it("is domain-separated from userCommitment and unique per secret AND per nonce", () => {
+    const nonceA = bytes(32, 0x01);
+    const nonceB = bytes(32, 0x02);
+    const commitment = pureCircuits.requestCommitment(SECRET_KEY, nonceA);
     expect(commitment).toHaveLength(32);
     // Never the deposit-identity commitment: THAT one is public on the ledger
     // as the deposit's derivation path, so equality would link withdraw to
     // deposit.
     expect(commitment).not.toEqual(pureCircuits.userCommitment(SECRET_KEY));
-    // Bound to the request id: two withdrawals by the same secret differ.
-    expect(commitment).not.toEqual(pureCircuits.refundCommitment(SECRET_KEY, requestIdB));
+    // Bound to the nonce: two withdrawals by the same secret differ, which is
+    // what keeps allocator leaves unique.
+    expect(commitment).not.toEqual(pureCircuits.requestCommitment(SECRET_KEY, nonceB));
     // And bound to the secret: another identity's commitment differs.
-    expect(commitment).not.toEqual(pureCircuits.refundCommitment(OTHER_SECRET_KEY, requestIdA));
+    expect(commitment).not.toEqual(pureCircuits.requestCommitment(OTHER_SECRET_KEY, nonceA));
   });
 });
 
@@ -382,6 +467,7 @@ describe("initialise", () => {
         CHAIN_ID,
         CAIP2_ID,
         MPC_RESPONSE_KEY,
+        EVM_NONCE_BASE,
       ),
     ).rejects.toThrow(/Not the deployer/);
   });
@@ -398,6 +484,7 @@ describe("initialise", () => {
         CHAIN_ID,
         CAIP2_ID,
         MPC_RESPONSE_KEY,
+        EVM_NONCE_BASE,
       ),
     ).rejects.toThrow(/Already initialised/);
   });
@@ -414,6 +501,7 @@ describe("initialise", () => {
         0n,
         CAIP2_ID,
         MPC_RESPONSE_KEY,
+        EVM_NONCE_BASE,
       ),
     ).rejects.toThrow(/Chain ID must be positive/);
   });
@@ -427,6 +515,10 @@ describe("initialise", () => {
     expect(state.evmChainId).toBe(CHAIN_ID);
     expect(state.caip2Id).toEqual(CAIP2_ID);
     expect(state.mpcResponseKey).toEqual(MPC_RESPONSE_KEY);
+    // Write-once, so phase 2 can read it without pinning anything that moves.
+    expect(state.evmNonceBase).toBe(EVM_NONCE_BASE);
+    // The allocator starts empty: no slot is owed to anyone yet.
+    expect(state.pendingParams.isEmpty()).toBe(true);
   });
 });
 
@@ -443,13 +535,13 @@ describe("deposit round-trip", () => {
     const rawLedger = readSignetRequestsLedgerFromState(
       state,
       VAULT_DEPOSIT_REQUESTS_PATH,
-      VAULT_NONCE_PATH,
+      VAULT_ISSUED_SLOTS_PATH,
     );
 
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
-    // The raw counter read matches the generated one.
-    expect(rawLedger.nonce).toBe(ledger(state).signetRequestNonce);
+    // The raw counter read at the nonce path matches the generated one.
+    expect(rawLedger.nonce).toBe(ledger(state).issuedSlots);
 
     const [idHex, record] = first(typedIndex.entries(), "indexed signBidirectional request");
 
@@ -532,12 +624,12 @@ describe("deposit round-trip", () => {
       amount: AMOUNT,
     });
 
-    // This caller's OWN deposit nonce slot bumped for their next request,
-    // while the global signetRequestNonce (which the vault-signed flows still
-    // use) is left untouched: deposits no longer read or move the shared cell,
-    // which is what lets two different callers' deposits apply concurrently.
+    // This caller's OWN deposit nonce slot bumped for their next request, while
+    // the vault-path counter issuedSlots is left untouched: a deposit allocates
+    // no slot, and it reads no shared cell at all, which is what lets two
+    // different callers' deposits apply concurrently.
     expect(ledger(state).depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(1n);
-    expect(ledger(state).signetRequestNonce).toBe(0n);
+    expect(ledger(state).issuedSlots).toBe(0n);
   });
 });
 
@@ -607,17 +699,17 @@ describe("deposit validation", () => {
     expect(nonces).toEqual([0n, 1n]);
   });
 
-  it("the SAME caller depositing twice advances THEIR slot and leaves signetRequestNonce at 0", async () => {
+  it("the SAME caller depositing twice advances THEIR slot and issues no allocator slot", async () => {
     // The ledger-side facts the off-chain twin (`depositRequestNonce` in
     // src/vault-ledger.ts) reads to predict a request id. A twin reading the
-    // shared signetRequestNonce instead agrees only on the first deposit,
+    // vault-path counter issuedSlots instead agrees only on the first deposit,
     // when both cells read 0; this pins the divergence so that accident can
     // never silently return.
     const { contract, ctx } = await deployInitialised();
 
     const stateBefore = ledger(ctx.callContext.currentQueryContext.state);
     expect(stateBefore.depositRequestNonces.member(DEPLOYER_COMMITMENT)).toBe(false);
-    expect(stateBefore.signetRequestNonce).toBe(0n);
+    expect(stateBefore.issuedSlots).toBe(0n);
 
     const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
     const stateAfterFirst = ledger(afterFirst.callContext.currentQueryContext.state);
@@ -628,8 +720,9 @@ describe("deposit validation", () => {
 
     // The caller's own counter is what advanced...
     expect(stateAfterSecond.depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(2n);
-    // ...and the shared vault-path nonce never moved: deposits do not touch it.
-    expect(stateAfterSecond.signetRequestNonce).toBe(0n);
+    // ...and the vault-path issued-slot count never moved: a deposit is signed
+    // by the caller's own EVM account, so it allocates nothing.
+    expect(stateAfterSecond.issuedSlots).toBe(0n);
 
     // So the SECOND deposit hashed nonce 1, which the twin can only predict
     // from the per-caller slot.
@@ -669,9 +762,22 @@ const VAULT_TOKEN_COLOR = hexToBytes(
   rawTokenType(pureCircuits.vaultTokenDomainSeparator(ERC20), VAULT_ADDRESS),
 );
 
-/** A surrendered vault coin: fixed nonce, vault-token color, given value. */
-const vaultCoin = (value: bigint, color: Uint8Array = VAULT_TOKEN_COLOR) => ({
-  nonce: bytes(32, 0x0c),
+// The default surrendered-coin nonce. It is ALSO the request key's second
+// preimage, so any test that surrenders two coins against one deploy must give
+// them different nonces or phase 1 rejects the second as already pending.
+const COIN_NONCE = bytes(32, 0x0c);
+
+// The approves surrender no coin, so their request key is salted instead. Any
+// value the caller has not already parked a request under will do.
+const APPROVE_SALT = bytes(32, 0x5a);
+
+/** A surrendered vault coin: given nonce, vault-token color, given value. */
+const vaultCoin = (
+  value: bigint,
+  color: Uint8Array = VAULT_TOKEN_COLOR,
+  nonce: Uint8Array = COIN_NONCE,
+) => ({
+  nonce,
   color,
   value,
 });
@@ -683,7 +789,6 @@ const vaultCoin = (value: bigint, color: Uint8Array = VAULT_TOKEN_COLOR) => ({
  * that anonymous type structurally.
  */
 interface WithdrawCallArgs {
-  evmNonce: bigint;
   keyVersion: bigint;
   withdraw: { erc20Address: Uint8Array; amount: bigint; destEvmAddress: Uint8Array };
   coin: ReturnType<typeof vaultCoin>;
@@ -694,18 +799,36 @@ interface WithdrawCallArgs {
  * Shared across tests: NEVER mutate; build a variation as an explicit spread.
  */
 const VALID_WITHDRAW: WithdrawCallArgs = {
-  evmNonce: 0n,
   keyVersion: 1n,
   withdraw: { erc20Address: ERC20, amount: AMOUNT, destEvmAddress: DEST_EVM },
   coin: vaultCoin(AMOUNT),
 };
 
-/** Call withdraw with its flat args spread in circuit order. */
+/** Drive both halves of a withdrawal: requestWithdraw then assignWithdraw. */
 const withdraw = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startWithdraw"]>[0],
+  ctx: CircuitContext<VaultPrivateState>,
   args: WithdrawCallArgs,
-) => contract.circuits.startWithdraw(ctx, args.evmNonce, args.keyVersion, args.withdraw, args.coin);
+): Promise<TwoPhaseRun> => {
+  const key = requestKeyOf(ctx, args.coin.nonce);
+  return twoPhase(
+    key,
+    () => contract.circuits.requestWithdraw(ctx, args.keyVersion, args.withdraw, args.coin),
+    (next, path) =>
+      contract.circuits.assignWithdraw(
+        next,
+        key,
+        path as Parameters<Contract<VaultPrivateState>["circuits"]["assignWithdraw"]>[2],
+      ),
+  );
+};
+
+/** Phase 1 only, for the tests that assert on the parked request itself. */
+const requestWithdrawOnly = (
+  contract: Contract<VaultPrivateState>,
+  ctx: CircuitContext<VaultPrivateState>,
+  args: WithdrawCallArgs,
+) => contract.circuits.requestWithdraw(ctx, args.keyVersion, args.withdraw, args.coin);
 
 // ---- Withdraw tests ----
 
@@ -713,8 +836,12 @@ describe("withdraw round-trip", () => {
   it("burns the coin and stores a vault-path event with a contract-fixed envelope", async () => {
     const { contract, ctx } = await deployInitialised();
 
-    const { context: next } = await withdraw(contract, ctx, VALID_WITHDRAW);
+    const run = await withdraw(contract, ctx, VALID_WITHDRAW);
+    const next = run.context;
     const state = next.callContext.currentQueryContext.state;
+
+    // First request of this vault, so it owns allocator slot 0.
+    expect(run.slotIndex).toBe(0n);
 
     const index = toSignBidirectionalEventIndex(ledger(state).signBidirectionalEventMap);
     expect(index.size).toBe(1);
@@ -754,7 +881,8 @@ describe("withdraw round-trip", () => {
     expect(envelope).toEqual({
       to: ERC20,
       chainId: CHAIN_ID,
-      nonce: VALID_WITHDRAW.evmNonce,
+      // PROVEN, not read: evmNonceBase + the slot index the Merkle path bound.
+      nonce: EVM_NONCE_BASE + run.slotIndex,
       gasLimit: 100_000n,
       // The initialise-time defaults, now ledger values a deployer can move
       // with setGasParams (see the "gas parameters" describes at the end of
@@ -777,6 +905,9 @@ describe("withdraw round-trip", () => {
       EXPECTED_ROUTING.outputDeserializationSchema,
     );
     expect(record.respondSerializationSchema).toEqual(EXPECTED_ROUTING.respondSerializationSchema);
+    // A constant, not this request's slot index: every vault-signed flow hashes
+    // 0 here, because txParams.nonce below already makes the id unique. The
+    // UNIQUENESS test in the throughput block is what holds that claim up.
     expect(record.requestNonce).toBe(0n);
 
     // Contract-built calldata: transfer(destEvmAddress, amount) as ABI-ready
@@ -796,11 +927,21 @@ describe("withdraw round-trip", () => {
     // the typed token + amount settle circuits read back; nonce bumped.
     expect(ledger(state).withdrawSettleViews.member(requestIdBytes(idHex))).toBe(true);
     expect(ledger(state).withdrawSettleViews.lookup(requestIdBytes(idHex))).toEqual({
-      commitment: pureCircuits.refundCommitment(SECRET_KEY, requestIdBytes(idHex)),
+      // The commitment IS the phase-1 request key: phase 2 is permissionless
+      // and cannot commit over the requester's secret and the request id.
+      commitment: pureCircuits.requestCommitment(SECRET_KEY, VALID_WITHDRAW.coin.nonce),
       erc20: ERC20,
       amount: AMOUNT,
     });
-    expect(ledger(state).signetRequestNonce).toBe(1n);
+    // The shared counter is no longer a request nonce, it is the count of slots
+    // the allocator has issued: one, this request's. Nothing on this path READ
+    // it, which is why the increment costs no contention.
+    expect(ledger(state).issuedSlots).toBe(1n);
+    // The slot was consumed: the parked parameters are replaced by a tombstone,
+    // never removed, so the key can never be parked (and re-leafed) again.
+    expect(ledger(state).pendingParams.size()).toBe(1n);
+    // The allocator leaf STAYS: removing it would rebind an issued index.
+    expect(ledger(state).slots.checkRoot(ledger(state).slots.root())).toBe(true);
 
     // The burn, observable in the zswap local state: the coin is received (a
     // contract-owned output) and spent as the call's input, and the burn
@@ -808,7 +949,8 @@ describe("withdraw round-trip", () => {
     // output's coin info must equal the spent coin's exactly: that identity is
     // what lets the transaction builder pair the two into a same-transaction
     // transient instead of a contract coin-tree spend.
-    const zswap = zswapState(next);
+    // The burn happens in PHASE 1, so read that run's zswap local state.
+    const zswap = zswapState(run.request.context);
 
     // check inputs, expect 1 input:
     // - coin for the amount being withdrawn
@@ -859,7 +1001,9 @@ describe("withdraw round-trip", () => {
       await withdraw(contract, afterFirst, {
         ...VALID_WITHDRAW,
         withdraw: { erc20Address: otherErc20, amount: AMOUNT, destEvmAddress: DEST_EVM },
-        coin: vaultCoin(AMOUNT, otherColor),
+        // A DIFFERENT coin nonce, so it keys a different request and a
+        // different allocator slot. Reusing one would be a double spend.
+        coin: vaultCoin(AMOUNT, otherColor, bytes(32, 0x0d)),
       })
     ).context;
 
@@ -933,6 +1077,16 @@ describe("withdraw validation", () => {
   it("rejects before initialise", async () => {
     const { contract, ctx } = await deployContract();
     await expect(withdraw(contract, ctx, VALID_WITHDRAW)).rejects.toThrow(/Not initialised/);
+  });
+
+  it("rejects the legacy key version in PHASE 1, before the coin is burned", async () => {
+    // Phase 1 burns the coin, and slot i's EVM nonce is only ever consumed by
+    // slot i, so anything phase 2 would reject has to be caught here or the
+    // caller loses the coin AND the account stalls behind the stranded nonce.
+    const { contract, ctx } = await deployInitialised();
+    await expect(
+      requestWithdrawOnly(contract, ctx, { ...VALID_WITHDRAW, keyVersion: 0n }),
+    ).rejects.toThrow(/keyVersion must be >= 1/);
   });
 });
 
@@ -1023,6 +1177,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
 
@@ -1041,6 +1196,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
 
@@ -1064,6 +1220,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
         OUTPUT_FALSE,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
 
@@ -1085,6 +1242,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
         OUTPUT_FALSE,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Not the withdrawer/);
   });
@@ -1098,6 +1256,7 @@ describe("completeWithdraw settle", () => {
         respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
@@ -1115,6 +1274,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
@@ -1131,6 +1291,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, otherId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
@@ -1145,6 +1306,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
   });
@@ -1158,6 +1320,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
     await expect(
@@ -1167,6 +1330,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
   });
@@ -1187,6 +1351,7 @@ describe("completeWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
   });
@@ -1208,6 +1373,7 @@ describe("refundWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
 
@@ -1225,6 +1391,7 @@ describe("refundWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Not the withdrawer/);
   });
@@ -1241,6 +1408,7 @@ describe("refundWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, notTheSentinel),
         notTheSentinel,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Not the MPC failure output/);
   });
@@ -1254,6 +1422,7 @@ describe("refundWithdraw settle", () => {
         respond(IMPOSTER_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
@@ -1270,6 +1439,7 @@ describe("refundWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, bytes(5, 0x01)),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
@@ -1290,6 +1460,7 @@ describe("refundWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
       // Deposits never insert the pending-withdrawal marker, so a deposit id
       // cannot be refunded as a withdrawal.
@@ -1305,6 +1476,7 @@ describe("refundWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
     await expect(
@@ -1314,6 +1486,7 @@ describe("refundWithdraw settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
       // The first refund consumed the pending-withdrawal marker.
     ).rejects.toThrow(/Withdrawal not found/);
@@ -1524,7 +1697,6 @@ const SWAP_AMOUNT_IN_MAX = AMOUNT; // spend cap = the surrendered coin
 const SWAP_AMOUNT_IN_SPENT = 990_000n; // attested input actually spent (<= the cap)
 
 interface SwapCallArgs {
-  evmNonce: bigint;
   keyVersion: bigint;
   swap: {
     tokenIn: Uint8Array;
@@ -1537,7 +1709,6 @@ interface SwapCallArgs {
 }
 
 const VALID_SWAP: SwapCallArgs = {
-  evmNonce: 0n,
   keyVersion: 1n,
   swap: {
     tokenIn: ERC20,
@@ -1549,11 +1720,24 @@ const VALID_SWAP: SwapCallArgs = {
   coin: vaultCoin(SWAP_AMOUNT_IN_MAX),
 };
 
+/** Drive both halves of a swap: requestSwap then assignSwap. */
 const swap = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startSwap"]>[0],
+  ctx: CircuitContext<VaultPrivateState>,
   args: SwapCallArgs,
-) => contract.circuits.startSwap(ctx, args.evmNonce, args.keyVersion, args.swap, args.coin);
+): Promise<TwoPhaseRun> => {
+  const key = requestKeyOf(ctx, args.coin.nonce);
+  return twoPhase(
+    key,
+    () => contract.circuits.requestSwap(ctx, args.keyVersion, args.swap, args.coin),
+    (next, path) =>
+      contract.circuits.assignSwap(
+        next,
+        key,
+        path as Parameters<Contract<VaultPrivateState>["circuits"]["assignSwap"]>[2],
+      ),
+  );
+};
 
 // A successful swap's attested output: the amountIn spent as the MPC serializes it — a
 // Midnight-native little-endian uint64 (8 bytes), the twin of serializeRespondOutput.
@@ -1572,7 +1756,8 @@ const OUTPUT_SWAP = swapOutput(SWAP_AMOUNT_IN_SPENT);
 describe("approveRouter", () => {
   it("records an approve(router, ~unlimited) on signBidirectionalEventMap from the vault path, no coin", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
+    const run = await approveRouter(contract, ctx);
+    const next = run.context;
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1589,21 +1774,21 @@ describe("approveRouter", () => {
     expect(calldata.value.noWords).toBe(2n);
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(ROUTER));
     expect(calldata.value.words[1]).toEqual(numericAbiWord(MAX_APPROVE));
+
+    // The approves sign from the SAME vault EVM account as the value flows, so
+    // they must draw their nonce from the same allocator. A second source of
+    // nonces would hand one nonce to two transactions and strand the account.
+    expect(record.txParams.nonce).toBe(EVM_NONCE_BASE + run.slotIndex);
   });
 
   it("is permissionless (a stranger may ready a token) and needs initialise", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).rejects.toThrow(
-      /Not initialised/,
-    );
+    await expect(
+      contract.circuits.requestApproveRouter(ctx, ERC20, 1n, APPROVE_SALT),
+    ).rejects.toThrow(/Not initialised/);
     const ready = await deployInitialised();
     await expect(
-      ready.contract.circuits.approveRouter(
-        await strangerContext("approveRouter", ready.ctx),
-        ERC20,
-        0n,
-        1n,
-      ),
+      approveRouter(ready.contract, await strangerContext("requestApproveRouter", ready.ctx)),
     ).resolves.toBeDefined();
   });
 });
@@ -1611,7 +1796,8 @@ describe("approveRouter", () => {
 describe("swap round-trip", () => {
   it("burns tokenIn and stores a vault-path exactOutputSingle event on the swap map", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await swap(contract, ctx, VALID_SWAP);
+    const run = await swap(contract, ctx, VALID_SWAP);
+    const next = run.context;
     const state = ledger(next.callContext.currentQueryContext.state);
 
     const index = toSignBidirectionalEventIndex(state.swapEventMap);
@@ -1628,7 +1814,7 @@ describe("swap round-trip", () => {
     expect(envelope).toEqual({
       to: ROUTER,
       chainId: CHAIN_ID,
-      nonce: VALID_SWAP.evmNonce,
+      nonce: EVM_NONCE_BASE + run.slotIndex,
       gasLimit: 700_000n,
       // The initialise-time defaults, now ledger values a deployer can move
       // with setGasParams (see the "gas parameters" describes at the end of
@@ -1660,7 +1846,7 @@ describe("swap round-trip", () => {
     // Same burn as withdraw (which asserts the receive/spend pairing in
     // detail): amountInMaximum of the tokenIn vault coin is received, spent,
     // and paid whole to the shielded burn address.
-    const zswap = zswapState(next);
+    const zswap = zswapState(run.request.context);
 
     // check inputs, expect 1 input:
     // - coin for the amount being withdrawn
@@ -1730,6 +1916,7 @@ describe("completeSwap settle", () => {
         OUTPUT_SWAP,
         MINT_NONCE,
         CHANGE_NONCE,
+        COIN_NONCE,
       )
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
@@ -1747,6 +1934,7 @@ describe("completeSwap settle", () => {
         OUTPUT_SWAP,
         MINT_NONCE,
         CHANGE_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Not the swapper/);
   });
@@ -1761,6 +1949,7 @@ describe("completeSwap settle", () => {
         OUTPUT_SWAP,
         MINT_NONCE,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/changeNonce must differ from mintNonce/);
   });
@@ -1775,6 +1964,7 @@ describe("completeSwap settle", () => {
         OUTPUT_SWAP,
         MINT_NONCE,
         CHANGE_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
     await expect(
@@ -1785,6 +1975,7 @@ describe("completeSwap settle", () => {
         swapOutput(1n),
         MINT_NONCE,
         CHANGE_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
@@ -1800,6 +1991,7 @@ describe("refundSwap settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
@@ -1816,6 +2008,7 @@ describe("refundSwap settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Not the swapper/);
   });
@@ -1844,24 +2037,89 @@ const SUPPLY_SHARES = 360_679n; // attested stataUSDC shares minted
 const REDEEM_SHARES = AMOUNT; // stataUSDC surrendered
 const REDEEM_ASSETS = 2_780_944n; // attested USDC assets minted (principal + interest)
 
+/** Drive both halves of a supply: requestSupply then assignSupply. */
 const supply = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startSupply"]>[0],
+  ctx: CircuitContext<VaultPrivateState>,
   amount: bigint,
   coin: ReturnType<typeof vaultCoin>,
-) => contract.circuits.startSupply(ctx, 0n, 1n, amount, coin);
+): Promise<TwoPhaseRun> => {
+  const key = requestKeyOf(ctx, coin.nonce);
+  return twoPhase(
+    key,
+    () => contract.circuits.requestSupply(ctx, 1n, amount, coin),
+    (next, path) =>
+      contract.circuits.assignSupply(
+        next,
+        key,
+        path as Parameters<Contract<VaultPrivateState>["circuits"]["assignSupply"]>[2],
+      ),
+  );
+};
 
+/** Drive both halves of a redeem: requestRedeem then assignRedeem. */
 const redeem = (
   contract: Contract<VaultPrivateState>,
-  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startRedeem"]>[0],
+  ctx: CircuitContext<VaultPrivateState>,
   shares: bigint,
   coin: ReturnType<typeof vaultCoin>,
-) => contract.circuits.startRedeem(ctx, 0n, 1n, shares, coin);
+): Promise<TwoPhaseRun> => {
+  const key = requestKeyOf(ctx, coin.nonce);
+  return twoPhase(
+    key,
+    () => contract.circuits.requestRedeem(ctx, 1n, shares, coin),
+    (next, path) =>
+      contract.circuits.assignRedeem(
+        next,
+        key,
+        path as Parameters<Contract<VaultPrivateState>["circuits"]["assignRedeem"]>[2],
+      ),
+  );
+};
+
+/** Drive both halves of an approve: request* then assign*. `salt` keys the slot. */
+const approveRouter = (
+  contract: Contract<VaultPrivateState>,
+  ctx: CircuitContext<VaultPrivateState>,
+  erc20Address: Uint8Array = ERC20,
+  salt: Uint8Array = APPROVE_SALT,
+): Promise<TwoPhaseRun> => {
+  const key = requestKeyOf(ctx, salt);
+  return twoPhase(
+    key,
+    () => contract.circuits.requestApproveRouter(ctx, erc20Address, 1n, salt),
+    (next, path) =>
+      contract.circuits.assignApproveRouter(
+        next,
+        key,
+        path as Parameters<Contract<VaultPrivateState>["circuits"]["assignApproveRouter"]>[2],
+      ),
+  );
+};
+
+const approveStata = (
+  contract: Contract<VaultPrivateState>,
+  ctx: CircuitContext<VaultPrivateState>,
+  salt: Uint8Array = APPROVE_SALT,
+): Promise<TwoPhaseRun> => {
+  const key = requestKeyOf(ctx, salt);
+  return twoPhase(
+    key,
+    () => contract.circuits.requestApproveStata(ctx, 1n, salt),
+    (next, path) =>
+      contract.circuits.assignApproveStata(
+        next,
+        key,
+        path as Parameters<Contract<VaultPrivateState>["circuits"]["assignApproveStata"]>[2],
+      ),
+  );
+};
 
 describe("approveStata", () => {
   it("records approve(stataToken, MAX) on signBidirectionalEventMap from the vault path, to = the underlying", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await contract.circuits.approveStata(ctx, 0n, 1n);
+    const run = await approveStata(contract, ctx);
+    const next = run.context;
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1875,6 +2133,7 @@ describe("approveStata", () => {
     expect(calldata.value.selector).toEqual(APPROVE_SELECTOR);
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(STATA_TOKEN));
     expect(calldata.value.words[1]).toEqual(numericAbiWord(MAX_APPROVE));
+    expect(record.txParams.nonce).toBe(EVM_NONCE_BASE + run.slotIndex);
   });
 });
 
@@ -1986,6 +2245,7 @@ describe("completeSupply settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, out),
         out,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
@@ -2003,6 +2263,7 @@ describe("completeSupply settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, out),
         out,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Not the supplier/);
   });
@@ -2113,6 +2374,7 @@ describe("completeRedeem settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, out),
         out,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Not the redeemer/);
   });
@@ -2127,6 +2389,7 @@ describe("completeRedeem settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, out),
         out,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
@@ -2145,6 +2408,7 @@ describe("refundSupply / refundRedeem settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
@@ -2161,6 +2425,7 @@ describe("refundSupply / refundRedeem settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       )
     ).context;
     const state = ledger(next.callContext.currentQueryContext.state);
@@ -2177,6 +2442,7 @@ describe("refundSupply / refundRedeem settle", () => {
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     ).rejects.toThrow(/Not the supplier/);
   });
@@ -2213,7 +2479,7 @@ interface PendingRequest {
  */
 const approveRouterRequested = async (): Promise<PendingRequest> => {
   const { contract, ctx } = await deployInitialised();
-  const next = (await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).context;
+  const next = (await approveRouter(contract, ctx)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
   );
@@ -2261,6 +2527,7 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
         OUTPUT_SUCCESS,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     throws: /Withdrawal not found/,
   },
@@ -2274,6 +2541,7 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     throws: /Withdrawal not found/,
   },
@@ -2288,6 +2556,7 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
         OUTPUT_SWAP,
         MINT_NONCE,
         CHANGE_NONCE,
+        COIN_NONCE,
       ),
     throws: /Swap not found/,
   },
@@ -2301,6 +2570,7 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     throws: /Swap not found/,
   },
@@ -2314,6 +2584,7 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUPPLY),
         OUTPUT_SUPPLY,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     throws: /Supply not found/,
   },
@@ -2327,6 +2598,7 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     throws: /Supply not found/,
   },
@@ -2340,6 +2612,7 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REDEEM),
         OUTPUT_REDEEM,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     throws: /Redeem not found/,
   },
@@ -2353,6 +2626,7 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
         respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
         OUTPUT_REVERTED,
         MINT_NONCE,
+        COIN_NONCE,
       ),
     throws: /Redeem not found/,
   },
@@ -2398,18 +2672,22 @@ describe("cross-kind settle isolation", () => {
 });
 
 // ===========================================================================
-// Throughput: every start* circuit reads and increments ONE shared cell,
-// signetRequestNonce. The read is pinned (popeq) and the cell changes on every
-// request, so two requests proven against the same state cannot both apply:
-// the second fails on-chain reconciliation with a read mismatch. These tests
-// reproduce that in verifying mode and pin the requirement that concurrent
-// requests from DIFFERENT callers must both apply.
+// Throughput: the vault-signed flows used to read and increment ONE shared
+// counter for their request nonce — the cell now called issuedSlots — and take
+// the EVM account nonce from the caller. That READ is pinned (popeq) and the
+// cell moved on every request, so two requests proven against the same state
+// could not both apply: the second failed on-chain reconciliation with a read
+// mismatch. (The cell is still incremented today, once per issued slot, but
+// nothing on this path READS it, which is the whole difference.)
+// Measured against the shared-counter baseline this branch replaces, the pair
+// below produced
 //
-// Where this stands on THIS branch: startDeposit sources its nonce from a
-// per-caller counter, so the deposit REQUIREMENT is green. The vault-signed
-// flows (startWithdraw and friends) and the approves still read the shared
-// cell, so they still serialize and are still RED, with the read mismatch the
-// CONTROL below pins.
+//   REJECTED: mismatch between expected (<[-]: b8>) and actual (<[01]: b8>) read
+//
+// The two-phase allocator removes that read. Phase 1 touches only per-key map
+// paths and appends to a HistoricMerkleTree (whose insert emits no popeq at
+// all); phase 2 pins only per-key values plus a checkRoot whose TRUE is
+// monotone against an append-only root history.
 // ===========================================================================
 interface VaultCall {
   contractAddress: string;
@@ -2437,10 +2715,6 @@ const gasOf = (run: { context: CircuitContext<VaultPrivateState> }): Record<stri
   if (!gas) throw new Error("no vault gas cost on the run");
   return gas;
 };
-
-/** The state a threaded context currently sits on. */
-const stateOf = (ctx: CircuitContext<VaultPrivateState>): unknown =>
-  ctx.callContext.currentQueryContext.state;
 
 /**
  * A transcript's execution budget, scaled.
@@ -2482,7 +2756,20 @@ const replay = (
   }
 };
 
-describe("throughput: shared signetRequestNonce serializes vault requests", () => {
+/** The state a threaded context currently sits on. */
+const stateOf = (ctx: CircuitContext<VaultPrivateState>): unknown =>
+  ctx.callContext.currentQueryContext.state;
+
+/** The one request id a signBidirectional map holds, as bytes. */
+const soleRequestId = (state: unknown, map: "signBidirectionalEventMap"): RequestId =>
+  requestIdBytes(
+    first(
+      toSignBidirectionalEventIndex(ledger(state as Parameters<typeof ledger>[0])[map]).keys(),
+      "recorded request id",
+    ),
+  );
+
+describe("throughput: the two-phase allocator lets concurrent requests apply", () => {
   it("CONTROL: a deposit applies against the state it was built on (harness sanity)", async () => {
     const { contract, ctx } = await deployInitialised();
     // The state the call is proven against is the one on the context it is
@@ -2494,29 +2781,324 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
     expect(replay(builtOn, run)).toBe("applied");
   });
 
-  it("REQUIREMENT (red today): two concurrent startDeposits from different callers both apply", async () => {
+  it("two concurrent startDeposits from different callers both apply", async () => {
     const { contract, ctx } = await deployInitialised();
     const alice = await deposit(contract, ctx, VALID_DEPOSIT);
-    const stateAfterAlice = alice.context.callContext.currentQueryContext.state;
     const bobCtx = await strangerContext("startDeposit", ctx);
     const bob = await deposit(contract, bobCtx, VALID_DEPOSIT);
     // Bob was proven concurrently with Alice; he must still apply after her.
-    expect(replay(stateAfterAlice, bob, true)).toBe("applied");
+    expect(replay(stateOf(alice.context), bob, true)).toBe("applied");
   });
 
-  it("CONTROL: the still-shared approve path fails exactly as the vault flows used to", async () => {
-    // approveRouter deliberately keeps the global counter, so it still
-    // serializes. Replayed WITH headroom, so a gas artefact cannot be the
-    // reason it is turned away: the only thing left that can reject it is the
-    // pinned read of a cell Alice moved. This is the negative control for the
-    // harness above — it is what proves `replay` still DETECTS a conflict,
-    // rather than waving everything through now that it budgets generously.
+  // ---- CONTENTION: phase 1 ----
+
+  it("CONTENTION: two concurrent requestWithdraws from different callers both apply", async () => {
     const { contract, ctx } = await deployInitialised();
-    const alice = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
-    const stateAfterAlice = stateOf(alice.context);
-    const bobCtx = await strangerContext("approveRouter", ctx);
-    const bob = await contract.circuits.approveRouter(bobCtx, ERC20, 0n, 1n);
-    expect(replay(stateAfterAlice, bob, true)).toMatch(/mismatch between expected .* read/);
+    const alice = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const bobCtx = await strangerContext("requestWithdraw", ctx);
+    const bob = await requestWithdrawOnly(contract, bobCtx, VALID_WITHDRAW);
+
+    // Both were proven against the SAME post-initialise state. Alice applies,
+    // and Bob's transcript must still reconcile against the state she left:
+    // he read no cell she moved. This is the pair that failed with a read
+    // mismatch against the shared-counter baseline (see the banner above).
+    const afterAlice = stateOf(alice.context);
+    expect(replay(afterAlice, bob, true)).toBe("applied");
+
+    // ...and the allocator really did give them consecutive slots.
+    const state = ledger(afterAlice as Parameters<typeof ledger>[0]);
+    expect(state.pendingParams.size()).toBe(1n);
+  });
+
+  it("CONTENTION: the SAME caller's two coins both apply against one state", async () => {
+    // Different coins, so different request keys, so different map paths: the
+    // per-key pinned FALSE of one is not disturbed by the insert of the other.
+    const { contract, ctx } = await deployInitialised();
+    const one = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const two = await requestWithdrawOnly(contract, ctx, {
+      ...VALID_WITHDRAW,
+      coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x0d)),
+    });
+    expect(replay(stateOf(one.context), two, true)).toBe("applied");
+  });
+
+  it("REGRESSION: two requests keying on the SAME coin nonce must NOT both apply", async () => {
+    // The safety net behind unique allocator leaves: the duplicate key's
+    // pinned FALSE is on the very path the first insert moved.
+    const { contract, ctx } = await deployInitialised();
+    const one = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const two = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    expect(replay(stateOf(one.context), two)).toMatch(/^REJECTED/);
+  });
+
+  // ---- CONTENTION: phase 2 ----
+
+  it("CONTENTION: two concurrent assigns for different requests both apply", async () => {
+    const { contract, ctx } = await deployInitialised();
+
+    // Park two requests first, so both slots exist before either assign runs.
+    const parkedA = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const keyA = requestKeyOf(ctx, VALID_WITHDRAW.coin.nonce);
+    const argsB = {
+      ...VALID_WITHDRAW,
+      coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x0d)),
+    };
+    const parked = await requestWithdrawOnly(contract, parkedA.context, argsB);
+    const keyB = requestKeyOf(ctx, argsB.coin.nonce);
+
+    // Now prove BOTH assigns against that one state.
+    const shared = parked.context;
+    const pathA = slotPathOf(stateOf(shared) as Parameters<typeof ledger>[0], keyA);
+    const pathB = slotPathOf(stateOf(shared) as Parameters<typeof ledger>[0], keyB);
+    const assignA = await contract.circuits.assignWithdraw(shared, keyA, pathA);
+    const assignB = await contract.circuits.assignWithdraw(shared, keyB, pathB);
+
+    // A applies. B, proven against the same state, must still reconcile: its
+    // checkRoot TRUE is monotone, and every other read it made is keyed on B.
+    expect(replay(stateOf(assignA.context), assignB, true)).toBe("applied");
+  });
+
+  it("CONTENTION: a phase-2 proof survives a phase-1 insert that moves the slots root", async () => {
+    // The monotonicity claim, tested directly. assign* pins checkRoot TRUE,
+    // and checkRoot lowers to `member` against an APPEND-ONLY root history --
+    // not `eq` against the current root. So a request* that lands in between,
+    // moving the tree's current root, must not falsify it.
+    const { contract, ctx } = await deployInitialised();
+    const parked = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const key = requestKeyOf(ctx, VALID_WITHDRAW.coin.nonce);
+    const path = slotPathOf(stateOf(parked.context) as Parameters<typeof ledger>[0], key);
+
+    // Prove the assign against the state as it stands now...
+    const assigned = await contract.circuits.assignWithdraw(parked.context, key, path);
+
+    // ...then let somebody else's phase 1 insert a leaf and move the root.
+    const interloperCtx = await strangerContext("requestWithdraw", parked.context);
+    const interloper = await requestWithdrawOnly(contract, interloperCtx, VALID_WITHDRAW);
+    const movedRoot = stateOf(interloper.context);
+    expect(ledger(movedRoot as Parameters<typeof ledger>[0]).slots.root()).not.toEqual(
+      ledger(stateOf(parked.context) as Parameters<typeof ledger>[0]).slots.root(),
+    );
+
+    // The already-proven assign still applies against the moved root.
+    expect(replay(movedRoot, assigned, true)).toBe("applied");
+  });
+
+  // ---- CORRECTNESS ----
+
+  it("CORRECTNESS: assigned EVM nonces are distinct, contiguous and evmNonceBase + slot", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const nonces: bigint[] = [];
+
+    // Five requests across THREE flows plus BOTH approves, all signing from
+    // the one vault EVM account, so all five must draw from the one allocator.
+    const runs: TwoPhaseRun[] = [];
+    const step = async (
+      run: (threaded: CircuitContext<VaultPrivateState>) => Promise<TwoPhaseRun>,
+      threaded: CircuitContext<VaultPrivateState>,
+    ): Promise<CircuitContext<VaultPrivateState>> => {
+      const done = await run(threaded);
+      runs.push(done);
+      return done.context;
+    };
+
+    let threaded = ctx;
+    threaded = await step((c) => approveStata(contract, c), threaded);
+    threaded = await step((c) => approveRouter(contract, c, ERC20, bytes(32, 0x5b)), threaded);
+    threaded = await step(
+      (c) =>
+        withdraw(contract, c, {
+          ...VALID_WITHDRAW,
+          coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x11)),
+        }),
+      threaded,
+    );
+    threaded = await step(
+      (c) =>
+        withdraw(contract, c, {
+          ...VALID_WITHDRAW,
+          coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x12)),
+        }),
+      threaded,
+    );
+    threaded = await step(
+      (c) =>
+        supply(
+          contract,
+          c,
+          SUPPLY_AMOUNT,
+          vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR, bytes(32, 0x13)),
+        ),
+      threaded,
+    );
+
+    // Slot indexes are 0..4 in request order.
+    expect(runs.map((r) => r.slotIndex)).toEqual([0n, 1n, 2n, 3n, 4n]);
+
+    const state = ledger(stateOf(threaded) as Parameters<typeof ledger>[0]);
+    for (const [, record] of toSignBidirectionalEventIndex(state.signBidirectionalEventMap)) {
+      nonces.push(record.txParams.nonce);
+    }
+    for (const [, record] of toSignBidirectionalEventIndex(state.supplyEventMap)) {
+      nonces.push(record.txParams.nonce);
+    }
+    nonces.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+    // Distinct, contiguous, and offset by the initialise-pinned base. A gap or
+    // a repeat here is a stalled or double-spent EVM account nonce.
+    expect(nonces).toEqual([0n, 1n, 2n, 3n, 4n].map((i) => EVM_NONCE_BASE + i));
+    expect(new Set(nonces).size).toBe(nonces.length);
+  });
+
+  it("UNIQUENESS: identical vault-signed requests at different slots get different ids, and the EVM nonce is the only thing holding them apart", async () => {
+    // What carries request-id uniqueness now that every vault-signed flow hashes
+    // a CONSTANT 0 as its request nonce. calculateRequestId hashes the whole
+    // SignBidirectionalEvent, txParams included, so the EVM nonce the allocator
+    // issued is already inside every id; the vault signs from ONE EVM account,
+    // and Ethereum spends an account's nonce exactly once.
+    //
+    // These two withdrawals agree on everything the id is built from -- same
+    // caller, same amount, same recipient, same key version, same gas envelope.
+    // They differ only in the coin surrendered, and the coin is not hashed into
+    // the id at all: it only decides the request KEY, hence the slot.
+    const { contract, ctx } = await deployInitialised();
+    const one = await withdraw(contract, ctx, VALID_WITHDRAW);
+    const two = await withdraw(contract, one.context, {
+      ...VALID_WITHDRAW,
+      coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x31)),
+    });
+
+    expect([one.slotIndex, two.slotIndex]).toEqual([0n, 1n]);
+
+    const index = toSignBidirectionalEventIndex(
+      ledger(stateOf(two.context) as Parameters<typeof ledger>[0]).signBidirectionalEventMap,
+    );
+
+    // BOTH records landed, under two DIFFERENT ids: the map is keyed by request
+    // id, so a size of 2 IS the ids differing, and neither request was lost to
+    // the duplicate-id assert.
+    expect(index.size).toBe(2);
+
+    const records = [...index.values()];
+    const recordA = first(records, "recorded request");
+    const recordB = first(
+      records.filter((candidate) => candidate !== recordA),
+      "second recorded request",
+    );
+
+    // The request nonce cannot be what separates them: it is the same constant
+    // in both. This is the assertion that would have hidden the bug when the
+    // nonce still mirrored the slot index.
+    expect([recordA.requestNonce, recordB.requestNonce]).toEqual([0n, 0n]);
+
+    // The EVM nonce is what separates them, one per slot.
+    expect(
+      [recordA.txParams.nonce, recordB.txParams.nonce].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+    ).toEqual([EVM_NONCE_BASE, EVM_NONCE_BASE + 1n]);
+
+    // ...and it is the ONLY difference. Normalise the EVM nonce away and the two
+    // hashed events are identical, so nothing else in the payload is quietly
+    // doing the separating.
+    expect({ ...recordA, txParams: { ...recordA.txParams, nonce: 0n } }).toEqual({
+      ...recordB,
+      txParams: { ...recordB.txParams, nonce: 0n },
+    });
+  });
+
+  // ---- BINDING ----
+
+  it("BINDING: a phase-2 path whose leaf is not the key is rejected", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const mine = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const argsB = {
+      ...VALID_WITHDRAW,
+      coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x0d)),
+    };
+    const both = await requestWithdrawOnly(contract, mine.context, argsB);
+
+    const keyA = requestKeyOf(ctx, VALID_WITHDRAW.coin.nonce);
+    const keyB = requestKeyOf(ctx, argsB.coin.nonce);
+    const pathB = slotPathOf(stateOf(both.context) as Parameters<typeof ledger>[0], keyB);
+
+    // A real slot, a real root, but it proves B's position, not A's. Without
+    // this bind a caller could claim any index and pick their own EVM nonce.
+    await expect(contract.circuits.assignWithdraw(both.context, keyA, pathB)).rejects.toThrow(
+      /Path leaf is not the request key/,
+    );
+  });
+
+  it("BINDING: a path against a root the allocator never held is rejected", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const parked = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const key = requestKeyOf(ctx, VALID_WITHDRAW.coin.nonce);
+    const path = slotPathOf(stateOf(parked.context) as Parameters<typeof ledger>[0], key);
+
+    // Flip one sibling: the recomputed root is not in the history map.
+    const forged = {
+      ...path,
+      path: path.path.map((entry, i) =>
+        i === 0 ? { ...entry, sibling: { field: entry.sibling.field + 1n } } : entry,
+      ),
+    };
+    await expect(contract.circuits.assignWithdraw(parked.context, key, forged)).rejects.toThrow(
+      /Unknown slots root/,
+    );
+  });
+
+  it("BINDING: a phase-2 circuit refuses a key another flow parked", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const parked = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const key = requestKeyOf(ctx, VALID_WITHDRAW.coin.nonce);
+    const path = slotPathOf(stateOf(parked.context) as Parameters<typeof ledger>[0], key);
+    await expect(contract.circuits.assignSwap(parked.context, key, path)).rejects.toThrow(
+      /Wrong request kind for this key/,
+    );
+  });
+
+  // ---- ANTI-REPLAY ----
+
+  it("ANTI-REPLAY: a second phase 2 for the same request is rejected", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const run = await withdraw(contract, ctx, VALID_WITHDRAW);
+    const path = slotPathOf(stateOf(run.context) as Parameters<typeof ledger>[0], run.key);
+
+    // The slot leaf is still in the tree (removing it would rebind an issued
+    // index), and the root still checks out, so the guard that has to hold is
+    // the tombstone phase 2 left on the pending entry.
+    await expect(contract.circuits.assignWithdraw(run.context, run.key, path)).rejects.toThrow(
+      /Wrong request kind for this key/,
+    );
+  });
+
+  it("ANTI-REPLAY: an approve salt cannot be re-parked after its request settled", async () => {
+    // The approves surrender no coin, so nothing outside the contract stops a
+    // caller reusing a salt. Without the tombstone this would put a SECOND
+    // leaf with the same value in the allocator, and the caller could then
+    // present the path for either index -- one of which owns an EVM nonce the
+    // MPC has already signed against.
+    const { contract, ctx } = await deployInitialised();
+    const settled = await approveRouter(contract, ctx);
+    await expect(
+      contract.circuits.requestApproveRouter(settled.context, ERC20, 1n, APPROVE_SALT),
+    ).rejects.toThrow(/Request already pending/);
+  });
+
+  it("ANTI-REPLAY: a request id already recorded is rejected by the duplicate-id assert", async () => {
+    // Same request, same slot, so the SAME request id: proven twice against
+    // the state before either applied, the second must not record.
+    const { contract, ctx } = await deployInitialised();
+    const parked = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    const key = requestKeyOf(ctx, VALID_WITHDRAW.coin.nonce);
+    const path = slotPathOf(stateOf(parked.context) as Parameters<typeof ledger>[0], key);
+
+    const firstAssign = await contract.circuits.assignWithdraw(parked.context, key, path);
+    const secondAssign = await contract.circuits.assignWithdraw(parked.context, key, path);
+
+    // Both proved. Only one can apply.
+    expect(replay(stateOf(firstAssign.context), secondAssign, true)).toMatch(/^REJECTED/);
+
+    // And the id the first one recorded is the one the map holds.
+    const recorded = soleRequestId(stateOf(firstAssign.context), "signBidirectionalEventMap");
+    expect(recorded).toHaveLength(32);
   });
 
   it("ANTI-REPLAY GUARD (must stay green): a caller's identical repeat gets a fresh id", async () => {
@@ -2757,7 +3339,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+    const next = (await approveRouter(contract, configured)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -2772,7 +3354,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveStata(configured, 0n, 1n)).context;
+    const next = (await approveStata(contract, configured)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -2841,7 +3423,7 @@ describe("gas parameters reach the constructed transaction", () => {
 
     const afterWithdraw = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
     const afterSwap = (await swap(contract, configured, VALID_SWAP)).context;
-    const afterApprove = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+    const afterApprove = (await approveRouter(contract, configured)).context;
     const afterSupply = (
       await supply(
         contract,
@@ -2902,8 +3484,55 @@ describe("gas parameters reach the constructed transaction", () => {
 // 21000 gas), and the fees come from the ledger the admin just raised.
 // ===========================================================================
 
-/** The EVM nonce these tests name as the stuck one. Arbitrary and non-zero. */
-const STUCK_NONCE = 7n;
+/**
+ * The EVM nonce these tests name as the stuck one: EVM_NONCE_BASE itself, so it
+ * is the nonce allocator slot 0 owns. The circuit refuses a nonce the allocator
+ * has not issued, so this is only replaceable after {@link stranded} has run a
+ * real request through both phases.
+ */
+const STUCK_NONCE = EVM_NONCE_BASE;
+
+/**
+ * Arrange one genuinely stuck nonce: deploy, initialise, and run a real
+ * withdraw through both allocator phases, so slot 0 — and with it
+ * EVM_NONCE_BASE — has actually been issued.
+ *
+ * @returns The contract, the context after phase 2, and the issued nonce.
+ */
+const stranded = async (): Promise<{
+  contract: Contract<VaultPrivateState>;
+  ctx: CircuitContext<VaultPrivateState>;
+  stuckNonce: bigint;
+}> => {
+  const { contract, ctx } = await deployInitialised();
+  const run = await withdraw(contract, ctx, VALID_WITHDRAW);
+  return { contract, ctx: run.context, stuckNonce: EVM_NONCE_BASE + run.slotIndex };
+};
+
+/** The exact gas an EVM value transfer carrying no calldata costs. */
+const REPLACEMENT_GAS_LIMIT = 21_000n;
+
+/**
+ * The fee/gas envelope of the REPLACEMENT the admin circuit recorded, picked
+ * out of the shared map by the 21000-gas limit only an empty self-transfer
+ * carries. The stranded request it replaces sits in the same map at the SAME
+ * EVM nonce — that is what a replacement is — so the nonce cannot tell the two
+ * apart.
+ */
+const replacementEnvelopeOf = (
+  map: Parameters<typeof toSignBidirectionalEventIndex>[0],
+): { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; gasLimit: bigint } => {
+  const replacements = [...toSignBidirectionalEventIndex(map).values()].filter(
+    (record) => record.txParams.gasLimit === REPLACEMENT_GAS_LIMIT,
+  );
+  expect(replacements).toHaveLength(1);
+  const { txParams } = first(replacements, "recorded replacement request");
+  return {
+    maxFeePerGas: txParams.maxFeePerGas,
+    maxPriorityFeePerGas: txParams.maxPriorityFeePerGas,
+    gasLimit: txParams.gasLimit,
+  };
+};
 
 describe("adminReplaceEvmNonce", () => {
   it("is deployer-gated, with initialise's own gate", async () => {
@@ -2931,15 +3560,21 @@ describe("adminReplaceEvmNonce", () => {
   });
 
   it("builds an empty 21000-gas self-transfer at the nonce the caller named", async () => {
-    const { contract, ctx } = await deployInitialised();
+    const { contract, ctx, stuckNonce } = await stranded();
 
-    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
+    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, stuckNonce, 1n)).context;
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
-    expect(index.size).toBe(1);
-    const record = first(index.values(), "recorded replacement request");
+    // The stranded withdraw's own record, plus the replacement.
+    expect(index.size).toBe(2);
+    const record = first(
+      [...index.values()].filter(
+        (candidate) => candidate.txParams.gasLimit === REPLACEMENT_GAS_LIMIT,
+      ),
+      "recorded replacement request",
+    );
     const { txParams } = record;
 
     expect({
@@ -2960,7 +3595,7 @@ describe("adminReplaceEvmNonce", () => {
       to: VAULT_EVM,
       value: 0n,
       // The exact cost of an EVM value transfer carrying no calldata.
-      gasLimit: 21_000n,
+      gasLimit: REPLACEMENT_GAS_LIMIT,
       // Empty calldata, reusing the shared map's 2-word capacity unused.
       calldataPresent: false,
       data: "0x",
@@ -2969,16 +3604,18 @@ describe("adminReplaceEvmNonce", () => {
   });
 
   it("takes its fee values from the ledger, defaulting to initialise's", async () => {
-    const { contract, ctx } = await deployInitialised();
+    const { contract, ctx, stuckNonce } = await stranded();
 
-    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
+    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, stuckNonce, 1n)).context;
 
     expect(
-      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+      replacementEnvelopeOf(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ),
     ).toEqual({
       maxFeePerGas: DEFAULT_MAX_FEE_PER_GAS,
       maxPriorityFeePerGas: DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
-      gasLimit: 21_000n,
+      gasLimit: REPLACEMENT_GAS_LIMIT,
     });
   });
 
@@ -2989,20 +3626,141 @@ describe("adminReplaceEvmNonce", () => {
     // them with setGasParams and only then calls this; if the raise did not
     // reach the transaction, the replacement would re-offer the very fees that
     // got the original stuck and the node would drop it.
-    const { contract, ctx } = await deployInitialised();
+    const { contract, ctx, stuckNonce } = await stranded();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.adminReplaceEvmNonce(configured, STUCK_NONCE, 1n))
-      .context;
+    const next = (await contract.circuits.adminReplaceEvmNonce(configured, stuckNonce, 1n)).context;
 
     expect(
-      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+      replacementEnvelopeOf(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ),
     ).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
       maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
       // The gas limit is a property of the operation, never of the market, so
       // the per-kind limits setGasParams moved leave this one at 21000.
-      gasLimit: 21_000n,
+      gasLimit: REPLACEMENT_GAS_LIMIT,
     });
+  });
+
+  // ---- The issuance bound ----
+  //
+  // The circuit takes the nonce as an argument, so without a bound the admin
+  // could burn a nonce the allocator has NOT handed out yet. The allocator
+  // would hand that same nonce to a real request later, and the network would
+  // reject its signed transaction as a reused nonce: the exact stall this
+  // circuit exists to clear, caused by the tool meant to clear it. The bound
+  // is issuedSlots, the count of slots issued.
+
+  it("rejects a nonce the allocator has not issued yet", async () => {
+    // Nothing has run either allocator phase, so NO nonce has been issued and
+    // even slot 0's is out of bounds.
+    const { contract, ctx } = await deployInitialised();
+
+    await expect(contract.circuits.adminReplaceEvmNonce(ctx, EVM_NONCE_BASE, 1n)).rejects.toThrow(
+      /Nonce not issued yet/,
+    );
+  });
+
+  it("rejects the nonce one past the last issued one", async () => {
+    // The off-by-one that matters: one slot issued means one nonce replaceable.
+    const { contract, ctx, stuckNonce } = await stranded();
+
+    await expect(contract.circuits.adminReplaceEvmNonce(ctx, stuckNonce + 1n, 1n)).rejects.toThrow(
+      /Nonce not issued yet/,
+    );
+  });
+
+  it("accepts every nonce below the issued count", async () => {
+    // Three slots issued across two different flows, so nonces base..base+2
+    // are all replaceable — not just the most recent one, because any of them
+    // can be the stuck one.
+    const { contract, ctx } = await deployInitialised();
+    const first0 = await withdraw(contract, ctx, VALID_WITHDRAW);
+    const second = await withdraw(contract, first0.context, {
+      ...VALID_WITHDRAW,
+      coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x21)),
+    });
+    const third = await swap(contract, second.context, {
+      ...VALID_SWAP,
+      coin: vaultCoin(SWAP_AMOUNT_IN_MAX, VAULT_TOKEN_COLOR, bytes(32, 0x22)),
+    });
+
+    expect([first0.slotIndex, second.slotIndex, third.slotIndex]).toEqual([0n, 1n, 2n]);
+    for (const index of [0n, 1n, 2n]) {
+      await expect(
+        contract.circuits.adminReplaceEvmNonce(third.context, EVM_NONCE_BASE + index, 1n),
+      ).resolves.toBeDefined();
+    }
+  });
+
+  it("the issued count tracks assign* calls, and only assign* calls", async () => {
+    // What the bound is made of. Phase 1 alone issues nothing: the slot index
+    // is not decided until phase 2 proves it, so parking must not advance the
+    // count. A replacement issues nothing either — bumping it there would
+    // raise the bound by one and let the NEXT admin call name an unissued
+    // nonce.
+    const { contract, ctx } = await deployInitialised();
+    const issuedIn = (c: CircuitContext<VaultPrivateState>): bigint =>
+      ledger(c.callContext.currentQueryContext.state).issuedSlots;
+
+    expect(issuedIn(ctx)).toBe(0n);
+
+    const parked = await requestWithdrawOnly(contract, ctx, VALID_WITHDRAW);
+    expect(issuedIn(parked.context)).toBe(0n);
+
+    const key = requestKeyOf(ctx, VALID_WITHDRAW.coin.nonce);
+    const path = slotPathOf(parked.context.callContext.currentQueryContext.state, key);
+    const assigned = await contract.circuits.assignWithdraw(parked.context, key, path);
+    expect(issuedIn(assigned.context)).toBe(1n);
+
+    const approved = await approveRouter(contract, assigned.context);
+    expect(issuedIn(approved.context)).toBe(2n);
+
+    const replaced = await contract.circuits.adminReplaceEvmNonce(
+      approved.context,
+      EVM_NONCE_BASE,
+      1n,
+    );
+    expect(issuedIn(replaced.context)).toBe(2n);
+  });
+
+  it("bounds the count and nothing else: a repeat the moved count used to let through is now refused", async () => {
+    // The counter is the issuance BOUND and is not this event's request nonce:
+    // that is the constant 0 every vault-signed flow passes. The difference is
+    // observable exactly here. Two replacements at the same nonce for the same
+    // fees are the same request, but the count between them used to move, so
+    // salting the id with it used to give the repeat a different id and record
+    // it twice.
+    const { contract, ctx, stuckNonce } = await stranded();
+    const replaced = (await contract.circuits.adminReplaceEvmNonce(ctx, stuckNonce, 1n)).context;
+
+    // A real request issues a slot in between, moving issuedSlots.
+    const meanwhile = await withdraw(contract, replaced, {
+      ...VALID_WITHDRAW,
+      coin: vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x41)),
+    });
+
+    // Refusing this is right, not a lost capability: the MPC would sign the very
+    // same transaction bytes, and a node drops an identically-priced replacement
+    // of a transaction it already holds.
+    await expect(
+      contract.circuits.adminReplaceEvmNonce(meanwhile.context, stuckNonce, 1n),
+    ).rejects.toThrow(/Request already exists/);
+
+    // A genuine re-send raises the fees first -- which is what a node demands
+    // before it will evict anyway -- and the envelope is hashed, so the re-send
+    // lands under a fresh id.
+    const raised = (await setGasParams(contract, meanwhile.context, NEW_GAS_PARAMS)).context;
+    const resent = (await contract.circuits.adminReplaceEvmNonce(raised, stuckNonce, 1n)).context;
+
+    // The stranded withdraw, the first replacement, the interleaved withdraw,
+    // and the re-send.
+    expect(
+      toSignBidirectionalEventIndex(
+        ledger(resent.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ).size,
+    ).toBe(4);
   });
 });

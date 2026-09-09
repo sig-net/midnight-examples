@@ -2,6 +2,18 @@
 // vault's derived EVM account with a locally re-derived private key. A real
 // MPC never exposes its root key, so this can never be a flow capability —
 // it stays in test-support code.
+//
+// The vault's EVM account nonces belong to the contract's allocator: slot i of
+// the `slots` tree is PROMISED nonce `evmNonceBase + i`, and nothing on chain
+// re-reads the account. A transaction sent from that account out of band
+// therefore steals a nonce the allocator has already promised, and the request
+// holding that slot signs a nonce the account has already spent — its transfer
+// can never mine, so it is never attested and never settles. (Exactly one
+// request dies per out-of-band transaction; the allocator realigns after it.)
+// So the drain below puts the account nonce back where it found it, with an
+// anvil cheatcode, once its transfer has mined. That is bookkeeping only: the
+// transfer really is signed by the vault's own key and really does move the
+// tokens, which is what makes the next withdraw revert.
 
 import { deriveEpsilon, SECP256K1_ORDER, stripHexPrefix } from "@sig-net/midnight";
 import { VAULT_PATH_HEX } from "@sig-net/midnight-examples-erc20-vault-contract";
@@ -27,8 +39,14 @@ const ERC20_TRANSFER_ABI = [
  *
  * This exists to force a DETERMINISTIC withdraw failure: with the vault's
  * ERC20 balance at zero, the next MPC-signed `transfer` from it must mine
- * and revert. The drain also consumes one vault-account nonce, so fetch the
- * withdraw request's `evmNonce` only AFTER this resolves.
+ * and revert.
+ *
+ * The transfer consumes a vault-account nonce the contract's allocator has
+ * already promised to a slot, so this REWINDS the account nonce to its
+ * pre-drain value afterwards (`anvil_setNonce`, fork-only, like the suite's
+ * token dealing). Without that rewind the very next vault-signed request
+ * signs a spent nonce and its transaction can never mine — see this file's
+ * header.
  *
  * @param env - The setup-populated env accumulator (`MPC_ROOT_KEY`,
  *   `EVM_RPC_URL`, `ERC20_ADDRESS`, `MIDNIGHT_VAULT_CONTRACT_ADDRESS`,
@@ -84,11 +102,28 @@ export async function drainVaultErc20(
     console.log(
       `draining ${String(balance)} base units of ${erc20Address} from ${wallet.address} to ${to}`,
     );
+    // Captured BEFORE the transfer: the value the account nonce is rewound to.
+    const nonceBeforeDrain = await provider.getTransactionCount(wallet.address, "latest");
     const transfer = erc20.getFunction<ContractWriteMethod>("transfer");
     const tx = await transfer(to, balance);
     console.log(`drain tx:  ${tx.hash} — waiting for 1 confirmation…`);
     await tx.wait(1);
     console.log(`drained:   ${tx.hash}`);
+
+    // Hand the stolen nonce back to the allocator. The drain is a failure
+    // injection, not vault activity, so the account must look untouched to the
+    // next request the allocator hands a nonce to.
+    await provider.send("anvil_setNonce", [wallet.address, `0x${nonceBeforeDrain.toString(16)}`]);
+    const restored = await provider.getTransactionCount(wallet.address, "latest");
+    if (restored !== nonceBeforeDrain) {
+      throw new Error(
+        `rewound ${wallet.address} to nonce ${String(nonceBeforeDrain)} after the drain but the ` +
+          `chain reports ${String(restored)}: EVM_RPC_URL must be an anvil fork with anvil_* cheatcodes`,
+      );
+    }
+    console.log(
+      `nonce rewound to ${String(nonceBeforeDrain)} (the drain spends no allocator nonce)`,
+    );
     return balance;
   } finally {
     provider.destroy();

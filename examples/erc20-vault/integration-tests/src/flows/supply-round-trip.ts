@@ -2,7 +2,6 @@
 // signature, broadcast, completeSupply.
 import type { RequestIdHex } from "@sig-net/midnight";
 import { VAULT_SUPPLY_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
 import type { VaultSession } from "../vault-session.ts";
 import { ensureStataApproved } from "./approve-stata.ts";
@@ -20,7 +19,8 @@ export interface SupplyRoundTripOptions {
 
 /**
  * Full supply round trip against the live stack: ensure the wrapper is approved to pull the
- * underlying, submit the supply (vault-signed), poll the MPC signature, broadcast the deposit
+ * underlying, submit the supply (vault-signed, both allocator phases), poll the MPC signature,
+ * broadcast the deposit
  * tx, poll the attestation, and settle (completeSupply mints the attested stataUSDC shares).
  * The setup pipeline verifies the stataUSDC wrapper is deployed on the fork before any flow runs.
  * Requires the caller to already HOLD `amount` of the underlying vault coin (run a deposit of the
@@ -38,8 +38,9 @@ export async function runSupplyRoundTrip(
 
   await ensureStataApproved(session);
 
-  const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await startSupply(context, { amount: opts.amount, evmNonce });
+  // No EVM nonce is read from the chain: startSupply runs both phases and the vault's allocator
+  // proves the tx nonce out of the slot phase 1 landed in.
+  const { requestId, coinNonce } = await startSupply(context, { amount: opts.amount });
 
   // The deposit tx is signed by the VAULT's account (it holds the pooled funds). tolerateRevert:
   // an on-chain revert is a valid outcome the MPC attests as a failure and completeSupply settles
@@ -52,6 +53,8 @@ export async function runSupplyRoundTrip(
     requestsPath: VAULT_SUPPLY_REQUESTS_PATH,
   });
   await broadcastEvm(context, { transaction: signed, tolerateRevert: true });
-  const { shares, refunded } = await completeSupply(context, requestId);
+  // The surrendered coin's nonce is what proves supplier-hood at settle time: the settle-view
+  // commitment is the phase-1 request key, requestCommitment(secret, coinNonce).
+  const { shares, refunded } = await completeSupply(context, requestId, coinNonce);
   return { requestId, shares, refunded };
 }

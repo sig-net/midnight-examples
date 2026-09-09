@@ -20,18 +20,25 @@
 // tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives there. Recovery
 // from a run that died mid-flow (proof-server OOM): rerun this file with
 // FAILURE_REFUND_DEPOSIT_REQUEST_ID / FAILURE_REFUND_WITHDRAW_REQUEST_ID set
-// to the ids the failed run printed.
+// to the ids the failed run printed, plus FAILURE_REFUND_WITHDRAW_COIN_NONCE
+// — refundWithdraw proves withdrawer-hood from the surrendered coin's nonce,
+// which no public ledger read recovers.
+//
+// The drain sends a transfer from the vault's pooled EVM account, whose
+// nonces belong to the contract's allocator (slot i is promised
+// `evmNonceBase + i`). `drainVaultErc20` therefore rewinds the account nonce
+// once its transfer has mined, so the doomed withdraw below still signs the
+// nonce its slot owns and its transfer really does mine and revert.
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
 
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { bytesToHex, hexToBytes, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   banner,
   getErc20Balance,
   getEthBalance,
-  getTransactionNonce,
   logSkip,
   requireEnv as requireEnvOf,
 } from "@sig-net/midnight-examples-test-harness";
@@ -200,11 +207,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     // the subsequent stages.
     let withdrawRequestId: RequestIdHex;
 
+    // The surrendered coin's nonce the withdraw was keyed on: the settle-view
+    // commitment on the ledger is requestCommitment(secret, coinNonce), and
+    // refundWithdraw re-derives it to prove this wallet is the withdrawer.
+    let withdrawCommitmentNonce: Uint8Array;
+
     it(
       "withdraw: escrow shielded vault tokens for a transfer the vault cannot pay",
       async () => {
         if (env.FAILURE_REFUND_WITHDRAW_REQUEST_ID) {
           withdrawRequestId = env.FAILURE_REFUND_WITHDRAW_REQUEST_ID as RequestIdHex;
+          withdrawCommitmentNonce = hexToBytes(requireEnv("FAILURE_REFUND_WITHDRAW_COIN_NONCE"));
           logSkip(
             "withdraw",
             `FAILURE_REFUND_WITHDRAW_REQUEST_ID present, resuming withdraw '${withdrawRequestId}'`,
@@ -214,27 +227,28 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const context = await session.vaultContext();
 
-        // Nonce fetched AFTER the drain mined (the drain consumed one), so the
-        // signed transfer is the vault account's next expected tx.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
-        withdrawRequestId = await startWithdraw(context, {
+        // No nonce is fetched from the chain: startWithdraw runs both phases
+        // and the contract proves the transfer's nonce out of the allocator
+        // slot phase 1 took (evmNonceBase + slotIndex). See the drain caution
+        // in this file's header.
+        const started = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-          evmNonce,
         });
+        withdrawRequestId = started.requestId;
+        withdrawCommitmentNonce = started.coinNonce;
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
 
         banner([
           `Doomed withdraw request recorded on the vault ledger:`,
           "",
           `  request id: ${withdrawRequestId}`,
+          `  coin nonce: ${bytesToHex(withdrawCommitmentNonce)}`,
           "",
           "The caller's shielded vault tokens are escrowed. If a later step dies,",
-          `resume with FAILURE_REFUND_WITHDRAW_REQUEST_ID=${withdrawRequestId}`,
+          "resume with BOTH",
+          `  FAILURE_REFUND_WITHDRAW_REQUEST_ID=${withdrawRequestId}`,
+          `  FAILURE_REFUND_WITHDRAW_COIN_NONCE=${bytesToHex(withdrawCommitmentNonce)}`,
         ]);
       },
       5 * MINUTE,
@@ -369,7 +383,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
         expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
+        await settleWithdraw(
+          context,
+          withdrawRequestId,
+          withdrawAttestation,
+          withdrawCommitmentNonce,
+        );
 
         const after = await readLedger();
         expect(

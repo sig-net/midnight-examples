@@ -180,13 +180,25 @@ sealed ledger signetSigner: SignetSigner;
 // The MPC response key every response is verified against, set in Setup step 4.
 export ledger mpcResponseKey: Secp256k1Point;
 
-// The vault's own state.
-export ledger signetRequestNonce: Counter;  // keeps identical requests' ids distinct
+// The vault's own state. Declaration ORDER is load-bearing: the compiler packs
+// 15 fields per node, so the last 15 land in chunk 1 and every new field goes
+// BEFORE depositEventMap, never at the end.
+export ledger issuedSlots: Counter;         // how many allocator slots phase 2 has issued
+export ledger vaultMaxFeePerGas: Uint<128>; // the fee envelope of vault-signed transactions,
+export ledger vaultMaxPriorityFeePerGas: Uint<128>;  // ...which setGasParams can move
+export ledger vaultGasLimits: VaultGasLimits;        // ...one gas limit per kind, in ONE cell
 export ledger initialised: Counter;         // one-shot initialise marker
 export ledger vaultEvmAddress: Bytes<20>;   // the vault's derived EVM account
 export ledger evmChainId: Uint<64>;         // the pinned EVM chain, numeric...
 export ledger caip2Id: Bytes<32>;           // ...and CAIP-2 form
 sealed ledger deployer: Bytes<32>;          // only they may initialise
+export ledger depositRequestNonces: Map<Bytes<32>, Counter>;  // per-caller deposit nonces
+// The EVM nonce allocator: slot i owns EVM nonce evmNonceBase + i. Phase 1
+// appends a request key to `slots`; phase 2 proves where it landed and takes
+// the nonce from that position, so no vault-signed request reads a counter.
+export ledger evmNonceBase: Uint<64>;
+export ledger slots: HistoricMerkleTree<24, Bytes<32>>;
+export ledger pendingParams: Map<Bytes<32>, PendingRequest>;
 // Deposits get their own map: kind isolation is structural, so completeDeposit
 // never sees an approve or withdraw request at all.
 export ledger depositEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
@@ -263,7 +275,7 @@ pipeline derives and prints all three derived values as `EVM_VAULT_ADDRESS`,
 
 ## Deploying
 
-The contract has 17 circuits and their verifier keys do not fit in one block, so
+The contract has 25 circuits and their verifier keys do not fit in one block, so
 a deploy is two phases:
 
 1. The base transaction registers the whole ledger state and ONE small circuit.
@@ -433,6 +445,14 @@ export circuit startDeposit(
   // The request's derivation path IS the caller's identity commitment.
   const caller = disclose(userCommitment(callerSecretKey()));
 
+  // Per-caller nonce: read THIS caller's slot (default 0 for a first deposit),
+  // never a shared cell, so a concurrent deposit by another caller reads a
+  // different slot and does not conflict at apply time.
+  if (!depositRequestNonces.member(caller)) {
+    depositRequestNonces.insertDefault(caller);
+  }
+  const requestNonce = depositRequestNonces.lookup(caller) as Uint<64>;
+
   // Contract-enforced calldata: transfer(vaultEvmAddress, amount). The words
   // are ABI-ready (big-endian): the signer uses them verbatim.
   const calldata = EvmCalldata<2> {
@@ -463,8 +483,8 @@ export circuit startDeposit(
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
 
   // Store the request for the MPC to discover, plus the settle view
-  // completeDeposit gates and mints from...
-  signetRequestNonce.increment(1);
+  // completeDeposit gates and mints from, and advance THIS caller's nonce.
+  depositRequestNonces.lookup(caller).increment(1);
   depositEventMap.insert(requestId, disclose(request));
   depositSettleViews.insert(requestId, DepositSettleView {
     commitment: caller,
@@ -940,7 +960,7 @@ prefix. The tag carries the example name, the npm version does not:
 
 ## A note on package size
 
-The vault has 17 circuits carrying 1.4 GB of prover keys, against kilobytes
+The vault has 25 circuits carrying 1.4 GB of prover keys, against kilobytes
 for the verifier keys that go on-chain. Those prover keys are published
 nowhere: the package packs to well under a megabyte, and the workflow logs the
 packed and unpacked size before it publishes anything.
@@ -972,7 +992,7 @@ It compiles the shipped `src/erc20-vault.compact` with the pinned compiler
 manifest, and writes:
 
 ```
-public/keys/<circuit>.prover, <circuit>.verifier    the vault's 17 circuits
+public/keys/<circuit>.prover, <circuit>.verifier    the vault's 25 circuits
 public/zkir/<circuit>.bzkir
 public/compiler/contract-manifest.json, contract-info.json
 public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract
