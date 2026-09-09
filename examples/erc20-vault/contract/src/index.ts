@@ -49,18 +49,23 @@ export function deriveVaultEvmAddress(
 
 // THIS contract's signet ledger layout (declaration order in
 // erc20-vault.compact): each request kind owns a SignBidirectionalEventMap, and
-// `signetRequestNonce` keeps otherwise identical requests hashing apart. A
+// `vaultEvmNonce` is the CONTIGUOUS nonce sequence of the shared vault EVM
+// account, assigned by `approveStata`, `approveRouter` and `flush`. That nonce
+// is in every vault-signed request's txParams, so it is also what keeps two
+// otherwise identical requests hashing apart; `requestNonce` is the constant
+// `pureCircuits.vaultSignedRequestNonce()` for those flows. `signetRequestNonce`
+// is no longer read by any circuit -- see VAULT_NONCE_PATH below. A
 // client contract is free to place its event maps at any field: every raw
 // reader takes the resolved ledger-tree path explicitly, and the path must
 // match the `requestsPath` the contract packs into its notifications. The
 // compiler records each field's path as its "index" in
 // managed/erc20-vault/compiler/contract-info.json.
 
-// The vault has 25 ledger fields, past the 15-field flat limit, so the compiler
+// The vault has 27 ledger fields, past the 15-field flat limit, so the compiler
 // chunks the state tree two levels deep. Every path below is therefore
 // [chunk, offset] (depth 2), and the request circuits pack the same as
 // requestsPathDepth 2. Chunk 1 holds the LAST 15 fields (declaration indexes
-// 10-24) and chunk 0 holds the rest (0-9), which is why a new ledger field
+// 12-26) and chunk 0 holds the rest (0-11), which is why a new ledger field
 // must be declared BEFORE depositEventMap, never appended: appending re-chunks
 // the tree and moves every path below. Two chunks hold 30 fields at most, and
 // field 31 opens a THIRD chunk that re-splits the tree and moves every path at
@@ -71,15 +76,30 @@ export function deriveVaultEvmAddress(
 /**
  * Resolved ledger-tree path of `signBidirectionalEventMap` (ledger field 0),
  * which holds the approve and withdraw requests. The same path `approveStata`,
- * `approveRouter` and `startWithdraw` pack as depth 2 + [0, 0, 0, 0].
+ * `approveRouter` and `flush` (recording a queued withdrawal) pack as depth 2 +
+ * [0, 0, 0, 0].
  */
 export const VAULT_REQUESTS_PATH: readonly number[] = [0, 0];
 
-/** Resolved ledger-tree path of `signetRequestNonce` (ledger field 3). */
+/**
+ * Resolved ledger-tree path of `signetRequestNonce` (ledger field 3).
+ *
+ * The counter itself is dormant: no circuit reads or increments it any more,
+ * because the vault EVM nonce in a request's txParams already makes each
+ * vault-signed request id unique (see the contract's comment over the field).
+ * The path is still exported, and the field still declared, for two reasons
+ * that have nothing to do with the contract's own logic:
+ *
+ *   - the SDK's raw request-ledger reader,
+ *     `readSignetRequestsLedgerFromState(raw, requestsPath, noncePath)`, takes
+ *     a nonce path and throws unless it resolves to a `Uint<64>` Cell;
+ *   - it is one of the six pinned paths. Removing the field would shrink
+ *     chunk 0 and move chunk 1's base, taking every event-map path with it.
+ */
 export const VAULT_NONCE_PATH: readonly number[] = [0, 3];
 
 /**
- * Resolved ledger-tree path of `depositEventMap` (ledger field 17). Deposits
+ * Resolved ledger-tree path of `depositEventMap` (ledger field 15). Deposits
  * register their notification in this SEPARATE map, so the deposit flow reads
  * MPC responses from this path. Matches the depth 2 + `requestsPath`
  * [1, 3, 0, 0] the `startDeposit` circuit packs.
@@ -87,15 +107,15 @@ export const VAULT_NONCE_PATH: readonly number[] = [0, 3];
 export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [1, 3];
 
 /**
- * Resolved ledger-tree path of `swapEventMap` (ledger field 21). Swaps register
+ * Resolved ledger-tree path of `swapEventMap` (ledger field 19). Swaps register
  * their notification in this SEPARATE map (sized for a 7-word exactOutputSingle),
  * so the swap flow reads MPC responses from this path. Matches the depth 2 +
- * `requestsPath` [1, 7, 0, 0] the `startSwap` circuit packs.
+ * `requestsPath` [1, 7, 0, 0] `flush` packs when it records a queued swap.
  */
 export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [1, 7];
 
-/** Resolved ledger-tree path of `supplyEventMap` (ledger field 25). */
+/** Resolved ledger-tree path of `supplyEventMap` (ledger field 23). */
 export const VAULT_SUPPLY_REQUESTS_PATH: readonly number[] = [1, 11];
 
-/** Resolved ledger-tree path of `redeemEventMap` (ledger field 27). */
+/** Resolved ledger-tree path of `redeemEventMap` (ledger field 25). */
 export const VAULT_REDEEM_REQUESTS_PATH: readonly number[] = [1, 13];

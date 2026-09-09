@@ -448,7 +448,10 @@ describe("deposit round-trip", () => {
 
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
-    // The raw counter read matches the generated one.
+    // The raw counter read matches the generated one. The counter is dormant
+    // (both read 0 forever), but the read still has to RESOLVE: the SDK reader
+    // throws unless VAULT_NONCE_PATH lands on a Uint<64> Cell, which is one of
+    // the two reasons the field is still declared.
     expect(rawLedger.nonce).toBe(ledger(state).signetRequestNonce);
 
     const [idHex, record] = first(typedIndex.entries(), "indexed signBidirectional request");
@@ -533,9 +536,11 @@ describe("deposit round-trip", () => {
     });
 
     // This caller's OWN deposit nonce slot bumped for their next request,
-    // while the global signetRequestNonce (which the vault-signed flows still
-    // use) is left untouched: deposits no longer read or move the shared cell,
-    // which is what lets two different callers' deposits apply concurrently.
+    // while the global signetRequestNonce is left untouched: deposits no longer
+    // read or move the shared cell, which is what lets two different callers'
+    // deposits apply concurrently. (Nothing moves that cell now — the
+    // vault-signed flows carry a constant request nonce — so this is the
+    // dormant 0 every path agrees on.)
     expect(ledger(state).depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(1n);
     expect(ledger(state).signetRequestNonce).toBe(0n);
   });
@@ -611,8 +616,9 @@ describe("deposit validation", () => {
     // The ledger-side facts the off-chain twin (`depositRequestNonce` in
     // src/vault-ledger.ts) reads to predict a request id. A twin reading the
     // shared signetRequestNonce instead agrees only on the first deposit,
-    // when both cells read 0; this pins the divergence so that accident can
-    // never silently return.
+    // when both cells read 0 (that cell is dormant now, so it reads 0
+    // forever); this pins the divergence so that accident can never silently
+    // return.
     const { contract, ctx } = await deployInitialised();
 
     const stateBefore = ledger(ctx.callContext.currentQueryContext.state);
@@ -669,9 +675,21 @@ const VAULT_TOKEN_COLOR = hexToBytes(
   rawTokenType(pureCircuits.vaultTokenDomainSeparator(ERC20), VAULT_ADDRESS),
 );
 
-/** A surrendered vault coin: fixed nonce, vault-token color, given value. */
-const vaultCoin = (value: bigint, color: Uint8Array = VAULT_TOKEN_COLOR) => ({
-  nonce: bytes(32, 0x0c),
+/**
+ * A surrendered vault coin: vault-token color, given value, and a nonce.
+ *
+ * The nonce is now load-bearing, so it is a parameter: the vault-signed flows
+ * queue a started request under a key derived from the caller's secret AND this
+ * nonce (see {@link queueKey}), so two coins that exist at the same time must
+ * differ in it, exactly as two real Zswap coins do. It stays defaulted, because
+ * one coin per test is the common case.
+ */
+const vaultCoin = (
+  value: bigint,
+  color: Uint8Array = VAULT_TOKEN_COLOR,
+  nonce: Uint8Array = bytes(32, 0x0c),
+) => ({
+  nonce,
   color,
   value,
 });
@@ -683,7 +701,6 @@ const vaultCoin = (value: bigint, color: Uint8Array = VAULT_TOKEN_COLOR) => ({
  * that anonymous type structurally.
  */
 interface WithdrawCallArgs {
-  evmNonce: bigint;
   keyVersion: bigint;
   withdraw: { erc20Address: Uint8Array; amount: bigint; destEvmAddress: Uint8Array };
   coin: ReturnType<typeof vaultCoin>;
@@ -694,7 +711,6 @@ interface WithdrawCallArgs {
  * Shared across tests: NEVER mutate; build a variation as an explicit spread.
  */
 const VALID_WITHDRAW: WithdrawCallArgs = {
-  evmNonce: 0n,
   keyVersion: 1n,
   withdraw: { erc20Address: ERC20, amount: AMOUNT, destEvmAddress: DEST_EVM },
   coin: vaultCoin(AMOUNT),
@@ -705,24 +721,142 @@ const withdraw = (
   contract: Contract<VaultPrivateState>,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startWithdraw"]>[0],
   args: WithdrawCallArgs,
-) => contract.circuits.startWithdraw(ctx, args.evmNonce, args.keyVersion, args.withdraw, args.coin);
+) => contract.circuits.startWithdraw(ctx, args.keyVersion, args.withdraw, args.coin);
+
+// ---- Flush harness ----
+//
+// The four vault-signed flows (withdraw, swap, supply, redeem) no longer mint a
+// request id, record an event or notify the MPC: they validate, burn the coin
+// and QUEUE. `flush` — permissionless, batched — does the rest. Every test that
+// used to read an event map straight after a start* now starts, then flushes.
+
+/**
+ * The contract's flush batch width: every flush entry point takes exactly this
+ * many keys. It is declared once in erc20-vault.compact, on the four adjacent
+ * `flush*` wrappers over the `drain*<#N>` circuits, and this mirror of it must
+ * move in the same change.
+ */
+const FLUSH_BATCH = 5;
+
+/** A key nothing is ever queued under: pads a short batch (that slot is skipped). */
+const UNQUEUED_KEY = bytes(32, 0xff);
+
+/**
+ * The key a start* circuit queues its request under, which is also the refund
+ * commitment its settle view pins: the caller's secret bound to the nonce of the
+ * coin it surrendered. Computed here through the COMPILED refundCommitment
+ * circuit, so this is a lockstep check of the in-circuit derivation.
+ */
+const queueKey = (secretKey: Uint8Array, coin: { nonce: Uint8Array }) =>
+  pureCircuits.refundCommitment(secretKey, coin.nonce);
+
+/**
+ * Every flush entry point takes the same context type and the same fixed-width
+ * key vector, so one alias names it for all four.
+ */
+type FlushContext = Parameters<Contract<VaultPrivateState>["circuits"]["flushWithdraws"]>[0];
+
+/** Pad a short batch out to the fixed width with a key nothing is queued under. */
+const padBatch = (keys: Uint8Array[]) => {
+  if (keys.length > FLUSH_BATCH) {
+    throw new Error(`a flush takes at most ${String(FLUSH_BATCH)} keys`);
+  }
+  return [...keys, ...Array<Uint8Array>(FLUSH_BATCH - keys.length).fill(UNQUEUED_KEY)];
+};
+
+// There is no single `flush`: the contract exports one entry point per request
+// kind, so a caller proves only the transaction builder it actually uses. Each
+// drains ONLY its own kind — an entry of another kind is skipped exactly as a
+// missing key is.
+
+/** Drain the named WITHDRAW entries. */
+const flushWithdraws = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  keys: Uint8Array[],
+) => contract.circuits.flushWithdraws(ctx, padBatch(keys));
+
+/** Drain the named SWAP entries. */
+const flushSwaps = (contract: Contract<VaultPrivateState>, ctx: FlushContext, keys: Uint8Array[]) =>
+  contract.circuits.flushSwaps(ctx, padBatch(keys));
+
+/** Drain the named SUPPLY entries. */
+const flushSupplies = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  keys: Uint8Array[],
+) => contract.circuits.flushSupplies(ctx, padBatch(keys));
+
+/** Drain the named REDEEM entries. */
+const flushRedeems = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  keys: Uint8Array[],
+) => contract.circuits.flushRedeems(ctx, padBatch(keys));
+
+/** Flush the one WITHDRAW a start* call queued for `coin` (the deployer's, by default). */
+const flushWithdrawCoin = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  coin: { nonce: Uint8Array },
+  secretKey: Uint8Array = SECRET_KEY,
+) => flushWithdraws(contract, ctx, [queueKey(secretKey, coin)]);
+
+/** Flush the one SWAP a startSwap call queued for `coin`. */
+const flushSwapCoin = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  coin: { nonce: Uint8Array },
+  secretKey: Uint8Array = SECRET_KEY,
+) => flushSwaps(contract, ctx, [queueKey(secretKey, coin)]);
+
+/** Flush the one SUPPLY a startSupply call queued for `coin`. */
+const flushSupplyCoin = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  coin: { nonce: Uint8Array },
+  secretKey: Uint8Array = SECRET_KEY,
+) => flushSupplies(contract, ctx, [queueKey(secretKey, coin)]);
+
+/** Flush the one REDEEM a startRedeem call queued for `coin`. */
+const flushRedeemCoin = (
+  contract: Contract<VaultPrivateState>,
+  ctx: FlushContext,
+  coin: { nonce: Uint8Array },
+  secretKey: Uint8Array = SECRET_KEY,
+) => flushRedeems(contract, ctx, [queueKey(secretKey, coin)]);
 
 // ---- Withdraw tests ----
 
 describe("withdraw round-trip", () => {
-  it("burns the coin and stores a vault-path event with a contract-fixed envelope", async () => {
+  it("burns the coin, queues the request, and flush stores the vault-path event", async () => {
     const { contract, ctx } = await deployInitialised();
 
-    const { context: next } = await withdraw(contract, ctx, VALID_WITHDRAW);
+    // startWithdraw now only VALIDATES, BURNS and QUEUES. The event, the request
+    // id and the MPC notification moved to flush, which is what takes the read
+    // of the shared vaultEvmNonce out of this caller's transaction.
+    const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const afterStart = ledger(started.callContext.currentQueryContext.state);
+    const key = queueKey(SECRET_KEY, VALID_WITHDRAW.coin);
+    expect(afterStart.pendingVaultRequests.member(key)).toBe(true);
+    expect(afterStart.signBidirectionalEventMap.isEmpty()).toBe(true);
+    expect(afterStart.withdrawSettleViews.isEmpty()).toBe(true);
+    // No cross-contract call at all now: start notifies nobody.
+    expect(decodeSignetLogEvents(started.events, SIGNET_ADDRESS)).toHaveLength(0);
+    // And it left the shared EVM-nonce counter alone, which is the whole point:
+    // start* reads no shared cell, so two callers' withdrawals do not conflict.
+    expect(afterStart.vaultEvmNonce).toBe(0n);
+
+    const { context: next } = await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin);
     const state = next.callContext.currentQueryContext.state;
 
     const index = toSignBidirectionalEventIndex(ledger(state).signBidirectionalEventMap);
     expect(index.size).toBe(1);
     const [idHex, record] = first(index.entries(), "indexed signBidirectional request");
 
-    // The cross-contract call's observable effect: the signet contract
-    // emitted the notification event declaring the stored event's id and
-    // naming this vault's signBidirectionalEventMap.
+    // The cross-contract call's observable effect, now made by FLUSH: the signet
+    // contract emitted the notification event declaring the stored event's id
+    // and naming this vault's signBidirectionalEventMap.
     const notificationEvent = first(
       decodeSignetLogEvents(next.events, SIGNET_ADDRESS),
       "signet notification event",
@@ -754,7 +888,9 @@ describe("withdraw round-trip", () => {
     expect(envelope).toEqual({
       to: ERC20,
       chainId: CHAIN_ID,
-      nonce: VALID_WITHDRAW.evmNonce,
+      // Assigned by FLUSH from vaultEvmNonce, not supplied by the caller: this
+      // is the first vault-account signature the contract ever issued, so 0.
+      nonce: 0n,
       gasLimit: 100_000n,
       // The initialise-time defaults, now ledger values a deployer can move
       // with setGasParams (see the "gas parameters" describes at the end of
@@ -777,6 +913,9 @@ describe("withdraw round-trip", () => {
       EXPECTED_ROUTING.outputDeserializationSchema,
     );
     expect(record.respondSerializationSchema).toEqual(EXPECTED_ROUTING.respondSerializationSchema);
+    // A CONSTANT for every vault-signed request, not a counter: the EVM nonce
+    // above is already unique per request, so nothing is left to disambiguate.
+    expect(record.requestNonce).toBe(pureCircuits.vaultSignedRequestNonce());
     expect(record.requestNonce).toBe(0n);
 
     // Contract-built calldata: transfer(destEvmAddress, amount) as ABI-ready
@@ -790,25 +929,33 @@ describe("withdraw round-trip", () => {
     // TS-twin lockstep: the ledger map key is the id the library recomputes.
     expect(idHex).toBe(requestIdHex(calculateRequestId(record)));
 
-    // The withdrawer's settle view is pinned under the request id: the refund
-    // commitment (recomputed off-chain here via the compiled circuit,
-    // domain-separated from userCommitment and bound to THIS request id) plus
-    // the typed token + amount settle circuits read back; nonce bumped.
+    // The withdrawer's settle view, pinned by FLUSH under the id it minted. The
+    // refund commitment is bound to the surrendered COIN's nonce, not to the
+    // request id: startWithdraw has to pin ownership before an id exists, and
+    // the flusher (anyone) must be able to copy it across without a secret. The
+    // stored coinNonce is its preimage, which is what completeWithdraw and
+    // refundWithdraw recompute the gate from.
     expect(ledger(state).withdrawSettleViews.member(requestIdBytes(idHex))).toBe(true);
     expect(ledger(state).withdrawSettleViews.lookup(requestIdBytes(idHex))).toEqual({
-      commitment: pureCircuits.refundCommitment(SECRET_KEY, requestIdBytes(idHex)),
+      commitment: queueKey(SECRET_KEY, VALID_WITHDRAW.coin),
+      coinNonce: VALID_WITHDRAW.coin.nonce,
       erc20: ERC20,
       amount: AMOUNT,
     });
-    expect(ledger(state).signetRequestNonce).toBe(1n);
+    // The queue entry is consumed, one EVM nonce was spent for the one entry
+    // drained, and the dormant request-id counter did not move: flush no longer
+    // touches it.
+    expect(ledger(state).pendingVaultRequests.isEmpty()).toBe(true);
+    expect(ledger(state).vaultEvmNonce).toBe(1n);
+    expect(ledger(state).signetRequestNonce).toBe(0n);
 
-    // The burn, observable in the zswap local state: the coin is received (a
-    // contract-owned output) and spent as the call's input, and the burn
-    // output pays its full value to the shielded burn address. The receive
-    // output's coin info must equal the spent coin's exactly: that identity is
-    // what lets the transaction builder pair the two into a same-transaction
-    // transient instead of a contract coin-tree spend.
-    const zswap = zswapState(next);
+    // The burn, observable in the START call's zswap local state (flush moves no
+    // coins): the coin is received (a contract-owned output) and spent as the
+    // call's input, and the burn output pays its full value to the shielded burn
+    // address. The receive output's coin info must equal the spent coin's
+    // exactly: that identity is what lets the transaction builder pair the two
+    // into a same-transaction transient instead of a contract coin-tree spend.
+    const zswap = zswapState(started);
 
     // check inputs, expect 1 input:
     // - coin for the amount being withdrawn
@@ -844,29 +991,46 @@ describe("withdraw round-trip", () => {
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
   });
 
-  it("concurrent withdrawals across DIFFERENT ERC20 colors both land", async () => {
-    // No shared escrow slot: each withdrawal only touches its own request-id
-    // keyed entries, so coins of different colors surrendered back-to-back
-    // must both record.
+  it("concurrent withdrawals across DIFFERENT ERC20 colors both land, in ONE flush", async () => {
+    // No shared escrow slot: each withdrawal only touches its own keyed
+    // entries, so coins of different colors surrendered back-to-back must both
+    // queue, and one flush must record both. The two coins carry different
+    // nonces because they are different coins — the queue is keyed per coin.
     const { contract, ctx } = await deployInitialised();
     const otherErc20 = bytes(20, 0xab);
     const otherColor = hexToBytes(
       rawTokenType(pureCircuits.vaultTokenDomainSeparator(otherErc20), VAULT_ADDRESS),
     );
+    const otherCoin = vaultCoin(AMOUNT, otherColor, bytes(32, 0x0d));
 
     const afterFirst = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
     const afterSecond = (
       await withdraw(contract, afterFirst, {
         ...VALID_WITHDRAW,
         withdraw: { erc20Address: otherErc20, amount: AMOUNT, destEvmAddress: DEST_EVM },
-        coin: vaultCoin(AMOUNT, otherColor),
+        coin: otherCoin,
       })
     ).context;
+    expect(
+      ledger(afterSecond.callContext.currentQueryContext.state).pendingVaultRequests.size(),
+    ).toBe(2n);
 
-    const state = afterSecond.callContext.currentQueryContext.state;
+    const drained = (
+      await flushWithdraws(contract, afterSecond, [
+        queueKey(SECRET_KEY, VALID_WITHDRAW.coin),
+        queueKey(SECRET_KEY, otherCoin),
+      ])
+    ).context;
+
+    const state = drained.callContext.currentQueryContext.state;
     const index = toSignBidirectionalEventIndex(ledger(state).signBidirectionalEventMap);
     expect(index.size).toBe(2);
     expect(ledger(state).withdrawSettleViews.size()).toBe(2n);
+    expect(ledger(state).pendingVaultRequests.isEmpty()).toBe(true);
+    // Both records carry the SAME (constant) request nonce; what separates them
+    // is the EVM nonce flush handed each live slot.
+    expect([...index.values()].map((record) => record.requestNonce)).toEqual([0n, 0n]);
+    expect([...index.values()].map((record) => record.txParams.nonce).sort()).toEqual([0n, 1n]);
   });
 });
 
@@ -936,6 +1100,286 @@ describe("withdraw validation", () => {
   });
 });
 
+// The flush behaviour every entry point shares — permissionless, skipping,
+// and the two counter rules — driven through the WITHDRAW entry point. The
+// cross-kind describe further down covers what differs between them.
+describe("flush, via the withdraw entry point", () => {
+  it("is permissionless: a STRANGER drains what a withdrawer queued, and the gate still binds the withdrawer", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+
+    // A different identity (OTHER_SECRET_KEY witness) calls flush. Nothing in
+    // flush reads a secret, so this must work — batching is only useful if
+    // anyone can do it.
+    const strangerCtx = await strangerContext("flush", started);
+    const drained = (await flushWithdrawCoin(contract, strangerCtx, VALID_WITHDRAW.coin)).context;
+
+    const state = ledger(drained.callContext.currentQueryContext.state);
+    const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
+    expect(index.size).toBe(1);
+    const idHex = first(index.keys(), "signBidirectional request id");
+
+    // The settle view names the WITHDRAWER (flush copies the queue key across),
+    // so the flusher gained no claim on the refund.
+    const view = state.withdrawSettleViews.lookup(requestIdBytes(idHex));
+    expect(view.commitment).toEqual(queueKey(SECRET_KEY, VALID_WITHDRAW.coin));
+    expect(view.commitment).not.toEqual(queueKey(OTHER_SECRET_KEY, VALID_WITHDRAW.coin));
+  });
+
+  it("skips a slot whose key is not queued, so flushing the same key twice records once", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const drained = (await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin)).context;
+    const again = (await flushWithdrawCoin(contract, drained, VALID_WITHDRAW.coin)).context;
+
+    const state = ledger(again.callContext.currentQueryContext.state);
+    expect(toSignBidirectionalEventIndex(state.signBidirectionalEventMap).size).toBe(1);
+    expect(state.withdrawSettleViews.size()).toBe(1n);
+    // The second call notified nobody: both of its slots were empty. (Events
+    // accumulate on the threaded context, so the count must not have grown.)
+    expect(decodeSignetLogEvents(drained.events, SIGNET_ADDRESS)).toHaveLength(1);
+    expect(decodeSignetLogEvents(again.events, SIGNET_ADDRESS)).toHaveLength(1);
+    // And it consumed no EVM nonce: an empty batch is free.
+    expect(state.vaultEvmNonce).toBe(1n);
+  });
+
+  it("refuses a second request under a coin nonce already queued", async () => {
+    // A real coin is spendable once, so this cannot happen with honest inputs.
+    // The assert exists so a collision REVERTS instead of silently overwriting
+    // a queued entry whose coin is already burned.
+    const { contract, ctx } = await deployInitialised();
+    const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    await expect(withdraw(contract, started, VALID_WITHDRAW)).rejects.toThrow(
+      /Request already queued/,
+    );
+  });
+
+  it("gives two IDENTICAL withdrawals in ONE batch DIFFERENT ids, on the EVM nonce alone", async () => {
+    // THE uniqueness property, now that `requestNonce` is a constant for every
+    // vault-signed flow. Same caller, same ERC20, same amount, same
+    // destination, same key version: every field of the two recorded events
+    // matches except the EVM nonce flush handed each of them.
+    //
+    // The two surrendered coins necessarily differ in nonce (the queue key
+    // binds it), but a coin nonce reaches only the SETTLE VIEW, never the
+    // hashed request record, so it contributes nothing to the ids. If a second
+    // counter were still needed, this is the test that would fail: the two
+    // records would hash to one id and the "Request already exists" assert
+    // would turn the second slot away.
+    const { contract, ctx } = await deployInitialised();
+    const twinCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x4a));
+    const afterFirst = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const afterSecond = (
+      await withdraw(contract, afterFirst, { ...VALID_WITHDRAW, coin: twinCoin })
+    ).context;
+
+    const drained = (
+      await flushWithdraws(contract, afterSecond, [
+        queueKey(SECRET_KEY, VALID_WITHDRAW.coin),
+        queueKey(SECRET_KEY, twinCoin),
+      ])
+    ).context;
+
+    const state = ledger(drained.callContext.currentQueryContext.state);
+    const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
+
+    // BOTH records landed, under DIFFERENT ids: neither slot was turned away by
+    // the duplicate-id assert, and both settle views were pinned.
+    expect(index.size).toBe(2);
+    expect(state.withdrawSettleViews.size()).toBe(2n);
+    expect(state.pendingVaultRequests.isEmpty()).toBe(true);
+
+    const records = [...index.values()].sort((a, b) =>
+      a.txParams.nonce < b.txParams.nonce ? -1 : 1,
+    );
+    const [recordA, recordB] = records;
+    if (recordA === undefined || recordB === undefined) {
+      throw new Error("expected two recorded withdraw requests");
+    }
+
+    // The EVM nonce is the ONLY difference: normalise it away and the two
+    // records are equal field for field, request nonce included.
+    expect({ ...recordA, txParams: { ...recordA.txParams, nonce: 0n } }).toEqual({
+      ...recordB,
+      txParams: { ...recordB.txParams, nonce: 0n },
+    });
+    expect([recordA.requestNonce, recordB.requestNonce]).toEqual([
+      pureCircuits.vaultSignedRequestNonce(),
+      pureCircuits.vaultSignedRequestNonce(),
+    ]);
+    expect([recordA.txParams.nonce, recordB.txParams.nonce]).toEqual([0n, 1n]);
+
+    // And that single difference is what the ids hang on, confirmed through the
+    // TS twin of the id circuit as well as the map keys.
+    const idA = requestIdHex(calculateRequestId(recordA));
+    const idB = requestIdHex(calculateRequestId(recordB));
+    expect(idA).not.toBe(idB);
+    expect([...index.keys()].sort()).toEqual([idA, idB].sort());
+  });
+
+  it("assigns the vault EVM nonce from the contract counter, CONTIGUOUSLY across a FULL batch", async () => {
+    // The four vault-signed flows all sign from ONE shared EVM account, so a
+    // caller-supplied evmNonce let two callers pick the same value: only one of
+    // the two Ethereum transactions could ever mine and the loser had to
+    // refund. start* no longer takes one; flush hands out the next value per
+    // entry it drains.
+    //
+    // Every slot of the compiled width is live here, so this pins the whole
+    // batch: FLUSH_BATCH entries in, FLUSH_BATCH consecutive EVM nonces out.
+    const { contract, ctx } = await deployInitialised();
+    // One coin per slot. Coins that coexist must differ in nonce, because the
+    // queue key binds the surrendered coin's nonce (see queueKey).
+    const coins = [0x1a, 0x1c, 0x1d, 0x1e, 0x1f].map((nonceFill) =>
+      vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, nonceFill)),
+    );
+    expect(coins).toHaveLength(FLUSH_BATCH);
+
+    let queued = ctx;
+    for (const coin of coins) {
+      queued = (await withdraw(contract, queued, { ...VALID_WITHDRAW, coin })).context;
+    }
+
+    const drained = (
+      await flushWithdraws(
+        contract,
+        queued,
+        coins.map((coin) => queueKey(SECRET_KEY, coin)),
+      )
+    ).context;
+
+    const state = ledger(drained.callContext.currentQueryContext.state);
+    const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
+    expect(index.size).toBe(FLUSH_BATCH);
+    // 0,1,2,3,4: one per slot, in slot order, with no gap anywhere.
+    expect([...index.values()].map((record) => record.txParams.nonce).sort()).toEqual([
+      0n,
+      1n,
+      2n,
+      3n,
+      4n,
+    ]);
+    // The counter advanced by exactly the number of entries drained.
+    expect(state.vaultEvmNonce).toBe(BigInt(FLUSH_BATCH));
+    // The dormant request-id counter did not move, and every record carries
+    // the same constant request nonce: the EVM nonces above are what keep the
+    // FLUSH_BATCH ids apart.
+    expect(state.signetRequestNonce).toBe(0n);
+    expect([...index.values()].map((record) => record.requestNonce)).toEqual(
+      Array.from({ length: FLUSH_BATCH }, () => 0n),
+    );
+  });
+
+  it("leaves NO EVM-nonce gap when a slot is skipped", async () => {
+    // Ethereum executes an account's transactions in nonce order, so a skipped
+    // value would stall every later vault transaction behind it. vaultEvmNonce
+    // therefore advances per entry DRAINED, never by the batch width.
+    const { contract, ctx } = await deployInitialised();
+    const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    // A nearly empty batch: one live key, and FLUSH_BATCH - 1 dead slots the
+    // harness pads it out with.
+    const firstDrain = (await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin)).context;
+    expect(ledger(firstDrain.callContext.currentQueryContext.state).vaultEvmNonce).toBe(1n);
+
+    const secondCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x1b));
+    const startedAgain = (
+      await withdraw(contract, firstDrain, { ...VALID_WITHDRAW, coin: secondCoin })
+    ).context;
+    const secondDrain = (await flushWithdrawCoin(contract, startedAgain, secondCoin)).context;
+
+    const state = ledger(secondDrain.callContext.currentQueryContext.state);
+    const nonces = [...toSignBidirectionalEventIndex(state.signBidirectionalEventMap).values()].map(
+      (record) => record.txParams.nonce,
+    );
+    // 0 then 1 — contiguous across two nearly empty batches, even though eight
+    // of the ten slots drained nothing.
+    expect(nonces.sort()).toEqual([0n, 1n]);
+    expect(state.vaultEvmNonce).toBe(2n);
+    // Eight dead slots across two batches moved nothing.
+    expect(state.signetRequestNonce).toBe(0n);
+  });
+
+  it("burns an EVM nonce only for the LIVE slots of a partly filled batch, wherever they sit", async () => {
+    // The compiled width is fixed, so a caller with fewer keys pads the batch
+    // with a key nothing is queued under. Those dead slots must consume no EVM
+    // nonce — including a dead slot BETWEEN two live ones, which is why the
+    // padding here is interleaved and not merely trailing.
+    const { contract, ctx } = await deployInitialised();
+    const secondCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x2a));
+    const afterFirst = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const afterSecond = (
+      await withdraw(contract, afterFirst, { ...VALID_WITHDRAW, coin: secondCoin })
+    ).context;
+
+    // Slot 0 live, slot 1 dead, slot 2 live, slots 3 and 4 padded dead.
+    const firstDrain = (
+      await flushWithdraws(contract, afterSecond, [
+        queueKey(SECRET_KEY, VALID_WITHDRAW.coin),
+        UNQUEUED_KEY,
+        queueKey(SECRET_KEY, secondCoin),
+      ])
+    ).context;
+
+    const afterBatch = ledger(firstDrain.callContext.currentQueryContext.state);
+    const firstRecords = [
+      ...toSignBidirectionalEventIndex(afterBatch.signBidirectionalEventMap).values(),
+    ];
+    expect(firstRecords).toHaveLength(2);
+    // The request nonce is the same constant in both, so it carries no
+    // information about which slot a record came from...
+    expect(firstRecords.map((record) => record.requestNonce)).toEqual([0n, 0n]);
+    // ...and the EVM nonce, consumed only inside the live branch, is what
+    // separates them: the two drained entries got 0 and 1 with nothing
+    // between them, even though a DEAD slot sits between the live ones.
+    expect(firstRecords.map((record) => record.txParams.nonce).sort()).toEqual([0n, 1n]);
+    // Three dead slots burned no EVM nonce at all.
+    expect(afterBatch.vaultEvmNonce).toBe(2n);
+    // And nothing moved the dormant request-id counter.
+    expect(afterBatch.signetRequestNonce).toBe(0n);
+
+    // A second partly filled batch continues the EVM sequence with no gap,
+    // which is the property Ethereum actually requires of it.
+    const thirdCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0x2b));
+    const startedThird = (
+      await withdraw(contract, firstDrain, { ...VALID_WITHDRAW, coin: thirdCoin })
+    ).context;
+    const secondDrain = (await flushWithdrawCoin(contract, startedThird, thirdCoin)).context;
+
+    const state = ledger(secondDrain.callContext.currentQueryContext.state);
+    const nonces = [...toSignBidirectionalEventIndex(state.signBidirectionalEventMap).values()].map(
+      (record) => record.txParams.nonce,
+    );
+    expect(nonces.sort()).toEqual([0n, 1n, 2n]);
+    expect(state.vaultEvmNonce).toBe(3n);
+  });
+
+  it("shares the counter with approveRouter, which signs from the same vault account", async () => {
+    // approveStata/approveRouter sign with path "vault" too, so they had to
+    // move onto vaultEvmNonce as well: a caller-chosen nonce there would either
+    // collide with a value flush handed out or open a gap ahead of it.
+    const { contract, ctx } = await deployInitialised();
+    const approved = (await contract.circuits.approveRouter(ctx, ERC20, 1n)).context;
+    const started = (await withdraw(contract, approved, VALID_WITHDRAW)).context;
+    const drained = (await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin)).context;
+
+    const state = ledger(drained.callContext.currentQueryContext.state);
+    const nonces = [...toSignBidirectionalEventIndex(state.signBidirectionalEventMap).values()].map(
+      (record) => record.txParams.nonce,
+    );
+    expect(nonces.sort()).toEqual([0n, 1n]);
+    expect(state.vaultEvmNonce).toBe(2n);
+  });
+
+  it.each([
+    ["flushWithdraws", flushWithdraws],
+    ["flushSwaps", flushSwaps],
+    ["flushSupplies", flushSupplies],
+    ["flushRedeems", flushRedeems],
+  ] as const)("%s rejects before initialise", async (_name, entryPoint) => {
+    const { contract, ctx } = await deployContract();
+    await expect(entryPoint(contract, ctx, [UNQUEUED_KEY])).rejects.toThrow(/Not initialised/);
+  });
+});
+
 // ---- Response fixtures (shared by every settle and refund suite) ----
 
 // An MPC response secret OTHER than the one initialise pinned the key of.
@@ -996,13 +1440,15 @@ const respond = (
 // ---- Complete-withdraw fixtures ----
 
 /**
- * Deploy + initialise + withdraw(VALID_WITHDRAW): the arrange step of
- * every complete-withdraw test. Returns the pending withdrawal's request id
- * (the single ledger map key) alongside the threaded context.
+ * Deploy + initialise + withdraw(VALID_WITHDRAW) + flush: the arrange step of
+ * every complete-withdraw test. The flush is new and unavoidable — a started
+ * withdrawal has no request id until flush mints one. Returns that id (the
+ * single ledger map key) alongside the threaded context.
  */
 const withdrawRequested = async () => {
   const { contract, ctx } = await deployInitialised();
-  const next = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+  const started = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+  const next = (await flushWithdrawCoin(contract, started, VALID_WITHDRAW.coin)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
   );
@@ -1524,7 +1970,6 @@ const SWAP_AMOUNT_IN_MAX = AMOUNT; // spend cap = the surrendered coin
 const SWAP_AMOUNT_IN_SPENT = 990_000n; // attested input actually spent (<= the cap)
 
 interface SwapCallArgs {
-  evmNonce: bigint;
   keyVersion: bigint;
   swap: {
     tokenIn: Uint8Array;
@@ -1537,7 +1982,6 @@ interface SwapCallArgs {
 }
 
 const VALID_SWAP: SwapCallArgs = {
-  evmNonce: 0n,
   keyVersion: 1n,
   swap: {
     tokenIn: ERC20,
@@ -1553,7 +1997,7 @@ const swap = (
   contract: Contract<VaultPrivateState>,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startSwap"]>[0],
   args: SwapCallArgs,
-) => contract.circuits.startSwap(ctx, args.evmNonce, args.keyVersion, args.swap, args.coin);
+) => contract.circuits.startSwap(ctx, args.keyVersion, args.swap, args.coin);
 
 // A successful swap's attested output: the amountIn spent as the MPC serializes it — a
 // Midnight-native little-endian uint64 (8 bytes), the twin of serializeRespondOutput.
@@ -1572,7 +2016,7 @@ const OUTPUT_SWAP = swapOutput(SWAP_AMOUNT_IN_SPENT);
 describe("approveRouter", () => {
   it("records an approve(router, ~unlimited) on signBidirectionalEventMap from the vault path, no coin", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
+    const { context: next } = await contract.circuits.approveRouter(ctx, ERC20, 1n);
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1593,7 +2037,7 @@ describe("approveRouter", () => {
 
   it("is permissionless (a stranger may ready a token) and needs initialise", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).rejects.toThrow(
+    await expect(contract.circuits.approveRouter(ctx, ERC20, 1n)).rejects.toThrow(
       /Not initialised/,
     );
     const ready = await deployInitialised();
@@ -1601,7 +2045,6 @@ describe("approveRouter", () => {
       ready.contract.circuits.approveRouter(
         await strangerContext("approveRouter", ready.ctx),
         ERC20,
-        0n,
         1n,
       ),
     ).resolves.toBeDefined();
@@ -1609,9 +2052,19 @@ describe("approveRouter", () => {
 });
 
 describe("swap round-trip", () => {
-  it("burns tokenIn and stores a vault-path exactOutputSingle event on the swap map", async () => {
+  it("burns tokenIn, queues it, and flush stores the exactOutputSingle event on the swap map", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await swap(contract, ctx, VALID_SWAP);
+    // startSwap queues; flush records and notifies. See the withdraw round-trip
+    // for the full before/after of the split.
+    const started = (await swap(contract, ctx, VALID_SWAP)).context;
+    expect(
+      ledger(started.callContext.currentQueryContext.state).pendingVaultRequests.member(
+        queueKey(SECRET_KEY, VALID_SWAP.coin),
+      ),
+    ).toBe(true);
+    expect(ledger(started.callContext.currentQueryContext.state).swapEventMap.isEmpty()).toBe(true);
+
+    const { context: next } = await flushSwapCoin(contract, started, VALID_SWAP.coin);
     const state = ledger(next.callContext.currentQueryContext.state);
 
     const index = toSignBidirectionalEventIndex(state.swapEventMap);
@@ -1628,7 +2081,7 @@ describe("swap round-trip", () => {
     expect(envelope).toEqual({
       to: ROUTER,
       chainId: CHAIN_ID,
-      nonce: VALID_SWAP.evmNonce,
+      nonce: 0n, // flush-assigned, the vault account's first signature
       gasLimit: 700_000n,
       // The initialise-time defaults, now ledger values a deployer can move
       // with setGasParams (see the "gas parameters" describes at the end of
@@ -1658,9 +2111,9 @@ describe("swap round-trip", () => {
     expect(state.swapSettleViews.member(requestIdBytes(idHex))).toBe(true);
 
     // Same burn as withdraw (which asserts the receive/spend pairing in
-    // detail): amountInMaximum of the tokenIn vault coin is received, spent,
-    // and paid whole to the shielded burn address.
-    const zswap = zswapState(next);
+    // detail), and on the START call: amountInMaximum of the tokenIn vault coin
+    // is received, spent, and paid whole to the shielded burn address.
+    const zswap = zswapState(started);
 
     // check inputs, expect 1 input:
     // - coin for the amount being withdrawn
@@ -1709,9 +2162,11 @@ describe("swap round-trip", () => {
 
 // ---- Swap settle fixtures ----
 
+// Start AND flush: a swap has no request id until flush mints one.
 const swapRequested = async () => {
   const { contract, ctx } = await deployInitialised();
-  const next = (await swap(contract, ctx, VALID_SWAP)).context;
+  const started = (await swap(contract, ctx, VALID_SWAP)).context;
+  const next = (await flushSwapCoin(contract, started, VALID_SWAP.coin)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).swapEventMap,
   );
@@ -1849,19 +2304,19 @@ const supply = (
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startSupply"]>[0],
   amount: bigint,
   coin: ReturnType<typeof vaultCoin>,
-) => contract.circuits.startSupply(ctx, 0n, 1n, amount, coin);
+) => contract.circuits.startSupply(ctx, 1n, amount, coin);
 
 const redeem = (
   contract: Contract<VaultPrivateState>,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startRedeem"]>[0],
   shares: bigint,
   coin: ReturnType<typeof vaultCoin>,
-) => contract.circuits.startRedeem(ctx, 0n, 1n, shares, coin);
+) => contract.circuits.startRedeem(ctx, 1n, shares, coin);
 
 describe("approveStata", () => {
   it("records approve(stataToken, MAX) on signBidirectionalEventMap from the vault path, to = the underlying", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await contract.circuits.approveStata(ctx, 0n, 1n);
+    const { context: next } = await contract.circuits.approveStata(ctx, 1n);
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1879,14 +2334,16 @@ describe("approveStata", () => {
 });
 
 describe("supply round-trip", () => {
-  it("burns the underlying and stores a vault-path deposit event on the supply map", async () => {
+  it("burns the underlying, queues it, and flush stores the deposit event on the supply map", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await supply(
-      contract,
-      ctx,
-      SUPPLY_AMOUNT,
-      vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
+    // startSupply queues; flush records and notifies (see the withdraw round-trip).
+    const coin = vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR);
+    const started = (await supply(contract, ctx, SUPPLY_AMOUNT, coin)).context;
+    expect(ledger(started.callContext.currentQueryContext.state).supplyEventMap.isEmpty()).toBe(
+      true,
     );
+
+    const { context: next } = await flushSupplyCoin(contract, started, coin);
     const state = ledger(next.callContext.currentQueryContext.state);
 
     const index = toSignBidirectionalEventIndex(state.supplyEventMap);
@@ -1908,9 +2365,9 @@ describe("supply round-trip", () => {
     expect(state.supplySettleViews.member(requestIdBytes(idHex))).toBe(true);
 
     // Same burn as withdraw (which asserts the receive/spend pairing in
-    // detail): the underlying vault coin is received, spent, and paid whole to
-    // the shielded burn address.
-    const zswap = zswapState(next);
+    // detail), and on the START call: the underlying vault coin is received,
+    // spent, and paid whole to the shielded burn address.
+    const zswap = zswapState(started);
 
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
@@ -1963,11 +2420,12 @@ describe("supply round-trip", () => {
   });
 });
 
+// Start AND flush: a supply has no request id until flush mints one.
 const supplyRequested = async () => {
   const { contract, ctx } = await deployInitialised();
-  const next = (
-    await supply(contract, ctx, SUPPLY_AMOUNT, vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR))
-  ).context;
+  const coin = vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR);
+  const started = (await supply(contract, ctx, SUPPLY_AMOUNT, coin)).context;
+  const next = (await flushSupplyCoin(contract, started, coin)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).supplyEventMap,
   );
@@ -2009,14 +2467,16 @@ describe("completeSupply settle", () => {
 });
 
 describe("redeem round-trip", () => {
-  it("burns the stataToken and stores a vault-path redeem event on the redeem map", async () => {
+  it("burns the stataToken, queues it, and flush stores the redeem event on the redeem map", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await redeem(
-      contract,
-      ctx,
-      REDEEM_SHARES,
-      vaultCoin(REDEEM_SHARES, STATA_COLOR),
+    // startRedeem queues; flush records and notifies (see the withdraw round-trip).
+    const coin = vaultCoin(REDEEM_SHARES, STATA_COLOR);
+    const started = (await redeem(contract, ctx, REDEEM_SHARES, coin)).context;
+    expect(ledger(started.callContext.currentQueryContext.state).redeemEventMap.isEmpty()).toBe(
+      true,
     );
+
+    const { context: next } = await flushRedeemCoin(contract, started, coin);
     const state = ledger(next.callContext.currentQueryContext.state);
 
     const index = toSignBidirectionalEventIndex(state.redeemEventMap);
@@ -2036,9 +2496,9 @@ describe("redeem round-trip", () => {
 
     expect(state.redeemSettleViews.member(requestIdBytes(idHex))).toBe(true);
 
-    // Same burn as supply: the wrapper vault coin is received, spent, and paid
-    // whole to the shielded burn address.
-    const zswap = zswapState(next);
+    // Same burn as supply, and on the START call: the wrapper vault coin is
+    // received, spent, and paid whole to the shielded burn address.
+    const zswap = zswapState(started);
 
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
@@ -2091,10 +2551,12 @@ describe("redeem round-trip", () => {
   });
 });
 
+// Start AND flush: a redeem has no request id until flush mints one.
 const redeemRequested = async () => {
   const { contract, ctx } = await deployInitialised();
-  const next = (await redeem(contract, ctx, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_COLOR)))
-    .context;
+  const coin = vaultCoin(REDEEM_SHARES, STATA_COLOR);
+  const started = (await redeem(contract, ctx, REDEEM_SHARES, coin)).context;
+  const next = (await flushRedeemCoin(contract, started, coin)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).redeemEventMap,
   );
@@ -2213,7 +2675,7 @@ interface PendingRequest {
  */
 const approveRouterRequested = async (): Promise<PendingRequest> => {
   const { contract, ctx } = await deployInitialised();
-  const next = (await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).context;
+  const next = (await contract.circuits.approveRouter(ctx, ERC20, 1n)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
   );
@@ -2398,18 +2860,19 @@ describe("cross-kind settle isolation", () => {
 });
 
 // ===========================================================================
-// Throughput: every start* circuit reads and increments ONE shared cell,
+// Throughput: start* circuits USED to read and increment ONE shared cell,
 // signetRequestNonce. The read is pinned (popeq) and the cell changes on every
-// request, so two requests proven against the same state cannot both apply:
-// the second fails on-chain reconciliation with a read mismatch. These tests
+// request, so two requests proven against the same state could not both apply:
+// the second failed on-chain reconciliation with a read mismatch. These tests
 // reproduce that in verifying mode and pin the requirement that concurrent
 // requests from DIFFERENT callers must both apply.
 //
-// Where this stands on THIS branch: startDeposit sources its nonce from a
-// per-caller counter, so the deposit REQUIREMENT is green. The vault-signed
-// flows (startWithdraw and friends) and the approves still read the shared
-// cell, so they still serialize and are still RED, with the read mismatch the
-// CONTROL below pins.
+// Where this stands now: startDeposit sources its nonce per caller, and the
+// four vault-signed flows queue and let `flush` hand out vaultEvmNonce values
+// at drain time, so NO start* circuit reads a shared cell any more. The
+// approve CONTROL below still does (it consumes a vaultEvmNonce inline), and
+// still fails with the read mismatch, which is exactly what the requirement
+// tests no longer fail with.
 // ===========================================================================
 interface VaultCall {
   contractAddress: string;
@@ -2482,7 +2945,56 @@ const replay = (
   }
 };
 
-describe("throughput: shared signetRequestNonce serializes vault requests", () => {
+// The four entry points, tested against EACH OTHER. Every describe above covers
+// one of them in isolation; what this covers is that an entry point leaves the
+// other kinds strictly alone. That is the property which makes splitting flush
+// by kind SAFE rather than merely cheaper: a caller proves one transaction
+// builder instead of four, and pays nothing — in EVM nonces or in lost entries
+// — for the kinds it did not ask for.
+describe("flush entry points drain only their own kind", () => {
+  it("skips an entry of ANOTHER kind, burning no EVM nonce and leaving it queued for its own entry point", async () => {
+    const { contract, ctx } = await deployInitialised();
+    // A swap coin with its own nonce: the queue key binds the coin nonce, so
+    // reusing VALID_SWAP's default would collide with the withdraw's key.
+    const swapCoin = vaultCoin(SWAP_AMOUNT_IN_MAX, VAULT_TOKEN_COLOR, bytes(32, 0x3c));
+    const afterWithdraw = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const afterSwap = (await swap(contract, afterWithdraw, { ...VALID_SWAP, coin: swapCoin }))
+      .context;
+    const withdrawKey = queueKey(SECRET_KEY, VALID_WITHDRAW.coin);
+    const swapKey = queueKey(SECRET_KEY, swapCoin);
+
+    // BOTH keys handed to the WITHDRAW entry point. The swap must be skipped
+    // exactly as a missing key is.
+    const drained = (await flushWithdraws(contract, afterSwap, [withdrawKey, swapKey])).context;
+
+    const state = ledger(drained.callContext.currentQueryContext.state);
+    expect(toSignBidirectionalEventIndex(state.signBidirectionalEventMap).size).toBe(1);
+    // Nothing was recorded on the swap map, and the swap is still QUEUED: a
+    // wrong-kind slot must not consume the entry, or the burn behind it would
+    // be stranded.
+    expect(state.swapEventMap.isEmpty()).toBe(true);
+    expect(state.pendingVaultRequests.member(withdrawKey)).toBe(false);
+    expect(state.pendingVaultRequests.member(swapKey)).toBe(true);
+    // ONE entry drained, so exactly ONE EVM nonce burned. A wrong-kind slot
+    // that consumed one would open the gap this whole design exists to avoid.
+    expect(state.vaultEvmNonce).toBe(1n);
+
+    // The swap's OWN entry point still drains it, at the very next EVM nonce.
+    const swapped = (await flushSwaps(contract, drained, [swapKey])).context;
+    const after = ledger(swapped.callContext.currentQueryContext.state);
+    const swapRecord = first(
+      toSignBidirectionalEventIndex(after.swapEventMap).values(),
+      "indexed swap request",
+    );
+    expect(swapRecord.txParams.nonce).toBe(1n);
+    expect(after.vaultEvmNonce).toBe(2n);
+    expect(after.pendingVaultRequests.isEmpty()).toBe(true);
+    // And neither batch moved the dormant request-id counter.
+    expect(after.signetRequestNonce).toBe(0n);
+  });
+});
+
+describe("throughput: a shared counter read serializes vault requests", () => {
   it("CONTROL: a deposit applies against the state it was built on (harness sanity)", async () => {
     const { contract, ctx } = await deployInitialised();
     // The state the call is proven against is the one on the context it is
@@ -2505,18 +3017,83 @@ describe("throughput: shared signetRequestNonce serializes vault requests", () =
   });
 
   it("CONTROL: the still-shared approve path fails exactly as the vault flows used to", async () => {
-    // approveRouter deliberately keeps the global counter, so it still
-    // serializes. Replayed WITH headroom, so a gas artefact cannot be the
-    // reason it is turned away: the only thing left that can reject it is the
-    // pinned read of a cell Alice moved. This is the negative control for the
-    // harness above — it is what proves `replay` still DETECTS a conflict,
-    // rather than waving everything through now that it budgets generously.
+    // approveStata and approveRouter read and increment vaultEvmNonce inline —
+    // they sign from the same one EVM account, so they must — and so they still
+    // serialize. This is the failure shape the four vault-signed flows had
+    // before the queue, proven here so the tests below are read against a
+    // harness that demonstrably detects a shared-cell conflict.
+    // Replayed WITH headroom, exactly like the REQUIREMENTs above: a gas
+    // artefact cannot be the reason this one is turned away, so the only thing
+    // left is the pinned read of a cell Alice moved.
     const { contract, ctx } = await deployInitialised();
-    const alice = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
+    const alice = await contract.circuits.approveRouter(ctx, ERC20, 1n);
     const stateAfterAlice = stateOf(alice.context);
     const bobCtx = await strangerContext("approveRouter", ctx);
-    const bob = await contract.circuits.approveRouter(bobCtx, ERC20, 0n, 1n);
+    const bob = await contract.circuits.approveRouter(bobCtx, ERC20, 1n);
     expect(replay(stateAfterAlice, bob, true)).toMatch(/mismatch between expected .* read/);
+  });
+
+  it("two concurrent startWithdraws from DIFFERENT callers both apply, and ONE flush emits both with distinct ids", async () => {
+    const { contract, ctx } = await deployInitialised();
+
+    // Alice and Bob surrender different coins. Both are proven against the SAME
+    // state: Bob's context is built from the pre-Alice state.
+    const aliceCoin = VALID_WITHDRAW.coin;
+    const bobCoin = vaultCoin(AMOUNT, VAULT_TOKEN_COLOR, bytes(32, 0xb0));
+    const alice = await withdraw(contract, ctx, VALID_WITHDRAW);
+    const stateAfterAlice = alice.context.callContext.currentQueryContext.state;
+    const bobCtx = await strangerContext("startWithdraw", ctx);
+    const bob = await withdraw(contract, bobCtx, { ...VALID_WITHDRAW, coin: bobCoin });
+
+    // The requirement: Bob's transcript, proven concurrently with Alice's, must
+    // not be invalidated by Alice's. It no longer can be — neither call reads a
+    // cell the other writes.
+    expect(replay(stateAfterAlice, bob, true)).toBe("applied");
+
+    // Sequenced, both land in the queue, under keys that differ by BOTH secret
+    // and coin, and neither has an id or an event yet.
+    const afterBob = (
+      await withdraw(contract, await strangerContext("startWithdraw", alice.context), {
+        ...VALID_WITHDRAW,
+        coin: bobCoin,
+      })
+    ).context;
+    const aliceKey = queueKey(SECRET_KEY, aliceCoin);
+    const bobKey = queueKey(OTHER_SECRET_KEY, bobCoin);
+    expect(aliceKey).not.toEqual(bobKey);
+    const queued = ledger(afterBob.callContext.currentQueryContext.state);
+    expect(queued.pendingVaultRequests.member(aliceKey)).toBe(true);
+    expect(queued.pendingVaultRequests.member(bobKey)).toBe(true);
+    expect(queued.signBidirectionalEventMap.isEmpty()).toBe(true);
+    // Neither start* spent an EVM nonce: only a flush does.
+    expect(queued.vaultEvmNonce).toBe(0n);
+
+    // ONE flush, two EVM nonces handed out, two requests out.
+    const drained = (await flushWithdraws(contract, afterBob, [aliceKey, bobKey])).context;
+    const state = ledger(drained.callContext.currentQueryContext.state);
+    const index = toSignBidirectionalEventIndex(state.signBidirectionalEventMap);
+    expect(index.size).toBe(2);
+    expect(state.pendingVaultRequests.isEmpty()).toBe(true);
+
+    // Distinct ids, carried by the distinct EVM nonces slot 0 and slot 1 were
+    // handed. The request nonce is the same constant in both records.
+    const ids = [...index.keys()];
+    expect(new Set(ids).size).toBe(2);
+    expect([...index.values()].map((record) => record.requestNonce)).toEqual([0n, 0n]);
+    expect([...index.values()].map((record) => record.txParams.nonce).sort()).toEqual([0n, 1n]);
+
+    // Both were announced to the MPC, each notification naming its own id.
+    const notified = decodeSignetLogEvents(drained.events, SIGNET_ADDRESS).map((event) =>
+      requestIdHex(decodeSignBidirectionalEventNotificationPayload(event.payload).requestId),
+    );
+    expect(notified.sort()).toEqual([...ids].sort());
+
+    // Each settle view still belongs to its own requester.
+    const commitments = ids.map(
+      (idHex) => state.withdrawSettleViews.lookup(requestIdBytes(idHex)).commitment,
+    );
+    expect(commitments).toContainEqual(aliceKey);
+    expect(commitments).toContainEqual(bobKey);
   });
 
   it("ANTI-REPLAY GUARD (must stay green): a caller's identical repeat gets a fresh id", async () => {
@@ -2742,7 +3319,9 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
+    // The envelope is stamped by the FLUSH, not the start: start only queues.
+    const queued = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
+    const next = (await flushWithdrawCoin(contract, queued, VALID_WITHDRAW.coin)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -2757,7 +3336,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+    const next = (await contract.circuits.approveRouter(configured, ERC20, 1n)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -2772,7 +3351,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveStata(configured, 0n, 1n)).context;
+    const next = (await contract.circuits.approveStata(configured, 1n)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -2787,7 +3366,8 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await swap(contract, configured, VALID_SWAP)).context;
+    const queued = (await swap(contract, configured, VALID_SWAP)).context;
+    const next = (await flushSwapCoin(contract, queued, VALID_SWAP.coin)).context;
 
     expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).swapEventMap)).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
@@ -2800,14 +3380,9 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (
-      await supply(
-        contract,
-        configured,
-        SUPPLY_AMOUNT,
-        vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
-      )
-    ).context;
+    const coin = vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR);
+    const queued = (await supply(contract, configured, SUPPLY_AMOUNT, coin)).context;
+    const next = (await flushSupplyCoin(contract, queued, coin)).context;
 
     expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).supplyEventMap)).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
@@ -2820,9 +3395,9 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (
-      await redeem(contract, configured, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_COLOR))
-    ).context;
+    const coin = vaultCoin(REDEEM_SHARES, STATA_COLOR);
+    const queued = (await redeem(contract, configured, REDEEM_SHARES, coin)).context;
+    const next = (await flushRedeemCoin(contract, queued, coin)).context;
 
     expect(envelopeOf(ledger(next.callContext.currentQueryContext.state).redeemEventMap)).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
@@ -2839,19 +3414,39 @@ describe("gas parameters reach the constructed transaction", () => {
 
     const stateOf = (c: typeof configured) => ledger(c.callContext.currentQueryContext.state);
 
-    const afterWithdraw = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
-    const afterSwap = (await swap(contract, configured, VALID_SWAP)).context;
-    const afterApprove = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
-    const afterSupply = (
-      await supply(
+    const supplyCoin = vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR);
+    const redeemCoin = vaultCoin(REDEEM_SHARES, STATA_COLOR);
+
+    // Each kind is started and then flushed on its own branch of the state, so
+    // the four maps below each hold exactly the one request of their kind.
+    const afterWithdraw = (
+      await flushWithdrawCoin(
         contract,
-        configured,
-        SUPPLY_AMOUNT,
-        vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
+        (await withdraw(contract, configured, VALID_WITHDRAW)).context,
+        VALID_WITHDRAW.coin,
+      )
+    ).context;
+    const afterSwap = (
+      await flushSwapCoin(
+        contract,
+        (await swap(contract, configured, VALID_SWAP)).context,
+        VALID_SWAP.coin,
+      )
+    ).context;
+    const afterApprove = (await contract.circuits.approveRouter(configured, ERC20, 1n)).context;
+    const afterSupply = (
+      await flushSupplyCoin(
+        contract,
+        (await supply(contract, configured, SUPPLY_AMOUNT, supplyCoin)).context,
+        supplyCoin,
       )
     ).context;
     const afterRedeem = (
-      await redeem(contract, configured, REDEEM_SHARES, vaultCoin(REDEEM_SHARES, STATA_COLOR))
+      await flushRedeemCoin(
+        contract,
+        (await redeem(contract, configured, REDEEM_SHARES, redeemCoin)).context,
+        redeemCoin,
+      )
     ).context;
 
     expect({
@@ -2980,6 +3575,51 @@ describe("adminReplaceEvmNonce", () => {
       maxPriorityFeePerGas: DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
       gasLimit: 21_000n,
     });
+  });
+
+  it("rejects a byte-identical repeat, but allows the retry that follows a fee raise", async () => {
+    // The one behavioural consequence of dropping the request-id counter. This
+    // circuit's EVM nonce is NAMED BY THE CALLER, not drawn from vaultEvmNonce,
+    // so with a constant requestNonce the id is a hash of (nonce, fees, key
+    // version) and a second call changing none of them collides with the first.
+    //
+    // Rejecting it is right, not a regression. A byte-identical re-request
+    // would only re-derive a signature that already exists and is already
+    // public in the singleton's SignatureRespondedEvent, so anyone can
+    // rebroadcast the first one instead. And a real retry cannot be
+    // byte-identical anyway: a replacement only evicts the stuck transaction if
+    // it pays meaningfully more, so it must follow a setGasParams raise — which
+    // changes the hashed envelope and mints a fresh id, as the second half of
+    // this test shows.
+    const { contract, ctx } = await deployInitialised();
+    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
+
+    await expect(contract.circuits.adminReplaceEvmNonce(next, STUCK_NONCE, 1n)).rejects.toThrow(
+      /Request already exists/,
+    );
+
+    // Raise the fees, which is the only way a replacement evicts anything, and
+    // the same stuck nonce records a SECOND, distinct request.
+    const raised = (await setGasParams(contract, next, NEW_GAS_PARAMS)).context;
+    const retried = (await contract.circuits.adminReplaceEvmNonce(raised, STUCK_NONCE, 1n)).context;
+
+    const index = toSignBidirectionalEventIndex(
+      ledger(retried.callContext.currentQueryContext.state).signBidirectionalEventMap,
+    );
+    expect(index.size).toBe(2);
+    // Both name the same stuck EVM nonce and the same constant request nonce;
+    // the fee raise is the whole of the difference.
+    expect([...index.values()].map((record) => record.txParams.nonce)).toEqual([
+      STUCK_NONCE,
+      STUCK_NONCE,
+    ]);
+    expect([...index.values()].map((record) => record.requestNonce)).toEqual([
+      pureCircuits.vaultSignedRequestNonce(),
+      pureCircuits.vaultSignedRequestNonce(),
+    ]);
+    expect([...index.values()].map((record) => record.txParams.maxFeePerGas).sort()).toEqual(
+      [DEFAULT_MAX_FEE_PER_GAS, NEW_MAX_FEE_PER_GAS].sort(),
+    );
   });
 
   it("reflects a prior setGasParams, which is why the admin raises the fees FIRST", async () => {

@@ -1,6 +1,10 @@
-// `startSwap`: record an exactOutputSingle SignBidirectionalEvent on the vault's SWAP ledger
-// map, surrendering amountInMaximum of the tokenIn vault coin (burned), to be signed with the
-// VAULT's account and broadcast. The settle side lives in complete-swap.ts.
+// `startSwap`: surrender amountInMaximum of the tokenIn vault coin (burned) and QUEUE an
+// exactOutputSingle request; `flush` then records it on the vault's SWAP ledger map, to be
+// signed with the VAULT's account and broadcast. The settle side lives in complete-swap.ts.
+//
+// The circuit no longer takes an EVM nonce: all four vault-signed flows sign from ONE shared
+// vault EVM account, so the contract's own `vaultEvmNonce` counter hands out that account's
+// nonces at flush time. See ./flush.ts and start-withdraw.ts.
 import {
   calculateRequestId,
   evmAddressAbiWord,
@@ -16,6 +20,7 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -24,6 +29,7 @@ import {
 import { EXACT_OUTPUT_SINGLE_SELECTOR, SWAP_MPC_ROUTING } from "../evm-swap.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
+import { FlushKind, flushVaultRequests, vaultQueueKey } from "./flush.ts";
 
 /** Options for {@link startSwap}. */
 export interface StartSwapOptions {
@@ -31,14 +37,14 @@ export interface StartSwapOptions {
   readonly fee: bigint;
   readonly amountOut: bigint;
   readonly amountInMaximum: bigint;
-  readonly evmNonce: bigint;
 }
 
 /**
- * Record the swap request (exactOutputSingle) and return its id. tokenIn = context.erc20Address.
+ * Queue the swap request (exactOutputSingle), flush it, and return the id the flush minted.
+ * tokenIn = context.erc20Address.
  *
  * @param context - The flow context.
- * @param options - The swap parameters (tokenOut, fee, amountOut, amountInMaximum, evmNonce).
+ * @param options - The swap parameters (tokenOut, fee, amountOut, amountInMaximum).
  * @returns The recorded swap request id.
  */
 export async function startSwap(
@@ -68,11 +74,33 @@ export async function startSwap(
     value: options.amountInMaximum,
   };
 
+  const result = await context.vault.callTx.startSwap(
+    SIGNET_DEFAULT_KEY_VERSION,
+    {
+      tokenIn,
+      tokenOut,
+      fee: options.fee,
+      amountOut: options.amountOut,
+      amountInMaximum: options.amountInMaximum,
+    },
+    coin,
+  );
+  console.log(`swap queued in tx ${result.public.txId}`);
+
+  // The EVM nonce is read BETWEEN the queue and the drain, because it is the
+  // contract's to assign: this flush drains one entry in slot 0, so it is handed
+  // exactly this value. The request nonce is not read at all — every
+  // vault-signed request carries the constant vaultSignedRequestNonce().
+  const beforeFlush = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+
   // The record the contract composes: vault path/sender, router `to`, contract-fixed gas,
   // exactOutputSingle((tokenIn, tokenOut, fee, recipient=vault, amountOut, amountInMaximum, 0)).
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...SWAP_MPC_ROUTING,
@@ -81,7 +109,7 @@ export async function startSwap(
     txParams: {
       to: before.uniswapRouter,
       chainId: before.evmChainId,
-      nonce: options.evmNonce,
+      nonce: beforeFlush.vaultEvmNonce,
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -108,19 +136,7 @@ export async function startSwap(
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  const result = await context.vault.callTx.startSwap(
-    options.evmNonce,
-    SIGNET_DEFAULT_KEY_VERSION,
-    {
-      tokenIn,
-      tokenOut,
-      fee: options.fee,
-      amountOut: options.amountOut,
-      amountInMaximum: options.amountInMaximum,
-    },
-    coin,
-  );
-  console.log(`swap finalized in tx ${result.public.txId}`);
+  await flushVaultRequests(context, FlushKind.Swaps, [vaultQueueKey(context, coin.nonce)]);
 
   const after = await readVaultLedger(
     context.providers.publicDataProvider,

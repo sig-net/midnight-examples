@@ -2,7 +2,6 @@
 // signature, broadcast, completeSupply.
 import type { RequestIdHex } from "@sig-net/midnight";
 import { VAULT_SUPPLY_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
 import type { VaultSession } from "../vault-session.ts";
 import { ensureStataApproved } from "./approve-stata.ts";
@@ -38,8 +37,9 @@ export async function runSupplyRoundTrip(
 
   await ensureStataApproved(session);
 
-  const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await startSupply(context, { amount: opts.amount, evmNonce });
+  // No evmNonce: startSupply queues, and `flush` (inside startSupply) assigns the shared vault
+  // EVM account's nonce from the contract's own counter.
+  const requestId = await startSupply(context, { amount: opts.amount });
 
   // The deposit tx is signed by the VAULT's account (it holds the pooled funds). tolerateRevert:
   // an on-chain revert is a valid outcome the MPC attests as a failure and completeSupply settles

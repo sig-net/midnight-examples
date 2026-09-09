@@ -2,7 +2,6 @@
 // completeRedeem. No approve is needed: the vault redeems its OWN shares (owner = vault).
 import type { RequestIdHex } from "@sig-net/midnight";
 import { VAULT_REDEEM_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
@@ -34,8 +33,9 @@ export async function runRedeemRoundTrip(
 ): Promise<{ requestId: RequestIdHex; assets: bigint; refunded: boolean }> {
   const context = await session.vaultContext();
 
-  const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await startRedeem(context, { shares: opts.shares, evmNonce });
+  // No evmNonce: startRedeem queues, and `flush` (inside startRedeem) assigns the shared vault
+  // EVM account's nonce from the contract's own counter.
+  const requestId = await startRedeem(context, { shares: opts.shares });
 
   const signed = await pollSignatureResponse(context, {
     requestId,

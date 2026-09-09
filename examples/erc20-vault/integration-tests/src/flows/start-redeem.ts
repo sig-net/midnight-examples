@@ -1,6 +1,10 @@
-// `startRedeem`: record a stataToken.redeem(shares, vault, vault) SignBidirectionalEvent on the
-// vault's REDEEM ledger map, surrendering `shares` of the stataUSDC vault coin (burned), to be
-// signed with the VAULT's account and broadcast. The settle side lives in complete-redeem.ts.
+// `startRedeem`: surrender `shares` of the stataUSDC vault coin (burned) and QUEUE a
+// stataToken.redeem(shares, vault, vault) request; `flush` then records it on the vault's
+// REDEEM ledger map, to be signed with the VAULT's account and broadcast. The settle side
+// lives in complete-redeem.ts.
+//
+// The circuit no longer takes an EVM nonce: the shared vault EVM account's nonces come from
+// the contract's own `vaultEvmNonce` counter at flush time. See ./flush.ts.
 import {
   calculateRequestId,
   evmAddressAbiWord,
@@ -15,6 +19,7 @@ import {
   TxParamType,
 } from "@sig-net/midnight";
 import {
+  pureCircuits,
   readVaultLedger,
   STATA_USDC,
   VAULT_PATH_BYTES,
@@ -24,19 +29,19 @@ import {
 import { REDEEM_MPC_ROUTING, STATA_REDEEM_SELECTOR } from "../evm-stata.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
+import { FlushKind, flushVaultRequests, vaultQueueKey } from "./flush.ts";
 
 /** Options for {@link startRedeem}. */
 export interface StartRedeemOptions {
   readonly shares: bigint;
-  readonly evmNonce: bigint;
 }
 
 /**
- * Record the redeem request (stataToken.redeem(shares, vault, vault)) and return its id. The
- * burned coin is the stataUSDC vault token of exactly `shares`.
+ * Queue the redeem request (stataToken.redeem(shares, vault, vault)), flush it, and return the
+ * id the flush minted. The burned coin is the stataUSDC vault token of exactly `shares`.
  *
  * @param context - The flow context.
- * @param options - The redeem parameters (shares, evmNonce).
+ * @param options - The redeem parameters (shares).
  * @returns The recorded redeem request id.
  */
 export async function startRedeem(
@@ -62,9 +67,25 @@ export async function startRedeem(
     value: options.shares,
   };
 
+  const result = await context.vault.callTx.startRedeem(
+    SIGNET_DEFAULT_KEY_VERSION,
+    options.shares,
+    coin,
+  );
+  console.log(`redeem queued in tx ${result.public.txId}`);
+
+  // The EVM nonce is read BETWEEN the queue and the drain, because it is the
+  // contract's to assign: this flush drains one entry in slot 0, so it is handed
+  // exactly this value. The request nonce is not read at all — every
+  // vault-signed request carries the constant vaultSignedRequestNonce().
+  const beforeFlush = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...REDEEM_MPC_ROUTING,
@@ -73,7 +94,7 @@ export async function startRedeem(
     txParams: {
       to: before.stataToken,
       chainId: before.evmChainId,
-      nonce: options.evmNonce,
+      nonce: beforeFlush.vaultEvmNonce,
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -96,13 +117,7 @@ export async function startRedeem(
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
 
-  const result = await context.vault.callTx.startRedeem(
-    options.evmNonce,
-    SIGNET_DEFAULT_KEY_VERSION,
-    options.shares,
-    coin,
-  );
-  console.log(`redeem finalized in tx ${result.public.txId}`);
+  await flushVaultRequests(context, FlushKind.Redeems, [vaultQueueKey(context, coin.nonce)]);
 
   const after = await readVaultLedger(
     context.providers.publicDataProvider,

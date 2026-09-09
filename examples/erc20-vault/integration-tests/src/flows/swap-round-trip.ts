@@ -2,7 +2,6 @@
 // signature, broadcast, completeSwap.
 import type { RequestIdHex } from "@sig-net/midnight";
 import { VAULT_SWAP_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
 import { quoteExactOutputSingle } from "../evm-swap.ts";
 import type { VaultSession } from "../vault-session.ts";
@@ -64,13 +63,13 @@ export async function runSwapRoundTrip(
     `quote: ~${String(quoted)} ${context.erc20Address} -> ${String(opts.amountOut)} ${opts.tokenOut} (max ${String(amountInMaximum)})`,
   );
 
-  const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
+  // No evmNonce: startSwap queues, and `flush` (inside startSwap) assigns the shared vault
+  // EVM account's nonce from the contract's own counter.
   const requestId = await startSwap(context, {
     tokenOut: opts.tokenOut,
     fee: opts.fee,
     amountOut: opts.amountOut,
     amountInMaximum,
-    evmNonce,
   });
 
   // The swap tx is signed by the VAULT's account (it holds the pooled funds). tolerateRevert:

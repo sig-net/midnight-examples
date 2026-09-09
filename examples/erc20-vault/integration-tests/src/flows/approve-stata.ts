@@ -21,15 +21,12 @@ import {
 import {
   AAVE_USDC,
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
   STATA_USDC,
   vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
-  type ContractReadMethod,
-  getTransactionNonce,
-  logSkip,
-} from "@sig-net/midnight-examples-test-harness";
+import { type ContractReadMethod, logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-stata.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
@@ -43,11 +40,14 @@ const MINUTE = 60_000;
 /**
  * Record the approveStata request and return its id.
  *
+ * The vault EVM account's nonce is NOT an argument: approveStata signs from the same shared
+ * vault account as the queued flows, so the contract's own `vaultEvmNonce` counter assigns it
+ * (see ./flush.ts). It is read here only to recompute the record off-chain.
+ *
  * @param context - The flow context.
- * @param evmNonce - The vault EVM account nonce for the approve transaction.
  * @returns The recorded request id.
  */
-export async function approveStata(context: VaultContext, evmNonce: bigint): Promise<RequestIdHex> {
+export async function approveStata(context: VaultContext): Promise<RequestIdHex> {
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
@@ -65,7 +65,7 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
   // "vault"), the same 2-word map + bool schema as a transfer.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: asciiPadded("vault", PATH_BYTES),
     ...VAULT_MPC_ROUTING,
@@ -74,7 +74,7 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
     txParams: {
       to: evmAddressBytes(AAVE_USDC),
       chainId: before.evmChainId,
-      nonce: evmNonce,
+      nonce: before.vaultEvmNonce,
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -92,7 +92,7 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
-  const result = await context.vault.callTx.approveStata(evmNonce, SIGNET_DEFAULT_KEY_VERSION);
+  const result = await context.vault.callTx.approveStata(SIGNET_DEFAULT_KEY_VERSION);
   console.log(`approveStata finalized in tx ${result.public.txId}`);
 
   const after = await readVaultLedger(
@@ -129,8 +129,7 @@ export async function ensureStataApproved(session: VaultSession): Promise<void> 
     return;
   }
 
-  const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await approveStata(context, evmNonce);
+  const requestId = await approveStata(context);
   const signed = await pollSignatureResponse(context, {
     requestId,
     intervalMs: 1000,

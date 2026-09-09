@@ -35,7 +35,6 @@ import {
   banner,
   getErc20Balance,
   getEthBalance,
-  getTransactionNonce,
   logSkip,
   requireEnv as requireEnvOf,
 } from "@sig-net/midnight-examples-test-harness";
@@ -324,25 +323,21 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
               context.providers.publicDataProvider,
               context.vaultContractAddress,
             )
-          ).signetRequestNonce;
+          ).vaultEvmNonce;
         const nonceBefore = await readNonce();
 
         // The `startWithdraw` circuit demands a surrendered coin of the full amount;
         // A's wallet holds none of the color, so balancing cannot fund it and
         // the attempt dies client-side — the tx is never submitted.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
         await expect(
           startWithdraw(context, {
             amount: WITHDRAW_AMOUNT,
             destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-            evmNonce,
           }),
         ).rejects.toThrow(/[Ii]nsufficient funds/);
 
-        // Client-side death leaves no trace: the request counter is unchanged.
+        // Client-side death leaves no trace: the vault EVM nonce, which a flush
+        // consumes one of per recorded request, is unchanged.
         expect(
           await readNonce(),
           "the failed withdraw must not record a request on the ledger",
@@ -376,17 +371,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const context = await bearerSession.vaultContext();
 
         // The withdraw tx sender is the VAULT's derived EVM account; its next
-        // nonce comes from the chain. The destination is the user's derived
-        // account, so the suite's funds cycle.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
+        // nonce now comes from the CONTRACT's vaultEvmNonce counter, assigned by
+        // the flush inside startWithdraw, not fetched from the chain. The
+        // destination is the user's derived account, so the suite's funds cycle.
         withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-          evmNonce,
         });
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
 

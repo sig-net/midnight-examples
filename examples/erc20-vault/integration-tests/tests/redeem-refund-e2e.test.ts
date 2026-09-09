@@ -56,8 +56,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave redeem-ref
       expect(balanceBefore).toBeGreaterThanOrEqual(supplyResult.shares);
 
       // Drain the vault's stataUSDC EVM balance to the user, so the wrapper's redeem (burning
-      // the vault's shares) reverts. runRedeemRoundTrip fetches the vault nonce AFTER this, so
-      // the signed redeem is the account's next expected tx.
+      // the vault's shares) reverts. The drain rewinds the vault account's nonce afterwards, so
+      // the redeem still signs the nonce its allocator slot owns.
       await drainVaultErc20(env, context.evmUserAddress, STATA_USDC);
 
       // The redeem's stataUSDC.redeem reverts on-chain -> the MPC attests failure -> the settle

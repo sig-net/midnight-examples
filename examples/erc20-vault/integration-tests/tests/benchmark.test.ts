@@ -300,15 +300,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       async () => {
         const context = await session.vaultContext();
         // The approve tx is sent FROM the vault's derived account; its next
-        // nonce comes from the chain, fetched outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // nonce comes from the contract's own vaultEvmNonce counter, not the chain.
 
         recorder.setLeg(BenchmarkLeg.ApproveRouter);
         const stop = startTimer();
-        approveRequestId = await approveRouter(context, evmNonce);
+        approveRequestId = await approveRouter(context);
         const ms = stop();
         recorder.clearLeg();
         timings.approve.approveRouter = ms;
@@ -548,12 +544,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const context = await session.vaultContext();
         // The withdraw tx sender is the VAULT's derived EVM account; the
-        // destination is the user's derived account, so the funds cycle. The
-        // nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // destination is the user's derived account, so the funds cycle. Its
+        // nonce comes from the contract's vaultEvmNonce counter, not the chain.
+        // NOTE: this leg now times startWithdraw's QUEUE **and** the flush that
+        // mints the request id — two Midnight transactions, not one.
         const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
 
         recorder.setLeg(BenchmarkLeg.WithdrawStart);
@@ -561,7 +555,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress,
-          evmNonce,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -748,11 +741,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const context = await session.vaultContext();
         // The swap tx is sent FROM the vault's derived account (it holds the
-        // pooled funds); the nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // pooled funds); its nonce comes from the contract's vaultEvmNonce
+        // counter. This leg times the queue AND the flush.
 
         recorder.setLeg(BenchmarkLeg.SwapStart);
         const stop = startTimer();
@@ -761,7 +751,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           fee: SWAP_FEE,
           amountOut: SWAP_AMOUNT_OUT,
           amountInMaximum: swapAmountInMaximum,
-          evmNonce,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -942,14 +931,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // The approve tx is sent FROM the vault's derived account. Like
         // approveRouter it is repeatable (a repeat re-sets the same
         // allowance), so it always runs and always records a prove.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
         recorder.setLeg(BenchmarkLeg.ApproveStata);
         const stop = startTimer();
-        approveStataRequestId = await approveStata(context, evmNonce);
+        approveStataRequestId = await approveStata(context);
         const ms = stop();
         recorder.clearLeg();
         timings.approveStata.approveStata = ms;
@@ -1020,15 +1004,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const context = await session.vaultContext();
         // The deposit tx is sent FROM the vault's derived account (it holds
-        // the pooled underlying), and the nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // the pooled underlying); its nonce comes from the contract's
+        // vaultEvmNonce counter. This leg times the queue AND the flush.
 
         recorder.setLeg(BenchmarkLeg.SupplyStart);
         const stop = startTimer();
-        supplyRequestId = await startSupply(context, { amount: SUPPLY_AMOUNT, evmNonce });
+        supplyRequestId = await startSupply(context, { amount: SUPPLY_AMOUNT });
         const ms = stop();
         recorder.clearLeg();
         timings.supply.startSupply = ms;
@@ -1202,16 +1183,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(shares, "no stataUSDC shares to redeem (run the supply sequence)").toBeGreaterThan(
           0n,
         );
-        // The redeem tx is sent FROM the vault's derived account, and the
-        // nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // The redeem tx is sent FROM the vault's derived account; its nonce
+        // comes from the contract's vaultEvmNonce counter. This leg times the
+        // queue AND the flush.
 
         recorder.setLeg(BenchmarkLeg.RedeemStart);
         const stop = startTimer();
-        redeemRequestId = await startRedeem(context, { shares, evmNonce });
+        redeemRequestId = await startRedeem(context, { shares });
         const ms = stop();
         recorder.clearLeg();
         timings.redeem.startRedeem = ms;
@@ -1424,18 +1402,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
 
         const context = await session.vaultContext();
-        // Nonce fetched AFTER the drain mined (the drain consumed one).
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
+        // No chain nonce fetch: the contract's vaultEvmNonce counter assigns it.
 
         recorder.setLeg(BenchmarkLeg.RefundStartWithdraw);
         const stop = startTimer();
         refundWithdrawRequestId = await startWithdraw(context, {
           amount: REFUND_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-          evmNonce,
         });
         const ms = stop();
         recorder.clearLeg();
