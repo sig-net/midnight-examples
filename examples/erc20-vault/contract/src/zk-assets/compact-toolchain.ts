@@ -15,7 +15,7 @@ import { join } from "node:path";
  * the workspace's toolchain pin, which moves together with the workflows'
  * launcher and compiler URLs and the README's prerequisites table.
  */
-export const COMPACT_COMPILER_VERSION = "0.33.0-rc.2";
+export const COMPACT_COMPILER_VERSION = "0.34.0";
 
 /** The launcher's own release, named in the fix printed when the compiler is missing. */
 export const COMPACT_LAUNCHER_VERSION = "compact-v0.5.1";
@@ -58,8 +58,8 @@ export function locatePinnedCompiler(env: Record<string, string | undefined>): s
 /** How to install the pinned release, printed by every toolchain failure. */
 export const INSTALL_HINT =
   `install the compact launcher ${COMPACT_LAUNCHER_VERSION} and run ` +
-  `\`compact update ${COMPACT_COMPILER_VERSION}\`. The release is a prerelease the launcher's ` +
-  "channel may not list: download it from the Compact repository's release page into " +
+  `\`compact update ${COMPACT_COMPILER_VERSION}\`. If the launcher's channel does not list ` +
+  "that release, download it from the Compact repository's release page into " +
   `<compact dir>/versions/${COMPACT_COMPILER_VERSION}/<arch>/ and rerun \`compact update\`.`;
 
 /**
@@ -119,7 +119,7 @@ export function runCompactCompile(
 }
 
 /**
- * The release string the pinned compiler reports, e.g. `0.33.0`.
+ * The release string the pinned compiler reports, e.g. `0.34.0`.
  *
  * @param env - The environment the launcher runs under.
  * @returns The trimmed output of `compact compile +<pin> --version`.

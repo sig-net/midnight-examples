@@ -25,7 +25,7 @@ Run everything from the repo root, in this order:
 ```sh
 corepack enable                # yarn 4 via the packageManager field
 yarn install                   # NEVER from inside a member package
-compact update 0.33.0-rc.2     # the ledger-9 rc toolchain, see the toolchain note
+compact update 0.34.0          # the pinned ledger-9 toolchain, see the toolchain note
 yarn compile                   # run before the e2e
 docker compose up -d           # node :9944, indexer :8088, proof server :6300, anvil :8545
 yarn test:erc20-vault:e2e > e2e-run.log 2>&1 &        # BACKGROUND it, watch the log
@@ -38,15 +38,14 @@ NOT run `yarn compile:erc20-vault:zk` separately first: the setup recompiles
 regardless and you pay keygen twice. Expect the whole first invocation to take
 ~20–25 minutes (keygen + fresh deploys + the flow tests).
 
-**Toolchain note:** the contracts declare `pragma language_version >= 0.25`,
-which needs the ledger-9 rc compiler (0.33.0-rc.2, part of the matched set
+**Toolchain note:** the pinned compiler is 0.34.0 (part of the matched set
 pinned in `docker-compose.yaml`'s image-tag comment). A bare `compact update`
-installs latest STABLE (0.31.1, language 0.23), and DOWNGRADES the default if
-an rc is already active, after which the compile fails with
-`language version 0.23.0 mismatch`. If `compact` itself is missing, or the
-launcher's channel refuses the rc version, use the installer + direct-download
-recipe in `.github/workflows/example-test.yaml` (the `Install / update the
-compact toolchain` step).
+tracks the channel's latest stable and drifts from that pin the moment a newer
+release lands, and a different compiler version silently changes the
+`managed/` output the tests and deploys are built on. If `compact` itself is
+missing, or the launcher's channel refuses the version, use the installer +
+direct-download recipe in `.github/workflows/example-test.yaml` (the `Install
+the compact toolchain` step).
 
 One value MUST be in `.env` before the stack comes up: `SEPOLIA_FORK_RPC_URL`
 (any Sepolia RPC). The compose anvil forks Sepolia from it so the real Uniswap V3
@@ -118,7 +117,7 @@ kept contracts.
   root with dust-registered NIGHT (on the local chain root is the genesis
   mint wallet, so this is fully automatic, and on a deployed network the
   first run stops printing root's NIGHT address to faucet-fund). Roles are
-  provisioned by runtime NIGHT funding: on the node 2.0.0-rc.4 line a runtime
+  provisioned by runtime NIGHT funding: on the node 2.1.0-beta.1 line a runtime
   NIGHT transfer or registration does not brick a wallet's dust spend proofs
   (error 170). Receive-only test wallets (`…42`, `…43`) need no funding at all.
 - Every test from the first signature poll onward needs the **fakenet MPC
@@ -277,7 +276,7 @@ raw traced EVM output from it, so a poll that times out with
   a flow, rerun (dust accrues on its own).
 - **`1010: Invalid Transaction: Custom error: 170`** (`InvalidDustSpendProof`)
   on every submit, from every wallet: the "dust-poison" failure mode a
-  runtime NIGHT movement can cause. It does not reproduce on the 2.0.0-rc.4
+  runtime NIGHT movement can cause. It does not reproduce on the 2.1.0-beta.1
   node line, where the setup's root-funding transfers are routine. If it does
   surface, reset the stack
   (`docker compose --profile fakenet down && docker compose up -d`),

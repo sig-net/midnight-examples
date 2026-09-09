@@ -2,17 +2,20 @@
 # indexer + proof server), a local EVM dev chain, and the fakenet MPC
 # responder. Start with `docker compose up -d`.
 #
-# The three midnight image tags are a MATCHED SET on the ledger-9 line: the
-# Midnight 2.0 stagenet-beta (Q2) RC3 stack, paired with the npm
-# @midnightntwrk/ledger-v9 version the workspace resolves. Never bump one
-# alone; move the set together with the npm stack. The indexer tag string
-# still reads `l91r3-n2r3` (its build provenance: ledger-v9 1.0.0-rc.3 +
-# node 2.0.0-rc.3); stagenet pairs that same indexer build with node
-# 2.0.0-rc.4 and proof-server 9.0.0-rc.5_experimental, so we do too.
+# The three midnight image tags are a MATCHED SET on the ledger-9 line,
+# paired with the npm @midnightntwrk/ledger-v9 version the workspace
+# resolves (1.0.0-rc.4, the ledger-9.1.0.0-rc.4 tag). Never bump one alone;
+# move the set together with the npm stack. Node 2.1.0-beta.1 pins that
+# ledger tag. The ledger tag declares proof-server 9.0.0-rc.7, which Docker
+# Hub carries only as the arch-suffixed `9.0.0-rc.7-amd64` / `-arm64` tags,
+# so the multi-arch 9.0.0-rc.6 (the build cut the day before that tag, with
+# zkir-v3 already the default) is what compose pulls. Indexer 4.4.0-rc.2 is
+# the newest 4.4.0 build published to Docker Hub; 4.4.0-rc.3 ships on
+# ghcr.io only and rejects anonymous pulls.
 services:
   proof-server:
     container_name: 'midnight-proof-server'
-    image: 'midnightntwrk/proof-server:9.0.0-rc.5_experimental'
+    image: 'midnightntwrk/proof-server:9.0.0-rc.6'
     command: ['midnight-proof-server -v']
     # Proving is memory-hungry and a long e2e run has killed this server outright. Bring it back
     # on its own: paired with the prove retry in `createCrossContractProofServerProvider`, a death
@@ -24,10 +27,10 @@ services:
       RUST_BACKTRACE: 'full'
 
   indexer:
-    # Pre-alpha tag on purpose: the first published builds that decode
-    # MIP-0002 `Misc` events — no stable ledger-9 indexer release exists yet.
+    # The 4.4.0 line decodes the MIP-0002 `Misc` events the signet contract
+    # emits (an indexer off the 4.3.x mainnet line drops them).
     container_name: 'midnight-indexer'
-    image: 'midnightntwrk/indexer-standalone:4.4.0-pre-alpha.16-l91r3-n2r3-bridge-and-events-epics-contract-zswap-16c656df'
+    image: 'midnightntwrk/indexer-standalone:4.4.0-rc.2'
     ports:
       - '127.0.0.1:8088:8088'
     # Committed dev-only values (local defaults, nothing sensitive):
@@ -49,7 +52,7 @@ services:
 
   node:
     container_name: 'midnight-node'
-    image: 'midnightntwrk/midnight-node:2.0.0-rc.4'
+    image: 'midnightntwrk/midnight-node:2.1.0-beta.1'
     ports:
       - '127.0.0.1:9944:9944'
     environment:
@@ -101,7 +104,7 @@ services:
     # service. Manual equivalent (and the FAKENET_MANAGED=0 path):
     #   docker compose --profile fakenet up -d --force-recreate fakenet
     container_name: 'fakenet-responder'
-    image: 'ghcr.io/sig-net/fakenet:0.18.0'
+    image: 'ghcr.io/sig-net/fakenet:0.19.0'
     profiles: ['fakenet']
     depends_on:
       indexer:

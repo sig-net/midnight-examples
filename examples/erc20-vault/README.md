@@ -121,9 +121,9 @@ The contract package's dependency list is the minimal integration surface:
 ```jsonc
 // contract/package.json
 "dependencies": {
-  "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-  "@sig-net/midnight": "0.21.0-rc.2",
-  "@sig-net/midnight-contract": "0.21.0-rc.2"
+  "@midnight-ntwrk/compact-runtime": "0.19.0",
+  "@sig-net/midnight": "0.21.0-rc.7",
+  "@sig-net/midnight-contract": "0.21.0-rc.7"
 }
 ```
 
@@ -781,7 +781,7 @@ contracts.
 corepack enable
 yarn install
 cp .env.example .env                # then set SEPOLIA_FORK_RPC_URL to any Sepolia RPC
-compact update 0.33.0-rc.2          # Exact version required.
+compact update 0.34.0               # Exact version required.
 yarn compile:erc20-vault:zk         # ~10 min zk key generation, background it
 docker compose up -d                # node, indexer, proof server, anvil forking
                                     # Sepolia (NOT the fakenet responder: it is
@@ -985,7 +985,7 @@ the callee's tree without the toolchain, `--vault-only` skips the copy. The run
 ends by printing each tree's `compiler/contract-manifest.json` sha256.
 
 Point [`@midnight-ntwrk/midnight-js-fetch-zk-config-provider`](https://www.npmjs.com/package/@midnight-ntwrk/midnight-js-fetch-zk-config-provider)
-at `5.0.0-beta.6`, the version matching the rest of this stack, at the origin
+at `5.0.0-beta.7`, the version matching the rest of this stack, at the origin
 (`/` for the vault and `/signet` for the callee in the layout above). It reads
 the same `keys/<id>.prover`, `keys/<id>.verifier`, `zkir/<id>.bzkir` and
 `compiler/contract-manifest.json` paths the Node provider does. Pass the

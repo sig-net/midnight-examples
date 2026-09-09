@@ -103,7 +103,7 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
         const config = getMidnightNodeConfig(env);
         const keys = deriveAccountKeys(resolveUserSeed(env), config.networkId);
         const facade = await initialiseWalletFacade(keys, config);
-        await facade.start(keys.shieldedSecretKeys, keys.dustSecretKey);
+        await facade.start(keys.seeds);
         await facade.waitForSyncedState();
         sharedWallet = { facade, keys };
       }

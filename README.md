@@ -52,9 +52,9 @@ The quickest way to get going with these examples is to get an end to end integr
    ```sh
    corepack enable
    yarn install
-   compact update 0.33.0-rc.2   # Exact version required.
-                                # `compact update` installs/downgrades
-                                # to stable.
+   compact update 0.34.0        # Exact version required: a bare
+                                # `compact update` tracks the channel's
+                                # latest stable and drifts from this pin.
    yarn compile
    ```
 3. Fork Sepolia on the local EVM. The e2e suites use the **real** Sepolia Uniswap V3 deployment and real USDC (dealt to the derived accounts with anvil cheatcodes), so the anvil service must fork Sepolia. Copy the env template and set a Sepolia RPC:
@@ -160,7 +160,7 @@ yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts  # one spec file (any test
 | ------- | ------| ------  |----------- |
 | Node | ≥ 20 (22+ recommended) | `node --version` | [nodejs.org](https://nodejs.org) or your version manager (nvm, fnm, …) |
 | Yarn 4 (via Corepack) | 4.x | `corepack enable && yarn --version` | Corepack ships with Node. The repo's `packageManager` field pins the Yarn version |
-| Compact toolchain | compiler 0.33.0-rc.2, invoked with `--feature-zkir-v3` (see note) | `compact compile --version` → `0.33.0` | Install the `compact` launcher per [Midnight's docs](https://docs.midnight.network/), then `compact update 0.33.0-rc.2` (compiler builds live at [LFDT-Minokawa/compact releases](https://github.com/LFDT-Minokawa/compact/releases)). If the launcher refuses the rc version, use the direct-download recipe in [.github/workflows/example-test.yaml](.github/workflows/example-test.yaml) |
+| Compact toolchain | compiler 0.34.0, invoked with `--feature-zkir-v3` (see note) | `compact compile --version` → `0.34.0` | Install the `compact` launcher per [Midnight's docs](https://docs.midnight.network/), then `compact update 0.34.0` (compiler builds live at [LFDT-Minokawa/compact releases](https://github.com/LFDT-Minokawa/compact/releases)). [.github/workflows/example-test.yaml](.github/workflows/example-test.yaml) pins the same build by URL and checksum |
 | A docker environment | any recent engine | `docker --version` | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS/Windows) or your distro's engine, with **≥ 16 GB RAM allocated** (see note) |
 | Docker Compose v2 | ≥ 2.x | `docker compose version` | Included with Docker Desktop, plugin package on Linux |
 
