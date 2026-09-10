@@ -42,7 +42,7 @@ const FILES: Record<string, Uint8Array> = {
  */
 function manifestJson(
   files: Record<string, Uint8Array>,
-  versions = { compiler: "0.33.0", language: "0.25.0", runtime: "0.18.0-rc.1" },
+  versions = { compiler: "0.34.0", language: "0.26.0", runtime: "0.19.0" },
 ): string {
   const directories: Record<string, Record<string, unknown>> = {};
   for (const [relativePath, bytes] of Object.entries(files)) {
@@ -167,11 +167,11 @@ describe("explainBuildIncompatibility", () => {
 
   it("names every toolchain version that differs", () => {
     const regenerated = parseZkArtifactManifest(
-      manifestJson(FILES, { compiler: "0.34.0", language: "0.25.0", runtime: "0.19.0" }),
+      manifestJson(FILES, { compiler: "0.35.0", language: "0.26.0", runtime: "0.20.0" }),
     );
     expect(explainBuildIncompatibility(MANIFEST, regenerated)).toEqual([
-      "compiler-version: the package was built with 0.33.0, this compile used 0.34.0",
-      "runtime-version: the package was built with 0.18.0-rc.1, this compile used 0.19.0",
+      "compiler-version: the package was built with 0.34.0, this compile used 0.35.0",
+      "runtime-version: the package was built with 0.19.0, this compile used 0.20.0",
     ]);
   });
 

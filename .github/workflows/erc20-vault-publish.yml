@@ -91,26 +91,26 @@ jobs:
             echo "85e74a53ae4a67b31fa4d854f3b6ffb4c29f7c53e3372c5008b6a4729a8b4a73  /tmp/compact-installer.sh" | sha256sum -c
             sh /tmp/compact-installer.sh
           fi
-          # compactc 0.33.0-rc.2 is the PINNED compiler, part of the ledger-9
-          # MATCHED SET. It is a prerelease published on the toolchain's LF
-          # home (LFDT-Minokawa/compact), which the launcher's channel does not
-          # list: download it directly and let the launcher adopt it. A bare
+          # compactc 0.34.0 is the PINNED compiler, part of the ledger-9
+          # MATCHED SET. It is fetched by exact URL from the toolchain's home
+          # (LFDT-Minokawa/compact) and verified by checksum, so the build
+          # depends only on this pin, then adopted by the launcher. A bare
           # `compact update` would install latest stable and break the pin, so
           # it is never run here.
-          RC_DIR="$HOME/.compact/versions/0.33.0-rc.2/x86_64-unknown-linux-musl"
-          if [ ! -x "$RC_DIR/compactc" ]; then
-            mkdir -p "$RC_DIR"
-            curl -fsSL --retry 4 -o /tmp/compactc-rc.zip \
-              https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.33.0-rc.2/compactc_v0.33.0-rc.2_x86_64-unknown-linux-musl.zip
-            echo "3055ab92bbc8d5bb0d6282b661b83761d2a0de2ee37e21cf7107e25aaf2a9aad  /tmp/compactc-rc.zip" | sha256sum -c
-            unzip -qo /tmp/compactc-rc.zip -d "$RC_DIR"
-            chmod +x "$RC_DIR"/*
+          COMPACTC_DIR="$HOME/.compact/versions/0.34.0/x86_64-unknown-linux-musl"
+          if [ ! -x "$COMPACTC_DIR/compactc" ]; then
+            mkdir -p "$COMPACTC_DIR"
+            curl -fsSL --retry 4 -o /tmp/compactc.zip \
+              https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.34.0/compactc_v0.34.0_x86_64-unknown-linux-musl.zip
+            echo "775ccddf5a71399835329bbf7471ba5a8c54fcc825d372c75e19ba7042069584  /tmp/compactc.zip" | sha256sum -c
+            unzip -qo /tmp/compactc.zip -d "$COMPACTC_DIR"
+            chmod +x "$COMPACTC_DIR"/*
           fi
           # `compact update <ver>` adopts an already-on-disk version without
           # downloading. If the launcher refuses (version not in its channel),
           # wire the default symlinks it would have created.
           mkdir -p "$HOME/.compact/bin"
-          compact update 0.33.0-rc.2 || ln -sfn "$RC_DIR"/* "$HOME/.compact/bin/"
+          compact update 0.34.0 || ln -sfn "$COMPACTC_DIR"/* "$HOME/.compact/bin/"
           compact compile --version
       - name: Install dependencies (frozen, from the committed yarn.lock)
         run: yarn install --immutable

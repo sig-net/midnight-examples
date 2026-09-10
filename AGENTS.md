@@ -130,7 +130,7 @@ exception for that specific case.
   (`-rc`/`-beta`/`-alpha`/`-next`/`-canary`), STOP and ask the user before
   adopting it. Before you install, confirm the release is not deprecated and
   `yarn npm audit` reports no new advisory. The compact toolchain is likewise
-  pinned: install it with `compact update 0.33.0-rc.2` (the exact version named
+  pinned: install it with `compact update 0.34.0` (the exact version named
   in the README's prerequisites), and CI installs exactly that version. The
   toolchain pin lives in several places that move TOGETHER, in EVERY workflow
   that installs the toolchain (`example-test.yaml`, `erc20-vault-publish.yml`
