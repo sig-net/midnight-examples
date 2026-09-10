@@ -4,18 +4,19 @@
 #
 # The three midnight image tags are a MATCHED SET on the ledger-9 line,
 # paired with the npm @midnightntwrk/ledger-v9 version the workspace
-# resolves (1.0.0-rc.4, the ledger-9.1.0.0-rc.4 tag). Never bump one alone;
-# move the set together with the npm stack. Node 2.1.0-beta.1 pins that
-# ledger tag. The ledger tag declares proof-server 9.0.0-rc.7, which Docker
-# Hub carries only as the arch-suffixed `9.0.0-rc.7-amd64` / `-arm64` tags,
-# so the multi-arch 9.0.0-rc.6 (the build cut the day before that tag, with
-# zkir-v3 already the default) is what compose pulls. Indexer 4.4.0-rc.2 is
-# the newest 4.4.0 build published to Docker Hub; 4.4.0-rc.3 ships on
-# ghcr.io only and rejects anonymous pulls.
+# resolves (1.0.0-rc.3, the ledger-9.1.0.0-rc.3 crates). Never bump one
+# alone; move the set together with the npm stack. Node 2.0.0-rc.4 and
+# proof-server 9.0.0-rc.5_experimental are built on those crates, and so is
+# indexer 4.4.0-rc.2 (the newest 4.4.0 build on Docker Hub): the indexer
+# re-applies every block with its own ledger crate, so a node on a newer
+# ledger tag (2.1.0-beta.1 runs 9.1.0.0-rc.4, whose dust spend circuit
+# differs) makes it exit on the first dust spend. Every indexer built on
+# rc.4 (4.4.0-rc.5 onwards) ships on ghcr.io only and rejects anonymous
+# pulls, which is why this stack stays on the rc.3 crates.
 services:
   proof-server:
     container_name: 'midnight-proof-server'
-    image: 'midnightntwrk/proof-server:9.0.0-rc.6'
+    image: 'midnightntwrk/proof-server:9.0.0-rc.5_experimental'
     command: ['midnight-proof-server -v']
     # Proving is memory-hungry and a long e2e run has killed this server outright. Bring it back
     # on its own: paired with the prove retry in `createCrossContractProofServerProvider`, a death
@@ -52,7 +53,7 @@ services:
 
   node:
     container_name: 'midnight-node'
-    image: 'midnightntwrk/midnight-node:2.1.0-beta.1'
+    image: 'midnightntwrk/midnight-node:2.0.0-rc.4'
     ports:
       - '127.0.0.1:9944:9944'
     environment:
@@ -104,7 +105,7 @@ services:
     # service. Manual equivalent (and the FAKENET_MANAGED=0 path):
     #   docker compose --profile fakenet up -d --force-recreate fakenet
     container_name: 'fakenet-responder'
-    image: 'ghcr.io/sig-net/fakenet:0.19.0'
+    image: 'ghcr.io/sig-net/fakenet:0.20.0'
     profiles: ['fakenet']
     depends_on:
       indexer:

@@ -21,7 +21,7 @@ const RECIPE_TTL_MS = 30 * 60 * 1000;
  * its next sync — pair with {@link waitForFacadeState} on the receiver.
  *
  * @param facade - A started (and synced) wallet facade that funds, pays for and submits the transfer.
- * @param keys - The key material of the same wallet, for signing.
+ * @param keys - The key material of the same wallet, for balancing and signing.
  * @param outputs - The transfer outputs (shielded and/or unshielded), each naming a token type, receiver address and amount.
  * @returns The submitted transaction's identifier.
  * @throws {Error} If the wallet cannot fund the outputs or fees, proving fails, or the node rejects the transaction.
@@ -31,9 +31,11 @@ export async function submitTransferTransaction(
   keys: AccountKeys,
   outputs: CombinedTokenTransfer[],
 ): Promise<TransactionIdentifier> {
-  const recipe = await facade.transferTransaction(outputs, {
-    ttl: new Date(Date.now() + RECIPE_TTL_MS),
-  });
+  const recipe = await facade.transferTransaction(
+    outputs,
+    { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
+    { ttl: new Date(Date.now() + RECIPE_TTL_MS) },
+  );
   const signed = await facade.signRecipe(recipe, keys.unshieldedKeystore.signDataAsync);
   const finalized = await facade.finalizeRecipe(signed);
   return facade.submitTransaction(finalized);

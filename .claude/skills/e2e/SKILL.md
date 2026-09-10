@@ -117,7 +117,7 @@ kept contracts.
   root with dust-registered NIGHT (on the local chain root is the genesis
   mint wallet, so this is fully automatic, and on a deployed network the
   first run stops printing root's NIGHT address to faucet-fund). Roles are
-  provisioned by runtime NIGHT funding: on the node 2.1.0-beta.1 line a runtime
+  provisioned by runtime NIGHT funding: on the node 2.0.0-rc.4 line a runtime
   NIGHT transfer or registration does not brick a wallet's dust spend proofs
   (error 170). Receive-only test wallets (`…42`, `…43`) need no funding at all.
 - Every test from the first signature poll onward needs the **fakenet MPC
@@ -276,7 +276,7 @@ raw traced EVM output from it, so a poll that times out with
   a flow, rerun (dust accrues on its own).
 - **`1010: Invalid Transaction: Custom error: 170`** (`InvalidDustSpendProof`)
   on every submit, from every wallet: the "dust-poison" failure mode a
-  runtime NIGHT movement can cause. It does not reproduce on the 2.1.0-beta.1
+  runtime NIGHT movement can cause. It does not reproduce on the 2.0.0-rc.4
   node line, where the setup's root-funding transfers are routine. If it does
   surface, reset the stack
   (`docker compose --profile fakenet down && docker compose up -d`),
