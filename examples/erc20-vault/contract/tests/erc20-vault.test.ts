@@ -1747,6 +1747,21 @@ describe("completeSwap settle", () => {
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
+  it("rejects a failure attestation presented as a zero-padded success output", async () => {
+    const { contract, ctx, requestId } = await swapRequested();
+    const padded = new Uint8Array(8);
+    padded.set(OUTPUT_REVERTED);
+    await expect(
+      contract.circuits.completeSwap(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        padded,
+        MINT_NONCE,
+        CHANGE_NONCE,
+      ),
+    ).rejects.toThrow(/Invalid attestation signature/);
+  });
 });
 
 describe("refundSwap settle", () => {
