@@ -78,3 +78,30 @@ function printRequestMap(
     console.log(`- ${requestIdHex} (requestNonce ${String(request.requestNonce)})`);
   }
 }
+
+/**
+ * The request nonce the vault's `startDeposit` circuit will stamp on the next
+ * deposit by `callerCommitment`: this caller's own slot in
+ * `depositRequestNonces`, defaulting to 0 when they have never deposited.
+ *
+ * This is the off-chain twin of the circuit's own nonce read, and it must stay
+ * in lockstep with it: the nonce is hashed into the request id, so predicting
+ * it wrong makes the recomputed id miss the ledger map key and the whole flow
+ * fail. Deposits deliberately do NOT read the shared `signetRequestNonce` --
+ * that cell belongs to the vault-path flows (approve/withdraw/swap/supply/
+ * redeem). The two agree only on a vault's first-ever deposit, when both read
+ * 0, which is exactly how a twin reading the wrong cell passes an e2e suite
+ * that never deposits twice as one caller.
+ *
+ * @param state - The decoded vault ledger state, read before the call.
+ * @param callerCommitment - The caller's 32-byte identity commitment.
+ * @returns The next request nonce for that caller.
+ */
+export function depositRequestNonce(state: VaultLedgerState, callerCommitment: Uint8Array): bigint {
+  // Absent slot means this caller has never deposited, and the circuit's
+  // `insertDefault` seeds it at 0 before reading it, so an absent slot and a
+  // slot holding 0 are the same request nonce.
+  return state.depositRequestNonces.member(callerCommitment)
+    ? state.depositRequestNonces.lookup(callerCommitment).read()
+    : 0n;
+}

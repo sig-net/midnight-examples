@@ -41,6 +41,26 @@ export ledger caip2Id: Bytes<32>;
 // Identity commitment of the deployer. Only they may call initialise().
 sealed ledger deployer: Bytes<32>;
 
+// Per-caller deposit request nonces, keyed by the caller's identity commitment
+// (startDeposit's `caller`). startDeposit sources its requestNonce from this
+// caller's own slot instead of the single global signetRequestNonce, so two
+// DIFFERENT callers' deposits no longer read one shared ledger cell and can
+// both apply against the same proving state. The counter stays
+// contract-controlled and monotonic per caller, so a caller still cannot replay
+// their own settled request. Only deposit binds the caller into the request id
+// (path = caller), so only deposit can safely key uniqueness on the caller; the
+// vault-signed flows (approve*, withdraw, swap, supply, redeem) sign with the
+// constant path "vault" and keep the global signetRequestNonce for now.
+//
+// Declared HERE (immediately before depositEventMap), not appended at the end,
+// on purpose. The compiler chunks this 22-field state as [chunk 0: fields 0-6],
+// [chunk 1: the last 15 fields], so the event maps below pin compiled paths the
+// MPC notifications and src/index.ts depend on ([1,3], [1,7], [1,11], [1,13]).
+// Inserting the new field just before depositEventMap shifts each of those
+// fields one slot later AND the chunk-1 base one slot later too, so their
+// offsets — and every pinned path — are unchanged.
+export ledger depositRequestNonces: Map<Bytes<32>, Counter>;
+
 // Deposit requests (2-word ERC20 transfer, 34-byte schemas).
 // Compiled path for MPC notification: [1, 3] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger depositEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
@@ -395,7 +415,13 @@ export circuit startDeposit(
   };
 
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
+  // Per-caller nonce: read THIS caller's slot (default 0 for a first deposit),
+  // never the shared signetRequestNonce, so a concurrent deposit by another
+  // caller reads a different slot and does not conflict at apply time.
+  if (!depositRequestNonces.member(caller)) {
+    depositRequestNonces.insertDefault(caller);
+  }
+  const requestNonce = depositRequestNonces.lookup(caller) as Uint<64>;
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
     requestNonce,
@@ -413,7 +439,7 @@ export circuit startDeposit(
   const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
 
   assert(!depositEventMap.member(requestId), "Request already exists");
-  signetRequestNonce.increment(1);
+  depositRequestNonces.lookup(caller).increment(1);
   depositEventMap.insert(requestId, disclose(request));
   depositSettleViews.insert(requestId, DepositSettleView {
     commitment: caller,
