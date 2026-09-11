@@ -23,6 +23,7 @@ import {
   CounterpartyOrigin,
   ensureFeeReady,
   envOrUndefined,
+  estimateUnprovenTransactionFee,
   getDeployConfig,
   getFaucetUrl,
   isLocalStandaloneNetwork,
@@ -105,8 +106,8 @@ export function orderDeferredCircuits(deferred: readonly DeferredCircuit[]): Def
  * Install the circuits deferred from the base deploy via one maintenance update each, in
  * {@link orderDeferredCircuits} order, waiting for the authority counter to advance between them
  * so every update binds to the current counter. Each update waits for the deployer's running
- * facade to catch up (fresh fee coins) and is signed by the `MAINTENANCE_SIGNING_KEY` authority
- * sealed at deploy time.
+ * facade to catch up (fresh fee coins) and to hold the fee of every add still to come, and is
+ * signed by the `MAINTENANCE_SIGNING_KEY` authority sealed at deploy time.
  *
  * @param nodeConfig - The Midnight stack config (node/indexer endpoints + network id).
  * @param env - The environment carrying the `MAINTENANCE_SIGNING_KEY` that signs each update.
@@ -115,8 +116,8 @@ export function orderDeferredCircuits(deferred: readonly DeferredCircuit[]): Def
  * @param contractAddress - The deployed base contract's address.
  * @param deferred - The circuits to add.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor DUST before an add.
- * @throws {Error} If the base deploy never indexes, no spendable DUST appears after registering
- *   the wallet's NIGHT, or an add's counter never advances.
+ * @throws {Error} If the base deploy never indexes, the remaining adds' fees do not generate in
+ *   spendable DUST after registering the wallet's NIGHT, or an add's counter never advances.
  */
 async function addDeferredCircuits(
   nodeConfig: MidnightNodeConfig,
@@ -157,7 +158,8 @@ async function addDeferredCircuitsThrough(
     await sleep(3000);
   }
 
-  for (const { circuitId, verifierKey } of orderDeferredCircuits(deferred)) {
+  const ordered = orderDeferredCircuits(deferred);
+  for (const [index, { circuitId, verifierKey }] of ordered.entries()) {
     const current = await readContractState(pdp, contractAddress);
     if (!current) throw new Error(`contract state for ${contractAddress} vanished mid-deploy`);
     console.log(`[${circuitId}] maintenance-add at counter ${current.counter.toString()}`);
@@ -170,6 +172,9 @@ async function addDeferredCircuitsThrough(
       verifierKey,
       current.serialized,
     );
+    // This add and every one after it, each priced at this add's fee.
+    const remaining = BigInt(ordered.length - index);
+    const fee = await estimateUnprovenTransactionFee(deployer.facade, serializedTransaction);
     const state = await deployer.facade.waitForSyncedState();
     await ensureFeeReady(
       deployer.facade,
@@ -177,6 +182,7 @@ async function addDeferredCircuitsThrough(
       state,
       networkId,
       getFaucetUrl(env, networkId),
+      fee * remaining,
     );
     const txId = await submitUnprovenTransaction(
       deployer.facade,
@@ -267,13 +273,17 @@ export interface VaultDeployment {
  * @param wallets - A registry to take the deployer wallet from, when the caller keeps wallets
  *   open across steps (the e2e setup pipeline). Without one, a private registry is opened for
  *   this deploy and closed after it.
+ * @param onBaseDeploySubmitted - Called with the contract address once the base deploy
+ *   transaction is submitted and before the first maintenance add: from here the contract is
+ *   live and a rerun would deploy a second one, so a caller that persists the address for
+ *   {@link resumeVaultDeploy} does it here.
  * @returns The deployed contract address and base deploy transaction id.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.
  * @throws {Error} If no signet singleton resolves (see `resolveSignetContractAddress`),
- *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, no spendable
- *   DUST appears after registering the wallet's NIGHT, or the base deploy
- *   submission fails.
+ *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, the fee of the base deploy
+ *   plus one add per deferred circuit does not generate in spendable DUST after registering
+ *   the wallet's NIGHT, or the base deploy submission fails.
  * @throws {SplitDeployAfterBaseSubmitError} If installing the deferred
  *   circuits fails after the base deploy was submitted: a rerun would deploy
  *   a second contract, so callers must not retry on it.
@@ -281,6 +291,7 @@ export interface VaultDeployment {
 export async function deployVault(
   env: Record<string, string | undefined> = process.env,
   wallets?: WalletRegistry,
+  onBaseDeploySubmitted?: (contractAddress: string) => void,
 ): Promise<VaultDeployment> {
   const deployConfig = getDeployConfig(env);
   const { networkId } = deployConfig.midnightNodeConfig;
@@ -329,6 +340,16 @@ export async function deployVault(
         `deferring ${String(deferred.length)} for maintenance adds`,
     );
 
+    // The base deploy plus one maintenance add per deferred circuit, each priced at the base
+    // transaction's fee: a deployer short of that total stops here, with nothing submitted.
+    const transactionCount = BigInt(1 + deferred.length);
+    const fee = await estimateUnprovenTransactionFee(
+      deployer.facade,
+      deployTransaction.serializedTransaction,
+    );
+    console.log(
+      `fee budget: ${String(transactionCount)} transactions at about ${String(fee)} DUST each`,
+    );
     const state = await deployer.facade.waitForSyncedState();
     await ensureFeeReady(
       deployer.facade,
@@ -336,6 +357,7 @@ export async function deployVault(
       state,
       networkId,
       getFaucetUrl(env, networkId),
+      fee * transactionCount,
     );
     const txId = await submitUnprovenTransaction(
       deployer.facade,
@@ -347,6 +369,7 @@ export async function deployVault(
     // takes.
     console.log(`submitted base deploy tx ${txId}`);
     console.log(`deployed erc20-vault base at ${contractAddress}`);
+    onBaseDeploySubmitted?.(contractAddress);
 
     try {
       await addDeferredCircuits(
@@ -430,15 +453,17 @@ export function readDeferredCircuits(circuitIds: readonly string[]): DeferredCir
  * run).
  *
  * @param env - Environment providing `DEPLOYER_SEED`, `MAINTENANCE_SIGNING_KEY` (the authority
- *   sealed at deploy, without which a resume cannot work) and the deploy SDK's Midnight node
- *   configuration. Defaults to `process.env`.
+ *   sealed at deploy, without which no circuit can be installed: a vault with every circuit
+ *   already installed needs neither) and the deploy SDK's Midnight node configuration.
+ *   Defaults to `process.env`.
  * @param contractAddress - The vault to resume. Defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
  * @param wallets - A registry to take the deployer wallet from. Without one a private registry
  *   is opened for this resume and closed after it.
  * @returns The address and the circuits this call installed.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor DUST before an add.
- * @throws {Error} If no address is available, `MAINTENANCE_SIGNING_KEY` is unset, no contract
- *   answers at the address, a verifier key is missing or mismatched, or an add fails.
+ * @throws {Error} If no address is available, no contract answers at the address, or circuits
+ *   are missing and `MAINTENANCE_SIGNING_KEY` is unset, a verifier key is missing or
+ *   mismatched, or an add fails.
  */
 export async function resumeVaultDeploy(
   env: Record<string, string | undefined> = process.env,
@@ -456,14 +481,6 @@ export async function resumeVaultDeploy(
         'it as "deployed erc20-vault base at <address>"',
     );
   }
-  if (!envOrUndefined(env, "MAINTENANCE_SIGNING_KEY")) {
-    throw new Error(
-      "MAINTENANCE_SIGNING_KEY is required to resume a deploy: the maintenance adds must be signed " +
-        "by the authority sealed at the base deploy. A local run printed the ephemeral key it " +
-        "generated just before the base deploy.",
-    );
-  }
-
   const deployConfig = getDeployConfig(env);
   const nodeConfig = deployConfig.midnightNodeConfig;
   const { networkId } = nodeConfig;
@@ -493,6 +510,13 @@ export async function resumeVaultDeploy(
   );
   if (missing.length === 0) {
     return { contractAddress: vaultContractAddress, installed: [] };
+  }
+  if (!envOrUndefined(env, "MAINTENANCE_SIGNING_KEY")) {
+    throw new Error(
+      "MAINTENANCE_SIGNING_KEY is required to resume a deploy: the maintenance adds must be signed " +
+        "by the authority sealed at the base deploy. A local run printed the ephemeral key it " +
+        "generated just before the base deploy.",
+    );
   }
 
   const deferred = orderDeferredCircuits(readDeferredCircuits(missing));

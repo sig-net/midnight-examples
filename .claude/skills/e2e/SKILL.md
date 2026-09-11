@@ -70,7 +70,10 @@ completes across two or three invocations.
 
 After the run, paste the setup's printed `.env` block into `.env` (the
 contract addresses in particular) so the next run is a fast rerun against
-kept contracts.
+kept contracts. `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already there: the setup
+appends it the moment the vault's base deploy is submitted, and a rerun with it
+set resumes the circuit installs the previous run left missing (a no-op on a
+vault with every circuit).
 
 ## Modes
 

@@ -505,9 +505,14 @@ STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts -t "initial
 The `-t` filter keeps the happy-day spec's initialise and deposit tests
 (deposit, sweep signature, broadcast, attestation, `completeDeposit`) and skips
 its withdraw tests. Drop it for the full spec. The first run stops at the root funding preflight and
-prints ROOT's NIGHT address to faucet-fund. A rerun funds the role wallets,
-generates the zk keys, deploys the vault and carries on into the spec, where
-the first signature poll is the first exchange with the real MPC.
+prints ROOT's NIGHT address to faucet-fund. A rerun funds the role wallets
+(root's NIGHT split by weight: three shares to the deployer, which pays one
+transaction per vault circuit, one share to every other role, one kept by
+root, or `FUND_CHILD_NIGHT` each), generates the zk keys, deploys the vault
+and carries on into the spec, where the first signature poll is the first
+exchange with the real MPC. The vault's address is appended to `.env` the
+moment its base deploy is submitted, so a run that dies during the circuit
+installs resumes them on the next run.
 
 ### Watching a run step by step: `STEP_THROUGH=1`
 
@@ -555,7 +560,8 @@ yarn initialise:erc20-vault
 
 # install the circuits a split deploy left missing (recovers a run that died
 # after its base deploy landed, named by MIDNIGHT_VAULT_CONTRACT_ADDRESS, and
-# is a no-op on a vault with every circuit), then initialise as above
+# is a no-op on a vault with every circuit), then initialise as above. The
+# e2e setup runs this itself whenever the address is set.
 yarn resume-deploy:erc20-vault
 ```
 
