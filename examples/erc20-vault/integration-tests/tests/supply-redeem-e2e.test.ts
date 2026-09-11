@@ -36,7 +36,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave lending e2
       // The setup pipeline deploys the vault but does not initialise it (the key it pins
       // derives from the vault address), so seal the config here before any flow. A kept
       // contract address that is already initialised is left untouched.
-      await initialise(context, resolveInitialiseConfig(env, context.vaultContractAddress));
+      await initialise(context, await resolveInitialiseConfig(env, context.vaultContractAddress));
 
       // Fund the vault + mint the caller a shielded USDC coin equal to the amount we supply.
       // Deposit Aave's USDC specifically (the wrapper's underlying), independent of the suite's

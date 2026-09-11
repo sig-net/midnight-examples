@@ -22,7 +22,7 @@ const env = buildEntrypointEnv();
 // Before spending a whole multistage deploy: a missing chain id, a malformed
 // router override or a leftover previous vault's values must fail now, not
 // after the contract exists.
-assertInitialiseInputsPresent(env);
+await assertInitialiseInputsPresent(env);
 assertNoVaultBoundPresets(env);
 
 const { contractAddress } = await deployVault(env);

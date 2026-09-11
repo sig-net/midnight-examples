@@ -27,21 +27,6 @@ export type ContractWriteMethod = ContractMethod<
 >;
 
 /**
- * Read the chain id the RPC endpoint reports.
- *
- * @param rpcUrl - JSON-RPC endpoint (e.g. `EVM_RPC_URL`).
- * @returns The chain id (e.g. 31337n for the local dev node).
- */
-export async function getEvmChainId(rpcUrl: string): Promise<bigint> {
-  const provider = new JsonRpcProvider(rpcUrl);
-  try {
-    return (await provider.getNetwork()).chainId;
-  } finally {
-    provider.destroy();
-  }
-}
-
-/**
  * Read the bytecode deployed at an address.
  *
  * @param rpcUrl - JSON-RPC endpoint (e.g. `EVM_RPC_URL`).

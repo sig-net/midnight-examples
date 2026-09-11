@@ -10,9 +10,8 @@
 // testing against.
 
 import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
-import { buildBaseEnv } from "@sig-net/midnight-examples-lib";
+import { buildBaseEnv, getEvmChainId } from "@sig-net/midnight-examples-lib";
 
-import { getEvmChainId } from "../src/evm.ts";
 import { runCommand } from "../src/exec.ts";
 import { assertHttpReachable } from "../src/preflight.ts";
 

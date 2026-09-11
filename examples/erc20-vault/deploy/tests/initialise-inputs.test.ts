@@ -1,6 +1,7 @@
 // The checks a deploy+initialise run makes BEFORE spending the multistage
-// deploy: the address-free initialise inputs must parse, and nothing bound to
-// a previous vault may be lying around in the environment.
+// deploy: the address-free initialise inputs must resolve, and nothing bound to
+// a previous vault may be lying around in the environment. Offline: every case
+// pins EVM_CHAIN_ID or omits EVM_RPC_URL, so no chain is consulted.
 
 import { describe, expect, it } from "vitest";
 
@@ -17,52 +18,88 @@ const MPC_KEY_CANONICAL =
   "0x047dd8ecafa5d9c921485b6ac33476870e98c3378e395f3c8fae92ce4943d8432847f591ab25ca454effb522ec2eaf04b7e1c83ba65ae731ea98dd52eb7d458dd4";
 const MPC_KEY_COMPRESSED = "0x027dd8ecafa5d9c921485b6ac33476870e98c3378e395f3c8fae92ce4943d84328";
 
-// The smallest environment initialise accepts without an address: the EVM
-// targets default to their Sepolia canonicals.
+// The smallest environment initialise accepts without an address on the local
+// stack (which publishes no MPC key): the EVM targets default to their Sepolia
+// canonicals.
 const VALID_INPUTS = {
   MPC_SECP256K1_PUBKEY: MPC_KEY_CANONICAL,
   EVM_CHAIN_ID: "11155111",
 } as const;
 
 describe("assertInitialiseInputsPresent", () => {
-  const ACCEPTED_MPC_KEYS: readonly string[] = [
-    MPC_KEY_NEAR_FORM,
-    MPC_KEY_CANONICAL,
-    MPC_KEY_COMPRESSED,
+  /** An environment the check accepts. */
+  interface AcceptedCase {
+    readonly name: string;
+    readonly env: Record<string, string | undefined>;
+  }
+
+  const ACCEPTED: readonly AcceptedCase[] = [
+    {
+      name: "the NEAR form of the MPC key",
+      env: { ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: MPC_KEY_NEAR_FORM },
+    },
+    { name: "the canonical MPC key", env: VALID_INPUTS },
+    {
+      name: "the compressed MPC key",
+      env: { ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: MPC_KEY_COMPRESSED },
+    },
+    {
+      name: "no MPC key on a deployed network the SDK publishes one for",
+      env: { NETWORK_ID: "stagenet", EVM_CHAIN_ID: "11155111" },
+    },
+    { name: "chain id 1", env: { ...VALID_INPUTS, EVM_CHAIN_ID: "1" } },
   ];
 
-  it.each(ACCEPTED_MPC_KEYS)("accepts MPC_SECP256K1_PUBKEY=%s", (key) => {
-    expect(() => {
-      assertInitialiseInputsPresent({ ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: key });
-    }).not.toThrow();
+  it.each(ACCEPTED)("accepts $name", async ({ env }) => {
+    await expect(assertInitialiseInputsPresent(env)).resolves.toBeUndefined();
   });
 
-  it("refuses an MPC_SECP256K1_PUBKEY that is not a secp256k1 public key", () => {
-    expect(() => {
-      assertInitialiseInputsPresent({ ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: "0x04ab" });
-    }).toThrow(/not a secp256k1 public key/);
-  });
+  /** An environment the check refuses, and the refusal. */
+  interface RefusedCase {
+    readonly name: string;
+    readonly env: Record<string, string | undefined>;
+    readonly error: RegExp;
+  }
 
-  const ACCEPTED_CHAIN_IDS: readonly string[] = ["1", "11155111"];
+  const REFUSED_CHAIN_IDS: readonly RefusedCase[] = ["", "0", "00", "007", "-1", "1.5", "abc"].map(
+    (chainId) => ({
+      name: `EVM_CHAIN_ID=${chainId}`,
+      env: { ...VALID_INPUTS, EVM_CHAIN_ID: chainId },
+      error: /EVM_CHAIN_ID/,
+    }),
+  );
 
-  it.each(ACCEPTED_CHAIN_IDS)("accepts EVM_CHAIN_ID=%s", (chainId) => {
-    expect(() => {
-      assertInitialiseInputsPresent({ ...VALID_INPUTS, EVM_CHAIN_ID: chainId });
-    }).not.toThrow();
-  });
+  const REFUSED: readonly RefusedCase[] = [
+    ...REFUSED_CHAIN_IDS,
+    {
+      name: "an MPC key that is not a secp256k1 public key",
+      env: { ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: "0x04ab" },
+      error: /not a secp256k1 public key/,
+    },
+    {
+      name: "no MPC key on the local stack, which publishes none",
+      env: { ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: undefined },
+      error: /MPC_SECP256K1_PUBKEY is required on "undeployed"/,
+    },
+    {
+      name: "an MPC key disagreeing with the one the SDK publishes for the network",
+      env: {
+        NETWORK_ID: "stagenet",
+        EVM_CHAIN_ID: "11155111",
+        MPC_SECP256K1_PUBKEY:
+          "0x0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      },
+      error: /disagrees with the MPC root public key the SDK publishes/,
+    },
+    {
+      name: "neither a chain id nor an RPC to read it from",
+      env: { MPC_SECP256K1_PUBKEY: MPC_KEY_CANONICAL },
+      error: /EVM_CHAIN_ID or EVM_RPC_URL is required/,
+    },
+  ];
 
-  const REFUSED_CHAIN_IDS: readonly string[] = ["", "0", "00", "007", "-1", "1.5", "abc"];
-
-  it.each(REFUSED_CHAIN_IDS)("refuses EVM_CHAIN_ID=%s", (chainId) => {
-    expect(() => {
-      assertInitialiseInputsPresent({ ...VALID_INPUTS, EVM_CHAIN_ID: chainId });
-    }).toThrow(/EVM_CHAIN_ID/);
-  });
-
-  it("requires the MPC public key", () => {
-    expect(() => {
-      assertInitialiseInputsPresent({ ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: undefined });
-    }).toThrow(/MPC_SECP256K1_PUBKEY/);
+  it.each(REFUSED)("refuses $name", async ({ env, error }) => {
+    await expect(assertInitialiseInputsPresent(env)).rejects.toThrow(error);
   });
 });
 

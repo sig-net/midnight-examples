@@ -39,7 +39,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
       // The setup pipeline deploys the vault but does not initialise it (the key it pins
       // derives from the vault address), so seal the config here before any flow. A kept
       // contract address that is already initialised is left untouched.
-      await initialise(context, resolveInitialiseConfig(env, context.vaultContractAddress));
+      await initialise(context, await resolveInitialiseConfig(env, context.vaultContractAddress));
 
       // Size the deposit/cap from a LIVE exactOutput quote (the fork pool price is arbitrary),
       // with generous headroom so the on-chain swap fits and leaves change. The deposited coin IS

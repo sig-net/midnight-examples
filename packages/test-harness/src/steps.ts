@@ -15,26 +15,22 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  type DeployedNetwork,
   deriveMidnightResponseKey,
   formatSecp256k1PublicKey,
-  getMpcRootPublicKey,
-  getSignetContractAddress,
   normaliseSecp256k1PublicKey,
-  stripHexPrefix,
 } from "@sig-net/midnight";
 import {
+  CounterpartyOrigin,
   deploySignetContract,
+  findMpcRootPublicKey,
+  findSignetContractAddress,
   getMidnightNodeConfig,
   isLocalStandaloneNetwork,
-  MidnightNetwork,
-  type NetworkId,
 } from "@sig-net/midnight-contract-deploy";
-import { loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
+import { getEvmChainId, loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv } from "./env-file.ts";
-import { getEvmChainId } from "./evm.ts";
 import { runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { MpcKind, mpcKind } from "./mpc-kind.ts";
@@ -42,6 +38,19 @@ import { banner, logSkip } from "./output.ts";
 import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
 
 const MINUTE = 60_000;
+
+/**
+ * How a resolved MPC root public key reads in the setup log: the variable
+ * that set it, or the SDK's published value for the network.
+ *
+ * @param origin - Where the key came from.
+ * @returns The phrase to log.
+ */
+function mpcKeyOrigin(origin: CounterpartyOrigin): string {
+  return origin === CounterpartyOrigin.Environment
+    ? "MPC_SECP256K1_PUBKEY"
+    : "the MPC root public key the SDK publishes for this network";
+}
 
 /**
  * Assert the environment is workable before anything spends time or money:
@@ -101,104 +110,6 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
   }
 }
 
-// The deployed networks the SDK publishes per-network counterparty values
-// for (the MPC root public key, the signet singleton's address). The local
-// standalone stack has neither: each run mints its own.
-const DEPLOYED_NETWORKS: readonly DeployedNetwork[] = [
-  MidnightNetwork.Stagenet,
-  MidnightNetwork.Preview,
-  MidnightNetwork.Preprod,
-  MidnightNetwork.Mainnet,
-];
-
-/**
- * Narrow a resolved network id to a network the SDK may publish values for.
- *
- * @param networkId - The network the run resolved.
- * @returns The same id as a {@link DeployedNetwork}, or undefined for the local stack.
- */
-function deployedNetwork(networkId: NetworkId): DeployedNetwork | undefined {
-  const id: string = networkId;
-  return DEPLOYED_NETWORKS.find((network) => {
-    const candidate: string = network;
-    return candidate === id;
-  });
-}
-
-/**
- * The SDK's published value for a deployed network, or undefined when the
- * network is the local stack or the SDK holds no value for it yet (the SDK
- * throws for an unpublished entry, and "not published yet" is a normal state
- * for a young network, not a failure).
- *
- * @param networkId - The network the run resolved.
- * @param lookup - The SDK lookup (`getMpcRootPublicKey`, `getSignetContractAddress`).
- * @returns The published value, or undefined.
- */
-function publishedForNetwork(
-  networkId: NetworkId,
-  lookup: (network: DeployedNetwork) => string,
-): string | undefined {
-  const network = deployedNetwork(networkId);
-  if (network === undefined) return undefined;
-  try {
-    return lookup(network);
-  } catch {
-    return undefined;
-  }
-}
-
-/** Where a run's MPC root public key came from, when no root key is held. */
-enum MpcPublicKeyOrigin {
-  Environment = "MPC_SECP256K1_PUBKEY",
-  Sdk = "the MPC root public key the SDK publishes for this network",
-}
-
-/** An MPC root public key the run holds without holding the root key. */
-interface PresetMpcPublicKey {
-  /** The key, canonicalised (`0x04…` uncompressed SEC1 hex). */
-  readonly value: string;
-  /** Which source supplied it. */
-  readonly origin: MpcPublicKeyOrigin;
-}
-
-/**
- * The MPC root public key a run is handed rather than deriving: the
- * environment's `MPC_SECP256K1_PUBKEY` (any spelling
- * {@link normaliseSecp256k1PublicKey} accepts) or, failing that, the key the
- * SDK publishes for a deployed network. Both present and different is a
- * misconfiguration worth stopping on, since the key is sealed into every
- * derived account.
- *
- * @param env - The suite's env accumulator.
- * @returns The preset key and its origin, or undefined when nothing supplies one.
- * @throws {Error} If `MPC_SECP256K1_PUBKEY` is malformed or disagrees with the SDK's published key.
- */
-function presetMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): PresetMpcPublicKey | undefined {
-  const { networkId } = getMidnightNodeConfig(env);
-  const supplied = env.MPC_SECP256K1_PUBKEY?.trim();
-  const fromEnvironment = supplied ? normaliseSecp256k1PublicKey(supplied) : undefined;
-  const publishedRaw = publishedForNetwork(networkId, getMpcRootPublicKey);
-  const published =
-    publishedRaw === undefined ? undefined : normaliseSecp256k1PublicKey(publishedRaw);
-  const disagree =
-    fromEnvironment !== undefined && published !== undefined && fromEnvironment !== published;
-  if (disagree) {
-    throw new Error(
-      `MPC_SECP256K1_PUBKEY (${fromEnvironment}) disagrees with the MPC root public key the SDK ` +
-        `publishes for "${networkId}" (${published}). One of the two is wrong, and the key is ` +
-        "sealed into every derived account: reconcile them before running.",
-    );
-  }
-  if (fromEnvironment !== undefined) {
-    return { value: fromEnvironment, origin: MpcPublicKeyOrigin.Environment };
-  }
-  if (published !== undefined) {
-    return { value: published, origin: MpcPublicKeyOrigin.Sdk };
-  }
-  return undefined;
-}
-
 /**
  * Ensure the run knows which MPC it faces: a fakenet, whose `MPC_ROOT_KEY`
  * this run holds (kept when set, generated when nothing names an MPC), or a
@@ -218,19 +129,19 @@ export function ensureMpcRootKey(env: NodeJS.ProcessEnv): void {
     logSkip("check/derive MPC root key", `MPC_ROOT_KEY is set as ${env.MPC_ROOT_KEY}`);
     return;
   }
-  const preset = presetMpcSecp256k1Pubkey(env);
+  const preset = findMpcRootPublicKey(env);
   if (preset !== undefined) {
     const { networkId } = getMidnightNodeConfig(env);
     if (isLocalStandaloneNetwork(networkId)) {
       throw new Error(
-        `${preset.origin} is set (${preset.value}) without MPC_ROOT_KEY on the local ` +
+        `${mpcKeyOrigin(preset.origin)} is set (${preset.value}) without MPC_ROOT_KEY on the local ` +
           `"${networkId}" stack, which no real MPC answers. Unset it so the setup mints a fakenet ` +
           "root key, or set the MPC_ROOT_KEY it derives from.",
       );
     }
     logSkip(
       "check/derive MPC root key",
-      `${preset.origin} names a real MPC network (${preset.value}), whose root key this run does not hold`,
+      `${mpcKeyOrigin(preset.origin)} names a real MPC network (${preset.value}), whose root key this run does not hold`,
     );
     console.log(
       ` ➜ no fakenet responder can serve that key: the real MPC answers the signet singleton`,
@@ -304,14 +215,17 @@ export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvV
  *   malformed, or nothing at all supplies a key.
  */
 export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
-  const preset = presetMpcSecp256k1Pubkey(env);
   if (env.MPC_ROOT_KEY) {
+    // A held root key names a fakenet, whose key the SDK never publishes: only
+    // an environment preset is checked, never the network's published key.
     const derived = normaliseSecp256k1PublicKey(mpcKeys(env).secp256k1CompressedPubkey);
-    if (preset !== undefined) {
-      console.log(`Found ${preset.origin} as ${preset.value}`);
-      if (preset.value !== derived) {
+    const supplied = env.MPC_SECP256K1_PUBKEY?.trim();
+    if (supplied) {
+      const preset = normaliseSecp256k1PublicKey(supplied);
+      console.log(`Found MPC_SECP256K1_PUBKEY as ${preset}`);
+      if (preset !== derived) {
         throw new Error(
-          `MPC_SECP256K1_PUBKEY should be derived from MPC_ROOT_KEY: expected ${derived}, found ${preset.value}`,
+          `MPC_SECP256K1_PUBKEY should be derived from MPC_ROOT_KEY: expected ${derived}, found ${preset}`,
         );
       }
       env.MPC_SECP256K1_PUBKEY = derived;
@@ -329,6 +243,7 @@ export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
     );
     return;
   }
+  const preset = findMpcRootPublicKey(env);
   if (preset === undefined) {
     throw new Error(
       "no MPC to face: MPC_ROOT_KEY and MPC_SECP256K1_PUBKEY are both unset and the SDK publishes " +
@@ -338,7 +253,7 @@ export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
     );
   }
   env.MPC_SECP256K1_PUBKEY = preset.value;
-  console.log(`using ${preset.origin}: MPC_SECP256K1_PUBKEY=${preset.value}`);
+  console.log(`using ${mpcKeyOrigin(preset.origin)}: MPC_SECP256K1_PUBKEY=${preset.value}`);
   console.log(` ➜ canonicalised to uncompressed SEC1 hex: every derived account starts from it`);
 }
 
@@ -454,28 +369,17 @@ export async function explainDustSpendRejection<T>(
  */
 export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<void> {
   const { networkId } = getMidnightNodeConfig(env);
-  const preset = env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS?.trim();
-  const published = publishedForNetwork(networkId, getSignetContractAddress);
-  if (
-    preset &&
-    published !== undefined &&
-    stripHexPrefix(preset).toLowerCase() !== stripHexPrefix(published).toLowerCase()
-  ) {
-    throw new Error(
-      `MIDNIGHT_SIGNET_CONTRACT_ADDRESS (${preset}) disagrees with the signet singleton the SDK ` +
-        `publishes for "${networkId}" (${published}). The real MPC answers only the published one, ` +
-        "and requesters seal the address at deploy: reconcile them before running.",
-    );
-  }
-  if (preset) {
-    logSkip("deploy signet contract", `MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set (${preset})`);
+  const found = findSignetContractAddress(env);
+  if (found?.origin === CounterpartyOrigin.Environment) {
+    env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = found.value;
+    logSkip("deploy signet contract", `MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set (${found.value})`);
     return;
   }
-  if (published !== undefined) {
-    env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = published;
+  if (found !== undefined) {
+    env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = found.value;
     logSkip(
       "deploy signet contract",
-      `the SDK publishes the "${networkId}" signet singleton at ${published}`,
+      `the SDK publishes the "${networkId}" signet singleton at ${found.value}`,
     );
     console.log(` ➜ the real MPC listens to that singleton: requesters deployed here notify it`);
     return;

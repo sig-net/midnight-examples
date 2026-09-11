@@ -2,5 +2,6 @@
 // examples share and the deploy SDK does not publish.
 export * from "./deploy.ts";
 export * from "./env-file.ts";
+export * from "./evm.ts";
 export * from "./midnight-providers.ts";
 export * from "./wallet.ts";

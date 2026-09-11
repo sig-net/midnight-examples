@@ -34,7 +34,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave supply-ref
 
       // Seal the config before any flow. A kept contract address that is already initialised
       // is left untouched.
-      await initialise(context, resolveInitialiseConfig(env, context.vaultContractAddress));
+      await initialise(context, await resolveInitialiseConfig(env, context.vaultContractAddress));
 
       // Fund: deposit Aave USDC, minting the caller a shielded Aave-USDC coin and funding the
       // vault's EVM Aave-USDC balance (which the drain below then removes).

@@ -37,7 +37,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
 
       // Seal the config before any flow. A kept contract address that is already initialised
       // is left untouched.
-      await initialise(context, resolveInitialiseConfig(env, context.vaultContractAddress));
+      await initialise(context, await resolveInitialiseConfig(env, context.vaultContractAddress));
 
       // Cap the spend at HALF the live quote — guaranteed under the real cost, so the swap
       // reverts. The deposited coin IS the surrendered cap, so deposit exactly it.

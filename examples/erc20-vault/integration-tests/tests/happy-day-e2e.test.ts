@@ -106,7 +106,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
       // The same arguments the stagenet deploy+initialise entrypoint resolves, from the
       // same env. A rerun against a kept, initialised contract is a no-op inside initialise.
-      const config = resolveInitialiseConfig(env, context.vaultContractAddress);
+      const config = await resolveInitialiseConfig(env, context.vaultContractAddress);
       const outcome = await initialise(context, config);
       if (outcome === InitialiseVaultOutcome.AlreadyInitialised) {
         logSkip("initialise", "vault is already initialised (rerun against a kept contract)");

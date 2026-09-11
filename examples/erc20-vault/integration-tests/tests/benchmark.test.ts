@@ -268,7 +268,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const stop = startTimer();
         const outcome = await initialise(
           context,
-          resolveInitialiseConfig(env, context.vaultContractAddress),
+          await resolveInitialiseConfig(env, context.vaultContractAddress),
         );
         if (outcome === InitialiseVaultOutcome.AlreadyInitialised) {
           recorder.clearLeg();

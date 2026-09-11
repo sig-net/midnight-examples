@@ -566,6 +566,23 @@ still supplies a network-scoped value (a signet address, an MPC key): those are
 sealed into the contract permanently, and a local-chain value on a remote network
 produces a vault that can never work.
 
+On a deployed network a deploy needs four variables:
+
+```sh
+NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
+DEPLOYER_SEED=             # pays the fees, funded via the network's faucet
+MAINTENANCE_SIGNING_KEY=   # 32 bytes of hex, kept (see below)
+EVM_RPC_URL=               # the EVM chain the vault operates on
+```
+
+Everything else is derived: the signet singleton and the MPC root public key
+are the ones `@sig-net/midnight` publishes for the network, and the chain id is
+read from `EVM_RPC_URL`. `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
+`MPC_SECP256K1_PUBKEY` and `EVM_CHAIN_ID` remain as overrides, and a set value
+must agree with the published one or with what the chain reports. The local
+stack publishes nothing, so there the e2e setup deploys a singleton and mints a
+fakenet key and hands both over through those same variables.
+
 `BASE_DEPLOY_CIRCUITS` names the circuit that goes in the base transaction.
 `buildDeployTransactionDeferring` returns the contract address plus the deferred
 list, and each deferred circuit is then added at the next maintenance-authority

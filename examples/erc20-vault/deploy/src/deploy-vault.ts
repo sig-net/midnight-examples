@@ -21,6 +21,7 @@ import * as ledger from "@midnightntwrk/ledger-v9";
 import { contractAddressFromHex } from "@sig-net/midnight";
 import {
   type AccountKeys,
+  CounterpartyOrigin,
   deriveAccountKeys,
   ensureFeeReady,
   envOrUndefined,
@@ -30,6 +31,7 @@ import {
   type MidnightNodeConfig,
   type NetworkId,
   parseIdentitySecretKey,
+  resolveSignetContractAddress,
   submitUnprovenTransaction,
   type TransactionIdentifier,
   withSyncedWalletFacade,
@@ -259,13 +261,13 @@ export interface VaultDeployment {
  * from front-running (see {@link file://./initialise-vault.ts}).
  *
  * @param env - Environment providing `DEPLOYER_SEED`, `VAULT_DEPLOYER_SECRET_KEY`,
- *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` (the signet contract to seal as the
- *   cross-contract signer), `MAINTENANCE_SIGNING_KEY` and the deploy SDK's Midnight
- *   node configuration. Defaults to `process.env`.
+ *   `MAINTENANCE_SIGNING_KEY` and the deploy SDK's Midnight node configuration, plus
+ *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` where the SDK publishes no signet singleton
+ *   for the network (see `resolveSignetContractAddress`). Defaults to `process.env`.
  * @returns The deployed contract address and base deploy transaction id.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.
- * @throws {Error} If `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is missing/malformed,
+ * @throws {Error} If no signet singleton resolves (see `resolveSignetContractAddress`),
  *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, no spendable
  *   DUST appears after registering the wallet's NIGHT, or the base deploy
  *   submission fails.
@@ -289,14 +291,16 @@ export async function deployVault(
 
   // The signet contract the vault cross-contract-calls to register signature
   // request notifications, sealed into the vault as the SignetSigner
-  // reference, so it must be deployed first.
-  const signetContractAddress = envOrUndefined(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
-  if (!signetContractAddress) {
-    throw new Error(
-      "MIDNIGHT_SIGNET_CONTRACT_ADDRESS is required (deploy the signet contract first)",
-    );
-  }
-  const signetSigner = contractAddressFromHex(signetContractAddress);
+  // reference: the singleton the SDK publishes for a deployed network, or the
+  // one MIDNIGHT_SIGNET_CONTRACT_ADDRESS names.
+  const signet = resolveSignetContractAddress(env);
+  console.log(
+    `signet singleton ${signet.value} ` +
+      (signet.origin === CounterpartyOrigin.Published
+        ? `(published by the SDK for ${networkId})`
+        : "(MIDNIGHT_SIGNET_CONTRACT_ADDRESS)"),
+  );
+  const signetSigner = contractAddressFromHex(signet.value);
 
   const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, networkId);
 
