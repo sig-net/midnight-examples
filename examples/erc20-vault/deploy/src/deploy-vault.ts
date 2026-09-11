@@ -20,9 +20,7 @@ import {
 import * as ledger from "@midnightntwrk/ledger-v9";
 import { contractAddressFromHex } from "@sig-net/midnight";
 import {
-  type AccountKeys,
   CounterpartyOrigin,
-  deriveAccountKeys,
   ensureFeeReady,
   envOrUndefined,
   getDeployConfig,
@@ -31,10 +29,11 @@ import {
   type MidnightNodeConfig,
   type NetworkId,
   parseIdentitySecretKey,
+  type RegisteredWallet,
   resolveSignetContractAddress,
   submitUnprovenTransaction,
   type TransactionIdentifier,
-  withSyncedWalletFacade,
+  WalletRegistry,
 } from "@sig-net/midnight-contract-deploy";
 import {
   createVaultPrivateState,
@@ -105,12 +104,13 @@ export function orderDeferredCircuits(deferred: readonly DeferredCircuit[]): Def
 /**
  * Install the circuits deferred from the base deploy via one maintenance update each, in
  * {@link orderDeferredCircuits} order, waiting for the authority counter to advance between them
- * so every update binds to the current counter. Each update re-syncs the wallet (fresh fee coins)
- * and is signed by the `MAINTENANCE_SIGNING_KEY` authority sealed at deploy time.
+ * so every update binds to the current counter. Each update waits for the deployer's running
+ * facade to catch up (fresh fee coins) and is signed by the `MAINTENANCE_SIGNING_KEY` authority
+ * sealed at deploy time.
  *
  * @param nodeConfig - The Midnight stack config (node/indexer endpoints + network id).
  * @param env - The environment carrying the `MAINTENANCE_SIGNING_KEY` that signs each update.
- * @param accountKeys - The deployer's derived account keys (pays the update fees).
+ * @param deployer - The deployer's started wallet (pays the update fees).
  * @param networkId - The network the updates target.
  * @param contractAddress - The deployed base contract's address.
  * @param deferred - The circuits to add.
@@ -121,7 +121,7 @@ export function orderDeferredCircuits(deferred: readonly DeferredCircuit[]): Def
 async function addDeferredCircuits(
   nodeConfig: MidnightNodeConfig,
   env: Record<string, string | undefined>,
-  accountKeys: AccountKeys,
+  deployer: RegisteredWallet,
   networkId: NetworkId,
   contractAddress: string,
   deferred: readonly DeferredCircuit[],
@@ -132,15 +132,7 @@ async function addDeferredCircuits(
     subscriptionURL: nodeConfig.indexerWsUrl,
   });
   try {
-    await addDeferredCircuitsThrough(
-      pdp,
-      nodeConfig,
-      env,
-      accountKeys,
-      networkId,
-      contractAddress,
-      deferred,
-    );
+    await addDeferredCircuitsThrough(pdp, env, deployer, networkId, contractAddress, deferred);
   } finally {
     // The provider holds a WebSocket that would otherwise keep the entrypoint alive.
     await pdp.dispose();
@@ -150,9 +142,8 @@ async function addDeferredCircuits(
 // The body of {@link addDeferredCircuits}, against a provider the caller disposes.
 async function addDeferredCircuitsThrough(
   pdp: IndexerPublicDataProvider,
-  nodeConfig: MidnightNodeConfig,
   env: Record<string, string | undefined>,
-  accountKeys: AccountKeys,
+  deployer: RegisteredWallet,
   networkId: NetworkId,
   contractAddress: string,
   deferred: readonly DeferredCircuit[],
@@ -179,10 +170,19 @@ async function addDeferredCircuitsThrough(
       verifierKey,
       current.serialized,
     );
-    const txId = await withSyncedWalletFacade(accountKeys, nodeConfig, async (facade, state) => {
-      await ensureFeeReady(facade, accountKeys, state, networkId, getFaucetUrl(env, networkId));
-      return submitUnprovenTransaction(facade, accountKeys, serializedTransaction);
-    });
+    const state = await deployer.facade.waitForSyncedState();
+    await ensureFeeReady(
+      deployer.facade,
+      deployer.keys,
+      state,
+      networkId,
+      getFaucetUrl(env, networkId),
+    );
+    const txId = await submitUnprovenTransaction(
+      deployer.facade,
+      deployer.keys,
+      serializedTransaction,
+    );
     const target = current.counter + 1n;
     console.log(`[${circuitId}] maintenance tx ${txId}, waiting for counter ${target.toString()}`);
 
@@ -264,6 +264,9 @@ export interface VaultDeployment {
  *   `MAINTENANCE_SIGNING_KEY` and the deploy SDK's Midnight node configuration, plus
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` where the SDK publishes no signet singleton
  *   for the network (see `resolveSignetContractAddress`). Defaults to `process.env`.
+ * @param wallets - A registry to take the deployer wallet from, when the caller keeps wallets
+ *   open across steps (the e2e setup pipeline). Without one, a private registry is opened for
+ *   this deploy and closed after it.
  * @returns The deployed contract address and base deploy transaction id.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.
@@ -277,92 +280,99 @@ export interface VaultDeployment {
  */
 export async function deployVault(
   env: Record<string, string | undefined> = process.env,
+  wallets?: WalletRegistry,
 ): Promise<VaultDeployment> {
   const deployConfig = getDeployConfig(env);
   const { networkId } = deployConfig.midnightNodeConfig;
   const deployEnv = resolveMaintenanceEnv(env, networkId);
-
-  const secretKey = parseIdentitySecretKey(
-    "VAULT_DEPLOYER_SECRET_KEY",
-    env,
-    deployConfig.deployerSeed,
-  );
-  const deployerCommitment = pureCircuits.userCommitment(secretKey);
-
-  // The signet contract the vault cross-contract-calls to register signature
-  // request notifications, sealed into the vault as the SignetSigner
-  // reference: the singleton the SDK publishes for a deployed network, or the
-  // one MIDNIGHT_SIGNET_CONTRACT_ADDRESS names.
-  const signet = resolveSignetContractAddress(env);
-  console.log(
-    `signet singleton ${signet.value} ` +
-      (signet.origin === CounterpartyOrigin.Published
-        ? `(published by the SDK for ${networkId})`
-        : "(MIDNIGHT_SIGNET_CONTRACT_ADDRESS)"),
-  );
-  const signetSigner = contractAddressFromHex(signet.value);
-
-  const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, networkId);
-
-  console.log(`deploying erc20-vault to ${networkId} (${deployConfig.midnightNodeConfig.nodeUrl})`);
-
-  const deployTransaction = await buildDeployTransactionDeferring(
-    vaultCompiledContract,
-    networkId,
-    accountKeys.shieldedSecretKeys.coinPublicKey,
-    deployEnv,
-    createVaultPrivateState(secretKey),
-    BASE_DEPLOY_CIRCUITS,
-    deployerCommitment,
-    signetSigner,
-  );
-  const { contractAddress, deferred } = deployTransaction;
-  console.log(`contract address (pre-submit): ${contractAddress}`);
-  console.log(
-    `base deploy registers ${String(BASE_DEPLOY_CIRCUITS.length)} circuit(s); ` +
-      `deferring ${String(deferred.length)} for maintenance adds`,
-  );
-
-  const txId = await withSyncedWalletFacade(
-    accountKeys,
-    deployConfig.midnightNodeConfig,
-    async (facade, state) => {
-      await ensureFeeReady(facade, accountKeys, state, networkId, getFaucetUrl(env, networkId));
-      return submitUnprovenTransaction(
-        facade,
-        accountKeys,
-        deployTransaction.serializedTransaction,
-      );
-    },
-  );
-  // From here the contract is live: a failure below is reported as
-  // SplitDeployAfterBaseSubmitError, and the address line is what a resume
-  // takes.
-  console.log(`submitted base deploy tx ${txId}`);
-  console.log(`deployed erc20-vault base at ${contractAddress}`);
-
+  const registry = wallets ?? new WalletRegistry(deployConfig.midnightNodeConfig);
   try {
-    await addDeferredCircuits(
-      deployConfig.midnightNodeConfig,
-      deployEnv,
-      accountKeys,
-      networkId,
-      contractAddress,
-      deferred,
+    const secretKey = parseIdentitySecretKey(
+      "VAULT_DEPLOYER_SECRET_KEY",
+      env,
+      deployConfig.deployerSeed,
     );
-  } catch (error) {
-    throw new SplitDeployAfterBaseSubmitError(
-      `installing the deferred circuits on ${contractAddress} failed after its base deploy ` +
-        "was submitted",
-      { cause: error },
-    );
-  }
-  console.log(
-    `deployed erc20-vault at ${contractAddress} ` +
-      `(all ${String(deferred.length + BASE_DEPLOY_CIRCUITS.length)} circuits installed)`,
-  );
+    const deployerCommitment = pureCircuits.userCommitment(secretKey);
 
-  return { contractAddress, txId };
+    // The signet contract the vault cross-contract-calls to register signature
+    // request notifications, sealed into the vault as the SignetSigner
+    // reference: the singleton the SDK publishes for a deployed network, or the
+    // one MIDNIGHT_SIGNET_CONTRACT_ADDRESS names.
+    const signet = resolveSignetContractAddress(env);
+    console.log(
+      `signet singleton ${signet.value} ` +
+        (signet.origin === CounterpartyOrigin.Published
+          ? `(published by the SDK for ${networkId})`
+          : "(MIDNIGHT_SIGNET_CONTRACT_ADDRESS)"),
+    );
+    const signetSigner = contractAddressFromHex(signet.value);
+
+    console.log(
+      `deploying erc20-vault to ${networkId} (${deployConfig.midnightNodeConfig.nodeUrl})`,
+    );
+    const deployer = await registry.wallet(deployConfig.deployerSeed, "deployer");
+
+    const deployTransaction = await buildDeployTransactionDeferring(
+      vaultCompiledContract,
+      networkId,
+      deployer.keys.shieldedSecretKeys.coinPublicKey,
+      deployEnv,
+      createVaultPrivateState(secretKey),
+      BASE_DEPLOY_CIRCUITS,
+      deployerCommitment,
+      signetSigner,
+    );
+    const { contractAddress, deferred } = deployTransaction;
+    console.log(`contract address (pre-submit): ${contractAddress}`);
+    console.log(
+      `base deploy registers ${String(BASE_DEPLOY_CIRCUITS.length)} circuit(s); ` +
+        `deferring ${String(deferred.length)} for maintenance adds`,
+    );
+
+    const state = await deployer.facade.waitForSyncedState();
+    await ensureFeeReady(
+      deployer.facade,
+      deployer.keys,
+      state,
+      networkId,
+      getFaucetUrl(env, networkId),
+    );
+    const txId = await submitUnprovenTransaction(
+      deployer.facade,
+      deployer.keys,
+      deployTransaction.serializedTransaction,
+    );
+    // From here the contract is live: a failure below is reported as
+    // SplitDeployAfterBaseSubmitError, and the address line is what a resume
+    // takes.
+    console.log(`submitted base deploy tx ${txId}`);
+    console.log(`deployed erc20-vault base at ${contractAddress}`);
+
+    try {
+      await addDeferredCircuits(
+        deployConfig.midnightNodeConfig,
+        deployEnv,
+        deployer,
+        networkId,
+        contractAddress,
+        deferred,
+      );
+    } catch (error) {
+      throw new SplitDeployAfterBaseSubmitError(
+        `installing the deferred circuits on ${contractAddress} failed after its base deploy ` +
+          "was submitted",
+        { cause: error },
+      );
+    }
+    console.log(
+      `deployed erc20-vault at ${contractAddress} ` +
+        `(all ${String(deferred.length + BASE_DEPLOY_CIRCUITS.length)} circuits installed)`,
+    );
+
+    return { contractAddress, txId };
+  } finally {
+    if (wallets === undefined) await registry.close();
+  }
 }
 
 /** The outcome of {@link resumeVaultDeploy}. */
@@ -423,6 +433,8 @@ export function readDeferredCircuits(circuitIds: readonly string[]): DeferredCir
  *   sealed at deploy, without which a resume cannot work) and the deploy SDK's Midnight node
  *   configuration. Defaults to `process.env`.
  * @param contractAddress - The vault to resume. Defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
+ * @param wallets - A registry to take the deployer wallet from. Without one a private registry
+ *   is opened for this resume and closed after it.
  * @returns The address and the circuits this call installed.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor DUST before an add.
  * @throws {Error} If no address is available, `MAINTENANCE_SIGNING_KEY` is unset, no contract
@@ -431,6 +443,7 @@ export function readDeferredCircuits(circuitIds: readonly string[]): DeferredCir
 export async function resumeVaultDeploy(
   env: Record<string, string | undefined> = process.env,
   contractAddress?: string,
+  wallets?: WalletRegistry,
 ): Promise<ResumedVaultDeploy> {
   const explicitAddress = contractAddress?.trim();
   const vaultContractAddress =
@@ -454,7 +467,6 @@ export async function resumeVaultDeploy(
   const deployConfig = getDeployConfig(env);
   const nodeConfig = deployConfig.midnightNodeConfig;
   const { networkId } = nodeConfig;
-  const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, networkId);
 
   const pdp = indexerPublicDataProvider({
     queryURL: nodeConfig.indexerUrl,
@@ -484,14 +496,13 @@ export async function resumeVaultDeploy(
   }
 
   const deferred = orderDeferredCircuits(readDeferredCircuits(missing));
-  await addDeferredCircuits(
-    nodeConfig,
-    env,
-    accountKeys,
-    networkId,
-    vaultContractAddress,
-    deferred,
-  );
+  const registry = wallets ?? new WalletRegistry(nodeConfig);
+  try {
+    const deployer = await registry.wallet(deployConfig.deployerSeed, "deployer");
+    await addDeferredCircuits(nodeConfig, env, deployer, networkId, vaultContractAddress, deferred);
+  } finally {
+    if (wallets === undefined) await registry.close();
+  }
   console.log(
     `resumed erc20-vault at ${vaultContractAddress} ` +
       `(all ${String(Object.keys(expectedVk).length)} circuits installed)`,

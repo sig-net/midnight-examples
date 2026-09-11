@@ -26,6 +26,7 @@ import {
   findSignetContractAddress,
   getMidnightNodeConfig,
   isLocalStandaloneNetwork,
+  type WalletRegistry,
 } from "@sig-net/midnight-contract-deploy";
 import { getEvmChainId, loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
@@ -365,9 +366,13 @@ export async function explainDustSpendRejection<T>(
  * (requesters seal the signet address at deploy time).
  *
  * @param env - The suite's env accumulator.
+ * @param wallets - The pipeline's registry, holding the deployer wallet the funding step synced.
  * @throws {Error} If a preset address disagrees with the SDK's published one, or the deploy fails.
  */
-export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<void> {
+export async function deploySignetContractStep(
+  env: NodeJS.ProcessEnv,
+  wallets: WalletRegistry,
+): Promise<void> {
   const { networkId } = getMidnightNodeConfig(env);
   const found = findSignetContractAddress(env);
   if (found?.origin === CounterpartyOrigin.Environment) {
@@ -385,7 +390,7 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
     return;
   }
   const { contractAddress } = await explainDustSpendRejection("deploy signet contract", () =>
-    deploySignetContract(env),
+    deploySignetContract(env, wallets),
   );
   env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${contractAddress}`);

@@ -24,9 +24,9 @@ import {
   getMidnightNodeConfig,
   isFeeReady,
   isLocalStandaloneNetwork,
-  type MidnightNodeConfig,
   readAccountFunding,
   type WalletAddresses,
+  type WalletRegistry,
   WalletUnfundedError,
 } from "@sig-net/midnight-contract-deploy";
 
@@ -162,20 +162,23 @@ function perChildAmount(env: NodeJS.ProcessEnv, rootNight: bigint, unfundedCount
  * wallets are only checked.
  *
  * @param env - The suite's env accumulator (seeds already resolved).
+ * @param wallets - The pipeline's registry: every role wallet syncs once here and stays open.
  * @throws {WalletUnfundedError} To halt the run when root needs faucet funding.
  */
-export async function ensureWalletsFunded(env: NodeJS.ProcessEnv): Promise<void> {
-  const config = getMidnightNodeConfig(env);
-  const faucetUrl = getFaucetUrl(env, config.networkId);
+export async function ensureWalletsFunded(
+  env: NodeJS.ProcessEnv,
+  wallets: WalletRegistry,
+): Promise<void> {
+  const faucetUrl = getFaucetUrl(env, wallets.config.networkId);
 
-  const root = await preflightRoot(config, requireEnv(env, ROOT.envVar), faucetUrl);
+  const root = await preflightRoot(wallets, requireEnv(env, ROOT.envVar), faucetUrl);
   logFundedPass("root", root);
 
   const checked = [];
   for (const child of CHILDREN) {
     checked.push({
       child,
-      funding: await readAccountFunding(config, requireEnv(env, child.envVar)),
+      funding: await readAccountFunding(wallets, requireEnv(env, child.envVar), child.label),
     });
   }
   const unfundedCount = checked.filter((entry) => !isFeeReady(entry.funding)).length;
@@ -191,9 +194,10 @@ export async function ensureWalletsFunded(env: NodeJS.ProcessEnv): Promise<void>
     );
     const funded = await explainDustSpendRejection(`fund ${child.label}`, () =>
       fundChildFromRoot(
-        config,
+        wallets,
         requireEnv(env, ROOT.envVar),
         requireEnv(env, child.envVar),
+        child.label,
         amount,
       ),
     );
@@ -204,19 +208,19 @@ export async function ensureWalletsFunded(env: NodeJS.ProcessEnv): Promise<void>
 /**
  * Root preflight, surfacing {@link WalletUnfundedError}'s stop message before rethrowing.
  *
- * @param config - The node config the balances are read through.
+ * @param wallets - The registry holding the root wallet.
  * @param rootSeed - Root's seed, hex or mnemonic.
  * @param faucetUrl - Faucet URL for the stop message, when one is known.
  * @returns Root's read NIGHT/DUST balances and addresses.
  * @throws {WalletUnfundedError} When root holds too little to fund the children.
  */
 async function preflightRoot(
-  config: MidnightNodeConfig,
+  wallets: WalletRegistry,
   rootSeed: string,
   faucetUrl: string | undefined,
 ): Promise<AccountFunding> {
   try {
-    return await assertRootFunded(config, rootSeed, faucetUrl);
+    return await assertRootFunded(wallets, rootSeed, faucetUrl);
   } catch (error) {
     if (error instanceof WalletUnfundedError) {
       banner(["ROOT WALLET NEEDS FUNDING — stopping here", "", ...error.message.split("\n")]);

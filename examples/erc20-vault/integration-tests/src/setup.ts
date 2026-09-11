@@ -11,6 +11,7 @@
 // initialise flow pins it on-chain.
 
 import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
+import type { WalletRegistry } from "@sig-net/midnight-contract-deploy";
 import {
   deriveVaultEvmAddress,
   STATA_USDC,
@@ -69,12 +70,16 @@ const PIPELINE_KEYS = [
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
  *   config from it).
+ * @param wallets - The pipeline's registry, holding the deployer wallet the funding step synced.
  * @throws {SplitDeployAfterBaseSubmitError} If the deploy failed after its base
  *   deploy was submitted: the split deploy has no resume path, so a rerun would
  *   deploy a SECOND contract and orphan the half-installed first one.
  * @throws {Error} If the deploy fails otherwise.
  */
-async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
+async function deployVaultContractStep(
+  env: NodeJS.ProcessEnv,
+  wallets: WalletRegistry,
+): Promise<void> {
   if (env.MIDNIGHT_VAULT_CONTRACT_ADDRESS) {
     logSkip(
       "deploy vault contract",
@@ -95,7 +100,7 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
     );
   }
   const { contractAddress } = await explainDustSpendRejection("deploy vault contract", () =>
-    deployVault(env),
+    deployVault(env, wallets),
   );
   env.MIDNIGHT_VAULT_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_VAULT_CONTRACT_ADDRESS=${contractAddress}`);
