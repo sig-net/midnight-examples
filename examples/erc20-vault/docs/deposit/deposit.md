@@ -131,11 +131,9 @@ As illustrated, the flow comprises 6 steps:
     nothing else: neither the digest nor the serialised output goes on chain.
   - The client must therefore rebuild the exact bytes the MPC hashed.
     [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L105)
-    takes the mined call's raw EVM return data (the fakenet responder caches
-    each traced output before it posts, and serves it at
-    `/responses/{requestId}`, while a node with tracing enabled yields the same
-    bytes from `debug_traceTransaction`, the RPC method the MPC itself uses),
-    then decodes it per the request's output deserialisation schema with
+    takes the mined call's raw EVM return data (read from `EVM_RPC_URL` with
+    `debug_traceTransaction`, the RPC method the MPC itself uses), then
+    decodes it per the request's output deserialisation schema with
     [`deserializeEvmOutput`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/abi-serde.ts#L143)
     and re-packs it per the respond serialisation schema with
     [`serializeRespondOutput`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/abi-serde.ts#L194):
@@ -149,11 +147,11 @@ As illustrated, the flow comprises 6 steps:
     replaced. Whichever candidate a posted signature verifies over, against the
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact) read from the
     vault's own ledger, is the attested outcome. The success candidate is
-    skipped when no output was cached, and a decode failure drops it with a
-    warning instead of crashing the poll.
+    skipped when the transaction reverted (a failed execution has no output),
+    and a decode failure drops it with a warning instead of crashing the poll.
   - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L54)
     owns the loop, the timeout and the reporting. Everything resolved here stays
-    UNTRUSTED: the respond events are open to anyone and the helper API is
+    UNTRUSTED: the respond events are open to anyone and the traced output is
     unauthenticated, and the authoritative check is the in-circuit verification
     step 6 runs.
 - **6.** completeDeposit(...) verifies and mints

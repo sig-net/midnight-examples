@@ -147,12 +147,7 @@ The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
 stand-in: it polls the signet contract's emitted notification events via the
 indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and
-posts responses through the proof server. It also serves the public
-`/responses/{requestId}` helper API on port 3040 (mapped to localhost by the
-compose file): the attestation poll and settle flows fetch each request's
-raw traced EVM output from it, so a poll that times out with
-`no fakenet response for … at http://localhost:3040/...` means the responder
-(or its API port mapping) is down, not the Midnight stack.
+posts responses through the proof server.
 
 - **Managed by setup (default):** the setup's hand-off steps append
   `MPC_ROOT_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
@@ -169,7 +164,7 @@ raw traced EVM output from it, so a poll that times out with
 - **Responder development:** set `FAKENET_MANAGED=0` so setup leaves the
   responder (and `.env`) alone, and run it yourself (`yarn response` in a
   solana-signet-program checkout, with the current signet address and root
-  key in its config, and it serves the responses API on 3040 automatically).
+  key in its config).
   Then a poll timeout is YOUR restart to do.
 - **Prover/verifier parity is by construction here:** the singleton is
   always deployed from the published `@sig-net/midnight-contract`, the same
@@ -178,6 +173,29 @@ raw traced EVM output from it, so a poll that times out with
   contract diverges from the published package. In that case bind-mount the
   checkout's `signet-contract/src/managed` over the responder's keys in the
   `fakenet` compose service.
+
+## Running against the real MPC (a deployed network)
+
+The vault README's "Running against the real MPC on a deployed network"
+section is the runbook, the same on every deployed network (stagenet, preview,
+preprod, mainnet). The setup pipeline switches modes on `MPC_ROOT_KEY`
+(`mpcKind` in the test harness): absent on a deployed network, the run faces a
+real MPC named by `MPC_SECP256K1_PUBKEY` (NEAR `secp256k1:<base58>` or SEC1
+hex, canonicalised to `0x04…`, the SDK's published key filling it in when
+unset), takes the signet singleton the SDK publishes for the network instead
+of deploying one, skips the fakenet hand-off on its own, and skips anvil dealing on a
+non-anvil `EVM_RPC_URL` (fund the printed derived accounts by hand, `STEP_THROUGH=1`).
+Execution outputs come from `debug_traceTransaction` on `EVM_RPC_URL` on every
+network, and the setup step "verify EVM_RPC_URL serves debug_traceTransaction"
+refuses an endpoint without it. Only the specs that never
+sign as the vault can run there (`happy-day-e2e`, `bearer-transfer`,
+`swap-e2e`, `supply-redeem-e2e`, `swap-refund-e2e`); the rest re-derive the
+vault key from `MPC_ROOT_KEY` and stay fakenet-only. Start only the
+`proof-server` compose service for such a run, and start with one deposit
+round trip, not the whole spec:
+`STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts -t "initialise|[dD]eposit|sweep"`
+(vitest's `-t` is a case-sensitive regex over the full test title; this one
+keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
 
 ## Reading failures
 

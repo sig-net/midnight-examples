@@ -74,7 +74,7 @@ function isAlreadySubmitted(err: unknown): boolean {
  * @param context - The flow context.
  * @param options - The transaction to broadcast.
  * @returns The mined transaction's receipt (its `hash` is the tx hash the
- *   fakenet traces the execution output from).
+ *   MPC traces the execution output from).
  * @throws {Error} When the transaction reverted on-chain, or its nonce was
  *   consumed by a different transaction (so it can never mine).
  */

@@ -16,6 +16,7 @@ import {
   CAIP2_ID_BYTES,
   deriveMidnightResponseKey,
   formatSecp256k1PublicKey,
+  normaliseSecp256k1PublicKey,
   parseSecp256k1PublicKey,
 } from "@sig-net/midnight";
 import {
@@ -101,10 +102,14 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
   evmChainId: bigint;
   targets: VaultEvmTargets;
 } {
-  const mpcSecp256k1PublicKey = requireValue(
-    env,
-    "MPC_SECP256K1_PUBKEY",
-    "it is the MPC network's public key, derived from MPC_ROOT_KEY by the setup pipeline",
+  // Any spelling the operator pastes (SEC1 hex or NEAR `secp256k1:<base58>`)
+  // canonicalises here, so the derivations below read one form.
+  const mpcSecp256k1PublicKey = normaliseSecp256k1PublicKey(
+    requireValue(
+      env,
+      "MPC_SECP256K1_PUBKEY",
+      "it is the MPC network's root public key (the fakenet's derives from MPC_ROOT_KEY in the setup pipeline)",
+    ),
   );
   const chainIdRaw = requireValue(
     env,
@@ -135,12 +140,14 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
  * against the derivation, since a stale pin would seal an
  * account the MPC never signs from.
  *
- * @param env - The environment providing `MPC_SECP256K1_PUBKEY`, `EVM_CHAIN_ID` and the
- *   optional `EVM_ROUTER` / `EVM_STATA_UNDERLYING` / `EVM_STATA_TOKEN` overrides.
+ * @param env - The environment providing `MPC_SECP256K1_PUBKEY` (SEC1 hex or NEAR
+ *   `secp256k1:<base58>`), `EVM_CHAIN_ID` and the optional `EVM_ROUTER` /
+ *   `EVM_STATA_UNDERLYING` / `EVM_STATA_TOKEN` overrides.
  * @param vaultContractAddress - The deployed vault contract's address.
  * @returns The resolved arguments.
- * @throws {Error} If a required variable is missing, `EVM_CHAIN_ID` is not a positive
- *   integer, or a preset `EVM_VAULT_ADDRESS` / `MPC_RESPONSE_KEY` contradicts the derivation.
+ * @throws {Error} If a required variable is missing, `MPC_SECP256K1_PUBKEY` is not a
+ *   secp256k1 public key, `EVM_CHAIN_ID` is not a positive integer, or a preset
+ *   `EVM_VAULT_ADDRESS` / `MPC_RESPONSE_KEY` contradicts the derivation.
  */
 export function resolveInitialiseConfig(
   env: Record<string, string | undefined>,

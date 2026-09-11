@@ -1,8 +1,8 @@
-// Fork-only EVM funding: deal ETH + real USDC to the derived accounts. Every suite runs against
-// a Sepolia fork where the ERC20 is the real, unmintable USDC. Token balances are dealt by
+// Fork-only EVM funding: deal ETH + real USDC to the derived accounts on the local anvil,
+// which forks Sepolia so the ERC20 is the real, unmintable USDC. Token balances are dealt by
 // writing the holder's slot in the token's balance mapping directly (anvil_setStorageAt, the
 // same mechanism as foundry's `deal`), so dealing needs no funded source account and repeated
-// redeploy campaigns can never exhaust one.
+// redeploy campaigns can never exhaust one. On any other node the accounts are funded by hand.
 import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { type ContractWriteMethod, requireEnv } from "@sig-net/midnight-examples-test-harness";
 import { ethers } from "ethers";
@@ -140,18 +140,50 @@ async function liftAaveUsdcSupplyCap(provider: ethers.JsonRpcProvider): Promise<
 }
 
 /**
+ * Whether the node behind `provider` is anvil, the only node whose `anvil_*` cheatcodes the
+ * dealing here uses. Read from `web3_clientVersion`, which every node answers (anvil reports
+ * `anvil/v<version>`), so a failure is a dead RPC and never an ambiguous "method not found".
+ *
+ * @param provider - The JSON-RPC provider to ask.
+ * @returns True when anvil answers, false for any other node.
+ */
+async function isAnvil(provider: ethers.JsonRpcProvider): Promise<boolean> {
+  const clientVersion: unknown = await provider.send("web3_clientVersion", []);
+  return typeof clientVersion === "string" && clientVersion.toLowerCase().startsWith("anvil");
+}
+
+/**
  * Setup step: deal the derived EVM accounts their gas + tokens on the fork. The user gets ETH +
  * USDC (the deposit source), and the vault gets ETH (withdraw/approve/swap gas, deposits fund
- * its USDC). Requires EVM_RPC_URL to point at a Sepolia fork exposing anvil_* cheatcodes.
+ * its USDC). Dealing is anvil's `anvil_*` cheatcodes, so on any other node (a real chain
+ * behind a public RPC) the step skips and prints what to fund by hand instead: the flows'
+ * funding preflights then check those balances before spending.
  *
  * @param env - The suite's env accumulator (reads EVM_RPC_URL, EVM_USER_ADDRESS, EVM_VAULT_ADDRESS).
- * @throws {Error} If the anvil cheatcalls fail (the EVM is not a cheatcode-capable fork).
+ * @throws {Error} If the RPC does not answer, or the anvil cheatcalls fail on an anvil that is
+ *   not forking Sepolia.
  */
 export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void> {
   const rpcUrl = requireEnv(env, "EVM_RPC_URL");
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const user = requireEnv(env, "EVM_USER_ADDRESS");
   const vault = requireEnv(env, "EVM_VAULT_ADDRESS");
+
+  if (!(await isAnvil(provider))) {
+    console.log(`${rpcUrl} is not anvil: no cheatcodes, so nothing is dealt`);
+    console.log(" ➜ FUND THE DERIVED ACCOUNTS ON THE REAL CHAIN before the flows run:");
+    console.log(
+      `   user  ${user}: >= 0.01 ETH (gas) and >= 0.1 of ERC20 ${requireEnv(env, "ERC20_ADDRESS")}`,
+    );
+    console.log(
+      `   vault ${vault}: ETH for withdrawal gas (the withdraw preflight prints the exact budget)`,
+    );
+    console.log(
+      " ➜ 💡 STEP_THROUGH=1 pauses before every step and test, so an attended run can fund them",
+    );
+    console.log("   here and continue");
+    return;
+  }
 
   // Fail loudly BEFORE dealing: if USDC has no code, the EVM is not forking Sepolia (almost
   // always a missing/empty SEPOLIA_FORK_RPC_URL), and the balance-slot probe would fail with an

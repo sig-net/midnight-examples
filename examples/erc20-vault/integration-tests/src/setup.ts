@@ -1,6 +1,6 @@
 // The example's vitest globalSetup: compose the ordered setup pipeline
-// (environment check -> wallet seeds + root funding -> EVM chain + test token
-// -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
+// (environment check -> wallet seeds + root funding -> EVM chain + trace RPC
+// check + test token -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
 // vault zk compile + deploy -> MPC response key -> derived EVM addresses ->
 // fork dealing -> fork dependency check -> MPC hand-off printout) from the
 // harness's generic steps plus the vault-specific steps below, and run it via
@@ -41,6 +41,7 @@ import type { TestProject } from "vitest/node";
 import { stataAvailable } from "./evm-stata.ts";
 import { uniswapAvailable } from "./evm-swap.ts";
 import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
+import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 
 // The env keys the setup steps populate, in derivation order — the "Minimal
@@ -227,9 +228,10 @@ async function verifyForkDependencies(env: NodeJS.ProcessEnv): Promise<void> {
   if (!stata) missing.push(`${STATA_USDC} (stataUSDC wrapper)`);
   if (missing.length > 0) {
     throw new Error(
-      `no code on ${rpcUrl} at ${missing.join(" and at ")}: the suites run against a Sepolia ` +
-        `fork that deploys both, so either SEPOLIA_FORK_RPC_URL is not a Sepolia endpoint or ` +
-        `SEPOLIA_FORK_BLOCK is pinned before the contract was deployed.`,
+      `no code on ${rpcUrl} at ${missing.join(" and at ")}: the suites run against Sepolia ` +
+        `(the local anvil fork, or the real network), which deploys both, so either EVM_RPC_URL ` +
+        `is not a Sepolia endpoint, SEPOLIA_FORK_RPC_URL is not one, or SEPOLIA_FORK_BLOCK is ` +
+        `pinned before the contract was deployed.`,
     );
   }
   console.log(
@@ -250,6 +252,10 @@ const STEPS: readonly SetupStep[] = [
   ["setup: resolve/generate wallet seeds (root + deployer/user/mpc responder)", ensureWalletSeeds],
   ["setup: preflight root funding + fund the role wallets from root", ensureWalletsFunded],
   ["setup: resolve EVM chain id from EVM_RPC_URL", resolveEvmChain],
+  [
+    "setup: verify EVM_RPC_URL serves debug_traceTransaction",
+    (env) => assertDebugTraceAvailable(requireEnv(env, "EVM_RPC_URL")),
+  ],
   ["setup: default ERC20_ADDRESS to real Sepolia USDC", ensureErc20Address],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
   ["setup: check/derive MPC_SECP256K1_PUBKEY public key", ensureMpcSecp256k1Pubkey],
@@ -274,8 +280,14 @@ const STEPS: readonly SetupStep[] = [
   ],
   ["setup: check/derive vault EVM address", ensureVaultEvmAddress],
   ["setup: check/derive user EVM address", ensureUserEvmAddress],
-  ["setup: deal derived EVM accounts on the Sepolia fork (ETH + real USDC)", dealForkEvmAccounts],
-  ["setup: verify fork dependencies (Uniswap router + stataUSDC wrapper)", verifyForkDependencies],
+  [
+    "setup: deal derived EVM accounts (ETH + real USDC on an anvil fork, funding hints on a real chain)",
+    dealForkEvmAccounts,
+  ],
+  [
+    "setup: verify Sepolia dependencies (Uniswap router + stataUSDC wrapper)",
+    verifyForkDependencies,
+  ],
   [
     "setup: print MPC server configuration",
     (env) => {

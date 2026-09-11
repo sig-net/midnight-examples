@@ -449,6 +449,66 @@ What does NOT happen automatically on a real chain, by design:
 - A redeploy of the vault contract derives **new** accounts, and any you already
   funded do not move with it.
 
+### Running against the real MPC on a deployed network
+
+Point the Midnight side at a deployed network (stagenet, preview, preprod or
+mainnet) and drop the fakenet: the real Signature Network MPC listens to the
+signet singleton the SDK publishes for that network and answers requests from
+any vault sealed to it. The suite runs the same way on every deployed network.
+The minimal `.env` is
+[`.env.example-stagenet-minimal`](../../.env.example-stagenet-minimal) at the
+repo root, with stagenet as the example network:
+
+```sh
+NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
+ROOT_SEED=                 # funded via the network's faucet (the first run prints the address and URL)
+MAINTENANCE_SIGNING_KEY=   # 32 bytes of hex, required on any deployed network
+EVM_RPC_URL=               # a REAL Sepolia RPC that serves debug_traceTransaction
+```
+
+What differs from the local loop:
+
+- **No signet deploy.** The setup takes the singleton address the SDK
+  publishes for the network (a set `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` must
+  agree with it).
+- **No `MPC_ROOT_KEY`.** The MPC root public key the SDK publishes for the
+  network names the real MPC, every derived account starts from it, and the
+  fakenet hand-off steps skip on their own. A set `MPC_SECP256K1_PUBKEY` must
+  agree with it, in any spelling (NEAR `secp256k1:<base58>` or SEC1 hex): the
+  run canonicalises it to `0x04…` uncompressed SEC1 hex. A held root key on a
+  deployed network means the opposite: a fakenet you run against that network.
+- **The real Sepolia network, not a fork.** The MPC reaches Sepolia through its
+  own RPC, so a local anvil is invisible to it. With no anvil there is no
+  dealing either: the setup prints the derived accounts and what to fund by
+  hand, and `STEP_THROUGH=1` (below) lets one attended run fund them and
+  continue.
+- **A tracing RPC, as everywhere.** `EVM_RPC_URL` must serve
+  `debug_traceTransaction` on every network (the attestation polls recover
+  each execution output by tracing the mined transaction, the method the MPC
+  itself observes with), and the setup refuses an endpoint without it before
+  anything is deployed. The local anvil serves it, and hosted Sepolia
+  endpoints often gate it behind a paid tier.
+- **Only the specs that never sign as the vault run here:** `happy-day-e2e`,
+  `bearer-transfer`, `swap-e2e`, `supply-redeem-e2e` and `swap-refund-e2e`.
+  The others force reverts with a vault key re-derived from `MPC_ROOT_KEY`
+  ([`integration-tests/src/fakenet-vault-account.ts`](integration-tests/src/fakenet-vault-account.ts))
+  and are fakenet-only.
+
+Bring up only the `proof-server` service of the compose file (the node, indexer
+and anvil are not used), then start with one deposit round trip rather than
+the whole spec:
+
+```sh
+STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts -t "initialise|[dD]eposit|sweep"
+```
+
+The `-t` filter keeps the happy-day spec's initialise and deposit tests
+(deposit, sweep signature, broadcast, attestation, `completeDeposit`) and skips
+its withdraw tests. Drop it for the full spec. The first run stops at the root funding preflight and
+prints ROOT's NIGHT address to faucet-fund. A rerun funds the role wallets,
+generates the zk keys, deploys the vault and carries on into the spec, where
+the first signature poll is the first exchange with the real MPC.
+
 ### Watching a run step by step: `STEP_THROUGH=1`
 
 ```sh

@@ -9,14 +9,40 @@ import {
   assertNoVaultBoundPresets,
 } from "../src/initialise-vault.ts";
 
+// The stagenet MPC root public key as the MPC team hands it out (NEAR form),
+// its canonical SEC1 spelling, and its compressed twin.
+const MPC_KEY_NEAR_FORM =
+  "secp256k1:3Ww8iFjqTHufye5aRGUvrQqETegR4gVUcW8FX5xzscaN9ENhpkffojsxJwi6N1RbbHMTxYa9UyKeqK3fsMuwxjR5";
+const MPC_KEY_CANONICAL =
+  "0x047dd8ecafa5d9c921485b6ac33476870e98c3378e395f3c8fae92ce4943d8432847f591ab25ca454effb522ec2eaf04b7e1c83ba65ae731ea98dd52eb7d458dd4";
+const MPC_KEY_COMPRESSED = "0x027dd8ecafa5d9c921485b6ac33476870e98c3378e395f3c8fae92ce4943d84328";
+
 // The smallest environment initialise accepts without an address: the EVM
 // targets default to their Sepolia canonicals.
 const VALID_INPUTS = {
-  MPC_SECP256K1_PUBKEY: "0x04ab",
+  MPC_SECP256K1_PUBKEY: MPC_KEY_CANONICAL,
   EVM_CHAIN_ID: "11155111",
 } as const;
 
 describe("assertInitialiseInputsPresent", () => {
+  const ACCEPTED_MPC_KEYS: readonly string[] = [
+    MPC_KEY_NEAR_FORM,
+    MPC_KEY_CANONICAL,
+    MPC_KEY_COMPRESSED,
+  ];
+
+  it.each(ACCEPTED_MPC_KEYS)("accepts MPC_SECP256K1_PUBKEY=%s", (key) => {
+    expect(() => {
+      assertInitialiseInputsPresent({ ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: key });
+    }).not.toThrow();
+  });
+
+  it("refuses an MPC_SECP256K1_PUBKEY that is not a secp256k1 public key", () => {
+    expect(() => {
+      assertInitialiseInputsPresent({ ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: "0x04ab" });
+    }).toThrow(/not a secp256k1 public key/);
+  });
+
   const ACCEPTED_CHAIN_IDS: readonly string[] = ["1", "11155111"];
 
   it.each(ACCEPTED_CHAIN_IDS)("accepts EVM_CHAIN_ID=%s", (chainId) => {

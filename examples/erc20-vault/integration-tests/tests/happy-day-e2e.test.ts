@@ -331,10 +331,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
-      // The attestation carries only the MPC's signature: the poll fetches
-      // the sweep's raw traced output from the fakenet's /responses API,
-      // re-packs it per the schema and verifies the posted events' signatures
-      // over it against the response key the vault pinned.
+      // The attestation carries only the MPC's signature: the poll traces the
+      // sweep's mined transaction for its raw output, re-packs it per the
+      // schema and verifies the posted events' signatures over it against the
+      // response key the vault pinned.
       const context = await session.vaultContext();
       depositSweepTransactionRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: depositTransactionSignatureRequestId,
@@ -374,7 +374,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         )}`,
         "",
         "Neither the output nor its digest went on-chain: the raw bytes came",
-        "from the fakenet /responses API, were re-packed here, and the posted",
+        "from a debug_traceTransaction of the mined sweep transaction,",
+        "were re-packed here, and the posted",
         "signature verified over them.",
       ]);
     },

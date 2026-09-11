@@ -35,7 +35,7 @@ export interface PollRespondBidirectionalOptions {
  * and return the resolved outcome.
  *
  * The event carries only the MPC's signature, so each tick recomputes the
- * serialized output from the fakenet's cached raw EVM output and checks the
+ * serialized output from the observed raw EVM output and checks the
  * posted events' signatures against it (see `fetchAttestedRespondOutcome`):
  * the event log is unauthenticated, and that check is what makes a returned
  * record meaningful off-chain. The settle circuits run the same check
@@ -47,9 +47,9 @@ export interface PollRespondBidirectionalOptions {
  * @param options - What to poll for and how patiently.
  * @returns The resolved outcome (attested event + verified output bytes).
  * @throws {Error} When the contract has no state on-chain, or `timeoutMs`
- *   elapses with no verifying attestation posted (a fakenet /responses API
- *   that stays unreachable surfaces as this timeout: each tick's fetch
- *   failure is logged and retried, this loop owns the deadline).
+ *   elapses with no verifying attestation posted (an EVM endpoint that
+ *   stays unreachable surfaces as this timeout: each tick's trace failure
+ *   is logged and retried, this loop owns the deadline).
  */
 export async function pollRespondBidirectional(
   context: VaultContext,

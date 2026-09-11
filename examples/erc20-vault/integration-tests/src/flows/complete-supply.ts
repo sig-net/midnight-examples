@@ -10,13 +10,14 @@ import {
   respondBidirectionalEventToCircuitInput,
   type Secp256k1Point,
   serializeRespondOutput,
+  type SignetRequestResponseReader,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
 import { VAULT_SUPPLY_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { SUPPLY_OUTPUT_SCHEMA, SUPPLY_RESPOND_SCHEMA } from "../evm-stata.ts";
-import { type FakenetResponse, fetchFakenetResponse } from "../fakenet-responses.ts";
+import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import { warnOnce } from "../warn-once.ts";
 
@@ -35,39 +36,48 @@ interface SupplyCandidate {
   readonly isFailureOutput: boolean;
 }
 
-// How long one candidate build waits on the fakenet's /responses API. Short on purpose: the
-// poll loop owns the deadline, so a tick that cannot fetch gives up fast and the next retries.
-const FAKENET_FETCH_TICK_TIMEOUT_MS = 3_000;
+// How long one candidate build waits on the trace. Short on purpose: the poll
+// loop owns the deadline, so a tick that cannot observe gives up fast and the next retries.
+const OBSERVATION_TICK_TIMEOUT_MS = 3_000;
 
 /**
  * Recompute both candidate outputs the protocol allows for a supply (the supply-schema twin of
- * complete-swap.ts's candidate build): the success candidate is the fakenet's cached traced
+ * complete-swap.ts's candidate build): the success candidate is the observed traced
  * output decoded per the uint256 output schema and re-packed per the uint64 respond schema, the
  * failure candidate is the protocol's fixed 5-byte output. A decode failure drops the success
- * candidate with a warning. The fakenet serves one fixed observation per request, so a caller
+ * candidate with a warning. An execution has one fixed observation per request, so a caller
  * resolving this once holds the candidates for its whole poll.
  *
+ * @param context - The flow context, whose EVM endpoint serves the trace.
+ * @param reader - The reader over the supply request map, which rebuilds the mined transaction.
  * @param requestId - The supply request id whose execution result to recompute.
- * @returns The candidates, failure last, or undefined when the fakenet cannot serve this tick.
+ * @returns The candidates, failure last, or undefined when the execution cannot be observed this tick.
  */
 async function fetchSupplyCandidates(
+  context: VaultContext,
+  reader: SignetRequestResponseReader,
   requestId: RequestIdHex,
 ): Promise<SupplyCandidate[] | undefined> {
-  let cached: FakenetResponse;
+  let observed: ObservedExecution;
   try {
-    cached = await fetchFakenetResponse(requestId, FAKENET_FETCH_TICK_TIMEOUT_MS);
+    observed = await observeExecution(
+      reader,
+      context.evmRpcUrl,
+      requestId,
+      OBSERVATION_TICK_TIMEOUT_MS,
+    );
   } catch (error) {
     warnOnce(
-      `supply-fetch:${requestId}`,
-      `fakenet /responses fetch failed for supply ${requestId}, will retry on the next poll tick: ${String(error)}`,
+      `supply-observe:${requestId}`,
+      `could not observe the execution of supply ${requestId}, will retry on the next poll tick: ${String(error)}`,
     );
     return undefined;
   }
 
   const candidates: SupplyCandidate[] = [];
-  if (cached.success && cached.output !== null) {
+  if (observed.success && observed.output !== null) {
     try {
-      const decoded = deserializeEvmOutput(SUPPLY_OUTPUT_SCHEMA, cached.output);
+      const decoded = deserializeEvmOutput(SUPPLY_OUTPUT_SCHEMA, observed.output);
       candidates.push({
         serializedOutput: serializeRespondOutput(SUPPLY_RESPOND_SCHEMA, decoded),
         shares: (decoded as { shares: bigint }).shares,
@@ -76,7 +86,7 @@ async function fetchSupplyCandidates(
     } catch (error) {
       warnOnce(
         `supply-decode:${requestId}`,
-        `could not decode/re-pack the cached output for supply ${requestId} ` +
+        `could not decode/re-pack the observed output for supply ${requestId} ` +
           `(matching against the failure candidate only): ${String(error)}`,
       );
     }
@@ -141,7 +151,7 @@ const MINUTE = 60_000;
  *
  * Everything a tick would otherwise redo is resolved once: the reader, whose request-record
  * cache a rebuild would throw away, the response key the vault pinned at initialise, and the
- * candidates {@link fetchSupplyCandidates} builds from the fakenet's fixed observation. A tick
+ * candidates {@link fetchSupplyCandidates} builds from the execution's fixed observation. A tick
  * costs one event read plus a signature check per candidate.
  *
  * @param context - The flow context.
@@ -166,10 +176,10 @@ export async function pollSupplyOutcome(
   let candidates: SupplyCandidate[] | undefined;
   while (Date.now() < end) {
     const events = await reader.getRespondBidirectionalEvents(options.requestId);
-    // A posted attestation means the fakenet has already cached the observed result (it caches
-    // before it posts), so the candidates are worth building only once a post appears.
+    // A posted attestation means the transaction has executed and its result is observable, so
+    // the candidates are worth building only once a post appears.
     if (events.length > 0) {
-      candidates ??= await fetchSupplyCandidates(options.requestId);
+      candidates ??= await fetchSupplyCandidates(context, reader, options.requestId);
       if (candidates !== undefined) {
         const outcome = matchSupplyOutcome(events, options.requestId, candidates, mpcResponseKey);
         if (outcome !== undefined) return outcome;

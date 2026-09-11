@@ -300,10 +300,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       async () => {
         expect(withdrawRequestId).toBeDefined();
 
-        // The event carries only the digest, so the poll fetches the observed
-        // result from the fakenet's /responses API and matches: for a mined
-        // revert the API serves success: false, so the ONLY matchable
-        // candidate is the protocol's fixed failure output.
+        // The event carries only the signature, so the poll traces the mined
+        // transaction and matches: a reverted receipt yields no output, so the
+        // ONLY matchable candidate is the protocol's fixed failure output.
         const context = await session.vaultContext();
         withdrawAttestation = await pollRespondBidirectional(context, {
           requestId: withdrawRequestId,
