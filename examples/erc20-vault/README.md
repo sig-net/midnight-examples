@@ -186,8 +186,8 @@ The contract package's dependency list is the minimal integration surface:
 "dependencies": {
   "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
   "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
-  "@sig-net/midnight": "0.21.0-rc.6",
-  "@sig-net/midnight-contract": "0.21.0-rc.6"
+  "@sig-net/midnight": "0.21.0-rc.10",
+  "@sig-net/midnight-contract": "0.21.0-rc.10"
 }
 ```
 
