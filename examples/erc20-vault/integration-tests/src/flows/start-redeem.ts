@@ -68,7 +68,6 @@ export async function startRedeem(
     path: VAULT_PATH_BYTES,
     ...REDEEM_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: before.stataToken,
       chainId: before.evmChainId,

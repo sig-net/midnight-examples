@@ -105,7 +105,7 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
     env.EVM_CHAIN_ID = chainId.toString();
     console.log(`resolved EVM_CHAIN_ID=${env.EVM_CHAIN_ID} from EVM_RPC_URL`);
     console.log(
-      ` ➜ sealed into the example's contract at initialise as CAIP-2 eip155:${env.EVM_CHAIN_ID}`,
+      ` ➜ sealed into the example's contract at initialise: every signed EVM transaction carries it`,
     );
     console.log(` ➜ 💡 Set as EVM_CHAIN_ID in the environment to pin it explicitly`);
   }

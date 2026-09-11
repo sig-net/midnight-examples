@@ -119,7 +119,6 @@ export async function startWithdraw(
     path: VAULT_PATH_BYTES,
     ...VAULT_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: erc20,
       chainId: before.evmChainId,

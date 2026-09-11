@@ -67,7 +67,7 @@ As illustrated, the flow comprises 5 steps:
     ([`redeemOutputSchema`](../../contract/src/erc20-vault.compact) and
     [`redeemRespondSchema`](../../contract/src/erc20-vault.compact), 36 and
     35 bytes) say the wrapper returns a `uint256 assets` the MPC repacks to
-    `uint64`. It is ledger field 19, and the notification carries its resolved
+    `uint64`. It is ledger field 18, and the notification carries its resolved
     ledger-tree path `[1, 13]` at depth 2, mirrored off chain by
     [`VAULT_REDEEM_REQUESTS_PATH`](../../contract/src/index.ts#L94).
   - The derivation path is the contract-fixed literal `pad(32, "vault")`, so the

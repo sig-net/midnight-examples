@@ -52,10 +52,7 @@ export async function printVaultState(
   console.log(`vault contract:    ${address}`);
   console.log(`initialised:       ${String(state.initialised)}`);
   console.log(`vault EVM address: 0x${bytesToHex(state.vaultEvmAddress)}`);
-  // caip2Id is zero-padded ASCII; NUL-trim for display.
-  console.log(
-    `EVM chain:         ${String(state.evmChainId)} (${new TextDecoder().decode(state.caip2Id).replace(/\0+$/u, "")})`,
-  );
+  console.log(`EVM chain id:      ${String(state.evmChainId)}`);
 
   printRequestMap("deposit", state.depositEventMap);
   printRequestMap("approve/withdraw", state.signBidirectionalEventMap);

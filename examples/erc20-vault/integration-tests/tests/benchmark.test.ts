@@ -792,7 +792,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const context = await session.vaultContext();
 
         // Swaps are signed by the VAULT's derived account, read from the
-        // vault's SWAP ledger map (field 11).
+        // vault's SWAP ledger map (field 12).
         recorder.setLeg(BenchmarkLeg.SwapPollSignatureResponse);
         const stop = startTimer();
         signedSwapTransaction = await pollSignatureResponse(context, {

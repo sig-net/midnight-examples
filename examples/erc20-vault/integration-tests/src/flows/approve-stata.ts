@@ -68,7 +68,6 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
     path: asciiPadded("vault", PATH_BYTES),
     ...VAULT_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: evmAddressBytes(AAVE_USDC),
       chainId: before.evmChainId,

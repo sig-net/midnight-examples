@@ -12,8 +12,6 @@ import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import {
-  asciiPadded,
-  CAIP2_ID_BYTES,
   deriveMidnightResponseKey,
   formatSecp256k1PublicKey,
   parseSecp256k1PublicKey,
@@ -60,10 +58,8 @@ export interface VaultInitialiseConfig {
   readonly stataUnderlyingAddress: string;
   /** The ERC-4626 wrapper the supply/redeem circuits mint and burn. */
   readonly stataTokenAddress: string;
-  /** The EVM chain the vault operates on. */
+  /** EIP-155 chain id of the Ethereum network the vault's transactions are signed for. */
   readonly evmChainId: bigint;
-  /** CAIP-2 rendering of {@link VaultInitialiseConfig.evmChainId} (`eip155:<id>`), the MPC routing key. */
-  readonly caip2Id: string;
   /**
    * The MPC response key for THIS vault contract (SEC1 hex): `f(MPC root key,
    * vault contract address, "midnight response key")`. The claim and
@@ -95,8 +91,8 @@ function assertDerivedMatch(preset: string | undefined, derived: string, name: s
   }
 }
 
-// The chain the vault's EVM transactions target, sealed at initialise as the
-// CAIP-2 routing key: `EVM_CHAIN_ID` when set, read from `EVM_RPC_URL` when
+// The EIP-155 chain id sealed at initialise, which every signed vault
+// transaction carries: `EVM_CHAIN_ID` when set, read from `EVM_RPC_URL` when
 // not, and checked against the chain when both are set.
 async function resolveEvmChainId(env: Record<string, string | undefined>): Promise<bigint> {
   const preset = envOrUndefined(env, "EVM_CHAIN_ID");
@@ -197,7 +193,6 @@ export async function resolveInitialiseConfig(
     vaultEvmAddress,
     ...targets,
     evmChainId,
-    caip2Id: `eip155:${String(evmChainId)}`,
     mpcResponseKey,
   };
 }
@@ -278,7 +273,7 @@ export async function initialiseVaultContract(
   console.log(`vault EVM address: ${config.vaultEvmAddress}`);
   console.log(`router:            ${config.routerAddress}`);
   console.log(`stata pair:        ${config.stataUnderlyingAddress} -> ${config.stataTokenAddress}`);
-  console.log(`EVM chain:         ${String(config.evmChainId)} (${config.caip2Id})`);
+  console.log(`EVM chain id:      ${String(config.evmChainId)}`);
   console.log(`MPC response key:  ${config.mpcResponseKey}`);
 
   const result = await vault.callTx.initialise(
@@ -287,7 +282,6 @@ export async function initialiseVaultContract(
     evmAddressBytes(config.stataUnderlyingAddress),
     evmAddressBytes(config.stataTokenAddress),
     config.evmChainId,
-    asciiPadded(config.caip2Id, CAIP2_ID_BYTES),
     parseSecp256k1PublicKey(config.mpcResponseKey),
   );
   console.log(`initialise finalized in tx ${result.public.txId}`);

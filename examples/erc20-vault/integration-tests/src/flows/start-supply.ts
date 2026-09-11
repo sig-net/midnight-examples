@@ -71,7 +71,6 @@ export async function startSupply(
     path: VAULT_PATH_BYTES,
     ...SUPPLY_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: before.stataToken,
       chainId: before.evmChainId,

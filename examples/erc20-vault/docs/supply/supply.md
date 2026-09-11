@@ -90,7 +90,7 @@ As illustrated, the flow comprises 6 steps:
     a `uint256 shares` the MPC repacks to `uint64`, and those schema widths
     ([`supplyOutputSchema`](../../contract/src/erc20-vault.compact) and
     [`supplyRespondSchema`](../../contract/src/erc20-vault.compact), 36 and
-    35 bytes) are part of the ledger type. It is ledger field 17, and the
+    35 bytes) are part of the ledger type. It is ledger field 16, and the
     notification carries its resolved ledger-tree path `[1, 11]` at depth 2,
     mirrored off chain by
     [`VAULT_SUPPLY_REQUESTS_PATH`](../../contract/src/index.ts#L91).

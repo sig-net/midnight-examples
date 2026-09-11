@@ -119,11 +119,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(`0x${bytesToHex(state.vaultEvmAddress)}`.toLowerCase()).toBe(
         config.vaultEvmAddress.toLowerCase(),
       );
-      // The pinned chain config: numeric id + zero-padded CAIP-2 string.
       expect(state.evmChainId).toBe(BigInt(requireEnv("EVM_CHAIN_ID")));
-      expect(new TextDecoder().decode(state.caip2Id).replace(/\0+$/u, "")).toBe(
-        `eip155:${requireEnv("EVM_CHAIN_ID")}`,
-      );
       // The stored MPC response key, verbatim: the sender-scoped key claim and
       // completeWithdraw verify responses against.
       expect(state.mpcResponseKey).toEqual(parseSecp256k1PublicKey(config.mpcResponseKey));

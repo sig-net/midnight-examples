@@ -71,7 +71,6 @@ export async function approveRouter(
     path: asciiPadded("vault", PATH_BYTES),
     ...VAULT_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: erc20,
       chainId: before.evmChainId,

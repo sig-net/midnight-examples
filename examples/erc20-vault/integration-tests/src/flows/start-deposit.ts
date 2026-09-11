@@ -113,7 +113,6 @@ export async function startDeposit(
     path: context.identity.commitment,
     ...VAULT_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: erc20,
       chainId: before.evmChainId,

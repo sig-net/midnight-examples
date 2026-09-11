@@ -248,8 +248,7 @@ export ledger mpcResponseKey: Secp256k1Point;
 export ledger signetRequestNonce: Counter;  // keeps identical requests' ids distinct
 export ledger initialised: Counter;         // one-shot initialise marker
 export ledger vaultEvmAddress: Bytes<20>;   // the vault's derived EVM account
-export ledger evmChainId: Uint<64>;         // the pinned EVM chain, numeric...
-export ledger caip2Id: Bytes<32>;           // ...and CAIP-2 form
+export ledger evmChainId: Uint<64>;         // EIP-155 chain id of the pinned Ethereum network
 sealed ledger deployer: Bytes<32>;          // only they may initialise
 // Deposits get their own map: kind isolation is structural, so completeDeposit
 // never sees an approve or withdraw request at all.
@@ -271,11 +270,11 @@ Two vault-specific points:
   (`VAULT_REQUESTS_PATH`, `VAULT_DEPOSIT_REQUESTS_PATH`,
   `VAULT_SWAP_REQUESTS_PATH`, `VAULT_SUPPLY_REQUESTS_PATH`,
   `VAULT_REDEEM_REQUESTS_PATH`) so off-chain readers cannot drift from them.
-  The vault has 21 ledger fields, past the 15-field flat limit, so the compiler
-  chunks the state tree: chunk 0 holds fields 0-5, chunk 1 holds fields 6-20,
+  The vault has 20 ledger fields, past the 15-field flat limit, so the compiler
+  chunks the state tree: chunk 0 holds fields 0–4, chunk 1 holds fields 5–19,
   and every path is depth 2. The approve/withdraw map at field 0 has the path
   `[0, 0]`, and its circuits pack `requestsPathDepth` 2 + `requestsPath`
-  [0, 0, 0, 0]; the deposit map at field 9 has `[1, 3]` and packs
+  [0, 0, 0, 0]. The deposit map at field 8 has `[1, 3]` and packs
   [1, 3, 0, 0]. The compiler records the same paths as each field's "index" in
   the compiled `contract-info.json`, and a ledger declaration change re-chunks
   the tree, so re-read them there and update every notification vector in the
@@ -311,7 +310,6 @@ export circuit initialise(
   stataUnderlyingAddr: Bytes<20>,
   stataTokenAddr: Bytes<20>,
   chainId: Uint<64>,
-  chainCaip2Id: Bytes<32>,
   responseKey: Secp256k1Point
 ): [] {
   assert(initialised == 0, "Already initialised");
@@ -326,10 +324,14 @@ export circuit initialise(
   stataUnderlying = disclose(stataUnderlyingAddr);
   stataToken = disclose(stataTokenAddr);
   evmChainId = disclose(chainId);
-  caip2Id = disclose(chainCaip2Id);
   mpcResponseKey = disclose(responseKey);
 }
 ```
+
+The chain id is the only per-network value a request carries: it binds each
+signed transaction to one Ethereum network (mainnet, Sepolia or a local anvil),
+and it must name the network the MPC watches. Every request's `caip2Id` is the
+SDK's fixed `ethereumCaip2Id()`, whichever Ethereum network that is.
 
 The gate prevents front-running: nobody else can initialise the vault to
 point at their own address, chain or key. Flow function:

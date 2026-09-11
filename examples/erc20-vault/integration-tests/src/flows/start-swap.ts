@@ -76,7 +76,6 @@ export async function startSwap(
     path: VAULT_PATH_BYTES,
     ...SWAP_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: before.uniswapRouter,
       chainId: before.evmChainId,
