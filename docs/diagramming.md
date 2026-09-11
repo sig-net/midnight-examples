@@ -19,9 +19,8 @@ same change. The pair moves together: re-render after every source edit, and com
 Draw.io SVG exports depend on the viewer's theme and render broken in dark mode, so READMEs
 embed the PNG and never an SVG.
 
-**TIP:** If you are using Claude Code you can ask it to edit and render diagrams for you.
-It has a skill for this workflow and will extract, edit, render and visually verify the
-result on your behalf.
+**TIP:** If you are using a coding agent you can ask it to edit and render diagrams for
+you: it can extract, edit, render and visually verify the result on your behalf.
 
 ## Colour palette
 
@@ -502,7 +501,8 @@ in the same change.
 ## Curated layouts (NEVER BREAK)
 
 A diagram carrying the curation marker (an inert model cell with id `curated`, added
-with `drawio-cli curate <file>`) has a hand-tidied layout, and that layout is
+with the `curate` command of [draw-io-cli](https://github.com/BRBussy/draw-io-cli)) has a
+hand-tidied layout, and that layout is
 authorial. On a curated diagram, an edit changes ONLY the cells its task names: the
 geometry, routing, label seats and spacing of everything else are the curator's
 decisions, and this page's layout preferences (working size, corner causes, circle
@@ -512,9 +512,9 @@ as ever: names come from code, membership comes from the census, and the truth
 priority is unchanged.
 
 The mandate is proven, never trusted: an edit to a curated diagram keeps a copy of
-the file from before the edit and finishes with
-`drawio-cli guard-diff <before> <after> --allow <id>...` listing exactly the cells
-the task authorised, and a violation is reverted rather than allowed after the fact.
+the file from before the edit and finishes with that tool's `guard-diff` command over
+the before and after copies, allowing exactly the cells the task authorised, and a
+violation is reverted rather than allowed after the fact.
 Only the curator adds or removes the marker, and a marking change re-renders the
 pair so the PNG's embedded model carries the same state.
 
