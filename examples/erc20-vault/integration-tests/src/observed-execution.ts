@@ -18,6 +18,9 @@ import {
 } from "@sig-net/midnight";
 import { JsonRpcProvider, type TransactionReceipt, ZeroHash } from "ethers";
 
+import { isAnvil } from "./evm-anvil.ts";
+import { jsonRpcRequest, parseJsonRpcReply } from "./json-rpc.ts";
+
 /** One observed remote-execution result. */
 export interface ObservedExecution {
   /** The request id, hex, no 0x prefix. */
@@ -37,17 +40,6 @@ export interface ObservedExecution {
 const TRACE_METHOD = "debug_traceTransaction";
 const CALL_TRACER = { tracer: "callTracer" } as const;
 
-/** The JSON-RPC error a node answers a refused or failed call with. */
-interface JsonRpcError {
-  readonly code: number;
-  readonly message: string;
-}
-
-/** A JSON-RPC reply, in the half read here. */
-interface JsonRpcReply {
-  readonly error?: JsonRpcError;
-}
-
 /** The standard JSON-RPC code for a method the node does not know. */
 const METHOD_NOT_FOUND_CODE = -32601;
 
@@ -58,43 +50,39 @@ const METHOD_UNAVAILABLE = /not (?:exist|available|supported|allowed)|unsupporte
 /**
  * Check that `evmRpcUrl` serves `debug_traceTransaction`, the method every
  * attestation poll recovers execution outputs with ({@link observeExecution}).
- * The probe traces the zero hash: a node that serves the method answers with
- * a result or a transaction-not-found error, one that does not answers with
- * the method-not-found code or a tier-gate message.
+ * Anvil passes without a probe: it traces the transactions it mines itself,
+ * and a forking anvil proxies a hash it does not hold to its upstream, whose
+ * answer says nothing about anvil. Any other node is probed with the zero
+ * hash: one that serves the method answers with a result or a
+ * transaction-not-found error, one that does not answers with the
+ * method-not-found code or a tier-gate message.
  *
  * @param evmRpcUrl - The EVM JSON-RPC endpoint (`EVM_RPC_URL`).
  * @throws {Error} If the endpoint is unreachable, answers with something other
  *   than JSON-RPC, or refuses the method.
  */
 export async function assertDebugTraceAvailable(evmRpcUrl: string): Promise<void> {
-  let status: number;
-  let text: string;
+  let anvil: boolean;
+  let answer: { status: number; text: string };
   try {
-    const response = await fetch(evmRpcUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: TRACE_METHOD,
-        params: [ZeroHash, CALL_TRACER],
-      }),
-    });
-    status = response.status;
-    text = await response.text();
+    anvil = await isAnvil(evmRpcUrl);
+    if (anvil) {
+      console.log(
+        `EVM_RPC_URL (${evmRpcUrl}) is anvil, which serves ${TRACE_METHOD} for the transactions it mines`,
+      );
+      return;
+    }
+    answer = await jsonRpcRequest(evmRpcUrl, TRACE_METHOD, [ZeroHash, CALL_TRACER]);
   } catch (error) {
     throw new Error(`EVM_RPC_URL (${evmRpcUrl}) is not answering a ${TRACE_METHOD} probe`, {
       cause: error,
     });
   }
-  let reply: JsonRpcReply;
-  try {
-    reply = JSON.parse(text) as JsonRpcReply;
-  } catch (error) {
+  const reply = parseJsonRpcReply(answer);
+  if (reply === undefined) {
     throw new Error(
-      `EVM_RPC_URL (${evmRpcUrl}) answered a ${TRACE_METHOD} probe with HTTP ${String(status)} ` +
-        `and no JSON-RPC reply: ${text}`,
-      { cause: error },
+      `EVM_RPC_URL (${evmRpcUrl}) answered a ${TRACE_METHOD} probe with HTTP ${String(answer.status)} ` +
+        `and no JSON-RPC reply: ${answer.text}`,
     );
   }
   const error = reply.error;

@@ -7,6 +7,8 @@ import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { type ContractWriteMethod, requireEnv } from "@sig-net/midnight-examples-test-harness";
 import { ethers } from "ethers";
 
+import { isAnvil } from "./evm-anvil.ts";
+
 /** Real Sepolia USDC (the swap suite's tokenIn), also present on a Sepolia fork. */
 export const SEPOLIA_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 // Aave v3 Sepolia PoolConfigurator + a pool admin: the live USDC reserve is supplied ~2x over its
@@ -140,19 +142,6 @@ async function liftAaveUsdcSupplyCap(provider: ethers.JsonRpcProvider): Promise<
 }
 
 /**
- * Whether the node behind `provider` is anvil, the only node whose `anvil_*` cheatcodes the
- * dealing here uses. Read from `web3_clientVersion`, which every node answers (anvil reports
- * `anvil/v<version>`), so a failure is a dead RPC and never an ambiguous "method not found".
- *
- * @param provider - The JSON-RPC provider to ask.
- * @returns True when anvil answers, false for any other node.
- */
-async function isAnvil(provider: ethers.JsonRpcProvider): Promise<boolean> {
-  const clientVersion: unknown = await provider.send("web3_clientVersion", []);
-  return typeof clientVersion === "string" && clientVersion.toLowerCase().startsWith("anvil");
-}
-
-/**
  * Setup step: deal the derived EVM accounts their gas + tokens on the fork. The user gets ETH +
  * USDC (the deposit source), and the vault gets ETH (withdraw/approve/swap gas, deposits fund
  * its USDC). Dealing is anvil's `anvil_*` cheatcodes, so on any other node (a real chain
@@ -169,7 +158,7 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
   const user = requireEnv(env, "EVM_USER_ADDRESS");
   const vault = requireEnv(env, "EVM_VAULT_ADDRESS");
 
-  if (!(await isAnvil(provider))) {
+  if (!(await isAnvil(rpcUrl))) {
     console.log(`${rpcUrl} is not anvil: no cheatcodes, so nothing is dealt`);
     console.log(" ➜ FUND THE DERIVED ACCOUNTS ON THE REAL CHAIN before the flows run:");
     console.log(

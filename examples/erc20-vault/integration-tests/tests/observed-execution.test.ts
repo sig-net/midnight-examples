@@ -24,11 +24,35 @@ afterEach(
     }),
 );
 
-/** Start a server that answers every request with `status` and `body`, returning its URL. */
-async function serveReply(status: number, body: string): Promise<string> {
-  const started = createServer((_request, response) => {
-    response.writeHead(status, { "content-type": "application/json" });
-    response.end(body);
+/** What the probe server tells about itself, and what it answers everything else with. */
+interface ProbeServer {
+  /** The `web3_clientVersion` result. Absent: the method is unknown to the server. */
+  readonly clientVersion?: string;
+  readonly status: number;
+  readonly body: string;
+}
+
+/** Start a server answering `web3_clientVersion` per `clientVersion` and every other call with `status` and `body`. */
+async function serveReply(spec: ProbeServer): Promise<string> {
+  const started = createServer((request, response) => {
+    let raw = "";
+    request.on("data", (chunk: Buffer) => {
+      raw += chunk.toString();
+    });
+    request.on("end", () => {
+      const { method } = JSON.parse(raw) as { method: string };
+      if (method === "web3_clientVersion") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          spec.clientVersion === undefined
+            ? '{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}'
+            : JSON.stringify({ jsonrpc: "2.0", id: 1, result: spec.clientVersion }),
+        );
+        return;
+      }
+      response.writeHead(spec.status, { "content-type": "application/json" });
+      response.end(spec.body);
+    });
   });
   server = started;
   await new Promise<void>((resolve) => started.listen(0, "127.0.0.1", resolve));
@@ -41,13 +65,19 @@ async function serveReply(status: number, body: string): Promise<string> {
 
 describe("assertDebugTraceAvailable", () => {
   /** A canned reply to the zero-hash probe. */
-  interface ProbeReply {
+  interface ProbeReply extends ProbeServer {
     readonly name: string;
-    readonly status: number;
-    readonly body: string;
   }
 
   const SERVED: readonly ProbeReply[] = [
+    {
+      // A forking anvil proxies an unknown hash to its upstream, here one
+      // without the method: anvil still traces the transactions it mines.
+      name: "anvil forking an upstream without the method",
+      clientVersion: "anvil/v1.5.1",
+      status: 200,
+      body: '{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"The method debug_traceTransaction does not exist/is not available"}}',
+    },
     {
       name: "a callTracer frame",
       status: 200,
@@ -66,8 +96,8 @@ describe("assertDebugTraceAvailable", () => {
     },
   ];
 
-  it.each(SERVED)("accepts $name", async ({ status, body }) => {
-    const url = await serveReply(status, body);
+  it.each(SERVED)("accepts $name", async ({ name: _name, ...spec }) => {
+    const url = await serveReply(spec);
     await expect(assertDebugTraceAvailable(url)).resolves.toBeUndefined();
   });
 
@@ -97,13 +127,13 @@ describe("assertDebugTraceAvailable", () => {
     },
   ];
 
-  it.each(REFUSED)("refuses $name", async ({ status, body, rejects }) => {
-    const url = await serveReply(status, body);
+  it.each(REFUSED)("refuses $name", async ({ name: _name, rejects, ...spec }) => {
+    const url = await serveReply(spec);
     await expect(assertDebugTraceAvailable(url)).rejects.toThrow(rejects);
   });
 
   it("names an endpoint that does not answer", async () => {
-    const url = await serveReply(200, "{}");
+    const url = await serveReply({ status: 200, body: "{}" });
     await new Promise<void>((resolve) => {
       server?.close(() => {
         resolve();
