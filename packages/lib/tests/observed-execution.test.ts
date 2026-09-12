@@ -4,9 +4,8 @@
 
 import { createServer, type Server } from "node:http";
 
+import { assertDebugTraceAvailable } from "@sig-net/midnight-examples-lib";
 import { afterEach, describe, expect, it } from "vitest";
-
-import { assertDebugTraceAvailable } from "../src/observed-execution.ts";
 
 let server: Server | undefined;
 

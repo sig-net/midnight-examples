@@ -16,10 +16,11 @@ import {
 import { STATA_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { VAULT_SUPPLY_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import type { ObservedExecution } from "@sig-net/midnight-examples-lib";
+import { observeExecution } from "@sig-net/midnight-examples-lib";
 
 import { logTokenAmount } from "../evm-logging.ts";
 import { SUPPLY_OUTPUT_SCHEMA, SUPPLY_RESPOND_SCHEMA } from "../evm-stata.ts";
-import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
 import { PollProgress } from "../poll-progress.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 

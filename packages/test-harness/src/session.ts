@@ -19,13 +19,12 @@ import {
   type WalletFacade,
 } from "@sig-net/midnight-contract-deploy";
 import { withOperationProgress } from "@sig-net/midnight-examples-lib";
-
-import { requireEnv } from "./e2e-env.ts";
+import { requireEnv } from "@sig-net/midnight-examples-lib";
 
 /**
  * The user-side wallet seed in effect: `USER_SEED`, a role wallet the setup
  * resolves (generated + persisted to `.env` when absent) and funds from the
- * root wallet — see wallets.ts. Required: by the time a session or identity
+ * root wallet — see `@sig-net/midnight-examples-lib`. Required: by the time a session or identity
  * derivation runs, the wallet steps have populated it.
  *
  * @param env - The environment to read `USER_SEED` from.

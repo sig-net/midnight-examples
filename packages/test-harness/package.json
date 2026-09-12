@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Test-only machinery shared by the examples' integration tests: stack preflight, the env-gated setup pipeline (MPC keys, signet deploy, fakenet hand-off, local-EVM funding), session lifecycle and signet polling. Test deps live here, never in an example's manifests.",
+  "description": "Integration-test session lifecycle, Vitest setup adapters and Signet polling, with shared Node setup exports.",
   "exports": {
     ".": "./src/index.ts",
     "./flow-hooks": "./src/flow-hooks.ts"

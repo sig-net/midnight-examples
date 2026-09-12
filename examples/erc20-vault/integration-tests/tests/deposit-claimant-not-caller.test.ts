@@ -37,7 +37,7 @@ import {
   getEthBalance,
   logSkip,
   requireEnv as requireEnvOf,
-} from "@sig-net/midnight-examples-test-harness";
+} from "@sig-net/midnight-examples-lib";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { formatEther, parseEther, parseUnits } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";

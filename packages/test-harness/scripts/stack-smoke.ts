@@ -11,9 +11,8 @@
 
 import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 import { buildBaseEnv, getEvmChainId } from "@sig-net/midnight-examples-lib";
-
-import { runCommand } from "../src/exec.ts";
-import { assertHttpReachable } from "../src/preflight.ts";
+import { runCommand } from "@sig-net/midnight-examples-lib";
+import { assertHttpReachable } from "@sig-net/midnight-examples-lib";
 
 const MINUTE = 60_000;
 

@@ -140,7 +140,7 @@ for them on the vault's request, and only through the vault's circuits.
 Derivation happens off-chain with the `@sig-net/midnight` helpers:
 `deriveEvmAddress(mpcPublicKey, vaultContractAddress, path)` for the two EVM
 accounts and `deriveMidnightResponseKey(mpcPublicKey, vaultContractAddress)`
-for the response key (the setup pipeline derives all three and prints them).
+for the response key (the setup pipeline derives all three and persists its environment).
 The diagrams render both helpers as one abstract `keyDerivation(...)` note per
 derived value: a note reading `keyDerivation(v2.0.0, MPC_ROOT_PUBLIC_KEY,
 MIDNIGHT_VAULT_CONTRACT_ADDRESS, <path>)` is `deriveEvmAddress` for the two EVM
@@ -368,7 +368,7 @@ the deposit round trip, from funding the deposit account through
 |---|---|
 | [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads and the EVM constants, all browser-safe. Plus simulator unit tests. Its runtime dependencies are the SDK (`@sig-net/midnight`, `@sig-net/midnight-contract`) plus the two Midnight packages the generated module and the provider types import (`@midnight-ntwrk/compact-runtime`, `@midnight-ntwrk/midnight-js`). |
 | [`deploy/`](deploy/) | Deploying and post-deploy initialisation: the split base-deploy-plus-maintenance-adds, the deployer-gated `initialise`, and the configuration those resolve, as typed functions taking an environment map plus thin CLI entrypoints over them, so a hand-run deploy and the e2e setup execute identical code. Also the Node half of the vault's client surface those flows and the integration tests share: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. Everything here needs Node, which is why it is not in the contract package. |
-| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
+| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the Vitest adapter for the shared deployment setup, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
 
 ## Running it
 

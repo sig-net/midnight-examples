@@ -1,33 +1,6 @@
-// Respond-output recomputation: the client half of the signature-only
-// attestation protocol. The MPC's RespondBidirectionalEvent carries only the
-// ECDSA signature over the attestation digest (binding requestId and
-// serializedOutput), never the digest and never the output itself, so the
-// client obtains the output bytes independently and checks the signature
-// against them. Every call recomputes BOTH candidate outputs the protocol
-// allows and tries the posted events against both:
-//
-//   success candidate -> the mined transaction's raw traced output (see
-//                        ../observed-execution.ts), decoded per the schema
-//                        and re-packed per the schema. Only computable when
-//                        the observation reports an executed transaction
-//                        with output bytes.
-//   failure candidate -> the protocol's fixed 5-byte failure output
-//                        (MPC_FAILURE_OUTPUT), schema-independent by design,
-//                        always a candidate.
-//
-// Candidate selection is by SIGNATURE VERIFICATION alone, against the
-// response key the vault pinned at initialise: the observation's own success
-// flag is unauthenticated and never decides anything, it only gates whether a
-// success candidate can be built at all. With no digest on the event there is
-// nothing else to match on. Which candidate verified is also what routes
-// settlement: the success candidate goes to `completeDeposit` for a sweep and
-// to `completeWithdraw` for a transfer, the failure candidate is unclaimable
-// on a sweep and goes to `refundWithdraw` on a transfer. The fetched
-// output is UNTRUSTED until that check: the verified bytes go into the settle
-// circuit as an argument, where `verifyRespondBidirectionalEvent<N>` re-hashes
-// them and verifies the same signature in-circuit. That in-circuit check is
-// the authentication gate, so a forged post merely wastes a proof here, it
-// cannot mint.
+// Candidate output bytes remain untrusted until the response signature verifies
+// against the key sealed into the vault. Only the verified candidate selects
+// the settlement path and supplies its circuit arguments.
 import {
   deserializeEvmOutput,
   MPC_FAILURE_OUTPUT,
@@ -38,9 +11,10 @@ import {
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import type { ObservedExecution } from "@sig-net/midnight-examples-lib";
+import { observeExecution } from "@sig-net/midnight-examples-lib";
 
 import { ERC20_TRANSFER_RESULT_SCHEMA } from "../mpc-routing.ts";
-import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
 import type { PollProgress } from "../poll-progress.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import { warnOnce } from "../warn-once.ts";

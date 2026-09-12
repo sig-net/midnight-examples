@@ -11,10 +11,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
+import { stepHeader } from "@sig-net/midnight-examples-lib";
+import { waitForGo } from "@sig-net/midnight-examples-lib";
 import { afterAll, beforeAll, beforeEach, inject } from "vitest";
-
-import { testHeader } from "./output.ts";
-import { waitForGo } from "./waitForGo.ts";
 
 const MINUTE = 60_000;
 const execFileAsync = promisify(execFile);
@@ -177,6 +176,6 @@ export function installFlowHooks(): void {
     if (process.env.STEP_THROUGH && index > 0) {
       await waitForGo(index + 1, siblings.length, ctx.task.name);
     }
-    testHeader(index + 1, siblings.length, ctx.task.name);
+    stepHeader(index + 1, siblings.length, ctx.task.name);
   }, 60 * MINUTE);
 }

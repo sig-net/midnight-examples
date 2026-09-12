@@ -9,7 +9,7 @@ import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-p
 import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 import { printVaultState } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { buildBaseEnv } from "@sig-net/midnight-examples-lib";
-import { requireEnv } from "@sig-net/midnight-examples-test-harness";
+import { requireEnv } from "@sig-net/midnight-examples-lib";
 
 const env = buildBaseEnv();
 const nodeConfig = getMidnightNodeConfig(env);

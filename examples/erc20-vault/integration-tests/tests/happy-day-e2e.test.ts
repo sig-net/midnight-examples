@@ -40,9 +40,9 @@ import {
   getTransactionNonce,
   isTransactionMined,
   logSkip,
-  pollSignetNotification,
   requireEnv as requireEnvOf,
-} from "@sig-net/midnight-examples-test-harness";
+} from "@sig-net/midnight-examples-lib";
+import { pollSignetNotification } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { formatEther, JsonRpcProvider, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Runtime plumbing the examples share and @sig-net/midnight-contract-deploy does not publish: split-deploy transaction builders, midnight-js provider adapters, repo .env readers and shielded wallet transfers. Kept ruthlessly small.",
+  "description": "Shared Node runtime plumbing for example deployment, wallet funding, provider adapters, environment configuration, artefact verification and EVM execution observation.",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -20,12 +20,14 @@
     "@midnight-ntwrk/platform-js": "^3.0.0",
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
     "@midnightntwrk/wallet-sdk-facade": "5.0.0-beta.2",
+    "@sig-net/midnight": "0.21.0",
     "@sig-net/midnight-contract-deploy": "0.21.0",
     "effect": "3.22.2",
     "ethers": "^6.17.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }

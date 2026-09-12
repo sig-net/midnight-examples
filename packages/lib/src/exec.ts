@@ -4,7 +4,7 @@
 
 import { spawn } from "node:child_process";
 
-import { REPO_ROOT } from "@sig-net/midnight-examples-lib";
+import { REPO_ROOT } from "./env-file.ts";
 
 /**
  * Run a root-level package script (`yarn run <script>` at {@link REPO_ROOT}),

@@ -15,8 +15,8 @@ import {
   WalletUnfundedError,
 } from "@sig-net/midnight-contract-deploy";
 
-import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv } from "./env-file.ts";
+import { requireEnv } from "./environment.ts";
 import { banner, logSkip } from "./output.ts";
 import { explainDustSpendRejection } from "./steps.ts";
 
@@ -33,17 +33,6 @@ export interface RoleWallet {
 /** The funding root. Does no test work: it holds NIGHT, pays the roles out and keeps one share for its own fees. */
 const ROOT: RoleWallet = { label: "root", envVar: "ROOT_SEED", shares: 1n };
 
-/**
- * The role wallets funded from root, in setup order: `deployer` deploys the
- * signet + example contracts, `user` drives the example's circuits (and seeds
- * the derived EVM account identity), `mpc responder` is the fakenet
- * responder's fee-paying wallet (docker-compose interpolates its seed), and
- * `bearer` is the second SPENDING wallet of the bearer-transfer flow (it
- * pays its own withdraw fees). Receive-only test wallets (the fixed
- * `…42`/`…43` seeds) never pay anything and need no role here. The deployer
- * weighs three shares: the vault's split deploy costs it one transaction per
- * circuit (seventeen) where every other role pays one or two.
- */
 const CHILDREN: readonly RoleWallet[] = [
   { label: "deployer", envVar: "DEPLOYER_SEED", shares: 3n },
   { label: "user", envVar: "USER_SEED", shares: 1n },
@@ -75,7 +64,7 @@ function walletAddressLines(label: string, addresses: WalletAddresses): string[]
  * DEPLOYER_SEED, USER_SEED, MPC_RESPONDER_SEED and BEARER_SEED are all set
  * in `env`.
  *
- * @param env - The suite's env accumulator (mutated with the resolved seeds).
+ * @param env - The setup environment accumulator (mutated with the resolved seeds).
  */
 export function ensureWalletSeeds(env: NodeJS.ProcessEnv): void {
   const config = getMidnightNodeConfig(env);
@@ -102,7 +91,7 @@ export function ensureWalletSeeds(env: NodeJS.ProcessEnv): void {
   if (Object.keys(generated).length > 0) {
     appendRepoDotEnv(
       generated,
-      "test-harness setup: generated wallet seeds (root/deployer/user/mpc responder/bearer)",
+      "wallet setup: generated wallet seeds (root/deployer/user/mpc responder/bearer)",
     );
   }
 }
@@ -136,7 +125,7 @@ export function fundingShare(rootNight: bigint, unfunded: readonly RoleWallet[])
  * The NIGHT to transfer to one child. `FUND_CHILD_NIGHT` (base units) pins it
  * for every child. Otherwise the child receives its shares of root's balance.
  *
- * @param env - The suite's env accumulator, read for `FUND_CHILD_NIGHT`.
+ * @param env - The setup environment accumulator, read for `FUND_CHILD_NIGHT`.
  * @param share - The NIGHT one share is worth (see {@link fundingShare}).
  * @param child - The child to fund.
  * @returns The NIGHT amount to send the child, in base units.
@@ -147,7 +136,7 @@ export function perChildAmount(env: NodeJS.ProcessEnv, share: bigint, child: Rol
   if (override) {
     if (!/^\d+$/.test(override)) {
       throw new Error(
-        `FUND_CHILD_NIGHT must be a non-negative integer in NIGHT base units; got "${override}".`,
+        `FUND_CHILD_NIGHT must be a non-negative integer in NIGHT base units. Received "${override}".`,
       );
     }
     return BigInt(override);

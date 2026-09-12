@@ -9,7 +9,7 @@ import {
 } from "@sig-net/midnight";
 import { pureCircuits as vaultPureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { UNISWAP_SWAP_ROUTER_02 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import type { ContractReadMethod } from "@sig-net/midnight-examples-test-harness";
+import type { ContractReadMethod } from "@sig-net/midnight-examples-lib";
 import { ethers } from "ethers";
 
 /** Uniswap V3 QuoterV2 on Sepolia — a read-only price oracle. */

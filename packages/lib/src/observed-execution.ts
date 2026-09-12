@@ -1,16 +1,3 @@
-// What the EVM did with an MPC-signed transaction, as a client obtains it on
-// its own: the MPC's attestation carries only a signature over (requestId,
-// serializedOutput), never the output, so the client recovers the raw
-// execution output independently and checks the signature against it. The
-// mined transaction is rebuilt from chain data alone (the request record plus
-// a posted signature, exactly as the broadcast did), then its top call
-// frame's return data is read with `debug_traceTransaction`, the RPC method
-// the MPC itself observes with. `EVM_RPC_URL` must serve that method on every
-// network: anvil does, and hosted endpoints often gate it behind a paid tier,
-// so the setup pipeline probes it before anything is deployed. An observation
-// is UNTRUSTED until the attestation signature check: it only gates which
-// candidate output is tried, never what is accepted.
-
 import {
   type RequestIdHex,
   signBidirectionalEventToSignedEvmTransaction,
@@ -109,11 +96,11 @@ const RECEIPT_POLL_INTERVAL_MS = 1_000;
  * receipt. A post that rebuilds no transaction (malformed) or names one that
  * never mined is skipped: only the chain says which post's transaction ran.
  *
- * @param reader - The reader over the vault / signet pair the request lives in.
+ * @param reader - The reader over the integrating contract and Signet instance.
  * @param provider - The EVM chain the transaction was broadcast to.
  * @param requestId - The request whose transaction to find.
  * @returns The receipt, or undefined when no posted signature names a mined transaction.
- * @throws {Error} When the vault holds no request under `requestId`.
+ * @throws {Error} When the reader holds no request under `requestId`.
  */
 async function minedTransactionReceipt(
   reader: SignetRequestResponseReader,
@@ -151,13 +138,13 @@ interface CallTracerFrame {
  * top frame's return data from `debug_traceTransaction`. UNTRUSTED: the
  * caller verifies the MPC's attestation signature over what this returns.
  *
- * @param reader - The reader over the vault / signet pair the request lives in.
+ * @param reader - The reader over the integrating contract and Signet instance.
  * @param evmRpcUrl - The EVM JSON-RPC endpoint, which must serve `debug_traceTransaction`.
  * @param requestId - The request whose execution to observe.
  * @param timeoutMs - How long to wait for a mined transaction before failing.
  * @returns The observed execution.
  * @throws {Error} When no posted signature names a mined transaction within `timeoutMs`,
- *   the vault holds no such request, or the RPC refuses `debug_traceTransaction`.
+ *   the reader holds no such request, or the RPC refuses `debug_traceTransaction`.
  */
 export async function observeExecution(
   reader: SignetRequestResponseReader,

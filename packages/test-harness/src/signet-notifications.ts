@@ -16,8 +16,7 @@ import {
   stripHexPrefix,
 } from "@sig-net/midnight";
 import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
-
-import { requireEnv } from "./e2e-env.ts";
+import { requireEnv } from "@sig-net/midnight-examples-lib";
 
 /**
  * Whether a decoded signet event carries `name`.

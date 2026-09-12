@@ -1,16 +1,10 @@
-// Environment preflight checks: is the local Midnight stack up, is the
-// compact compiler installed. Pure reachability probes — no protocol traffic.
-
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
 /**
- * Assert an HTTP endpoint is reachable. ANY http response counts as
- * reachable (the indexer's GraphQL endpoint answers GETs with 400, the
- * proof server's root with 404 — both prove the service is up); only a
- * network-level failure (refused, unresolvable, timeout) fails.
+ * Check transport reachability. Protocol readiness is checked by the subsequent setup steps.
  *
  * @param name - Human-readable service name for the error message.
  * @param url - The endpoint to probe.
@@ -22,7 +16,7 @@ export async function assertHttpReachable(name: string, url: string): Promise<vo
     await fetch(url, { signal: AbortSignal.timeout(5_000) });
   } catch (error) {
     throw new Error(
-      `${name} is not reachable at ${url} — is the local Midnight stack up? Start it with \`docker compose up -d\` at the repo root. (${String(error)})`,
+      `${name} is not reachable at ${url}. Start the local Midnight stack with \`docker compose up -d\` at the repo root. (${String(error)})`,
       { cause: error },
     );
   }
@@ -42,7 +36,7 @@ export async function assertCommandAvailable(command: string, args: string[]): P
     console.log(`${command} ${args.join(" ")}: ${firstLine}`);
   } catch (error) {
     throw new Error(
-      `\`${command} ${args.join(" ")}\` failed — is the ${command} toolchain installed and on PATH? (${String(error)})`,
+      `\`${command} ${args.join(" ")}\` failed. Verify ${command} is installed and on PATH. (${String(error)})`,
       { cause: error },
     );
   }

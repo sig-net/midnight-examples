@@ -1,4 +1,4 @@
-import { getErc20Balance } from "@sig-net/midnight-examples-test-harness";
+import { getErc20Balance } from "@sig-net/midnight-examples-lib";
 import { formatEther, formatUnits } from "ethers";
 
 /**

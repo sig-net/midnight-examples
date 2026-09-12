@@ -52,7 +52,7 @@ As illustrated, the flow comprises 6 steps:
   - Every later step assumes the deposit account already holds the tokens to
     sweep and the ETH to pay its own gas. On the local fork the setup pipeline
     deals both to it
-    ([`dealForkEvmAccounts`](../../integration-tests/src/fork-funding.ts#L152)),
+    ([`dealForkEvmAccounts`](../../deploy/src/fork-funding.ts)),
     and on a real chain the user funds the printed
     `EVM_USER_ADDRESS`.
 - **2.** startDeposit(...) records the request

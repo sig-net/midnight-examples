@@ -8,7 +8,7 @@ import {
   type ContractReadMethod,
   type ContractWriteMethod,
   requireEnv,
-} from "@sig-net/midnight-examples-test-harness";
+} from "@sig-net/midnight-examples-lib";
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
 
 import { logTokenAmount } from "./evm-logging.ts";

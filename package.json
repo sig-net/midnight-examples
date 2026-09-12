@@ -29,7 +29,8 @@
     "lint": "eslint . --max-warnings=0 --concurrency=auto",
     "lint:fix": "eslint . --fix --concurrency=auto",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "setup-local:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy setup-local"
   },
   "resolutions": {
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",

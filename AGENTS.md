@@ -3,11 +3,12 @@
 This repository is a single **Yarn workspace** (Yarn 4 via corepack, `nodeLinker:
 node-modules`), split between shared machinery and the examples integrators copy:
 
-- **`packages/lib`** — runtime helpers imported by examples (wallet,
-  providers, tx build & submit). Kept ruthlessly small.
-- **`packages/test-harness`** — test-only machinery (stack bring-up/teardown,
-  mpc-keys setup, wallet funding, env/session handling, subprocess helpers).
-  Test-only deps live here and never touch an example's manifests.
+- **`packages/lib`**: shared Node runtime plumbing for wallet transfers and funding,
+  providers, transaction construction, environment files, stack preparation,
+  artefact verification and EVM execution observation. Examples and the test
+  harness import these helpers directly.
+- **`packages/test-harness`**: Vitest adapters, integration sessions and worker
+  lifecycle. Runtime helpers belong in `packages/lib` and are not re-exported here.
 - **`examples/*/*`** — one directory per example, each holding up to three
   workspace packages: `contract` (required), then `deploy` and
   `integration-tests` as warranted. Each package holds exactly one kind of

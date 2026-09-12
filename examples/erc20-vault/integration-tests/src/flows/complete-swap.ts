@@ -16,10 +16,11 @@ import {
 } from "@sig-net/midnight";
 import { VAULT_SWAP_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import type { ObservedExecution } from "@sig-net/midnight-examples-lib";
+import { observeExecution } from "@sig-net/midnight-examples-lib";
 
 import { logTokenAmount } from "../evm-logging.ts";
 import { SWAP_OUTPUT_SCHEMA, SWAP_RESPOND_SCHEMA } from "../evm-swap.ts";
-import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
 import { PollProgress } from "../poll-progress.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 

@@ -6,7 +6,7 @@ vi.mock("@sig-net/midnight-contract-deploy", async (importOriginal) => {
 import * as funding from "@sig-net/midnight-contract-deploy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ensureWalletsFunded } from "../src/wallets.ts";
+import { ensureWalletsFunded } from "../src/wallet-funding.ts";
 
 const ENV: NodeJS.ProcessEnv = {
   ROOT_SEED: "root",

@@ -1,4 +1,4 @@
-import { submitTransferTransaction } from "../src/wallet.ts";
+import { submitTransferTransaction } from "../src/wallet-transfers.ts";
 vi.mock("@sig-net/midnight-contract-deploy", async (importOriginal) => {
   const actual = await importOriginal<typeof funding>();
   return { ...actual };

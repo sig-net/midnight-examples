@@ -2,7 +2,7 @@
 // signature, broadcast, completeSwap.
 import type { RequestIdHex } from "@sig-net/midnight";
 import { VAULT_SWAP_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
+import { getTransactionNonce } from "@sig-net/midnight-examples-lib";
 
 import { logTokenAmount } from "../evm-logging.ts";
 import { quoteExactOutputSingle } from "../evm-swap.ts";

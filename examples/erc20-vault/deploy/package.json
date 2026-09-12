@@ -14,7 +14,8 @@
     "deploy-initialise": "tsx scripts/deploy-initialise.ts",
     "initialise": "tsx scripts/initialise.ts",
     "resume-deploy": "tsx scripts/resume-deploy.ts",
-    "record-contract-address": "tsx scripts/record-contract-address.ts"
+    "record-contract-address": "tsx scripts/record-contract-address.ts",
+    "setup-local": "tsx scripts/setup-local.ts"
   },
   "dependencies": {
     "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
@@ -26,7 +27,8 @@
     "@sig-net/midnight-contract": "0.21.0",
     "@sig-net/midnight-contract-deploy": "0.21.0",
     "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
-    "@sig-net/midnight-examples-lib": "workspace:*"
+    "@sig-net/midnight-examples-lib": "workspace:*",
+    "ethers": "^6.17.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

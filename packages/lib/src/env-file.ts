@@ -8,7 +8,7 @@
 // {@link parseDotEnv}), with no interpolation and no multiline. Compose reads the same
 // file for the fakenet container, so a value must parse identically here.
 
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -93,4 +93,21 @@ export function loadRepoDotEnv(): Record<string, string> {
  */
 export function buildBaseEnv(): NodeJS.ProcessEnv {
   return { ...loadRepoDotEnv(), ...process.env };
+}
+
+/**
+ * Append a provenance-labelled block while preserving operator-written content.
+ * Callers must check existing keys for conflicts: both the reader and Compose use the last occurrence.
+ *
+ * @param entries - The KEY=value pairs in write order.
+ * @param provenance - One-line label for the generated block.
+ * @param filePath - Destination file, defaulting to the repository environment file.
+ */
+export function appendRepoDotEnv(
+  entries: Record<string, string>,
+  provenance: string,
+  filePath: string = join(REPO_ROOT, ".env"),
+): void {
+  const lines = Object.entries(entries).map(([key, value]) => `${key}=${value}`);
+  appendFileSync(filePath, `\n# ${provenance}\n${lines.join("\n")}\n`, "utf8");
 }

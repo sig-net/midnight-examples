@@ -26,7 +26,7 @@ If you are looking for the parts of the Sig Network stack that these examples ar
 
 Each example is a directory under [`examples/`](examples/) holding up to three packages, split by what the code is: `contract` (required), plus `deploy` and `integration-tests` as warranted.
 
-The examples are what integrators read and copy. Shared repo-private plumbing lives under [`packages/`](packages/): `lib` holds the runtime helpers the examples import (wallets, providers, transaction build and submit), and `test-harness` the test-only utilities behind the e2e suites (stack bring-up, wallet funding, the setup pipeline).
+The examples are what integrators read and copy. Shared repo-private plumbing lives under [`packages/`](packages/): `lib` holds shared Node runtime helpers for wallets, providers, transactions, stack preparation, funding, artefact verification and EVM execution observation. `test-harness` holds Vitest adapters and integration session lifecycle.
 
 > ## ⚠️ CAUTION ⚠️
 >

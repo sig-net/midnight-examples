@@ -1,37 +1,13 @@
-// EVM read-only helpers for funding preflights and setup checks (per the repo
-// convention, ethers is the Ethereum library).
-
-import type { ContractMethod, ContractTransactionResponse } from "ethers";
 import { Contract, JsonRpcProvider } from "ethers";
 
-/**
- * A read-only ABI method reached through ethers' `getFunction` accessor.
- *
- * A `Contract` exposes its ABI methods through a string index signature, which
- * `noUncheckedIndexedAccess` types as possibly-undefined, so `erc20.balanceOf(…)`
- * cannot be invoked directly. `getFunction` is ethers' own typed accessor for
- * that call. Its generic pins argument tuples to a loose list, so the precision
- * worth expressing here is the return type.
- */
-export type ContractReadMethod<R> = ContractMethod<unknown[], R, R>;
-
-/**
- * A state-changing ABI method reached through ethers' `getFunction` accessor,
- * resolving to the sent transaction. See {@link ContractReadMethod} for why
- * `getFunction` stands in for a direct method access.
- */
-export type ContractWriteMethod = ContractMethod<
-  unknown[],
-  ContractTransactionResponse,
-  ContractTransactionResponse
->;
+import type { ContractReadMethod } from "./evm-contract-methods.ts";
 
 /**
  * Read the bytecode deployed at an address.
  *
  * @param rpcUrl - JSON-RPC endpoint (e.g. `EVM_RPC_URL`).
  * @param address - The address to query.
- * @returns The deployed code as a hex string — `"0x"` when nothing is deployed there.
+ * @returns The deployed code as a hex string, with `"0x"` for an empty address.
  */
 export async function getDeployedCode(rpcUrl: string, address: string): Promise<string> {
   const provider = new JsonRpcProvider(rpcUrl);
@@ -118,6 +94,22 @@ export async function getErc20Balance(
       erc20.getFunction<ContractReadMethod<bigint>>("decimals")(),
     ]);
     return { balance, decimals: Number(decimals) };
+  } finally {
+    provider.destroy();
+  }
+}
+
+/**
+ * Read the chain id the RPC endpoint reports.
+ *
+ * @param rpcUrl - JSON-RPC endpoint (e.g. `EVM_RPC_URL`).
+ * @returns The chain id (e.g. 31337n for the local dev node).
+ * @throws {Error} If the endpoint does not answer.
+ */
+export async function getEvmChainId(rpcUrl: string): Promise<bigint> {
+  const provider = new JsonRpcProvider(rpcUrl);
+  try {
+    return (await provider.getNetwork()).chainId;
   } finally {
     provider.destroy();
   }

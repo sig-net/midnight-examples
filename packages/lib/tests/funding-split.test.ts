@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { fundingShare, perChildAmount, type RoleWallet } from "../src/wallets.ts";
+import { fundingShare, perChildAmount, type RoleWallet } from "../src/wallet-funding.ts";
 
 const DEPLOYER: RoleWallet = { label: "deployer", envVar: "DEPLOYER_SEED", shares: 3n };
 const USER: RoleWallet = { label: "user", envVar: "USER_SEED", shares: 1n };

@@ -6,7 +6,7 @@
 import { bytesToHex } from "@sig-net/midnight";
 import { parseIdentitySecretKey } from "@sig-net/midnight-contract-deploy";
 import { pureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { resolveUserSeed } from "@sig-net/midnight-examples-test-harness";
+import { requireEnv } from "@sig-net/midnight-examples-lib";
 
 /** The caller identity every vault interaction is bound to. */
 export interface UserIdentity {
@@ -40,7 +40,11 @@ export interface UserIdentity {
  * @throws {ParseError} If the identity secret/seed is malformed.
  */
 export function resolveUserIdentity(env: NodeJS.ProcessEnv): UserIdentity {
-  const secretKey = parseIdentitySecretKey("VAULT_USER_SECRET_KEY", env, resolveUserSeed(env));
+  const secretKey = parseIdentitySecretKey(
+    "VAULT_USER_SECRET_KEY",
+    env,
+    requireEnv(env, "USER_SEED"),
+  );
   const commitment = pureCircuits.userCommitment(secretKey);
   return {
     secretKey,

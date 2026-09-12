@@ -3,7 +3,7 @@
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import { VAULT_DEPOSIT_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
+import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-lib";
 
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";

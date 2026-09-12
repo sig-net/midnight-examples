@@ -28,7 +28,7 @@ import {
   type ContractReadMethod,
   getTransactionNonce,
   logSkip,
-} from "@sig-net/midnight-examples-test-harness";
+} from "@sig-net/midnight-examples-lib";
 
 import { logEvmFeeCap } from "../evm-logging.ts";
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-stata.ts";

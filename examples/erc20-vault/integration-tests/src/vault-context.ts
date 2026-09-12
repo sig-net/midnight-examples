@@ -29,10 +29,13 @@ import {
   buildVaultProviders,
   vaultCompiledContract,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import {
+  resolveUserIdentity,
+  type UserIdentity,
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
 import type { ProofServerObserver } from "@sig-net/midnight-examples-lib";
-import { requireEnv, type SessionWallet } from "@sig-net/midnight-examples-test-harness";
-
-import { resolveUserIdentity, type UserIdentity } from "./vault-identity.ts";
+import { requireEnv } from "@sig-net/midnight-examples-lib";
+import type { SessionWallet } from "@sig-net/midnight-examples-test-harness";
 
 /**
  * Everything a flow needs: the resolved configuration (all fields REQUIRED —
