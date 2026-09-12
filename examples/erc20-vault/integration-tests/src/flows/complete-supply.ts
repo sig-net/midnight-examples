@@ -13,13 +13,15 @@ import {
   type SignetRequestResponseReader,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
+import { STATA_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { VAULT_SUPPLY_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { logTokenAmount } from "../evm-logging.ts";
 import { SUPPLY_OUTPUT_SCHEMA, SUPPLY_RESPOND_SCHEMA } from "../evm-stata.ts";
 import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
+import { PollProgress } from "../poll-progress.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { warnOnce } from "../warn-once.ts";
 
 /** The resolved attested outcome of a supply (uint64 shares minted, or the failure output). */
 export interface SupplyOutcome {
@@ -51,12 +53,14 @@ const OBSERVATION_TICK_TIMEOUT_MS = 3_000;
  * @param context - The flow context, whose EVM endpoint serves the trace.
  * @param reader - The reader over the supply request map, which rebuilds the mined transaction.
  * @param requestId - The supply request id whose execution result to recompute.
+ * @param progress - Diagnostics for the enclosing poll.
  * @returns The candidates, failure last, or undefined when the execution cannot be observed this tick.
  */
 async function fetchSupplyCandidates(
   context: VaultContext,
   reader: SignetRequestResponseReader,
   requestId: RequestIdHex,
+  progress: PollProgress,
 ): Promise<SupplyCandidate[] | undefined> {
   let observed: ObservedExecution;
   try {
@@ -67,10 +71,7 @@ async function fetchSupplyCandidates(
       OBSERVATION_TICK_TIMEOUT_MS,
     );
   } catch (error) {
-    warnOnce(
-      `supply-observe:${requestId}`,
-      `could not observe the execution of supply ${requestId}, will retry on the next poll tick: ${String(error)}`,
-    );
+    progress.failure("observation", `execution observation failed: ${String(error)}`);
     return undefined;
   }
 
@@ -84,11 +85,7 @@ async function fetchSupplyCandidates(
         isFailureOutput: false,
       });
     } catch (error) {
-      warnOnce(
-        `supply-decode:${requestId}`,
-        `could not decode/re-pack the observed output for supply ${requestId} ` +
-          `(matching against the failure candidate only): ${String(error)}`,
-      );
+      progress.failure("decode", `execution output decode failed: ${String(error)}`);
     }
   }
   candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, shares: 0n, isFailureOutput: true });
@@ -172,22 +169,34 @@ export async function pollSupplyOutcome(
     context.vaultContractAddress,
   );
 
+  const progress = new PollProgress(
+    `supply attestation ${options.requestId}`,
+    options.timeoutMs ?? 6 * MINUTE,
+  );
   const end = Date.now() + (options.timeoutMs ?? 6 * MINUTE);
   let candidates: SupplyCandidate[] | undefined;
   while (Date.now() < end) {
     const events = await reader.getRespondBidirectionalEvents(options.requestId);
+    progress.update(`${String(events.length)} attestation posts observed`);
     // A posted attestation means the transaction has executed and its result is observable, so
     // the candidates are worth building only once a post appears.
     if (events.length > 0) {
-      candidates ??= await fetchSupplyCandidates(context, reader, options.requestId);
+      candidates ??= await fetchSupplyCandidates(context, reader, options.requestId, progress);
       if (candidates !== undefined) {
         const outcome = matchSupplyOutcome(events, options.requestId, candidates, mpcResponseKey);
         if (outcome !== undefined) return outcome;
+        progress.update(
+          `${String(events.length)} attestation posts rejected against ${String(candidates.length)} output candidates`,
+        );
+        progress.failure(
+          "verification",
+          "no signature verifies against the vault response key and observed output",
+        );
       }
     }
     await new Promise((r) => setTimeout(r, options.intervalMs ?? 1000));
   }
-  throw new Error(`timed out waiting for a supply attestation for ${options.requestId}`);
+  throw new Error(`timed out: ${progress.summary()}`);
 }
 
 /**
@@ -223,8 +232,13 @@ export async function settleSupply(
     outcome.serializedOutput,
     mintNonce,
   );
-  console.log(
-    `completeSupply settled in tx ${r.public.txId} (minted ${String(outcome.shares)} stataUSDC)`,
+  console.log(`completeSupply settled in tx ${r.public.txId}`);
+  await logTokenAmount(
+    context.evmRpcUrl,
+    STATA_USDC,
+    context.evmVaultAddress,
+    outcome.shares,
+    "minted shares",
   );
   return { shares: outcome.shares, refunded: false };
 }

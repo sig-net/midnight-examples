@@ -1,14 +1,16 @@
 // Wallet-to-wallet transfers with caller-chosen outputs (shielded token
 // colours included), which the deploy SDK's NIGHT-only transfer does not
 // offer, plus the facade-state poll that observes a transfer land.
-
 import type {
   CombinedTokenTransfer,
   FacadeState,
   TransactionIdentifier,
   WalletFacade,
 } from "@midnightntwrk/wallet-sdk-facade";
-import type { AccountKeys } from "@sig-net/midnight-contract-deploy";
+import type { AccountKeys, NetworkId } from "@sig-net/midnight-contract-deploy";
+
+import { withOperationProgress } from "./operation-progress.ts";
+import { ensureTransactionFee } from "./transaction-fees.ts";
 
 // Recipes (balancing plans for submitted transactions) expire 30 min out.
 const RECIPE_TTL_MS = 30 * 60 * 1000;
@@ -23,6 +25,7 @@ const RECIPE_TTL_MS = 30 * 60 * 1000;
  * @param facade - A started (and synced) wallet facade that funds, pays for and submits the transfer.
  * @param keys - The key material of the same wallet, for balancing and signing.
  * @param outputs - The transfer outputs (shielded and/or unshielded), each naming a token type, receiver address and amount.
+ * @param networkId - Network used for funding addresses.
  * @returns The submitted transaction's identifier.
  * @throws {Error} If the wallet cannot fund the outputs or fees, proving fails, or the node rejects the transaction.
  */
@@ -30,19 +33,53 @@ export async function submitTransferTransaction(
   facade: WalletFacade,
   keys: AccountKeys,
   outputs: CombinedTokenTransfer[],
+  networkId: NetworkId,
 ): Promise<TransactionIdentifier> {
-  const recipe = await facade.transferTransaction(
+  const expires: number = Date.now() + RECIPE_TTL_MS;
+  const prepared = await facade.transferTransaction(
     outputs,
     { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
-    { ttl: new Date(Date.now() + RECIPE_TTL_MS) },
+    { ttl: new Date(expires), payFees: false },
   );
-  const signed = await facade.signRecipe(recipe, keys.unshieldedKeystore.signDataAsync);
-  const finalized = await facade.finalizeRecipe(signed);
-  return facade.submitTransaction(finalized);
+  let recipe = prepared;
+  let finalized: Awaited<ReturnType<WalletFacade["finalizeRecipe"]>>;
+  try {
+    await ensureTransactionFee(
+      facade,
+      keys,
+      networkId,
+      prepared.transaction,
+      expires,
+      "wallet transfer",
+    );
+    recipe = await facade.balanceUnprovenTransaction(
+      prepared.transaction,
+      { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
+      { ttl: new Date(expires) },
+    );
+    const signed = await facade.signRecipe(recipe, keys.unshieldedKeystore.signDataAsync);
+    finalized = await withOperationProgress(
+      "wallet transfer finalisation",
+      () => facade.finalizeRecipe(signed),
+      expires,
+    );
+  } catch (error) {
+    try {
+      await facade.revert(recipe);
+    } catch (revertError) {
+      console.error(`wallet transfer rollback failed: ${String(revertError)}`);
+    }
+    throw error;
+  }
+  // A submission error can leave node acceptance unknown, so keep its pending inputs reserved.
+  return withOperationProgress(
+    "wallet transfer submission",
+    () => facade.submitTransaction(finalized),
+    expires,
+  );
 }
 
-// A freshly submitted transaction lands within a block or two on the local
-// dev chain; poll gently rather than hammering the indexer.
+// Polling shares the indexer with the running wallet synchroniser.
 const STATE_POLL_INTERVAL_MS = 3_000;
 
 /**

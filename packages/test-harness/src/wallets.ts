@@ -1,28 +1,13 @@
-// The multi-wallet seed + funding phase: ONE root wallet funds the role
-// wallets (deployer, user, mpc responder, bearer). Each role's seed is read from
-// .env when present, otherwise generated, persisted (append-only), and its
-// addresses printed. Root does no test work; it only holds funds and pays the
-// roles out.
-//
-// - undeployed: root defaults to the pre-funded genesis mint wallet, so the
-//   roles are funded from genesis at runtime.
-// - deployed (e.g. stagenet): root is a generated (or supplied) seed; its
-//   NIGHT address must be faucet-funded. The first run generates the seeds and
-//   STOPS at the root preflight printing that address; once funded, a rerun
-//   funds the roles and proceeds.
-//
-// No `vitest` imports here — this runs in vitest's main process (globalSetup).
-
 import {
   type AccountFunding,
   assertRootFunded,
   deriveWalletAddresses,
+  formatDust,
   fundChildFromRoot,
   generateHexSeed,
   GENESIS_MINT_WALLET_SEED,
   getFaucetUrl,
   getMidnightNodeConfig,
-  isFeeReady,
   isLocalStandaloneNetwork,
   readAccountFunding,
   type WalletAddresses,
@@ -101,7 +86,7 @@ export function ensureWalletSeeds(env: NodeJS.ProcessEnv): void {
     let seed: string;
     if (existing) {
       seed = existing;
-      logSkip(`resolve ${role.label} seed`, `${role.envVar} is set — reusing it`);
+      logSkip(`resolve ${role.label} seed`, `${role.envVar} is set: reusing it`);
     } else {
       seed =
         role === ROOT && isLocalStandaloneNetwork(config.networkId)
@@ -123,14 +108,14 @@ export function ensureWalletSeeds(env: NodeJS.ProcessEnv): void {
 }
 
 /**
- * Log a funded wallet's pass line with its balances and NIGHT address.
+ * Log a wallet's measured balances and NIGHT address.
  *
  * @param label - The wallet's role name, e.g. `root`.
  * @param funding - The wallet's read NIGHT/DUST balances and addresses.
  */
-function logFundedPass(label: string, funding: AccountFunding): void {
+function logFundingBalance(label: string, funding: AccountFunding): void {
   console.log(
-    `${label} funding OK — NIGHT ${String(funding.night)}, DUST ${String(funding.dust)} (${funding.addresses.unshielded})`,
+    `${label}: NIGHT ${String(funding.night)} base units, ${formatDust(funding.dust)} DUST (${funding.addresses.unshielded})`,
   );
 }
 
@@ -171,58 +156,73 @@ export function perChildAmount(env: NodeJS.ProcessEnv, share: bigint, child: Rol
 }
 
 /**
- * Fund the role wallets from root. Preflight root first: on a deployed network
- * whose root is not yet faucet-funded this STOPS the run (re-throwing
- * {@link WalletUnfundedError}) after printing the NIGHT address + faucet URL.
- * Then each child that is already fee-ready passes; each that is not is topped
- * up from root and registered for dust. Idempotent across reruns: funded
- * wallets are only checked.
+ * Inspect child balances before opening the funding root. Transaction submission checks the actual fee requirement.
  *
- * @param env - The suite's env accumulator (seeds already resolved).
- * @param wallets - The pipeline's registry: every role wallet syncs once here and stays open.
- * @throws {WalletUnfundedError} To halt the run when root needs faucet funding.
+ * @param env - The resolved wallet seeds and optional transfer amount.
+ * @param wallets - The registry that keeps each wallet synchronised.
+ * @throws {WalletUnfundedError} If a required transfer has an unfunded root.
+ * @throws {Error} If a balance read or transfer fails.
  */
 export async function ensureWalletsFunded(
   env: NodeJS.ProcessEnv,
   wallets: WalletRegistry,
 ): Promise<void> {
-  const faucetUrl = getFaucetUrl(env, wallets.config.networkId);
-
-  const root = await preflightRoot(wallets, requireEnv(env, ROOT.envVar), faucetUrl);
-  logFundedPass("root", root);
-
-  const checked = [];
+  const transfers: RoleWallet[] = [];
   for (const child of CHILDREN) {
-    checked.push({
-      child,
-      funding: await readAccountFunding(wallets, requireEnv(env, child.envVar), child.label),
-    });
-  }
-  const unfunded = checked.filter(({ funding }) => !isFeeReady(funding)).map(({ child }) => child);
-  const share = fundingShare(root.night, unfunded);
-  if (unfunded.length > 0) {
-    console.log(
-      `funding plan: root holds ${String(root.night)} NIGHT, one share is ${String(share)}, root keeps ${String(ROOT.shares)}` +
-        (env.FUND_CHILD_NIGHT ? " (FUND_CHILD_NIGHT pins every child). " : ". ") +
-        unfunded
-          .map(
-            (child) =>
-              `${child.label}: ${String(perChildAmount(env, share, child))} (${String(child.shares)} share(s))`,
-          )
-          .join(", "),
+    const funding: AccountFunding = await readAccountFunding(
+      wallets,
+      requireEnv(env, child.envVar),
+      child.label,
     );
+    logFundingBalance(child.label, funding);
+    if (funding.night > 0n || funding.dust > 0n) {
+      console.log(
+        `${child.label}: NIGHT transfer skipped. The transaction fee check determines required DUST and registers existing NIGHT if needed.`,
+      );
+    } else {
+      transfers.push(child);
+    }
+  }
+  if (transfers.length === 0) {
+    console.log("root: no NIGHT transfers required, funding check skipped");
+    return;
   }
 
-  for (const { child, funding } of checked) {
-    if (isFeeReady(funding)) {
-      logFundedPass(child.label, funding);
+  let root: AccountFunding | undefined;
+  let share = 0n;
+  for (const child of transfers) {
+    const funding: AccountFunding = await readAccountFunding(
+      wallets,
+      requireEnv(env, child.envVar),
+      child.label,
+    );
+    if (funding.night > 0n || funding.dust > 0n) {
+      logFundingBalance(child.label, funding);
+      console.log(`${child.label}: balance changed, NIGHT transfer skipped`);
       continue;
     }
-    const amount = perChildAmount(env, share, child);
-    console.log(
-      `${child.label} not fee-ready (NIGHT ${String(funding.night)}, DUST ${String(funding.dust)}) — funding ${String(amount)} from root`,
-    );
-    const funded = await explainDustSpendRejection(`fund ${child.label}`, () =>
+    if (root === undefined) {
+      root = await preflightRoot(
+        wallets,
+        requireEnv(env, ROOT.envVar),
+        getFaucetUrl(env, wallets.config.networkId),
+      );
+      share = fundingShare(root.night, transfers);
+      const total: bigint = transfers.reduce(
+        (sum: bigint, role: RoleWallet): bigint => sum + perChildAmount(env, share, role),
+        0n,
+      );
+      if (total > root.night)
+        throw new Error(
+          `NIGHT transfers require ${String(total)} base units, root holds ${String(root.night)}`,
+        );
+      console.log(
+        `root funding plan: transfers ${String(total)} NIGHT base units, reserve ${String(root.night - total)} NIGHT base units`,
+      );
+    }
+    const amount: bigint = perChildAmount(env, share, child);
+    console.log(`${child.label}: transferring ${String(amount)} NIGHT base units from root`);
+    const funded: AccountFunding = await explainDustSpendRejection(`fund ${child.label}`, () =>
       fundChildFromRoot(
         wallets,
         requireEnv(env, ROOT.envVar),
@@ -231,7 +231,7 @@ export async function ensureWalletsFunded(
         amount,
       ),
     );
-    logFundedPass(child.label, funded);
+    logFundingBalance(child.label, funded);
   }
 }
 
@@ -253,7 +253,7 @@ async function preflightRoot(
     return await assertRootFunded(wallets, rootSeed, faucetUrl);
   } catch (error) {
     if (error instanceof WalletUnfundedError) {
-      banner(["ROOT WALLET NEEDS FUNDING — stopping here", "", ...error.message.split("\n")]);
+      banner(["ROOT WALLET NEEDS FUNDING: stopping here", "", ...error.message.split("\n")]);
     }
     throw error;
   }

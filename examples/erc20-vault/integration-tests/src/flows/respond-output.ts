@@ -28,7 +28,6 @@
 // them and verifies the same signature in-circuit. That in-circuit check is
 // the authentication gate, so a forged post merely wastes a proof here, it
 // cannot mint.
-
 import {
   deserializeEvmOutput,
   MPC_FAILURE_OUTPUT,
@@ -42,6 +41,7 @@ import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract
 
 import { ERC20_TRANSFER_RESULT_SCHEMA } from "../mpc-routing.ts";
 import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
+import type { PollProgress } from "../poll-progress.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import { warnOnce } from "../warn-once.ts";
 
@@ -98,6 +98,7 @@ const OBSERVATION_TICK_TIMEOUT_MS = 3_000;
  * @param requestsPath - The resolved ledger-tree path of the map holding the
  *   request: `VAULT_DEPOSIT_REQUESTS_PATH` for a deposit sweep, the default
  *   `VAULT_REQUESTS_PATH` for a withdraw transfer.
+ * @param progress - Optional diagnostics for the enclosing poll.
  * @returns The verified outcome, or `undefined` when no attestation has been
  *   posted yet, none verifies over a recomputed candidate, or the mined
  *   transaction could not be traced this tick.
@@ -106,9 +107,11 @@ export async function fetchAttestedRespondOutcome(
   context: VaultContext,
   requestId: RequestIdHex,
   requestsPath?: readonly number[],
+  progress?: PollProgress,
 ): Promise<RespondOutcome | undefined> {
   const reader = createResponseReader(context, requestsPath);
   const events = await reader.getRespondBidirectionalEvents(requestId);
+  progress?.update(`${String(events.length)} attestation posts observed`);
   if (events.length === 0) {
     return undefined;
   }
@@ -133,10 +136,12 @@ export async function fetchAttestedRespondOutcome(
       OBSERVATION_TICK_TIMEOUT_MS,
     );
   } catch (error) {
-    warnOnce(
-      `observe:${requestId}`,
-      `could not observe the execution of ${requestId}, will retry on the next poll tick: ${String(error)}`,
-    );
+    progress?.failure("observation", `execution observation failed: ${String(error)}`);
+    if (progress === undefined)
+      warnOnce(
+        `observe:${requestId}`,
+        `could not observe the execution of ${requestId}, will retry on the next poll tick: ${String(error)}`,
+      );
     return undefined;
   }
 
@@ -156,11 +161,13 @@ export async function fetchAttestedRespondOutcome(
         isFailureOutput: false,
       });
     } catch (error) {
-      warnOnce(
-        `decode:${requestId}`,
-        `could not decode/re-pack the observed output for ${requestId} ` +
-          `(matching against the failure candidate only): ${String(error)}`,
-      );
+      progress?.failure("decode", `execution output decode failed: ${String(error)}`);
+      if (progress === undefined)
+        warnOnce(
+          `decode:${requestId}`,
+          `could not decode/re-pack the observed output for ${requestId} ` +
+            `(matching against the failure candidate only): ${String(error)}`,
+        );
     }
   }
   candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, isFailureOutput: true });
@@ -183,5 +190,12 @@ export async function fetchAttestedRespondOutcome(
       };
     }
   }
+  progress?.update(
+    `${String(events.length)} attestation posts rejected against ${String(candidates.length)} output candidates`,
+  );
+  progress?.failure(
+    "verification",
+    "no signature verifies against the vault response key and observed output",
+  );
   return undefined;
 }

@@ -12,7 +12,6 @@
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
-
 import {
   abiWordToUint128,
   bytesToHex,
@@ -48,6 +47,7 @@ import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-
 import { formatEther, JsonRpcProvider, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { fundingSummary } from "../src/evm-logging.ts";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { settleDeposit } from "../src/flows/complete-deposit.ts";
@@ -135,14 +135,16 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const erc20Address = requireEnv("ERC20_ADDRESS");
 
       const ethBalance = await getEthBalance(rpcUrl, userAddress);
-      console.log(`${userAddress} ETH balance: ${String(ethBalance)} wei`);
-      expect(ethBalance, `fund ${userAddress} with >= 0.009 ETH on EVM`).toBeGreaterThanOrEqual(
-        parseEther("0.009"),
+      console.log(
+        `${userAddress}: ${fundingSummary(ethBalance, parseEther("0.01"), 18, "ETH")} (funding reserve)`,
+      );
+      expect(ethBalance, `fund ${userAddress} with >= 0.01 ETH on EVM`).toBeGreaterThanOrEqual(
+        parseEther("0.01"),
       );
 
       const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
       console.log(
-        `${userAddress} balance on ${erc20Address}: ${String(balance)} (decimals ${String(decimals)})`,
+        `${userAddress}: ${fundingSummary(balance, parseUnits("0.1", decimals), decimals, erc20Address)}`,
       );
       expect(
         balance,
@@ -454,7 +456,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
       const ethBalance = await getEthBalance(rpcUrl, vaultAddress);
       console.log(
-        `${vaultAddress} ETH balance: ${String(ethBalance)} wei (withdraw gas budget: ${String(gasBudget)} wei)`,
+        `${vaultAddress}: ${fundingSummary(ethBalance, gasBudget, 18, "ETH")} (maximum gas fee)`,
       );
       expect(
         ethBalance,
@@ -463,7 +465,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
       const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, vaultAddress);
       console.log(
-        `${vaultAddress} balance on ${erc20Address}: ${String(balance)} (decimals ${String(decimals)})`,
+        `${vaultAddress}: ${fundingSummary(balance, parseUnits("0.1", decimals), decimals, erc20Address)}`,
       );
       expect(
         balance,

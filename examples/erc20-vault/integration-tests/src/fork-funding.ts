@@ -162,10 +162,10 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
     console.log(`${rpcUrl} is not anvil: no cheatcodes, so nothing is dealt`);
     console.log(" ➜ FUND THE DERIVED ACCOUNTS ON THE REAL CHAIN before the flows run:");
     console.log(
-      `   user  ${user}: >= 0.01 ETH (gas) and >= 0.1 of ERC20 ${requireEnv(env, "ERC20_ADDRESS")}`,
+      `   user  ${user}: >= 0.01 ETH (funding reserve) and >= 0.1 of ERC20 ${requireEnv(env, "ERC20_ADDRESS")}`,
     );
     console.log(
-      `   vault ${vault}: ETH for withdrawal gas (the withdraw preflight prints the exact budget)`,
+      `   vault ${vault}: ETH for withdrawal gas (the withdraw preflight prints the maximum gas fee)`,
     );
     console.log(
       " ➜ 💡 STEP_THROUGH=1 pauses before every step and test, so an attended run can fund them",

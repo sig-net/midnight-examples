@@ -30,6 +30,7 @@ import {
   logSkip,
 } from "@sig-net/midnight-examples-test-harness";
 
+import { logEvmFeeCap } from "../evm-logging.ts";
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-stata.ts";
 import {
   ERC20_TRANSFER_GAS_LIMIT,
@@ -89,6 +90,13 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
+  logEvmFeeCap(
+    expectedIdHex,
+    context.evmVaultAddress,
+    expectedRecord.txParams.gasLimit,
+    expectedRecord.txParams.maxFeePerGas,
+    expectedRecord.txParams.maxPriorityFeePerGas,
+  );
   const result = await context.vault.callTx.approveStata(evmNonce, SIGNET_DEFAULT_KEY_VERSION);
   console.log(`approveStata finalized in tx ${result.public.txId}`);
 

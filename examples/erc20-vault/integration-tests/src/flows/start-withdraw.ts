@@ -4,7 +4,6 @@
 // ERC20, sent from the VAULT's derived address (path = "vault"). The request
 // id is recomputed off-chain with the library's TS twin of the request-id
 // circuit and asserted against the ledger map key before it is returned.
-
 import {
   calculateRequestId,
   evmAddressAbiWord,
@@ -21,6 +20,7 @@ import {
 import { VAULT_PATH_BYTES } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import {
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
@@ -81,12 +81,16 @@ export async function startWithdraw(
   console.log(`vault contract: ${context.vaultContractAddress}`);
   console.log(`erc20:          ${context.erc20Address}`);
   console.log(`destination:    ${options.destEvmAddress}`);
-  console.log(
-    `amount:         ${String(options.amount)} (vault evm nonce ${String(options.evmNonce)})`,
-  );
 
   // Pre-call ledger read: the request nonce the contract will use and the
   // pinned chain config.
+  await logTokenAmount(
+    context.evmRpcUrl,
+    context.erc20Address,
+    context.evmUserAddress,
+    options.amount,
+    "start-withdraw amount",
+  );
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
@@ -140,6 +144,13 @@ export async function startWithdraw(
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
+  logEvmFeeCap(
+    expectedIdHex,
+    context.evmVaultAddress,
+    expectedRecord.txParams.gasLimit,
+    expectedRecord.txParams.maxFeePerGas,
+    expectedRecord.txParams.maxPriorityFeePerGas,
+  );
 
   const result = await context.vault.callTx.startWithdraw(
     options.evmNonce,

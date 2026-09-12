@@ -20,6 +20,7 @@ import {
   VAULT_PATH_BYTES,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import {
   EXACT_OUTPUT_SINGLE_SELECTOR,
   SWAP_GAS_LIMIT,
@@ -69,6 +70,20 @@ export async function startSwap(
 
   // The record the contract composes: vault path/sender, router `to`, contract-fixed gas,
   // exactOutputSingle((tokenIn, tokenOut, fee, recipient=vault, amountOut, amountInMaximum, 0)).
+  await logTokenAmount(
+    context.evmRpcUrl,
+    context.erc20Address,
+    context.evmVaultAddress,
+    options.amountInMaximum,
+    "swap amount",
+  );
+  await logTokenAmount(
+    context.evmRpcUrl,
+    options.tokenOut,
+    context.evmVaultAddress,
+    options.amountOut,
+    "swap output",
+  );
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce: before.signetRequestNonce,
@@ -105,6 +120,13 @@ export async function startSwap(
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
+  logEvmFeeCap(
+    expectedIdHex,
+    context.evmVaultAddress,
+    expectedRecord.txParams.gasLimit,
+    expectedRecord.txParams.maxFeePerGas,
+    expectedRecord.txParams.maxPriorityFeePerGas,
+  );
 
   const result = await context.vault.callTx.startSwap(
     options.evmNonce,

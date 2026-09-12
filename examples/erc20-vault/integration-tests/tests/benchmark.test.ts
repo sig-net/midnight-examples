@@ -53,7 +53,6 @@
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
-
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
   VAULT_DEPOSIT_REQUESTS_PATH,
@@ -82,6 +81,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { PROOF_RECORDS_FILE } from "../src/benchmark/paths.ts";
 import { Recorder } from "../src/benchmark/recorder.ts";
 import { BenchmarkLeg } from "../src/benchmark/records.ts";
+import { fundingSummary } from "../src/evm-logging.ts";
 import { quoteExactOutputSingle } from "../src/evm-swap.ts";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
@@ -220,13 +220,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // Same minimums as the happy-day deposit leg: the user's derived
         // account pays the sweep gas and supplies the deposited ERC20.
         const userEth = await getEthBalance(rpcUrl, userAddress);
-        console.log(`${userAddress} ETH balance: ${String(userEth)} wei`);
-        expect(userEth, `fund ${userAddress} with >= 0.009 ETH on EVM`).toBeGreaterThanOrEqual(
-          parseEther("0.009"),
+        console.log(
+          `${userAddress}: ${fundingSummary(userEth, parseEther("0.01"), 18, "ETH")} (funding reserve)`,
+        );
+        expect(userEth, `fund ${userAddress} with >= 0.01 ETH on EVM`).toBeGreaterThanOrEqual(
+          parseEther("0.01"),
         );
         const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
         console.log(
-          `${userAddress} balance on ${erc20Address}: ${String(balance)} (decimals ${String(decimals)})`,
+          `${userAddress}: ${fundingSummary(balance, parseUnits("0.1", decimals), decimals, erc20Address)}`,
         );
         // The main deposit plus the refund sequence's arrange deposit. The
         // swap sequence's arrange deposit is sized from a live quote, so it
@@ -242,7 +244,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
         const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
         console.log(
-          `${vaultAddress} ETH balance: ${String(vaultEth)} wei (withdraw gas budget: ${String(gasBudget)} wei)`,
+          `${vaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,
         );
         expect(
           vaultEth,

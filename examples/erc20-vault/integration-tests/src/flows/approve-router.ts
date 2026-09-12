@@ -29,6 +29,7 @@ import {
   logSkip,
 } from "@sig-net/midnight-examples-test-harness";
 
+import { logEvmFeeCap } from "../evm-logging.ts";
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-swap.ts";
 import {
   ERC20_TRANSFER_GAS_LIMIT,
@@ -95,6 +96,13 @@ export async function approveRouter(
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
+  logEvmFeeCap(
+    expectedIdHex,
+    context.evmVaultAddress,
+    expectedRecord.txParams.gasLimit,
+    expectedRecord.txParams.maxFeePerGas,
+    expectedRecord.txParams.maxPriorityFeePerGas,
+  );
   const result = await context.vault.callTx.approveRouter(
     erc20,
     evmNonce,

@@ -6,7 +6,7 @@
 // the network.
 
 import type { SignetRequestResponseReader } from "@sig-net/midnight";
-import type { ProofServerObserver } from "@sig-net/midnight-examples-lib";
+import type { ProofServerObservation, ProofServerObserver } from "@sig-net/midnight-examples-lib";
 import {
   createE2eSession,
   type E2eSession,
@@ -63,7 +63,16 @@ export function createVaultSession(
       // wallet() re-awaits synced state on every call; the context itself is
       // built once (findDeployedContract needs the setup-deployed vault).
       const wallet = await session.wallet();
-      sharedContext ??= await createVaultContext(env, wallet, proofObserver);
+      sharedContext ??= await createVaultContext(
+        env,
+        wallet,
+        (observation: ProofServerObservation): void => {
+          console.log(
+            `proof ${observation.phase} ${observation.keyLocation}: ${(observation.ms / 1000).toFixed(2)}s, ${observation.error === undefined ? "completed" : `failed: ${observation.error}`}`,
+          );
+          proofObserver?.(observation);
+        },
+      );
       return sharedContext;
     },
 

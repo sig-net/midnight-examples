@@ -506,11 +506,16 @@ STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts -t "initial
 
 The `-t` filter keeps the happy-day spec's initialise and deposit tests
 (deposit, sweep signature, broadcast, attestation, `completeDeposit`) and skips
-its withdraw tests. Drop it for the full spec. The first run stops at the root funding preflight and
-prints ROOT's NIGHT address to faucet-fund. A rerun funds the role wallets
-(root's NIGHT split by weight: three shares to the deployer, which pays one
-transaction per vault circuit, one share to every other role, one kept by
-root, or `FUND_CHILD_NIGHT` each), generates the zk keys, deploys the vault
+its withdraw tests. Drop it for the full spec. Setup first synchronises the role wallets.
+Wallets with NIGHT or spendable DUST skip the root transfer. Each actual transaction
+checks its estimated DUST fee, including balancing, before submission. Existing NIGHT
+can generate the missing DUST after registration.
+
+Only empty wallets require root funding. An unfunded root stops the run only when a
+transfer is required and prints its NIGHT address and faucet URL. Transfers divide
+root's NIGHT by weight across empty roles: three shares for the deployer and one
+for each other role. Root retains one share. `FUND_CHILD_NIGHT` can specify each
+transfer in NIGHT base units. Setup generates the zk keys, deploys the vault
 and carries on into the spec, where the first signature poll is the first
 exchange with the real MPC. The vault's address is appended to `.env` the
 moment its base deploy is submitted, so a run that dies during the circuit

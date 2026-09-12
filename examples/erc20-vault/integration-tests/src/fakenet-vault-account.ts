@@ -2,7 +2,6 @@
 // vault's derived EVM account with a locally re-derived private key. A real
 // MPC never exposes its root key, so this can never be a flow capability —
 // it stays in test-support code.
-
 import { deriveEpsilon, SECP256K1_ORDER, stripHexPrefix } from "@sig-net/midnight";
 import { VAULT_PATH_HEX } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
@@ -11,6 +10,8 @@ import {
   requireEnv,
 } from "@sig-net/midnight-examples-test-harness";
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
+
+import { logTokenAmount } from "./evm-logging.ts";
 
 const ERC20_TRANSFER_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -81,8 +82,12 @@ export async function drainVaultErc20(
       return 0n;
     }
 
-    console.log(
-      `draining ${String(balance)} base units of ${erc20Address} from ${wallet.address} to ${to}`,
+    await logTokenAmount(
+      requireEnv(env, "EVM_RPC_URL"),
+      erc20Address,
+      wallet.address,
+      balance,
+      `drain from ${wallet.address} to ${to}`,
     );
     const transfer = erc20.getFunction<ContractWriteMethod>("transfer");
     const tx = await transfer(to, balance);

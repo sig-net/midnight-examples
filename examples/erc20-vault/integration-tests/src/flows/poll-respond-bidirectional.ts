@@ -3,9 +3,9 @@
 // attestation appears whose signature VERIFIES over the independently
 // recomputed serialized output for the request, and return the resolved
 // outcome. There is deliberately no push/websocket alternative.
-
 import type { RequestIdHex } from "@sig-net/midnight";
 
+import { PollProgress } from "../poll-progress.ts";
 import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { fetchAttestedRespondOutcome, type RespondOutcome } from "./respond-output.ts";
@@ -63,6 +63,7 @@ export async function pollRespondBidirectional(
 
   // The reads are single-shot; this loop owns the cadence and the give-up
   // timeout.
+  const progress = new PollProgress(`attestation ${options.requestId}`, options.timeoutMs);
   const giveUp = new AbortController();
   const timer = setTimeout(() => {
     giveUp.abort();
@@ -73,6 +74,7 @@ export async function pollRespondBidirectional(
         context,
         options.requestId,
         options.requestsPath,
+        progress,
       );
       if (outcome !== undefined) {
         if (outcome.matchedFailureOutput) {
@@ -84,9 +86,7 @@ export async function pollRespondBidirectional(
       }
       await sleepUnlessAborted(options.intervalMs, giveUp.signal);
     }
-    throw new Error(
-      `timed out after ${String(options.timeoutMs)}ms waiting for a verifying respond-bidirectional attestation to request ${options.requestId}`,
-    );
+    throw new Error(`timed out: ${progress.summary()}`);
   } finally {
     clearTimeout(timer);
   }

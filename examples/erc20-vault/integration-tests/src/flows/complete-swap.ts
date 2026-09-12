@@ -17,10 +17,11 @@ import {
 import { VAULT_SWAP_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { logTokenAmount } from "../evm-logging.ts";
 import { SWAP_OUTPUT_SCHEMA, SWAP_RESPOND_SCHEMA } from "../evm-swap.ts";
 import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
+import { PollProgress } from "../poll-progress.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { warnOnce } from "../warn-once.ts";
 
 /** The resolved attested outcome of a swap (uint64 amountIn spent, or the failure output). */
 export interface SwapOutcome {
@@ -52,12 +53,14 @@ const OBSERVATION_TICK_TIMEOUT_MS = 3_000;
  * @param context - The flow context, whose EVM endpoint serves the trace.
  * @param reader - The reader over the swap request map, which rebuilds the mined transaction.
  * @param requestId - The swap request id whose execution result to recompute.
+ * @param progress - Diagnostics for the enclosing poll.
  * @returns The candidates, failure last, or undefined when the execution cannot be observed this tick.
  */
 async function fetchSwapCandidates(
   context: VaultContext,
   reader: SignetRequestResponseReader,
   requestId: RequestIdHex,
+  progress: PollProgress,
 ): Promise<SwapCandidate[] | undefined> {
   let observed: ObservedExecution;
   try {
@@ -68,10 +71,7 @@ async function fetchSwapCandidates(
       OBSERVATION_TICK_TIMEOUT_MS,
     );
   } catch (error) {
-    warnOnce(
-      `swap-observe:${requestId}`,
-      `could not observe the execution of swap ${requestId}, will retry on the next poll tick: ${String(error)}`,
-    );
+    progress.failure("observation", `execution observation failed: ${String(error)}`);
     return undefined;
   }
 
@@ -85,11 +85,7 @@ async function fetchSwapCandidates(
         isFailureOutput: false,
       });
     } catch (error) {
-      warnOnce(
-        `swap-decode:${requestId}`,
-        `could not decode/re-pack the observed output for swap ${requestId} ` +
-          `(matching against the failure candidate only): ${String(error)}`,
-      );
+      progress.failure("decode", `execution output decode failed: ${String(error)}`);
     }
   }
   candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, amountIn: 0n, isFailureOutput: true });
@@ -173,22 +169,34 @@ export async function pollSwapOutcome(
     context.vaultContractAddress,
   );
 
+  const progress = new PollProgress(
+    `swap attestation ${options.requestId}`,
+    options.timeoutMs ?? 6 * MINUTE,
+  );
   const end = Date.now() + (options.timeoutMs ?? 6 * MINUTE);
   let candidates: SwapCandidate[] | undefined;
   while (Date.now() < end) {
     const events = await reader.getRespondBidirectionalEvents(options.requestId);
+    progress.update(`${String(events.length)} attestation posts observed`);
     // A posted attestation means the transaction has executed and its result is observable, so
     // the candidates are worth building only once a post appears.
     if (events.length > 0) {
-      candidates ??= await fetchSwapCandidates(context, reader, options.requestId);
+      candidates ??= await fetchSwapCandidates(context, reader, options.requestId, progress);
       if (candidates !== undefined) {
         const outcome = matchSwapOutcome(events, options.requestId, candidates, mpcResponseKey);
         if (outcome !== undefined) return outcome;
+        progress.update(
+          `${String(events.length)} attestation posts rejected against ${String(candidates.length)} output candidates`,
+        );
+        progress.failure(
+          "verification",
+          "no signature verifies against the vault response key and observed output",
+        );
       }
     }
     await new Promise((r) => setTimeout(r, options.intervalMs ?? 1000));
   }
-  throw new Error(`timed out waiting for a swap attestation for ${options.requestId}`);
+  throw new Error(`timed out: ${progress.summary()}`);
 }
 
 /**
@@ -229,8 +237,13 @@ export async function settleSwap(
     mintNonce,
     changeNonce,
   );
-  console.log(
-    `completeSwap settled in tx ${r.public.txId} (spent ${String(outcome.amountIn)} tokenIn)`,
+  console.log(`completeSwap settled in tx ${r.public.txId}`);
+  await logTokenAmount(
+    context.evmRpcUrl,
+    context.erc20Address,
+    context.evmVaultAddress,
+    outcome.amountIn,
+    "swap spent input",
   );
   return { amountIn: outcome.amountIn, refunded: false };
 }

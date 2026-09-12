@@ -197,7 +197,7 @@ function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   console.log(`derived a fresh EVM_USER_ADDRESS=${expectedAddress}`);
   console.log(` ➜ the user's derived EVM account (path = identity commitment)`);
   console.log(
-    ` ➜ FUND IT ON EVM before the deposit test: >= 0.01 ETH (gas) and >= 0.1 USDC (deposit) — automatic on the local dev chain`,
+    ` ➜ FUND IT ON EVM before the deposit test: >= 0.01 ETH (funding reserve) and >= 0.1 USDC (deposit) — automatic on the local dev chain`,
   );
   console.log(` ➜ 💡 Set as EVM_USER_ADDRESS in the environment to skip this step on the next run`);
 }
@@ -275,7 +275,7 @@ const STEPS: readonly SetupStep[] = [
     },
   ],
   ["setup: resolve/generate wallet seeds (root + deployer/user/mpc responder)", ensureWalletSeeds],
-  ["setup: preflight root funding + fund the role wallets from root", ensureWalletsFunded],
+  ["setup: inspect role wallets and fund empty wallets", ensureWalletsFunded],
   ["setup: resolve EVM chain id from EVM_RPC_URL", resolveEvmChain],
   [
     "setup: verify EVM_RPC_URL serves debug_traceTransaction",

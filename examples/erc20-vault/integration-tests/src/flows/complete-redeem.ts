@@ -13,13 +13,15 @@ import {
   type SignetRequestResponseReader,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
+import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { VAULT_REDEEM_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { logTokenAmount } from "../evm-logging.ts";
 import { REDEEM_OUTPUT_SCHEMA, REDEEM_RESPOND_SCHEMA } from "../evm-stata.ts";
 import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
+import { PollProgress } from "../poll-progress.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
-import { warnOnce } from "../warn-once.ts";
 
 /** The resolved attested outcome of a redeem (uint64 assets minted, or the failure output). */
 export interface RedeemOutcome {
@@ -51,12 +53,14 @@ const OBSERVATION_TICK_TIMEOUT_MS = 3_000;
  * @param context - The flow context, whose EVM endpoint serves the trace.
  * @param reader - The reader over the redeem request map, which rebuilds the mined transaction.
  * @param requestId - The redeem request id whose execution result to recompute.
+ * @param progress - Diagnostics for the enclosing poll.
  * @returns The candidates, failure last, or undefined when the execution cannot be observed this tick.
  */
 async function fetchRedeemCandidates(
   context: VaultContext,
   reader: SignetRequestResponseReader,
   requestId: RequestIdHex,
+  progress: PollProgress,
 ): Promise<RedeemCandidate[] | undefined> {
   let observed: ObservedExecution;
   try {
@@ -67,10 +71,7 @@ async function fetchRedeemCandidates(
       OBSERVATION_TICK_TIMEOUT_MS,
     );
   } catch (error) {
-    warnOnce(
-      `redeem-observe:${requestId}`,
-      `could not observe the execution of redeem ${requestId}, will retry on the next poll tick: ${String(error)}`,
-    );
+    progress.failure("observation", `execution observation failed: ${String(error)}`);
     return undefined;
   }
 
@@ -84,11 +85,7 @@ async function fetchRedeemCandidates(
         isFailureOutput: false,
       });
     } catch (error) {
-      warnOnce(
-        `redeem-decode:${requestId}`,
-        `could not decode/re-pack the observed output for redeem ${requestId} ` +
-          `(matching against the failure candidate only): ${String(error)}`,
-      );
+      progress.failure("decode", `execution output decode failed: ${String(error)}`);
     }
   }
   candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, assets: 0n, isFailureOutput: true });
@@ -172,22 +169,34 @@ export async function pollRedeemOutcome(
     context.vaultContractAddress,
   );
 
+  const progress = new PollProgress(
+    `redeem attestation ${options.requestId}`,
+    options.timeoutMs ?? 6 * MINUTE,
+  );
   const end = Date.now() + (options.timeoutMs ?? 6 * MINUTE);
   let candidates: RedeemCandidate[] | undefined;
   while (Date.now() < end) {
     const events = await reader.getRespondBidirectionalEvents(options.requestId);
+    progress.update(`${String(events.length)} attestation posts observed`);
     // A posted attestation means the transaction has executed and its result is observable, so
     // the candidates are worth building only once a post appears.
     if (events.length > 0) {
-      candidates ??= await fetchRedeemCandidates(context, reader, options.requestId);
+      candidates ??= await fetchRedeemCandidates(context, reader, options.requestId, progress);
       if (candidates !== undefined) {
         const outcome = matchRedeemOutcome(events, options.requestId, candidates, mpcResponseKey);
         if (outcome !== undefined) return outcome;
+        progress.update(
+          `${String(events.length)} attestation posts rejected against ${String(candidates.length)} output candidates`,
+        );
+        progress.failure(
+          "verification",
+          "no signature verifies against the vault response key and observed output",
+        );
       }
     }
     await new Promise((r) => setTimeout(r, options.intervalMs ?? 1000));
   }
-  throw new Error(`timed out waiting for a redeem attestation for ${options.requestId}`);
+  throw new Error(`timed out: ${progress.summary()}`);
 }
 
 /**
@@ -223,8 +232,13 @@ export async function settleRedeem(
     outcome.serializedOutput,
     mintNonce,
   );
-  console.log(
-    `completeRedeem settled in tx ${r.public.txId} (minted ${String(outcome.assets)} USDC)`,
+  console.log(`completeRedeem settled in tx ${r.public.txId}`);
+  await logTokenAmount(
+    context.evmRpcUrl,
+    AAVE_USDC,
+    context.evmVaultAddress,
+    outcome.assets,
+    "minted assets",
   );
   return { assets: outcome.assets, refunded: false };
 }
