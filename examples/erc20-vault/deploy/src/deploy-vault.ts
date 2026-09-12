@@ -24,6 +24,7 @@ import {
   ensureFeeReady,
   envOrUndefined,
   estimateUnprovenTransactionFee,
+  formatDust,
   getDeployConfig,
   getFaucetUrl,
   isLocalStandaloneNetwork,
@@ -47,6 +48,7 @@ import {
   type DeferredCircuit,
   installedCircuitIds,
   SplitDeployAfterBaseSubmitError,
+  type SplitDeployTransaction,
 } from "@sig-net/midnight-examples-lib";
 
 import { VAULT_MANAGED_PATH, vaultCompiledContract } from "./vault-contract-binding.ts";
@@ -57,6 +59,8 @@ import { VAULT_MANAGED_PATH, vaultCompiledContract } from "./vault-contract-bind
 const BASE_DEPLOY_CIRCUITS: readonly string[] = ["approveRouter"];
 
 const MINUTE_MS = 60_000;
+// Funding must finish within the base intent's 30-minute lifetime.
+const DEPLOY_FUNDING_TIMEOUT_MS: number = 20 * MINUTE_MS;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -106,7 +110,7 @@ export function orderDeferredCircuits(deferred: readonly DeferredCircuit[]): Def
  * Install the circuits deferred from the base deploy via one maintenance update each, in
  * {@link orderDeferredCircuits} order, waiting for the authority counter to advance between them
  * so every update binds to the current counter. Each update waits for the deployer's running
- * facade to catch up (fresh fee coins) and to hold the fee of every add still to come, and is
+ * facade to catch up (fresh fee coins) and to hold that update's estimated fee, and is
  * signed by the `MAINTENANCE_SIGNING_KEY` authority sealed at deploy time.
  *
  * @param nodeConfig - The Midnight stack config (node/indexer endpoints + network id).
@@ -116,7 +120,7 @@ export function orderDeferredCircuits(deferred: readonly DeferredCircuit[]): Def
  * @param contractAddress - The deployed base contract's address.
  * @param deferred - The circuits to add.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor DUST before an add.
- * @throws {Error} If the base deploy never indexes, the remaining adds' fees do not generate in
+ * @throws {Error} If the base deploy never indexes, an update's fee does not generate in
  *   spendable DUST after registering the wallet's NIGHT, or an add's counter never advances.
  */
 async function addDeferredCircuits(
@@ -159,7 +163,7 @@ async function addDeferredCircuitsThrough(
   }
 
   const ordered = orderDeferredCircuits(deferred);
-  for (const [index, { circuitId, verifierKey }] of ordered.entries()) {
+  for (const { circuitId, verifierKey } of ordered) {
     const current = await readContractState(pdp, contractAddress);
     if (!current) throw new Error(`contract state for ${contractAddress} vanished mid-deploy`);
     console.log(`[${circuitId}] maintenance-add at counter ${current.counter.toString()}`);
@@ -172,9 +176,8 @@ async function addDeferredCircuitsThrough(
       verifierKey,
       current.serialized,
     );
-    // This add and every one after it, each priced at this add's fee.
-    const remaining = BigInt(ordered.length - index);
     const fee = await estimateUnprovenTransactionFee(deployer.facade, serializedTransaction);
+    console.log(`[${circuitId}] estimated fee: ${formatDust(fee)} DUST`);
     const state = await deployer.facade.waitForSyncedState();
     await ensureFeeReady(
       deployer.facade,
@@ -182,7 +185,8 @@ async function addDeferredCircuitsThrough(
       state,
       networkId,
       getFaucetUrl(env, networkId),
-      fee * remaining,
+      fee,
+      DEPLOY_FUNDING_TIMEOUT_MS,
     );
     const txId = await submitUnprovenTransaction(
       deployer.facade,
@@ -243,6 +247,55 @@ function resolveMaintenanceEnv(
     "  (export it as MAINTENANCE_SIGNING_KEY to `yarn resume-deploy:erc20-vault` if a maintenance add fails)",
   );
   return { ...env, MAINTENANCE_SIGNING_KEY: maintenanceSigningKey };
+}
+
+/**
+ * Price the base deployment and every deferred verifier-key insertion individually.
+ * Balancing inputs and later price changes can increase the submitted fees.
+ *
+ * @param deployment - The base transaction and deferred verifier keys.
+ * @param networkId - The deployment network.
+ * @param env - The maintenance signing key for the deferred insertions.
+ * @param estimateFee - Price one serialized unproven transaction in SPECKs.
+ * @returns The combined estimated fee in SPECKs.
+ * @throws {Error} If the base transaction contains no deployment or an estimate fails.
+ */
+export async function estimateVaultDeploymentFee(
+  deployment: SplitDeployTransaction,
+  networkId: NetworkId,
+  env: Record<string, string | undefined>,
+  estimateFee: (transaction: Uint8Array) => Promise<bigint>,
+): Promise<bigint> {
+  const transaction: ledger.UnprovenTransaction = ledger.Transaction.deserialize(
+    "signature",
+    "pre-proof",
+    "pre-binding",
+    deployment.serializedTransaction,
+  );
+  const base = [...(transaction.intents?.values() ?? [])]
+    .flatMap((intent) => intent.actions)
+    .find((action): action is ledger.ContractDeploy => action instanceof ledger.ContractDeploy);
+  if (!base) throw new Error("fee estimation requires a base contract deployment");
+  const state: ledger.ContractState = base.initialState;
+  let total: bigint = await estimateFee(deployment.serializedTransaction);
+  for (const { circuitId, verifierKey } of orderDeferredCircuits(deployment.deferred)) {
+    const { serializedTransaction } = buildMaintenanceInsertTransaction(
+      networkId,
+      env,
+      deployment.contractAddress,
+      circuitId,
+      verifierKey,
+      state.serialize(),
+    );
+    total += await estimateFee(serializedTransaction);
+    const authority: ledger.ContractMaintenanceAuthority = state.maintenanceAuthority;
+    state.maintenanceAuthority = new ledger.ContractMaintenanceAuthority(
+      authority.committee,
+      authority.threshold,
+      authority.counter + 1n,
+    );
+  }
+  return total;
 }
 
 /** The outcome of a successful vault deployment. */
@@ -340,15 +393,16 @@ export async function deployVault(
         `deferring ${String(deferred.length)} for maintenance adds`,
     );
 
-    // The base deploy plus one maintenance add per deferred circuit, each priced at the base
-    // transaction's fee: a deployer short of that total stops here, with nothing submitted.
-    const transactionCount = BigInt(1 + deferred.length);
-    const fee = await estimateUnprovenTransactionFee(
-      deployer.facade,
-      deployTransaction.serializedTransaction,
+    const transactionCount: number = 1 + deferred.length;
+    const feeBudget: bigint = await estimateVaultDeploymentFee(
+      deployTransaction,
+      networkId,
+      deployEnv,
+      (transaction: Uint8Array): Promise<bigint> =>
+        estimateUnprovenTransactionFee(deployer.facade, transaction),
     );
     console.log(
-      `fee budget: ${String(transactionCount)} transactions at about ${String(fee)} DUST each`,
+      `estimated fee budget: ${formatDust(feeBudget)} DUST for ${String(transactionCount)} individually priced transactions (balancing fees additional)`,
     );
     const state = await deployer.facade.waitForSyncedState();
     await ensureFeeReady(
@@ -357,7 +411,8 @@ export async function deployVault(
       state,
       networkId,
       getFaucetUrl(env, networkId),
-      fee * transactionCount,
+      feeBudget,
+      DEPLOY_FUNDING_TIMEOUT_MS,
     );
     const txId = await submitUnprovenTransaction(
       deployer.facade,

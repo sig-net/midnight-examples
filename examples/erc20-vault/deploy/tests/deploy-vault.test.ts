@@ -7,11 +7,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { computeSha256Hex } from "@midnight-ntwrk/midnight-js/utils";
+import * as ledger from "@midnightntwrk/ledger-v9";
 import { expectedVk } from "@sig-net/midnight-examples-erc20-vault-contract";
-import type { DeferredCircuit } from "@sig-net/midnight-examples-lib";
-import { describe, expect, it } from "vitest";
+import type { DeferredCircuit, SplitDeployTransaction } from "@sig-net/midnight-examples-lib";
+import * as deployBuilders from "@sig-net/midnight-examples-lib";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { orderDeferredCircuits, readDeferredCircuits } from "../src/deploy-vault.ts";
+import {
+  estimateVaultDeploymentFee,
+  orderDeferredCircuits,
+  readDeferredCircuits,
+} from "../src/deploy-vault.ts";
 import { VAULT_MANAGED_PATH } from "../src/vault-contract-binding.ts";
 
 const KEYS_DIR = join(VAULT_MANAGED_PATH, "keys");
@@ -81,3 +87,95 @@ describe.skipIf(!HAS_VERIFIER_KEYS)(
     });
   },
 );
+
+describe("estimateVaultDeploymentFee", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("sums unequal fees and binds each insertion to its own maintenance counter", async () => {
+    const deploy = new ledger.ContractDeploy(new ledger.ContractState());
+    const transaction = ledger.Transaction.fromPartsRandomized(
+      "stagenet",
+      undefined,
+      undefined,
+      ledger.Intent.new(new Date(Date.now() + 60_000)).addDeploy(deploy),
+    );
+    const deployment: SplitDeployTransaction = {
+      contractAddress: deploy.address,
+      serializedTransaction: transaction.serialize(),
+      deferred: [circuit("startSwap"), circuit("initialise")],
+    };
+    const build = vi
+      .spyOn(deployBuilders, "buildMaintenanceInsertTransaction")
+      .mockReturnValueOnce({ serializedTransaction: Uint8Array.of(1) })
+      .mockReturnValueOnce({ serializedTransaction: Uint8Array.of(2) });
+    const estimateFee = vi
+      .fn<(bytes: Uint8Array) => Promise<bigint>>()
+      .mockResolvedValueOnce(100n)
+      .mockResolvedValueOnce(10n)
+      .mockResolvedValueOnce(20n);
+    const total = await estimateVaultDeploymentFee(deployment, "stagenet", {}, estimateFee);
+    expect(total).toBe(130n);
+    expect(estimateFee.mock.calls.map(([bytes]) => bytes)).toEqual([
+      deployment.serializedTransaction,
+      Uint8Array.of(1),
+      Uint8Array.of(2),
+    ]);
+    expect(
+      build.mock.calls.map(([, , address, id, , state]) => ({
+        address,
+        id,
+        counter: ledger.ContractState.deserialize(state).maintenanceAuthority.counter,
+      })),
+    ).toEqual([
+      { address: deploy.address, id: "initialise", counter: 0n },
+      { address: deploy.address, id: "startSwap", counter: 1n },
+    ]);
+  });
+  it("rejects a transaction without a deployment", async () => {
+    const transaction = ledger.Transaction.fromPartsRandomized(
+      "stagenet",
+      undefined,
+      undefined,
+      ledger.Intent.new(new Date(Date.now() + 60_000)),
+    );
+    await expect(
+      estimateVaultDeploymentFee(
+        {
+          contractAddress: "00".repeat(32),
+          serializedTransaction: transaction.serialize(),
+          deferred: [],
+        },
+        "stagenet",
+        {},
+        (): Promise<bigint> => Promise.resolve(100n),
+      ),
+    ).rejects.toThrow("fee estimation requires a base contract deployment");
+  });
+
+  it("prices a deployment with no deferred circuits once", async () => {
+    const deploy = new ledger.ContractDeploy(new ledger.ContractState());
+    const transaction = ledger.Transaction.fromPartsRandomized(
+      "stagenet",
+      undefined,
+      undefined,
+      ledger.Intent.new(new Date(Date.now() + 60_000)).addDeploy(deploy),
+    );
+    let estimates = 0;
+    await expect(
+      estimateVaultDeploymentFee(
+        {
+          contractAddress: deploy.address,
+          serializedTransaction: transaction.serialize(),
+          deferred: [],
+        },
+        "stagenet",
+        {},
+        (): Promise<bigint> => {
+          estimates += 1;
+          return Promise.resolve(100n);
+        },
+      ),
+    ).resolves.toBe(100n);
+    expect(estimates).toBe(1);
+  });
+});
