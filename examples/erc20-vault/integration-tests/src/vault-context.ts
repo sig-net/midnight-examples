@@ -52,8 +52,6 @@ export interface VaultContext {
   readonly evmRpcUrl: string;
   /** Chain id of that EVM chain. */
   readonly evmChainId: bigint;
-  /** CAIP-2 id derived from `evmChainId` (`eip155:<id>`) — the MPC routing key. */
-  readonly caip2Id: string;
   /** Address of the ERC20 token the vault holds (20-byte 0x hex). */
   readonly erc20Address: string;
   /** The vault's derived EVM account (path "vault") — the withdraw tx sender. */
@@ -117,7 +115,6 @@ export async function createVaultContext(
     signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
     evmRpcUrl: requireEnv(env, "EVM_RPC_URL"),
     evmChainId,
-    caip2Id: `eip155:${String(evmChainId)}`,
     erc20Address,
     evmVaultAddress: requireEnv(env, "EVM_VAULT_ADDRESS"),
     evmUserAddress: requireEnv(env, "EVM_USER_ADDRESS"),
@@ -148,7 +145,7 @@ export function createResponseReader(
   return new SignetRequestResponseReader({
     requesterContractAddress: context.vaultContractAddress,
     // The requestsPath the vault's notifications pack (erc20-vault.compact).
-    // The vault's 21 ledger fields chunk the state tree, so every path is depth 2.
+    // The vault's 20 ledger fields chunk the state tree, so every path is depth 2.
     requesterRequestsPath: requestsPath,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,

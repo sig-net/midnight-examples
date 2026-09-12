@@ -186,8 +186,8 @@ The contract package's dependency list is the minimal integration surface:
 "dependencies": {
   "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
   "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
-  "@sig-net/midnight": "0.21.0-rc.10",
-  "@sig-net/midnight-contract": "0.21.0-rc.10"
+  "@sig-net/midnight": "0.21.0",
+  "@sig-net/midnight-contract": "0.21.0"
 }
 ```
 
@@ -248,8 +248,7 @@ export ledger mpcResponseKey: Secp256k1Point;
 export ledger signetRequestNonce: Counter;  // keeps identical requests' ids distinct
 export ledger initialised: Counter;         // one-shot initialise marker
 export ledger vaultEvmAddress: Bytes<20>;   // the vault's derived EVM account
-export ledger evmChainId: Uint<64>;         // the pinned EVM chain, numeric...
-export ledger caip2Id: Bytes<32>;           // ...and CAIP-2 form
+export ledger evmChainId: Uint<64>;         // EIP-155 chain id of the pinned Ethereum network
 sealed ledger deployer: Bytes<32>;          // only they may initialise
 // Deposits get their own map: kind isolation is structural, so completeDeposit
 // never sees an approve or withdraw request at all.
@@ -271,11 +270,11 @@ Two vault-specific points:
   (`VAULT_REQUESTS_PATH`, `VAULT_DEPOSIT_REQUESTS_PATH`,
   `VAULT_SWAP_REQUESTS_PATH`, `VAULT_SUPPLY_REQUESTS_PATH`,
   `VAULT_REDEEM_REQUESTS_PATH`) so off-chain readers cannot drift from them.
-  The vault has 21 ledger fields, past the 15-field flat limit, so the compiler
-  chunks the state tree: chunk 0 holds fields 0-5, chunk 1 holds fields 6-20,
+  The vault has 20 ledger fields, past the 15-field flat limit, so the compiler
+  chunks the state tree: chunk 0 holds fields 0–4, chunk 1 holds fields 5–19,
   and every path is depth 2. The approve/withdraw map at field 0 has the path
   `[0, 0]`, and its circuits pack `requestsPathDepth` 2 + `requestsPath`
-  [0, 0, 0, 0]; the deposit map at field 9 has `[1, 3]` and packs
+  [0, 0, 0, 0]. The deposit map at field 8 has `[1, 3]` and packs
   [1, 3, 0, 0]. The compiler records the same paths as each field's "index" in
   the compiled `contract-info.json`, and a ledger declaration change re-chunks
   the tree, so re-read them there and update every notification vector in the
@@ -311,7 +310,6 @@ export circuit initialise(
   stataUnderlyingAddr: Bytes<20>,
   stataTokenAddr: Bytes<20>,
   chainId: Uint<64>,
-  chainCaip2Id: Bytes<32>,
   responseKey: Secp256k1Point
 ): [] {
   assert(initialised == 0, "Already initialised");
@@ -326,10 +324,14 @@ export circuit initialise(
   stataUnderlying = disclose(stataUnderlyingAddr);
   stataToken = disclose(stataTokenAddr);
   evmChainId = disclose(chainId);
-  caip2Id = disclose(chainCaip2Id);
   mpcResponseKey = disclose(responseKey);
 }
 ```
+
+The chain id is the only per-network value a request carries: it binds each
+signed transaction to one Ethereum network (mainnet, Sepolia or a local anvil),
+and it must name the network the MPC watches. Every request's `caip2Id` is the
+SDK's fixed `ethereumCaip2Id()`, whichever Ethereum network that is.
 
 The gate prevents front-running: nobody else can initialise the vault to
 point at their own address, chain or key. Flow function:
@@ -449,6 +451,76 @@ What does NOT happen automatically on a real chain, by design:
 - A redeploy of the vault contract derives **new** accounts, and any you already
   funded do not move with it.
 
+### Running against the real MPC on a deployed network
+
+Point the Midnight side at a deployed network (stagenet, preview, preprod or
+mainnet) and drop the fakenet: the real Signature Network MPC listens to the
+signet singleton the SDK publishes for that network and answers requests from
+any vault sealed to it. The suite runs the same way on every deployed network.
+The minimal `.env` is
+[`.env.example-stagenet-minimal`](../../.env.example-stagenet-minimal) at the
+repo root, with stagenet as the example network:
+
+```sh
+NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
+ROOT_SEED=                 # funded via the network's faucet (the first run prints the address and URL)
+MAINTENANCE_SIGNING_KEY=   # 32 bytes of hex, required on any deployed network
+EVM_RPC_URL=               # a REAL Sepolia RPC that serves debug_traceTransaction
+```
+
+What differs from the local loop:
+
+- **No signet deploy.** The setup takes the singleton address the SDK
+  publishes for the network (a set `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` must
+  agree with it).
+- **No `MPC_ROOT_KEY`.** The MPC root public key the SDK publishes for the
+  network names the real MPC, every derived account starts from it, and the
+  fakenet hand-off steps skip on their own. A set `MPC_SECP256K1_PUBKEY` must
+  agree with it, in any spelling (NEAR `secp256k1:<base58>` or SEC1 hex): the
+  run canonicalises it to `0x04…` uncompressed SEC1 hex. A held root key on a
+  deployed network means the opposite: a fakenet you run against that network.
+- **The real Sepolia network, not a fork.** The MPC reaches Sepolia through its
+  own RPC, so a local anvil is invisible to it. With no anvil there is no
+  dealing either: the setup prints the derived accounts and what to fund by
+  hand, and `STEP_THROUGH=1` (below) lets one attended run fund them and
+  continue.
+- **A tracing RPC, as everywhere.** `EVM_RPC_URL` must serve
+  `debug_traceTransaction` on every network (the attestation polls recover
+  each execution output by tracing the mined transaction, the method the MPC
+  itself observes with), and the setup refuses an endpoint without it before
+  anything is deployed. The local anvil serves it, and hosted Sepolia
+  endpoints often gate it behind a paid tier.
+- **Only the specs that never sign as the vault run here:** `happy-day-e2e`,
+  `bearer-transfer`, `swap-e2e`, `supply-redeem-e2e` and `swap-refund-e2e`.
+  The others force reverts with a vault key re-derived from `MPC_ROOT_KEY`
+  ([`integration-tests/src/fakenet-vault-account.ts`](integration-tests/src/fakenet-vault-account.ts))
+  and are fakenet-only.
+
+Bring up only the `proof-server` service of the compose file (the node, indexer
+and anvil are not used), then start with one deposit round trip rather than
+the whole spec:
+
+```sh
+STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts -t "initialise|[dD]eposit|sweep"
+```
+
+The `-t` filter keeps the happy-day spec's initialise and deposit tests
+(deposit, sweep signature, broadcast, attestation, `completeDeposit`) and skips
+its withdraw tests. Drop it for the full spec. Setup first synchronises the role wallets.
+Wallets with NIGHT or spendable DUST skip the root transfer. Each actual transaction
+checks its estimated DUST fee, including balancing, before submission. Existing NIGHT
+can generate the missing DUST after registration.
+
+Only empty wallets require root funding. An unfunded root stops the run only when a
+transfer is required and prints its NIGHT address and faucet URL. Transfers divide
+root's NIGHT by weight across empty roles: three shares for the deployer and one
+for each other role. Root retains one share. `FUND_CHILD_NIGHT` can specify each
+transfer in NIGHT base units. Setup generates the zk keys, deploys the vault
+and carries on into the spec, where the first signature poll is the first
+exchange with the real MPC. The vault's address is appended to `.env` the
+moment its base deploy is submitted, so a run that dies during the circuit
+installs resumes them on the next run.
+
 ### Watching a run step by step: `STEP_THROUGH=1`
 
 ```sh
@@ -495,7 +567,8 @@ yarn initialise:erc20-vault
 
 # install the circuits a split deploy left missing (recovers a run that died
 # after its base deploy landed, named by MIDNIGHT_VAULT_CONTRACT_ADDRESS, and
-# is a no-op on a vault with every circuit), then initialise as above
+# is a no-op on a vault with every circuit), then initialise as above. The
+# e2e setup runs this itself whenever the address is set.
 yarn resume-deploy:erc20-vault
 ```
 
@@ -505,6 +578,23 @@ run when that `.env` names a different `NETWORK_ID` than the run targets and
 still supplies a network-scoped value (a signet address, an MPC key): those are
 sealed into the contract permanently, and a local-chain value on a remote network
 produces a vault that can never work.
+
+On a deployed network a deploy needs four variables:
+
+```sh
+NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
+DEPLOYER_SEED=             # pays the fees, funded via the network's faucet
+MAINTENANCE_SIGNING_KEY=   # 32 bytes of hex, kept (see below)
+EVM_RPC_URL=               # the EVM chain the vault operates on
+```
+
+Everything else is derived: the signet singleton and the MPC root public key
+are the ones `@sig-net/midnight` publishes for the network, and the chain id is
+read from `EVM_RPC_URL`. `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
+`MPC_SECP256K1_PUBKEY` and `EVM_CHAIN_ID` remain as overrides, and a set value
+must agree with the published one or with what the chain reports. The local
+stack publishes nothing, so there the e2e setup deploys a singleton and mints a
+fakenet key and hands both over through those same variables.
 
 `BASE_DEPLOY_CIRCUITS` names the circuit that goes in the base transaction.
 `buildDeployTransactionDeferring` returns the contract address plus the deferred

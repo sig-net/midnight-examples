@@ -3,7 +3,6 @@
 // derived address. The request id is recomputed off-chain with the library's TS twin of the
 // request-id circuit and asserted against the ledger map key before it is returned. The
 // settle side lives in complete-deposit.ts.
-
 import {
   calculateRequestId,
   evmAddressAbiWord,
@@ -19,6 +18,7 @@ import {
 } from "@sig-net/midnight";
 import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import {
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
@@ -77,13 +77,18 @@ export async function startDeposit(
   const erc20 = evmAddressBytes(erc20Address);
   console.log(`vault contract:    ${context.vaultContractAddress}`);
   console.log(`erc20:             ${erc20Address}`);
-  console.log(
-    `amount:            ${String(options.amount)} (evm nonce ${String(options.evmNonce)})`,
-  );
+
   console.log(`caller commitment: ${context.identity.commitmentHex}`);
 
   // Pre-call ledger read: the request nonce the contract will use, the sealed
   // vault EVM address its calldata will pay to, and the pinned chain config.
+  await logTokenAmount(
+    context.evmRpcUrl,
+    erc20Address,
+    context.evmUserAddress,
+    options.amount,
+    "start-deposit amount",
+  );
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
@@ -113,7 +118,6 @@ export async function startDeposit(
     path: context.identity.commitment,
     ...VAULT_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: erc20,
       chainId: before.evmChainId,
@@ -135,6 +139,13 @@ export async function startDeposit(
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
+  logEvmFeeCap(
+    expectedIdHex,
+    context.evmUserAddress,
+    expectedRecord.txParams.gasLimit,
+    expectedRecord.txParams.maxFeePerGas,
+    expectedRecord.txParams.maxPriorityFeePerGas,
+  );
 
   const result = await context.vault.callTx.startDeposit(
     options.evmNonce,

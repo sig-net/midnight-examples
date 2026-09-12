@@ -2,10 +2,10 @@
 // signet contract's emitted signature response events by request id until the
 // MPC's ECDSA signature over a request's EVM transaction appears, verifying
 // every post on the way. There is deliberately no push/websocket alternative.
-
 import { type RequestIdHex, signBidirectionalEventToSignedEvmTransaction } from "@sig-net/midnight";
 import type { Transaction } from "ethers";
 
+import { PollProgress } from "../poll-progress.ts";
 import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 
@@ -79,7 +79,8 @@ export async function pollSignatureResponse(
   // The reader is single-shot; this loop owns the cadence and the give-up
   // timeout. Rejected posts are immutable emitted events, so warn each post
   // index once across the loop's lifetime, not every tick.
-  const warned = new Set<bigint>();
+  const progress = new PollProgress(`signature ${options.requestId}`, options.timeoutMs);
+  const rejected = new Map<bigint, string>();
   const giveUp = new AbortController();
   const timer = setTimeout(() => {
     giveUp.abort();
@@ -91,13 +92,18 @@ export async function pollSignatureResponse(
         options.expectedSigner,
       );
       for (const verdict of verdicts) {
-        if (verdict.rejectedReason !== undefined && !warned.has(verdict.index)) {
-          warned.add(verdict.index);
-          console.warn(
-            `ignoring response post ${String(verdict.index)}: ${verdict.rejectedReason}`,
+        if (verdict.rejectedReason !== undefined) {
+          const reason = `${verdict.rejectedReason}${verdict.signer === undefined ? "" : `. Expected ${options.expectedSigner}, recovered ${verdict.signer}`}`;
+          rejected.set(verdict.index, reason);
+          progress.failure(
+            String(verdict.index),
+            `response post ${String(verdict.index)} rejected: ${reason}`,
           );
         }
       }
+      progress.update(
+        `${String(verdicts.length)} posts observed, ${String(rejected.size)} rejected posts`,
+      );
       if (verified !== undefined) {
         const validIndex = verdicts.find((verdict) => verdict.rejectedReason === undefined)?.index;
         console.log(`valid response found (post ${String(validIndex ?? "unknown")})`);
@@ -110,7 +116,7 @@ export async function pollSignatureResponse(
       await sleepUnlessAborted(options.intervalMs, giveUp.signal);
     }
     throw new Error(
-      `timed out after ${String(options.timeoutMs)}ms waiting for a valid response to request ${options.requestId}`,
+      `timed out: ${progress.summary()}. Rejections: ${[...rejected].map(([index, reason]) => `${String(index)}: ${reason}`).join(" | ") || "none"}`,
     );
   } finally {
     clearTimeout(timer);

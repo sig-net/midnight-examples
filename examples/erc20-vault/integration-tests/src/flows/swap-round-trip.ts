@@ -4,6 +4,7 @@ import type { RequestIdHex } from "@sig-net/midnight";
 import { VAULT_SWAP_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { getTransactionNonce } from "@sig-net/midnight-examples-test-harness";
 
+import { logTokenAmount } from "../evm-logging.ts";
 import { quoteExactOutputSingle } from "../evm-swap.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { ensureRouterApproved } from "./approve-router.ts";
@@ -60,8 +61,19 @@ export async function runSwapRoundTrip(
     opts.slippageBps ?? 100n,
   );
   const amountInMaximum = opts.amountInMaximum ?? quotedMax;
-  console.log(
-    `quote: ~${String(quoted)} ${context.erc20Address} -> ${String(opts.amountOut)} ${opts.tokenOut} (max ${String(amountInMaximum)})`,
+  await logTokenAmount(
+    context.evmRpcUrl,
+    context.erc20Address,
+    context.evmVaultAddress,
+    quoted,
+    "swap quoted input",
+  );
+  await logTokenAmount(
+    context.evmRpcUrl,
+    context.erc20Address,
+    context.evmVaultAddress,
+    amountInMaximum,
+    "swap maximum input",
   );
 
   const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);

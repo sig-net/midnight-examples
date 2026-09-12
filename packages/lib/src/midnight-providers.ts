@@ -7,7 +7,6 @@
 // provider set (indexer / proof server / zk-config / private-state store)
 // lives with each contract package, since it depends on that package's
 // compiled assets.
-
 import {
   createProofProvider,
   type MidnightProvider,
@@ -20,7 +19,11 @@ import {
 } from "@midnight-ntwrk/midnight-js/types";
 import { httpClientProvingProvider } from "@midnight-ntwrk/midnight-js-http-client-proof-provider";
 import type { ProvingKeyMaterial, ProvingProvider } from "@midnightntwrk/ledger-v9";
-import type { AccountKeys, WalletFacade } from "@sig-net/midnight-contract-deploy";
+import { ContractCall } from "@midnightntwrk/ledger-v9";
+import type { AccountKeys, NetworkId, WalletFacade } from "@sig-net/midnight-contract-deploy";
+
+import { withOperationProgress } from "./operation-progress.ts";
+import { ensureTransactionFee } from "./transaction-fees.ts";
 
 // Balancing recipes expire 30 min out (same TTL as submitUnprovenTransaction).
 const BALANCE_TTL_MS = 30 * 60 * 1000;
@@ -38,25 +41,58 @@ const BALANCE_TTL_MS = 30 * 60 * 1000;
  *
  * @param facade - A started (and synced) wallet facade.
  * @param keys - The key material of the same wallet, for balancing and signing.
+ * @param networkId - The network used for wallet funding addresses.
  * @returns The provider pair midnight-js uses as balancer + submitter.
  */
 export function createWalletAndMidnightProvider(
   facade: WalletFacade,
   keys: AccountKeys,
+  networkId: NetworkId,
 ): WalletProvider & MidnightProvider {
   return {
     getCoinPublicKey: () => keys.shieldedSecretKeys.coinPublicKey,
     getEncryptionPublicKey: () => keys.shieldedSecretKeys.encryptionPublicKey,
     async balanceTx(tx: UnboundTransaction, ttl?: Date) {
-      const recipe = await facade.balanceUnboundTransaction(
-        tx,
-        { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
-        { ttl: ttl ?? new Date(Date.now() + BALANCE_TTL_MS) },
+      const intents = [...(tx.intents?.values() ?? [])];
+      const expires: number = Math.min(
+        ttl?.getTime() ?? Date.now() + BALANCE_TTL_MS,
+        ...intents.map((intent) => intent.ttl.getTime()),
+      );
+      const deadline: number = expires - 60_000;
+      const calls: string = intents
+        .flatMap((intent) => intent.actions)
+        .filter((action) => action instanceof ContractCall)
+        .map(
+          (action) =>
+            `${action.address}/${typeof action.entryPoint === "string" ? action.entryPoint : new TextDecoder().decode(action.entryPoint)}`,
+        )
+        .join(", ");
+      const label = `Midnight ${calls || "transaction"}`;
+      await ensureTransactionFee(facade, keys, networkId, tx, expires, label);
+      const recipe = await withOperationProgress(
+        `${label} balancing`,
+        () =>
+          facade.balanceUnboundTransaction(
+            tx,
+            { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
+            { ttl: new Date(expires) },
+          ),
+        deadline,
       );
       const signed = await facade.signRecipe(recipe, keys.unshieldedKeystore.signDataAsync);
-      return await facade.finalizeRecipe(signed);
+      return await withOperationProgress(
+        `${label} finalisation`,
+        () => facade.finalizeRecipe(signed),
+        expires,
+      );
     },
-    submitTx: (tx) => facade.submitTransaction(tx),
+    async submitTx(tx) {
+      return await withOperationProgress("Midnight submission", async () => {
+        const id = await facade.submitTransaction(tx);
+        console.log(`Midnight submitted transaction: ${id}`);
+        return id;
+      });
+    },
   };
 }
 
@@ -276,10 +312,14 @@ export function createCrossContractProofServerProvider(
     ...base,
     lookupKey,
     check: (serializedPreimage, keyLocation) =>
-      withConnectionRetry("check", () => observed.check(serializedPreimage, keyLocation)),
+      withOperationProgress(`proof check ${keyLocation}`, () =>
+        withConnectionRetry("check", () => observed.check(serializedPreimage, keyLocation)),
+      ),
     prove: (serializedPreimage, keyLocation, overwriteBindingInput) =>
-      withConnectionRetry("prove", () =>
-        observed.prove(serializedPreimage, keyLocation, overwriteBindingInput),
+      withOperationProgress(`proof prove ${keyLocation}`, () =>
+        withConnectionRetry("prove", () =>
+          observed.prove(serializedPreimage, keyLocation, overwriteBindingInput),
+        ),
       ),
   };
   return createProofProvider(provingProvider);

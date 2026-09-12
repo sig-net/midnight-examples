@@ -24,7 +24,6 @@
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
-
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
@@ -39,6 +38,7 @@ import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-
 import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { fundingSummary } from "../src/evm-logging.ts";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
@@ -105,13 +105,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // Same minimums as the happy-day deposit leg: the user's derived
         // account pays the sweep gas and supplies the deposited ERC20.
         const userEth = await getEthBalance(rpcUrl, userAddress);
-        console.log(`${userAddress} ETH balance: ${String(userEth)} wei`);
-        expect(userEth, `fund ${userAddress} with >= 0.009 ETH on EVM`).toBeGreaterThanOrEqual(
-          parseEther("0.009"),
+        console.log(
+          `${userAddress}: ${fundingSummary(userEth, parseEther("0.01"), 18, "ETH")} (funding reserve)`,
+        );
+        expect(userEth, `fund ${userAddress} with >= 0.01 ETH on EVM`).toBeGreaterThanOrEqual(
+          parseEther("0.01"),
         );
         const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
         console.log(
-          `${userAddress} balance on ${erc20Address}: ${String(balance)} (decimals ${String(decimals)})`,
+          `${userAddress}: ${fundingSummary(balance, parseUnits("0.1", decimals), decimals, erc20Address)}`,
         );
         expect(
           balance,
@@ -126,7 +128,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
         const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
         console.log(
-          `${vaultAddress} ETH balance: ${String(vaultEth)} wei (withdraw gas budget: ${String(gasBudget)} wei)`,
+          `${vaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,
         );
         expect(
           vaultEth,
@@ -300,10 +302,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       async () => {
         expect(withdrawRequestId).toBeDefined();
 
-        // The event carries only the digest, so the poll fetches the observed
-        // result from the fakenet's /responses API and matches: for a mined
-        // revert the API serves success: false, so the ONLY matchable
-        // candidate is the protocol's fixed failure output.
+        // The event carries only the signature, so the poll traces the mined
+        // transaction and matches: a reverted receipt yields no output, so the
+        // ONLY matchable candidate is the protocol's fixed failure output.
         const context = await session.vaultContext();
         withdrawAttestation = await pollRespondBidirectional(context, {
           requestId: withdrawRequestId,

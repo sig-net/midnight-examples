@@ -21,6 +21,7 @@ import {
   VAULT_PATH_BYTES,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import {
   STATA_DEPOSIT_SELECTOR,
   STATA_GAS_LIMIT,
@@ -64,6 +65,13 @@ export async function startSupply(
 
   // The record the contract composes: vault path/sender, stataToken `to`, contract-fixed gas,
   // deposit(amount, receiver=vault).
+  await logTokenAmount(
+    context.evmRpcUrl,
+    AAVE_USDC,
+    context.evmVaultAddress,
+    options.amount,
+    "supply amount",
+  );
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce: before.signetRequestNonce,
@@ -71,7 +79,6 @@ export async function startSupply(
     path: VAULT_PATH_BYTES,
     ...SUPPLY_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: before.stataToken,
       chainId: before.evmChainId,
@@ -93,6 +100,13 @@ export async function startSupply(
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
+  logEvmFeeCap(
+    expectedIdHex,
+    context.evmVaultAddress,
+    expectedRecord.txParams.gasLimit,
+    expectedRecord.txParams.maxFeePerGas,
+    expectedRecord.txParams.maxPriorityFeePerGas,
+  );
 
   const result = await context.vault.callTx.startSupply(
     options.evmNonce,

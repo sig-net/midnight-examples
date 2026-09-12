@@ -66,7 +66,7 @@ export function buildVaultProviders(
 
   // The wallet, adapted to midnight-js's balancer + submitter interfaces
   // (the facade itself does not implement WalletProvider/MidnightProvider).
-  const walletAndMidnightProvider = createWalletAndMidnightProvider(facade, keys);
+  const walletAndMidnightProvider = createWalletAndMidnightProvider(facade, keys, config.networkId);
   const accountId = walletAndMidnightProvider.getCoinPublicKey();
 
   return {

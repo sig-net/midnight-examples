@@ -34,15 +34,23 @@
 #   - example: decade...decade (exactly 64 hex chars, 0x optional)
 #
 # vars:
-# - MIDNIGHT_SIGNET_CONTRACT_ADDRESS
-#   - the network's deployed signet singleton, sealed as the vault's
-#     cross-contract signer
+# - EVM_RPC_URL
+#   - a JSON-RPC endpoint of the EVM chain the vault operates on. The
+#     initialise reads the chain id it seals from it
+#   - example: https://sepolia.infura.io/v3/<key>
+# - MIDNIGHT_SIGNET_CONTRACT_ADDRESS (optional)
+#   - the network's signet singleton, sealed as the vault's cross-contract
+#     signer. Unset, the one @sig-net/midnight publishes for the network is
+#     sealed, and a set value must agree with it
 #   - example: 0badf00d...1dea (64 hex chars, 0x optional)
-# - MPC_SECP256K1_PUBKEY
-#   - the network's MPC root public key
-#   - example: 04 followed by 128 hex chars (uncompressed SEC1)
-# - EVM_CHAIN_ID
-#   - the EVM chain the vault operates on
+# - MPC_SECP256K1_PUBKEY (optional)
+#   - the network's MPC root public key. Unset, the one @sig-net/midnight
+#     publishes for the network is used, and a set value must agree with it
+#   - example: 04 followed by 128 hex chars (uncompressed SEC1), or NEAR
+#     secp256k1:<base58>
+# - EVM_CHAIN_ID (optional)
+#   - the EVM chain the vault operates on. Unset, it is read from
+#     EVM_RPC_URL, and a set value must match what that endpoint reports
 #   - example: 11155111 (Sepolia)
 # - EVM_ROUTER / EVM_STATA_UNDERLYING / EVM_STATA_TOKEN (optional)
 #   - EVM target overrides, defaulting to the Sepolia canonicals
@@ -200,6 +208,10 @@ jobs:
           DEPLOYER_SEED: ${{ secrets.DEPLOYER_SEED }}
           VAULT_DEPLOYER_SECRET_KEY: ${{ secrets.VAULT_DEPLOYER_SECRET_KEY }}
           MAINTENANCE_SIGNING_KEY: ${{ secrets.MAINTENANCE_SIGNING_KEY }}
+          EVM_RPC_URL: ${{ vars.EVM_RPC_URL }}
+          # Optional: the SDK's published values for the network and the
+          # chain id EVM_RPC_URL reports fill these in. A blank var falls
+          # through, a set one must agree.
           MIDNIGHT_SIGNET_CONTRACT_ADDRESS: ${{ vars.MIDNIGHT_SIGNET_CONTRACT_ADDRESS }}
           MPC_SECP256K1_PUBKEY: ${{ vars.MPC_SECP256K1_PUBKEY }}
           EVM_CHAIN_ID: ${{ vars.EVM_CHAIN_ID }}

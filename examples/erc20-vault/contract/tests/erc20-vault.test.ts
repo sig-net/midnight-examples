@@ -157,9 +157,8 @@ const ZERO_ADDRESS = new Uint8Array(20);
 const AMOUNT = 1_000_000n;
 const UINT64_MAX = 18446744073709551615n;
 
-// The chain config initialise() pins (matching Sepolia's CAIP-2 form).
+// The EIP-155 chain id initialise() pins (Sepolia's).
 const CHAIN_ID = 11155111n;
-const CAIP2_ID = asciiPadded("eip155:11155111", 32);
 
 // The simulated vault's own contract address, fixed so tests can compute the
 // token colors withdraw checks against kernel.self(). Doubles as the sender
@@ -176,6 +175,7 @@ const EXPECTED_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
   dest: MPCDestination.unused,
   params: new Uint8Array(64),
+  caip2Id: signetCircuits.ethereumCaip2Id(),
   outputDeserializationSchema: EXPECTED_SCHEMA,
   respondSerializationSchema: EXPECTED_SCHEMA,
 };
@@ -258,7 +258,7 @@ const strangerContext = async (
   );
 
 /**
- * Deploy + initialise(VAULT_EVM, CHAIN_ID, CAIP2_ID, MPC_RESPONSE_KEY) as
+ * Deploy + initialise(VAULT_EVM, CHAIN_ID, MPC_RESPONSE_KEY) as
  * the deployer: the ready-to-use vault, with the MPC response key stored.
  */
 const deployInitialised = async () => {
@@ -271,7 +271,6 @@ const deployInitialised = async () => {
       STATA_UNDERLYING,
       STATA_TOKEN,
       CHAIN_ID,
-      CAIP2_ID,
       MPC_RESPONSE_KEY,
     )
   ).context;
@@ -379,7 +378,6 @@ describe("initialise", () => {
         STATA_UNDERLYING,
         STATA_TOKEN,
         CHAIN_ID,
-        CAIP2_ID,
         MPC_RESPONSE_KEY,
       ),
     ).rejects.toThrow(/Not the deployer/);
@@ -395,7 +393,6 @@ describe("initialise", () => {
         STATA_UNDERLYING,
         STATA_TOKEN,
         CHAIN_ID,
-        CAIP2_ID,
         MPC_RESPONSE_KEY,
       ),
     ).rejects.toThrow(/Already initialised/);
@@ -411,20 +408,18 @@ describe("initialise", () => {
         STATA_UNDERLYING,
         STATA_TOKEN,
         0n,
-        CAIP2_ID,
         MPC_RESPONSE_KEY,
       ),
     ).rejects.toThrow(/Chain ID must be positive/);
   });
 
-  it("stores the vault EVM address, the chain config and the MPC response key", async () => {
+  it("stores the vault EVM address, the chain id and the MPC response key", async () => {
     const { ctx } = await deployInitialised();
     const state = ledger(ctx.callContext.currentQueryContext.state);
     expect(state.initialised).toBe(1n);
     expect(state.vaultEvmAddress).toEqual(VAULT_EVM);
     expect(state.uniswapRouter).toEqual(ROUTER);
     expect(state.evmChainId).toBe(CHAIN_ID);
-    expect(state.caip2Id).toEqual(CAIP2_ID);
     expect(state.mpcResponseKey).toEqual(MPC_RESPONSE_KEY);
   });
 });
@@ -494,7 +489,7 @@ describe("deposit round-trip", () => {
     // literal at its exact 34-byte width).
     expect(record.sender).toEqual({ bytes: VAULT_ADDRESS_BYTES });
     expect(record.path).toEqual(DEPLOYER_COMMITMENT);
-    expect(record.caip2Id).toEqual(CAIP2_ID);
+    expect(record.caip2Id).toEqual(EXPECTED_ROUTING.caip2Id);
     expect(record.keyVersion).toBe(VALID_DEPOSIT.keyVersion);
     expect(record.algo).toBe(EXPECTED_ROUTING.algo);
     expect(record.dest).toBe(EXPECTED_ROUTING.dest);
@@ -729,7 +724,7 @@ describe("withdraw round-trip", () => {
     });
 
     // Contract-fixed routing, same constants as deposits.
-    expect(record.caip2Id).toEqual(CAIP2_ID);
+    expect(record.caip2Id).toEqual(EXPECTED_ROUTING.caip2Id);
     expect(record.keyVersion).toBe(VALID_WITHDRAW.keyVersion);
     expect(record.algo).toBe(EXPECTED_ROUTING.algo);
     expect(record.dest).toBe(EXPECTED_ROUTING.dest);

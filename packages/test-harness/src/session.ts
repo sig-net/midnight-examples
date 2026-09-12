@@ -6,7 +6,6 @@
 // (RUN_INTEGRATION_TESTS unset) from ever touching the network. Everything
 // contract-specific (providers, joined contract handles, identity) is the
 // example's: it wraps {@link E2eSession.wallet} to build its own context.
-
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import {
   signetEventSourceFromPublicDataProvider,
@@ -19,6 +18,7 @@ import {
   initialiseWalletFacade,
   type WalletFacade,
 } from "@sig-net/midnight-contract-deploy";
+import { withOperationProgress } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
 
@@ -104,10 +104,13 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
         const keys = deriveAccountKeys(resolveUserSeed(env), config.networkId);
         const facade = await initialiseWalletFacade(keys, config);
         await facade.start(keys.shieldedSecretKeys, keys.dustSecretKey);
-        await facade.waitForSyncedState();
+        await withOperationProgress("user wallet synchronisation", () =>
+          facade.waitForSyncedState(),
+        );
         sharedWallet = { facade, keys };
       }
-      await sharedWallet.facade.waitForSyncedState();
+      const facade = sharedWallet.facade;
+      await withOperationProgress("user wallet synchronisation", () => facade.waitForSyncedState());
       return sharedWallet;
     },
 

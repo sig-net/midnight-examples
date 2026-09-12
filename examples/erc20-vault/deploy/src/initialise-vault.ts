@@ -12,8 +12,6 @@ import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import {
-  asciiPadded,
-  CAIP2_ID_BYTES,
   deriveMidnightResponseKey,
   formatSecp256k1PublicKey,
   parseSecp256k1PublicKey,
@@ -25,6 +23,7 @@ import {
   getDeployConfig,
   getFaucetUrl,
   parseIdentitySecretKey,
+  resolveMpcRootPublicKey,
   withSyncedWalletFacade,
 } from "@sig-net/midnight-contract-deploy";
 import {
@@ -35,6 +34,7 @@ import {
   readVaultLedger,
   VAULT_PRIVATE_STATE_ID,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getEvmChainId } from "@sig-net/midnight-examples-lib";
 
 import { resolveEvmTargets, type VaultEvmTargets } from "./evm-targets.ts";
 import { vaultCompiledContract } from "./vault-contract-binding.ts";
@@ -58,10 +58,8 @@ export interface VaultInitialiseConfig {
   readonly stataUnderlyingAddress: string;
   /** The ERC-4626 wrapper the supply/redeem circuits mint and burn. */
   readonly stataTokenAddress: string;
-  /** The EVM chain the vault operates on. */
+  /** EIP-155 chain id of the Ethereum network the vault's transactions are signed for. */
   readonly evmChainId: bigint;
-  /** CAIP-2 rendering of {@link VaultInitialiseConfig.evmChainId} (`eip155:<id>`), the MPC routing key. */
-  readonly caip2Id: string;
   /**
    * The MPC response key for THIS vault contract (SEC1 hex): `f(MPC root key,
    * vault contract address, "midnight response key")`. The claim and
@@ -93,29 +91,56 @@ function assertDerivedMatch(preset: string | undefined, derived: string, name: s
   }
 }
 
+// The EIP-155 chain id sealed at initialise, which every signed vault
+// transaction carries: `EVM_CHAIN_ID` when set, read from `EVM_RPC_URL` when
+// not, and checked against the chain when both are set.
+async function resolveEvmChainId(env: Record<string, string | undefined>): Promise<bigint> {
+  const preset = envOrUndefined(env, "EVM_CHAIN_ID");
+  if (preset !== undefined && !/^[1-9]\d*$/.test(preset)) {
+    throw new Error(
+      `EVM_CHAIN_ID must be a positive integer with no leading zeros, got "${preset}".`,
+    );
+  }
+  const rpcUrl = envOrUndefined(env, "EVM_RPC_URL");
+  if (rpcUrl === undefined) {
+    if (preset === undefined) {
+      throw new Error(
+        "EVM_CHAIN_ID or EVM_RPC_URL is required to initialise the vault: the chain id pins " +
+          "the chain the vault's EVM transactions target, and the RPC lets it be read from " +
+          "that chain.",
+      );
+    }
+    return BigInt(preset);
+  }
+  let reported: bigint;
+  try {
+    reported = await getEvmChainId(rpcUrl);
+  } catch (error) {
+    throw new Error(`EVM_RPC_URL (${rpcUrl}) is not answering, so the chain id cannot be read`, {
+      cause: error,
+    });
+  }
+  if (preset !== undefined && BigInt(preset) !== reported) {
+    throw new Error(
+      `EVM_CHAIN_ID (${preset}) must match the chain EVM_RPC_URL serves, which reports ` +
+        `${String(reported)}: the id is sealed into the vault at initialise.`,
+    );
+  }
+  return reported;
+}
+
 // Everything initialise needs that does NOT depend on the vault's own address,
 // fully validated. Split out so a caller can fail on a missing or malformed
 // value BEFORE deploying the contract those values would configure.
-function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
+async function resolveAddressFreeInputs(env: Record<string, string | undefined>): Promise<{
   mpcSecp256k1PublicKey: string;
   evmChainId: bigint;
   targets: VaultEvmTargets;
-} {
-  const mpcSecp256k1PublicKey = requireValue(
-    env,
-    "MPC_SECP256K1_PUBKEY",
-    "it is the MPC network's public key, derived from MPC_ROOT_KEY by the setup pipeline",
-  );
-  const chainIdRaw = requireValue(
-    env,
-    "EVM_CHAIN_ID",
-    "it pins the chain the vault's EVM transactions target",
-  );
-  if (!/^[1-9]\d*$/.test(chainIdRaw)) {
-    throw new Error(
-      `EVM_CHAIN_ID must be a positive integer with no leading zeros, got "${chainIdRaw}".`,
-    );
-  }
+}> {
+  // The SDK's published key for a deployed network, or MPC_SECP256K1_PUBKEY in
+  // any spelling, canonicalised so the derivations below read one form.
+  const mpcSecp256k1PublicKey = resolveMpcRootPublicKey(env).value;
+  const evmChainId = await resolveEvmChainId(env);
 
   // Parse the targets up front: a malformed override must fail before
   // anything is submitted, not mid-initialise.
@@ -124,7 +149,7 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
   evmAddressBytes(targets.stataUnderlyingAddress);
   evmAddressBytes(targets.stataTokenAddress);
 
-  return { mpcSecp256k1PublicKey, evmChainId: BigInt(chainIdRaw), targets };
+  return { mpcSecp256k1PublicKey, evmChainId, targets };
 }
 
 /**
@@ -135,18 +160,22 @@ function resolveAddressFreeInputs(env: Record<string, string | undefined>): {
  * against the derivation, since a stale pin would seal an
  * account the MPC never signs from.
  *
- * @param env - The environment providing `MPC_SECP256K1_PUBKEY`, `EVM_CHAIN_ID` and the
- *   optional `EVM_ROUTER` / `EVM_STATA_UNDERLYING` / `EVM_STATA_TOKEN` overrides.
+ * @param env - The environment providing `EVM_CHAIN_ID` or `EVM_RPC_URL` (the chain to
+ *   seal, read from the RPC when the id is unset and checked against it when both are set),
+ *   `MPC_SECP256K1_PUBKEY` where the SDK publishes no MPC root public key for the
+ *   network (see `resolveMpcRootPublicKey`), and the optional `EVM_ROUTER` /
+ *   `EVM_STATA_UNDERLYING` / `EVM_STATA_TOKEN` overrides.
  * @param vaultContractAddress - The deployed vault contract's address.
  * @returns The resolved arguments.
- * @throws {Error} If a required variable is missing, `EVM_CHAIN_ID` is not a positive
- *   integer, or a preset `EVM_VAULT_ADDRESS` / `MPC_RESPONSE_KEY` contradicts the derivation.
+ * @throws {Error} If no MPC root public key or chain id resolves, `MPC_SECP256K1_PUBKEY` is
+ *   not a secp256k1 public key, `EVM_CHAIN_ID` is malformed or contradicts the RPC, or a
+ *   preset `EVM_VAULT_ADDRESS` / `MPC_RESPONSE_KEY` contradicts the derivation.
  */
-export function resolveInitialiseConfig(
+export async function resolveInitialiseConfig(
   env: Record<string, string | undefined>,
   vaultContractAddress: string,
-): VaultInitialiseConfig {
-  const { mpcSecp256k1PublicKey, evmChainId, targets } = resolveAddressFreeInputs(env);
+): Promise<VaultInitialiseConfig> {
+  const { mpcSecp256k1PublicKey, evmChainId, targets } = await resolveAddressFreeInputs(env);
 
   const vaultEvmAddress = deriveVaultEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress);
   assertDerivedMatch(
@@ -164,7 +193,6 @@ export function resolveInitialiseConfig(
     vaultEvmAddress,
     ...targets,
     evmChainId,
-    caip2Id: `eip155:${String(evmChainId)}`,
     mpcResponseKey,
   };
 }
@@ -178,8 +206,10 @@ export function resolveInitialiseConfig(
  * @param env - The environment the subsequent {@link resolveInitialiseConfig} will read.
  * @throws {Error} If a required variable is missing or malformed.
  */
-export function assertInitialiseInputsPresent(env: Record<string, string | undefined>): void {
-  resolveAddressFreeInputs(env);
+export async function assertInitialiseInputsPresent(
+  env: Record<string, string | undefined>,
+): Promise<void> {
+  await resolveAddressFreeInputs(env);
 }
 
 // The values that belong to ONE vault contract: its address and the two
@@ -243,7 +273,7 @@ export async function initialiseVaultContract(
   console.log(`vault EVM address: ${config.vaultEvmAddress}`);
   console.log(`router:            ${config.routerAddress}`);
   console.log(`stata pair:        ${config.stataUnderlyingAddress} -> ${config.stataTokenAddress}`);
-  console.log(`EVM chain:         ${String(config.evmChainId)} (${config.caip2Id})`);
+  console.log(`EVM chain id:      ${String(config.evmChainId)}`);
   console.log(`MPC response key:  ${config.mpcResponseKey}`);
 
   const result = await vault.callTx.initialise(
@@ -252,7 +282,6 @@ export async function initialiseVaultContract(
     evmAddressBytes(config.stataUnderlyingAddress),
     evmAddressBytes(config.stataTokenAddress),
     config.evmChainId,
-    asciiPadded(config.caip2Id, CAIP2_ID_BYTES),
     parseSecp256k1PublicKey(config.mpcResponseKey),
   );
   console.log(`initialise finalized in tx ${result.public.txId}`);
@@ -299,7 +328,7 @@ export async function initialiseVault(
 
   // Resolve the arguments before starting a wallet: a missing variable or a
   // preset contradicting the derivation should fail here, not after a sync.
-  const config = resolveInitialiseConfig(env, vaultContractAddress);
+  const config = await resolveInitialiseConfig(env, vaultContractAddress);
 
   const secretKey = parseIdentitySecretKey(
     "VAULT_DEPLOYER_SECRET_KEY",

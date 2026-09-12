@@ -8,6 +8,7 @@ export * from "./env-file.ts";
 export * from "./evm.ts";
 export * from "./exec.ts";
 export * from "./mpc-keys.ts";
+export * from "./mpc-kind.ts";
 export * from "./output.ts";
 export * from "./preflight.ts";
 export * from "./session.ts";

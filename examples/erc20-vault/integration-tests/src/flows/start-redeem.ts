@@ -20,6 +20,7 @@ import {
   VAULT_PATH_BYTES,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import {
   REDEEM_MPC_ROUTING,
   STATA_GAS_LIMIT,
@@ -61,6 +62,13 @@ export async function startRedeem(
     value: options.shares,
   };
 
+  await logTokenAmount(
+    context.evmRpcUrl,
+    STATA_USDC,
+    context.evmVaultAddress,
+    options.shares,
+    "redeem amount",
+  );
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     requestNonce: before.signetRequestNonce,
@@ -68,7 +76,6 @@ export async function startRedeem(
     path: VAULT_PATH_BYTES,
     ...REDEEM_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
-    caip2Id: before.caip2Id,
     txParams: {
       to: before.stataToken,
       chainId: before.evmChainId,
@@ -94,6 +101,13 @@ export async function startRedeem(
     },
   };
   const expectedIdHex = requestIdHex(calculateRequestId(expectedRecord));
+  logEvmFeeCap(
+    expectedIdHex,
+    context.evmVaultAddress,
+    expectedRecord.txParams.gasLimit,
+    expectedRecord.txParams.maxFeePerGas,
+    expectedRecord.txParams.maxPriorityFeePerGas,
+  );
 
   const result = await context.vault.callTx.startRedeem(
     options.evmNonce,

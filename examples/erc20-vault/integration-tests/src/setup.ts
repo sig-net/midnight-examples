@@ -1,6 +1,6 @@
 // The example's vitest globalSetup: compose the ordered setup pipeline
-// (environment check -> wallet seeds + root funding -> EVM chain + test token
-// -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
+// (environment check -> wallet seeds + root funding -> EVM chain + trace RPC
+// check + test token -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
 // vault zk compile + deploy -> MPC response key -> derived EVM addresses ->
 // fork dealing -> fork dependency check -> MPC hand-off printout) from the
 // harness's generic steps plus the vault-specific steps below, and run it via
@@ -11,13 +11,15 @@
 // initialise flow pins it on-chain.
 
 import { bytesToHex, deriveEvmAddress } from "@sig-net/midnight";
+import type { WalletRegistry } from "@sig-net/midnight-contract-deploy";
 import {
   deriveVaultEvmAddress,
   STATA_USDC,
   UNISWAP_SWAP_ROUTER_02,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { deployVault } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { deployVault, resumeVaultDeploy } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
+  appendRepoDotEnv,
   assertEnvironment,
   compileContractZk,
   deploySignetContractStep,
@@ -41,6 +43,7 @@ import type { TestProject } from "vitest/node";
 import { stataAvailable } from "./evm-stata.ts";
 import { uniswapAvailable } from "./evm-swap.ts";
 import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
+import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 
 // The env keys the setup steps populate, in derivation order — the "Minimal
@@ -62,22 +65,40 @@ const PIPELINE_KEYS = [
  * in-process: the same function the `deploy` and `deploy-initialise`
  * entrypoints run, so the split deploy (base deploy plus one maintenance
  * update per deferred circuit) this suite exercises is the one a remote
- * bring-up performs. Skips when `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already
- * set.
+ * bring-up performs. The address is appended to `.env` the moment the base
+ * deploy is submitted, before any maintenance add, so a run that dies
+ * mid-deploy leaves `MIDNIGHT_VAULT_CONTRACT_ADDRESS` set. With the address
+ * set, this step runs the deploy package's `resumeVaultDeploy` instead: it
+ * installs whatever circuits the vault still lacks, and passes straight
+ * through on a vault with every circuit.
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
  *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
  *   config from it).
+ * @param wallets - The pipeline's registry, holding the deployer wallet the funding step synced.
  * @throws {SplitDeployAfterBaseSubmitError} If the deploy failed after its base
- *   deploy was submitted: the split deploy has no resume path, so a rerun would
- *   deploy a SECOND contract and orphan the half-installed first one.
- * @throws {Error} If the deploy fails otherwise.
+ *   deploy was submitted. Its address is already in `.env`, so the next run
+ *   resumes it.
+ * @throws {Error} If the deploy or the resume fails otherwise.
  */
-async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
-  if (env.MIDNIGHT_VAULT_CONTRACT_ADDRESS) {
-    logSkip(
-      "deploy vault contract",
-      `MIDNIGHT_VAULT_CONTRACT_ADDRESS is set (${env.MIDNIGHT_VAULT_CONTRACT_ADDRESS})`,
+async function deployVaultContractStep(
+  env: NodeJS.ProcessEnv,
+  wallets: WalletRegistry,
+): Promise<void> {
+  const presetAddress = env.MIDNIGHT_VAULT_CONTRACT_ADDRESS;
+  if (presetAddress) {
+    const { installed } = await explainDustSpendRejection("resume vault deploy", () =>
+      resumeVaultDeploy(env, presetAddress, wallets),
+    );
+    if (installed.length === 0) {
+      logSkip(
+        "deploy vault contract",
+        `MIDNIGHT_VAULT_CONTRACT_ADDRESS is set (${presetAddress}) and every circuit is installed`,
+      );
+      return;
+    }
+    console.log(
+      `resumed the deploy of MIDNIGHT_VAULT_CONTRACT_ADDRESS=${presetAddress}: installed ${installed.join(", ")}`,
     );
     return;
   }
@@ -94,14 +115,19 @@ async function deployVaultContractStep(env: NodeJS.ProcessEnv): Promise<void> {
     );
   }
   const { contractAddress } = await explainDustSpendRejection("deploy vault contract", () =>
-    deployVault(env),
+    deployVault(env, wallets, (baseAddress) => {
+      env.MIDNIGHT_VAULT_CONTRACT_ADDRESS = baseAddress;
+      appendRepoDotEnv(
+        { MIDNIGHT_VAULT_CONTRACT_ADDRESS: baseAddress },
+        `appended by the erc20-vault setup (${new Date().toISOString()}): base deploy submitted, a rerun resumes the circuit installs`,
+      );
+      console.log(`appended MIDNIGHT_VAULT_CONTRACT_ADDRESS=${baseAddress} to .env`);
+      console.log(` ➜ a rerun with it set resumes the circuit installs from here`);
+    }),
   );
-  env.MIDNIGHT_VAULT_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_VAULT_CONTRACT_ADDRESS=${contractAddress}`);
   console.log(` ➜ the vault contract on Midnight — holds deposits and authorizes withdrawals`);
-  console.log(
-    ` ➜ 💡 Set as MIDNIGHT_VAULT_CONTRACT_ADDRESS in the environment to skip compile + deploy on the next run`,
-  );
+  console.log(` ➜ 💡 already in .env, so the next run skips compile + deploy`);
 }
 
 /**
@@ -171,7 +197,7 @@ function ensureUserEvmAddress(env: NodeJS.ProcessEnv): void {
   console.log(`derived a fresh EVM_USER_ADDRESS=${expectedAddress}`);
   console.log(` ➜ the user's derived EVM account (path = identity commitment)`);
   console.log(
-    ` ➜ FUND IT ON EVM before the deposit test: >= 0.01 ETH (gas) and >= 0.1 USDC (deposit) — automatic on the local dev chain`,
+    ` ➜ FUND IT ON EVM before the deposit test: >= 0.01 ETH (funding reserve) and >= 0.1 USDC (deposit) — automatic on the local dev chain`,
   );
   console.log(` ➜ 💡 Set as EVM_USER_ADDRESS in the environment to skip this step on the next run`);
 }
@@ -227,9 +253,10 @@ async function verifyForkDependencies(env: NodeJS.ProcessEnv): Promise<void> {
   if (!stata) missing.push(`${STATA_USDC} (stataUSDC wrapper)`);
   if (missing.length > 0) {
     throw new Error(
-      `no code on ${rpcUrl} at ${missing.join(" and at ")}: the suites run against a Sepolia ` +
-        `fork that deploys both, so either SEPOLIA_FORK_RPC_URL is not a Sepolia endpoint or ` +
-        `SEPOLIA_FORK_BLOCK is pinned before the contract was deployed.`,
+      `no code on ${rpcUrl} at ${missing.join(" and at ")}: the suites run against Sepolia ` +
+        `(the local anvil fork, or the real network), which deploys both, so either EVM_RPC_URL ` +
+        `is not a Sepolia endpoint, SEPOLIA_FORK_RPC_URL is not one, or SEPOLIA_FORK_BLOCK is ` +
+        `pinned before the contract was deployed.`,
     );
   }
   console.log(
@@ -248,8 +275,12 @@ const STEPS: readonly SetupStep[] = [
     },
   ],
   ["setup: resolve/generate wallet seeds (root + deployer/user/mpc responder)", ensureWalletSeeds],
-  ["setup: preflight root funding + fund the role wallets from root", ensureWalletsFunded],
+  ["setup: inspect role wallets and fund empty wallets", ensureWalletsFunded],
   ["setup: resolve EVM chain id from EVM_RPC_URL", resolveEvmChain],
+  [
+    "setup: verify EVM_RPC_URL serves debug_traceTransaction",
+    (env) => assertDebugTraceAvailable(requireEnv(env, "EVM_RPC_URL")),
+  ],
   ["setup: default ERC20_ADDRESS to real Sepolia USDC", ensureErc20Address],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
   ["setup: check/derive MPC_SECP256K1_PUBKEY public key", ensureMpcSecp256k1Pubkey],
@@ -274,8 +305,14 @@ const STEPS: readonly SetupStep[] = [
   ],
   ["setup: check/derive vault EVM address", ensureVaultEvmAddress],
   ["setup: check/derive user EVM address", ensureUserEvmAddress],
-  ["setup: deal derived EVM accounts on the Sepolia fork (ETH + real USDC)", dealForkEvmAccounts],
-  ["setup: verify fork dependencies (Uniswap router + stataUSDC wrapper)", verifyForkDependencies],
+  [
+    "setup: deal derived EVM accounts (ETH + real USDC on an anvil fork, funding hints on a real chain)",
+    dealForkEvmAccounts,
+  ],
+  [
+    "setup: verify Sepolia dependencies (Uniswap router + stataUSDC wrapper)",
+    verifyForkDependencies,
+  ],
   [
     "setup: print MPC server configuration",
     (env) => {
