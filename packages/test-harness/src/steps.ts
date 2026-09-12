@@ -14,19 +14,44 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { getMidnightNodeConfig } from "@midnight-examples/lib";
-import { deriveMidnightResponseKey, formatSecp256k1PublicKey } from "@sig-net/midnight";
-import { deploySignetContract } from "@sig-net/midnight-contract-deploy";
+import {
+  deriveMidnightResponseKey,
+  formatSecp256k1PublicKey,
+  normaliseSecp256k1PublicKey,
+} from "@sig-net/midnight";
+import {
+  CounterpartyOrigin,
+  deploySignetContract,
+  findMpcRootPublicKey,
+  findSignetContractAddress,
+  getMidnightNodeConfig,
+  isLocalStandaloneNetwork,
+  type WalletRegistry,
+} from "@sig-net/midnight-contract-deploy";
+import { getEvmChainId, loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
-import { appendRepoDotEnv, loadRepoDotEnv } from "./env-file.ts";
-import { getEvmChainId } from "./evm.ts";
-import { REPO_ROOT, runCommand, runRootScript } from "./exec.ts";
+import { appendRepoDotEnv } from "./env-file.ts";
+import { runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
+import { MpcKind, mpcKind } from "./mpc-kind.ts";
 import { banner, logSkip } from "./output.ts";
 import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
 
 const MINUTE = 60_000;
+
+/**
+ * How a resolved MPC root public key reads in the setup log: the variable
+ * that set it, or the SDK's published value for the network.
+ *
+ * @param origin - Where the key came from.
+ * @returns The phrase to log.
+ */
+function mpcKeyOrigin(origin: CounterpartyOrigin): string {
+  return origin === CounterpartyOrigin.Environment
+    ? "MPC_SECP256K1_PUBKEY"
+    : "the MPC root public key the SDK publishes for this network";
+}
 
 /**
  * Assert the environment is workable before anything spends time or money:
@@ -50,7 +75,7 @@ export async function assertEnvironment(env: NodeJS.ProcessEnv): Promise<void> {
 /**
  * Resolve `EVM_CHAIN_ID` from `EVM_RPC_URL` (or verify a preset value
  * against what the RPC reports — loud failure on mismatch, since examples
- * seal the chain id into their contracts at initialize).
+ * seal the chain id into their contracts at initialise).
  *
  * @param env - The suite's env accumulator.
  * @throws {Error} If the RPC is unreachable or a preset `EVM_CHAIN_ID` mismatches it.
@@ -72,7 +97,7 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
     if (BigInt(env.EVM_CHAIN_ID) !== chainId) {
       throw new Error(
         `EVM_CHAIN_ID must match the chain EVM_RPC_URL serves (it is sealed into the example's contract at` +
-          ` initialize): the RPC reports ${String(chainId)}, found ${env.EVM_CHAIN_ID}`,
+          ` initialise): the RPC reports ${String(chainId)}, found ${env.EVM_CHAIN_ID}`,
       );
     }
     logSkip("resolve EVM chain id", `EVM_CHAIN_ID is set correctly`);
@@ -80,20 +105,48 @@ export async function resolveEvmChain(env: NodeJS.ProcessEnv): Promise<void> {
     env.EVM_CHAIN_ID = chainId.toString();
     console.log(`resolved EVM_CHAIN_ID=${env.EVM_CHAIN_ID} from EVM_RPC_URL`);
     console.log(
-      ` ➜ sealed into the example's contract at initialize as CAIP-2 eip155:${env.EVM_CHAIN_ID}`,
+      ` ➜ sealed into the example's contract at initialise: every signed EVM transaction carries it`,
     );
     console.log(` ➜ 💡 Set as EVM_CHAIN_ID in the environment to pin it explicitly`);
   }
 }
 
 /**
- * Ensure `MPC_ROOT_KEY` is set, generating a fresh random key when absent.
+ * Ensure the run knows which MPC it faces: a fakenet, whose `MPC_ROOT_KEY`
+ * this run holds (kept when set, generated when nothing names an MPC), or a
+ * real MPC network, named by a preset root PUBLIC key (`MPC_SECP256K1_PUBKEY`,
+ * or the SDK's published key for a deployed network) whose root key nobody
+ * here holds. A preset public key therefore never generates a root key: a
+ * random root key beside a real MPC's public key could only ever mismatch.
+ * The local standalone stack has no real MPC, so a preset public key without
+ * a root key there is refused rather than left to fail at the first poll.
  *
  * @param env - The suite's env accumulator.
+ * @throws {Error} If a preset public key is malformed, disagrees with the SDK's published
+ *   key, or names a real MPC on the local standalone stack.
  */
 export function ensureMpcRootKey(env: NodeJS.ProcessEnv): void {
   if (env.MPC_ROOT_KEY) {
     logSkip("check/derive MPC root key", `MPC_ROOT_KEY is set as ${env.MPC_ROOT_KEY}`);
+    return;
+  }
+  const preset = findMpcRootPublicKey(env);
+  if (preset !== undefined) {
+    const { networkId } = getMidnightNodeConfig(env);
+    if (isLocalStandaloneNetwork(networkId)) {
+      throw new Error(
+        `${mpcKeyOrigin(preset.origin)} is set (${preset.value}) without MPC_ROOT_KEY on the local ` +
+          `"${networkId}" stack, which no real MPC answers. Unset it so the setup mints a fakenet ` +
+          "root key, or set the MPC_ROOT_KEY it derives from.",
+      );
+    }
+    logSkip(
+      "check/derive MPC root key",
+      `${mpcKeyOrigin(preset.origin)} names a real MPC network (${preset.value}), whose root key this run does not hold`,
+    );
+    console.log(
+      ` ➜ no fakenet responder can serve that key: the real MPC answers the signet singleton`,
+    );
     return;
   }
   env.MPC_ROOT_KEY = generateMpcRootKey();
@@ -114,8 +167,8 @@ const mpcKeys = (env: NodeJS.ProcessEnv) => deriveMpcKeys(requireEnv(env, "MPC_R
  * response key")`, the sender-scoped derivation the real MPC uses for
  * respond-bidirectional signing. The key depends on the client contract's
  * address, so this step MUST run after the client contract deploy; the
- * example's initialize flow then pins the key on-chain via the contract's
- * one-shot initialize circuit. The fakenet responder derives the same key
+ * example's initialise flow then pins the key on-chain via the contract's
+ * one-shot initialise circuit. The fakenet responder derives the same key
  * per request from its MPC_ROOT_KEY + the request's sender, so nothing
  * extra is handed off.
  *
@@ -145,39 +198,64 @@ export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvV
   env.MPC_RESPONSE_KEY = expected;
   console.log(`derived a fresh MPC_RESPONSE_KEY=${env.MPC_RESPONSE_KEY}`);
   console.log(
-    ` ➜ the MPC's respond-bidirectional key for the client contract; the initialize flow pins it on-chain`,
+    ` ➜ the MPC's respond-bidirectional key for the client contract; the initialise flow pins it on-chain`,
   );
   console.log(` ➜ 💡 Set as MPC_RESPONSE_KEY in the environment to skip this step on the next run`);
 }
 
 /**
- * Ensure `MPC_SECP256K1_PUBKEY` matches the key derived from `MPC_ROOT_KEY`,
- * deriving it when absent.
+ * Ensure `MPC_SECP256K1_PUBKEY` holds the MPC's root public key in canonical
+ * form (`0x04…` uncompressed SEC1 hex, what every derivation reads). With
+ * `MPC_ROOT_KEY` held (a fakenet) the key is derived from it and any preset
+ * must agree. Without one the preset itself (the environment's, in any
+ * accepted spelling, or the SDK's published key) is canonicalised into the
+ * accumulator.
  *
  * @param env - The suite's env accumulator.
- * @throws {Error} If a preset `MPC_SECP256K1_PUBKEY` mismatches the derived key.
+ * @throws {Error} If a preset key mismatches the one derived from `MPC_ROOT_KEY`, is
+ *   malformed, or nothing at all supplies a key.
  */
 export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
-  const expectedSECP256k1CompressedPubkey = mpcKeys(env).secp256k1CompressedPubkey;
-  if (env.MPC_SECP256K1_PUBKEY) {
-    console.log(`Found MPC_SECP256K1_PUBKEY in the environment as ${env.MPC_SECP256K1_PUBKEY}`);
-    if (env.MPC_SECP256K1_PUBKEY !== expectedSECP256k1CompressedPubkey) {
-      throw new Error(
-        `MPC_SECP256K1_PUBKEY should be derived from MPC_ROOT_KEY: expected ${expectedSECP256k1CompressedPubkey}, found ${env.MPC_SECP256K1_PUBKEY}`,
+  if (env.MPC_ROOT_KEY) {
+    // A held root key names a fakenet, whose key the SDK never publishes: only
+    // an environment preset is checked, never the network's published key.
+    const derived = normaliseSecp256k1PublicKey(mpcKeys(env).secp256k1CompressedPubkey);
+    const supplied = env.MPC_SECP256K1_PUBKEY?.trim();
+    if (supplied) {
+      const preset = normaliseSecp256k1PublicKey(supplied);
+      console.log(`Found MPC_SECP256K1_PUBKEY as ${preset}`);
+      if (preset !== derived) {
+        throw new Error(
+          `MPC_SECP256K1_PUBKEY should be derived from MPC_ROOT_KEY: expected ${derived}, found ${preset}`,
+        );
+      }
+      env.MPC_SECP256K1_PUBKEY = derived;
+      logSkip(
+        "check/derive MPC_SECP256K1_PUBKEY public key",
+        `MPC_SECP256K1_PUBKEY is set correctly`,
       );
+      return;
     }
-    logSkip(
-      "check/derive MPC_SECP256K1_PUBKEY public key",
-      `MPC_SECP256K1_PUBKEY is set correctly`,
+    env.MPC_SECP256K1_PUBKEY = derived;
+    console.log(`generated a fresh MPC_SECP256K1_PUBKEY=${env.MPC_SECP256K1_PUBKEY}`);
+    console.log(` ➜ used by contracts to validate signatures`);
+    console.log(
+      ` ➜ 💡 Set as MPC_SECP256K1_PUBKEY in the environment to skip this step on the next run`,
     );
     return;
   }
-  env.MPC_SECP256K1_PUBKEY = expectedSECP256k1CompressedPubkey;
-  console.log(`generated a fresh MPC_SECP256K1_PUBKEY=${env.MPC_SECP256K1_PUBKEY}`);
-  console.log(` ➜ used by contracts to validate signatures`);
-  console.log(
-    ` ➜ 💡 Set as MPC_SECP256K1_PUBKEY in the environment to skip this step on the next run`,
-  );
+  const preset = findMpcRootPublicKey(env);
+  if (preset === undefined) {
+    throw new Error(
+      "no MPC to face: MPC_ROOT_KEY and MPC_SECP256K1_PUBKEY are both unset and the SDK publishes " +
+        `no MPC root public key for "${getMidnightNodeConfig(env).networkId}" yet. Set ` +
+        "MPC_SECP256K1_PUBKEY to the real MPC's root public key (SEC1 hex or NEAR secp256k1:<base58>), " +
+        "or MPC_ROOT_KEY to run a fakenet.",
+    );
+  }
+  env.MPC_SECP256K1_PUBKEY = preset.value;
+  console.log(`using ${mpcKeyOrigin(preset.origin)}: MPC_SECP256K1_PUBKEY=${preset.value}`);
+  console.log(` ➜ canonicalised to uncompressed SEC1 hex: every derived account starts from it`);
 }
 
 /**
@@ -243,66 +321,76 @@ export async function compileContractZk(
 }
 
 /**
- * Run a fee-paying call (a deploy, a root-to-child funding transfer),
- * retrying while the paying wallet cannot yet cover the fee. On a freshly
- * started dev chain DUST generates block by block from the genesis NIGHT,
- * so the first fee-paying transactions can race the chain's first minutes:
- * `Wallet.InsufficientFunds` ("could not balance dust") is transient there.
- * A genuinely unfunded wallet fails fast in the root-funding preflight
- * (see wallets.ts) instead, so the bounded retry here cannot mask real
- * underfunding.
+ * Run a fee-paying call (a deploy, a root-to-child funding transfer) and
+ * translate the one opaque node rejection a local stack produces. Waiting
+ * for DUST is not this function's job: the deploy plumbing retries the
+ * balancing step itself while dust generates, and a wallet with nothing to
+ * generate from fails fast in `ensureFeeReady` with a funding hint.
  *
- * @param what - Step label for the retry log lines.
- * @param action - The fee-paying call to (re)attempt.
+ * @param what - Step label for the error message.
+ * @param action - The fee-paying call.
  * @returns Whatever `action` resolves to.
- * @throws {Error} The last error when attempts are exhausted, or immediately for
- *   any error that is not the transient insufficient-dust failure.
+ * @throws {Error} The node's `Custom error: 170` rejection (`InvalidDustSpendProof`,
+ *   which the node reports as `1010: Invalid Transaction: Custom error: 170`)
+ *   wrapped with the stack-reset hint, as the raw message is opaque. Any
+ *   other error passes through unchanged.
  */
-export async function retryWhileDustGenerates<T>(
+export async function explainDustSpendRejection<T>(
   what: string,
   action: () => Promise<T>,
 ): Promise<T> {
-  const RETRY_DELAY_MS = 15_000;
-  const MAX_ATTEMPTS = 24; // ~6 minutes: a young dev chain generates plenty by then
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await action();
-    } catch (error) {
-      const message = String(error);
-      const transient =
-        message.includes("InsufficientFunds") || message.includes("could not balance dust");
-      if (!transient || attempt >= MAX_ATTEMPTS) {
-        throw error;
-      }
-      console.log(
-        `${what}: the paying wallet cannot cover the fee yet (dust still generating on a young chain?),` +
-          ` retrying in ${String(RETRY_DELAY_MS / 1000)}s (attempt ${String(attempt)}/${String(MAX_ATTEMPTS)})`,
+  try {
+    return await action();
+  } catch (error) {
+    const message = String(error);
+    if (message.includes("Custom error: 170") || message.includes("InvalidDustSpendProof")) {
+      throw new Error(
+        `${what}: node rejected the dust spend (error 170 = InvalidDustSpendProof). ` +
+          "The local chain has diverged from the wallet's dust state: reset the stack " +
+          "(docker compose down and up, then redeploy) before rerunning. " +
+          `Original error: ${message}`,
+        { cause: error },
       );
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
     }
+    throw error;
   }
 }
 
 /**
  * Deploy the central signet contract (the Signature Network singleton every
- * example's requester contract notifies), unless
- * `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` is already set. The example's own
+ * example's requester contract notifies), unless one is already named:
+ * `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` when set, else the singleton the SDK
+ * publishes for a deployed network (which the real MPC listens to, so a
+ * second singleton there would never be answered). The example's own
  * requester contract deploy is the example's step — it runs AFTER this one
  * (requesters seal the signet address at deploy time).
  *
  * @param env - The suite's env accumulator.
- * @throws {Error} If the deploy fails (after the dust-generation retries).
+ * @param wallets - The pipeline's registry, holding the deployer wallet the funding step synced.
+ * @throws {Error} If a preset address disagrees with the SDK's published one, or the deploy fails.
  */
-export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<void> {
-  if (env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS) {
-    logSkip(
-      "deploy signet contract",
-      `MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set (${env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS})`,
-    );
+export async function deploySignetContractStep(
+  env: NodeJS.ProcessEnv,
+  wallets: WalletRegistry,
+): Promise<void> {
+  const { networkId } = getMidnightNodeConfig(env);
+  const found = findSignetContractAddress(env);
+  if (found?.origin === CounterpartyOrigin.Environment) {
+    env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = found.value;
+    logSkip("deploy signet contract", `MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set (${found.value})`);
     return;
   }
-  const { contractAddress } = await retryWhileDustGenerates("deploy signet contract", () =>
-    deploySignetContract(env),
+  if (found !== undefined) {
+    env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = found.value;
+    logSkip(
+      "deploy signet contract",
+      `the SDK publishes the "${networkId}" signet singleton at ${found.value}`,
+    );
+    console.log(` ➜ the real MPC listens to that singleton: requesters deployed here notify it`);
+    return;
+  }
+  const { contractAddress } = await explainDustSpendRejection("deploy signet contract", () =>
+    deploySignetContract(env, wallets),
   );
   env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = contractAddress;
   console.log(`deployed a fresh MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${contractAddress}`);
@@ -319,9 +407,11 @@ export async function deploySignetContractStep(env: NodeJS.ProcessEnv): Promise<
 // only start once MPC_ROOT_KEY and MIDNIGHT_SIGNET_CONTRACT_ADDRESS are IN
 // THAT FILE — the two steps below persist them (append-only) and start the
 // container, right after the signet deploy so the responder boots and syncs
-// while the (long) example zk compile runs. Set FAKENET_MANAGED=0 to run the
-// responder yourself (e.g. `yarn response` in a solana-signet-program
-// checkout for responder development) — both steps then skip.
+// while the (long) example zk compile runs. Both steps skip when the run
+// faces a real MPC (see mpcKind: no root key to hand off), and under
+// FAKENET_MANAGED=0, which says you run the responder yourself (e.g.
+// `yarn response` in a solana-signet-program checkout for responder
+// development).
 
 /** The env keys docker compose interpolates into the fakenet service — the hand-off payload. */
 const FAKENET_HANDOFF_KEYS = ["MPC_ROOT_KEY", "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"] as const;
@@ -347,6 +437,10 @@ let fakenetHandoffAppended = false;
  * @throws {Error} If a hand-off key in `.env` conflicts with the run's value.
  */
 export function persistFakenetHandoffToDotEnv(env: NodeJS.ProcessEnv): void {
+  if (mpcKind(env) === MpcKind.Real) {
+    logSkip("persist fakenet hand-off to .env", "a real MPC answers this run: nothing to hand off");
+    return;
+  }
   if (env.FAKENET_MANAGED === "0") {
     logSkip(
       "persist fakenet hand-off to .env",
@@ -404,6 +498,10 @@ export function persistFakenetHandoffToDotEnv(env: NodeJS.ProcessEnv): void {
  * @throws {Error} If docker compose fails or the container is not `running` after `up`.
  */
 export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<void> {
+  if (mpcKind(env) === MpcKind.Real) {
+    logSkip("start fakenet responder", "a real MPC answers this run: no responder to start");
+    return;
+  }
   if (env.FAKENET_MANAGED === "0") {
     logSkip(
       "start fakenet responder",
@@ -448,8 +546,9 @@ export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<voi
 }
 
 /**
- * Print the MPC (fakenet) responder configuration banner: the root key +
- * signet address hand-off, how the responder was (or must be) started, and
+ * Print the MPC configuration banner: which MPC the run faces (a fakenet
+ * responder, with its root key + signet address hand-off and how it was or
+ * must be started, or a real MPC network named by its root public key), and
  * the minimal `.env` block that lets the next run skip every derivation.
  *
  * @param env - The suite's env accumulator.
@@ -460,13 +559,32 @@ export function printMpcServerConfig(
   env: NodeJS.ProcessEnv,
   pipelineKeys: readonly string[],
 ): void {
-  const rootKey = env.MPC_ROOT_KEY ?? "(not derived here — already held by the server operator)";
   const managed = env.FAKENET_MANAGED !== "0";
+  const signetContractAddress = requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
+  const minimalEnvBlock = [
+    "",
+    "Minimal .env block for THIS suite:",
+    "",
+    ...pipelineKeys.map((key) => `  ${key}=${env[key] ?? ""}`),
+    `  EVM_RPC_URL=${env.EVM_RPC_URL ?? ""}`,
+  ];
+  if (mpcKind(env) === MpcKind.Real) {
+    banner([
+      "MPC configuration: a real MPC network answers this run.",
+      "",
+      `  MPC_SECP256K1_PUBKEY=${requireEnv(env, "MPC_SECP256K1_PUBKEY")}`,
+      `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${signetContractAddress}`,
+      "  # 💡 The MPC DISCOVERS requesters by polling this signet contract's",
+      "  #    emitted notification events, and its root key is not held here.",
+      ...minimalEnvBlock,
+    ]);
+    return;
+  }
   banner([
     "MPC (fakenet) responder configuration:",
     "",
-    `  MPC_ROOT_KEY=${rootKey}`,
-    `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS")}`,
+    `  MPC_ROOT_KEY=${requireEnv(env, "MPC_ROOT_KEY")}`,
+    `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${signetContractAddress}`,
     "  # 💡 The responder DISCOVERS requesters by polling this signet",
     "  #    contract's emitted notification events — no requester contract list needed.",
     "",
@@ -490,10 +608,6 @@ export function printMpcServerConfig(
           "Fallback for responder development: `yarn response` in a checkout of",
           "github.com/sig-net/solana-signet-program.) The e2e flows need it running.",
         ]),
-    "",
-    "Minimal .env block for THIS suite:",
-    "",
-    ...pipelineKeys.map((key) => `  ${key}=${env[key] ?? ""}`),
-    `  EVM_RPC_URL=${env.EVM_RPC_URL ?? ""}`,
+    ...minimalEnvBlock,
   ]);
 }

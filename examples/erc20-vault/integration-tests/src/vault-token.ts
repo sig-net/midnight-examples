@@ -5,14 +5,13 @@
 // Shared by the withdraw flow (the surrendered coin's color) and by tests
 // that read a wallet's shielded balance of the vault token.
 
-import { pureCircuits } from "@midnight-examples/erc20-vault-contract";
 import {
   type ContractAddress,
   type RawTokenType,
   rawTokenType,
 } from "@midnight-ntwrk/compact-runtime";
-
-import { evmAddressBytes } from "./evm-transfer.ts";
+import { pureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { evmAddressBytes } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 /**
  * Compute the shielded token color the vault at `vaultContractAddress` mints

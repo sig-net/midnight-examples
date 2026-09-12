@@ -3,18 +3,11 @@
 // flow file (inside a synced wallet session — see
 // {@link file://./vault-session.ts createVaultSession}) and handed to the
 // flow functions. The pieces come from where they belong: generic wallet
-// construction from the harness session, the vault-specific providers /
-// witnesses / compiled-contract binding from this example's own modules.
+// construction from the harness session, the contract's types and witnesses
+// from its own package, and the provider set + compiled-contract binding from
+// the example's deploy package, which its deploy flows build on too.
 
-import {
-  type Contract as VaultContract,
-  createVaultPrivateState,
-  VAULT_REQUESTS_PATH,
-  type VaultPrivateState,
-} from "@midnight-examples/erc20-vault-contract";
-import { getMidnightNodeConfig, type MidnightNodeConfig } from "@midnight-examples/lib";
-import { requireEnv, type SessionWallet } from "@midnight-examples/test-harness";
-import { findDeployedContract, type FoundContract } from "@midnight-ntwrk/midnight-js/contracts";
+import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
 // midnight-js reads a process-global network id (unlike compact-js, which
 // takes it explicitly). createVaultContext sets it once per construction.
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
@@ -22,21 +15,24 @@ import {
   signetEventSourceFromPublicDataProvider,
   SignetRequestResponseReader,
 } from "@sig-net/midnight";
-
-import { resolveUserIdentity, type UserIdentity } from "./vault-identity.ts";
+import { getMidnightNodeConfig, type MidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
+import {
+  createVaultPrivateState,
+  VAULT_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  type DeployedVaultContract,
+  VAULT_PRIVATE_STATE_ID,
+  type VaultProviders,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   buildVaultProviders,
-  VAULT_PRIVATE_STATE_ID,
   vaultCompiledContract,
-  type VaultProviders,
-} from "./vault-providers.ts";
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
+import type { ProofServerObserver } from "@sig-net/midnight-examples-lib";
+import { requireEnv, type SessionWallet } from "@sig-net/midnight-examples-test-harness";
 
-/**
- * The joined vault contract handle — midnight-js's found-contract shape typed
- * to the vault's generated contract, so `callTx.initialize(...)` /
- * `callTx.deposit(...)` carry the real circuit signatures.
- */
-export type DeployedVaultContract = FoundContract<VaultContract<VaultPrivateState>>;
+import { resolveUserIdentity, type UserIdentity } from "./vault-identity.ts";
 
 /**
  * Everything a flow needs: the resolved configuration (all fields REQUIRED —
@@ -56,8 +52,6 @@ export interface VaultContext {
   readonly evmRpcUrl: string;
   /** Chain id of that EVM chain. */
   readonly evmChainId: bigint;
-  /** CAIP-2 id derived from `evmChainId` (`eip155:<id>`) — the MPC routing key. */
-  readonly caip2Id: string;
   /** Address of the ERC20 token the vault holds (20-byte 0x hex). */
   readonly erc20Address: string;
   /** The vault's derived EVM account (path "vault") — the withdraw tx sender. */
@@ -80,6 +74,7 @@ export interface VaultContext {
  *
  * @param env - The setup-populated env accumulator.
  * @param wallet - The started wallet (from the harness session's `wallet()`).
+ * @param proofObserver - Called after every proof-server /check and /prove round trip.
  * @returns The context to hand to the flow functions.
  * @throws {Error} If a required env value is missing/malformed or no contract answers
  *   at `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
@@ -87,6 +82,7 @@ export interface VaultContext {
 export async function createVaultContext(
   env: NodeJS.ProcessEnv,
   wallet: SessionWallet,
+  proofObserver?: ProofServerObserver,
 ): Promise<VaultContext> {
   const nodeConfig = getMidnightNodeConfig(env);
   setNetworkId(nodeConfig.networkId);
@@ -104,7 +100,7 @@ export async function createVaultContext(
 
   const vaultContractAddress = requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
   const identity = resolveUserIdentity(env);
-  const providers = buildVaultProviders(wallet.facade, wallet.keys, nodeConfig);
+  const providers = buildVaultProviders(wallet.facade, wallet.keys, nodeConfig, proofObserver);
 
   const vault = await findDeployedContract(providers, {
     contractAddress: vaultContractAddress,
@@ -119,7 +115,6 @@ export async function createVaultContext(
     signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
     evmRpcUrl: requireEnv(env, "EVM_RPC_URL"),
     evmChainId,
-    caip2Id: `eip155:${String(evmChainId)}`,
     erc20Address,
     evmVaultAddress: requireEnv(env, "EVM_VAULT_ADDRESS"),
     evmUserAddress: requireEnv(env, "EVM_USER_ADDRESS"),
@@ -137,8 +132,10 @@ export async function createVaultContext(
  *
  * @param context - The flow's context.
  * @param requestsPath - The resolved ledger-tree path of the request map.
- *   Defaults to [0] (deposit/withdraw's signBidirectionalEventMap); swaps
- *   pass VAULT_SWAP_REQUESTS_PATH ([11], the swapEventMap).
+ *   Defaults to VAULT_REQUESTS_PATH ([0, 0], the signBidirectionalEventMap the
+ *   approves and withdraw share); deposits pass VAULT_DEPOSIT_REQUESTS_PATH
+ *   ([1, 3], the depositEventMap), swaps VAULT_SWAP_REQUESTS_PATH ([1, 7], the
+ *   swapEventMap), supply and redeem their own maps' exported paths.
  * @returns The reader.
  */
 export function createResponseReader(
@@ -147,8 +144,8 @@ export function createResponseReader(
 ): SignetRequestResponseReader {
   return new SignetRequestResponseReader({
     requesterContractAddress: context.vaultContractAddress,
-    // The requestsPath the vault's notifications pack (erc20-vault.compact):
-    // deposit/withdraw at field 0 path [0], swaps at field 11 path [11].
+    // The requestsPath the vault's notifications pack (erc20-vault.compact).
+    // The vault's 20 ledger fields chunk the state tree, so every path is depth 2.
     requesterRequestsPath: requestsPath,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,

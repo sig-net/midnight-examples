@@ -14,6 +14,10 @@ services:
     container_name: 'midnight-proof-server'
     image: 'midnightntwrk/proof-server:9.0.0-rc.5_experimental'
     command: ['midnight-proof-server -v']
+    # Proving is memory-hungry and a long e2e run has killed this server outright. Bring it back
+    # on its own: paired with the prove retry in `createCrossContractProofServerProvider`, a death
+    # costs seconds instead of the rest of the run. `docker stop` is still respected.
+    restart: 'unless-stopped'
     ports:
       - '127.0.0.1:6300:6300'
     environment:
@@ -97,7 +101,7 @@ services:
     # service. Manual equivalent (and the FAKENET_MANAGED=0 path):
     #   docker compose --profile fakenet up -d --force-recreate fakenet
     container_name: 'fakenet-responder'
-    image: 'ghcr.io/sig-net/fakenet:0.16.0'
+    image: 'ghcr.io/sig-net/fakenet:0.22.0'
     profiles: ['fakenet']
     depends_on:
       indexer:
@@ -108,12 +112,6 @@ services:
         condition: service_started
     extra_hosts: # To let the container reach services on the HOST (e.g. a hardhat node)
       - 'host.docker.internal:host-gateway'
-    ports:
-      # The public /responses/{requestId} helper API: the tests fetch each
-      # request's raw traced EVM output from here. It is unauthenticated, so
-      # clients digest-match and signature-verify what they fetch.
-      - '127.0.0.1:3040:3040'
-
     environment:
       VERBOSE: '${VERBOSE:-false}'
       DISABLE_SOLANA: '${DISABLE_SOLANA:-true}'
@@ -123,7 +121,9 @@ services:
       MIDNIGHT_NETWORK_ID: '${MIDNIGHT_NETWORK_ID:-undeployed}'
       MIDNIGHT_INDEXER_URL: '${MIDNIGHT_INDEXER_URL:-http://indexer:8088/api/v3/graphql}'
       MIDNIGHT_INDEXER_WS_URL: '${MIDNIGHT_INDEXER_WS_URL:-ws://indexer:8088/api/v3/graphql/ws}'
-      MIDNIGHT_NODE_URL: '${MIDNIGHT_NODE_URL:-http://node:9944}'
+      # Container-side twin of the host's MIDNIGHT_NODE_URL override, which
+      # points at 127.0.0.1 and would not resolve in here.
+      MIDNIGHT_NODE_URL: '${FAKENET_MIDNIGHT_NODE_URL:-http://node:9944}'
       MIDNIGHT_PROOF_SERVER_URL: '${MIDNIGHT_PROOF_SERVER_URL:-http://proof-server:6300}'
       # The responder's fee-paying wallet: the mpc_responder role seed the
       # test-harness setup generates and funds from root (falls back to the

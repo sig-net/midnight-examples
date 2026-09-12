@@ -6,25 +6,11 @@
 
 import {
   asciiPadded,
-  bytesToHex,
   MPC_PARAMS_BYTES,
   MPCDestination,
   MPCSignatureAlgorithm,
-  PATH_BYTES,
+  pureCircuits,
 } from "@sig-net/midnight";
-
-/**
- * The vault's own derivation path as the ledger stores it: the withdraw
- * circuit sets every record's `path` to `pad(32, "vault")`.
- */
-export const VAULT_PATH_BYTES = asciiPadded("vault", PATH_BYTES);
-
-/**
- * The derivation-string rendering of {@link VAULT_PATH_BYTES}: the MPC
- * renders a record's path as the lowercase hex of the full 32 bytes,
- * padding included, and `deriveEvmAddress` takes the same rendering.
- */
-export const VAULT_PATH_HEX = bytesToHex(VAULT_PATH_BYTES);
 
 /**
  * What the MPC reports back about the EVM call: an ERC20 `transfer` returns
@@ -51,6 +37,8 @@ export interface VaultMpcRouting {
   readonly dest: number;
   /** Extra MPC parameters (reserved, zeroed); 64 bytes. */
   readonly params: Uint8Array;
+  /** The MPC's Ethereum routing key (`ethereumCaip2Id()`), zero-padded to 32 bytes. */
+  readonly caip2Id: Uint8Array;
   /** MPC output_deserialization_schema at its declared 34-byte width. */
   readonly outputDeserializationSchema: Uint8Array;
   /** MPC respond_serialization_schema at its declared 34-byte width. */
@@ -59,13 +47,14 @@ export interface VaultMpcRouting {
 
 /**
  * The routing the vault contract bakes into every event it records: ECDSA,
- * an unused destination field, no extras, and the ERC20 `transfer` bool
- * result schema in both directions.
+ * an unused destination field, no extras, the MPC's Ethereum routing key, and the
+ * ERC20 `transfer` bool result schema in both directions.
  */
 export const VAULT_MPC_ROUTING: VaultMpcRouting = {
   algo: MPCSignatureAlgorithm.ecdsa,
   dest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
+  caip2Id: pureCircuits.ethereumCaip2Id(),
   outputDeserializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
   respondSerializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
 };

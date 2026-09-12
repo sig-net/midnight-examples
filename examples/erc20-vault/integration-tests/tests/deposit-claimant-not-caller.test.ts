@@ -17,36 +17,36 @@
 // account run after run — the final step drains it back to EVM_USER_ADDRESS
 // with the fakenet-only vault key (see src/fakenet-vault-account.ts), the
 // same fund-cycling move the failure-refund flow uses. Run AFTER
-// tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives there. Recovery
+// tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives there. Recovery
 // from a run that died mid-flow (proof-server OOM): rerun this file with
 // DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID set to the id the failed
 // run printed.
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
-
+import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
   deriveAccountKeys,
   getMidnightNodeConfig,
   withSyncedWalletFacade,
-} from "@midnight-examples/lib";
+} from "@sig-net/midnight-contract-deploy";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   banner,
   getErc20Balance,
   getEthBalance,
   logSkip,
   requireEnv as requireEnvOf,
-} from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+} from "@sig-net/midnight-examples-test-harness";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { formatEther, parseEther, parseUnits } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { formatTokenAmount, fundingSummary } from "../src/evm-logging.ts";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
-import type { ShieldedTokenRecipient } from "../src/flows/claim.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
+import type { ShieldedTokenRecipient } from "../src/flows/complete-deposit.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -130,13 +130,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // Same minimums as the happy-day deposit leg: the user's derived
         // account pays the sweep gas and supplies the deposited ERC20.
         const userEth = await getEthBalance(rpcUrl, userAddress);
-        console.log(`${userAddress} ETH balance: ${String(userEth)} wei`);
-        expect(userEth, `fund ${userAddress} with >= 0.009 ETH on EVM`).toBeGreaterThanOrEqual(
-          parseEther("0.009"),
+        console.log(
+          `${userAddress}: ${fundingSummary(userEth, parseEther("0.01"), 18, "ETH")} (funding reserve)`,
+        );
+        expect(userEth, `fund ${userAddress} with >= 0.01 ETH on EVM`).toBeGreaterThanOrEqual(
+          parseEther("0.01"),
         );
         const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
         console.log(
-          `${userAddress} balance on ${erc20Address}: ${String(balance)} (decimals ${String(decimals)})`,
+          `${userAddress}: ${fundingSummary(balance, parseUnits("0.1", decimals), decimals, erc20Address)}`,
         );
         expect(
           balance,
@@ -148,7 +150,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
         const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
         console.log(
-          `${vaultAddress} ETH balance: ${String(vaultEth)} wei (drain gas budget: ${String(gasBudget)} wei)`,
+          `${vaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,
         );
         expect(
           vaultEth,
@@ -159,7 +161,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "vault-initialized preflight: the vault contract is initialized (read-only)",
+      "vault-initialised preflight: the vault contract is initialised (read-only)",
       async () => {
         const context = await session.vaultContext();
         const state = await readVaultLedger(
@@ -167,8 +169,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          state.initialized,
-          "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
+          state.initialised,
+          "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
         ).toBe(1n);
       },
       5 * MINUTE,
@@ -190,7 +192,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "",
           `  coin public key:       ${recipient.coinPublicKey}`,
           `  encryption public key: ${recipient.encryptionPublicKey}`,
-          `  vault-token balance before the claim: ${String(recipientBalanceBefore)}`,
+          `  vault-token balance before the claim: ${await formatTokenAmount(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"), requireEnv("EVM_USER_ADDRESS"), recipientBalanceBefore)}`,
         ]);
 
         // The baseline every later delta assertion reads against.
@@ -224,7 +226,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          ledger.signBidirectionalEventMap.member(requestIdBytes(requestId)),
+          ledger.depositEventMap.member(requestIdBytes(requestId)),
           "claim must consume the request from the ledger",
         ).toBe(false);
 
@@ -265,8 +267,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         banner([
           "The alternate recipient received the claim's shielded mint:",
           "",
-          `  vault-token balance before: ${String(recipientBalanceBefore)}`,
-          `  vault-token balance after:  ${String(recipientBalanceAfter)}`,
+          `  vault-token balance before: ${await formatTokenAmount(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"), requireEnv("EVM_USER_ADDRESS"), recipientBalanceBefore)}`,
+          `  vault-token balance after:  ${await formatTokenAmount(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"), requireEnv("EVM_USER_ADDRESS"), recipientBalanceAfter)}`,
           `  delta:                      ${String(recipientBalanceAfter - recipientBalanceBefore)} (deposit amount ${String(DEPOSIT_AMOUNT)})`,
         ]);
       },

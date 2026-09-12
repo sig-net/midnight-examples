@@ -3,7 +3,6 @@
 // means polling — this module owns only that plumbing; every assertion on
 // the decoded notification stays in the test bodies.
 
-import { getMidnightNodeConfig } from "@midnight-examples/lib";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import {
   decodeSignBidirectionalEventNotificationPayload,
@@ -16,6 +15,7 @@ import {
   type SignetMiscEvent,
   stripHexPrefix,
 } from "@sig-net/midnight";
+import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 
 import { requireEnv } from "./e2e-env.ts";
 

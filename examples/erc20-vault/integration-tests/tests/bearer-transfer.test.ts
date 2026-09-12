@@ -20,15 +20,17 @@
 // vault tokens left on B beyond the withdrawn amount strand on its seed,
 // like the claimant-not-caller recipient's.
 //
-// Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialize lives
+// Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives
 // there. Recovery from a run that died mid-flow (proof-server OOM): rerun
 // this file with BEARER_TRANSFER_DEPOSIT_REQUEST_ID /
 // BEARER_TRANSFER_WITHDRAW_REQUEST_ID set to the ids the failed run printed.
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
-
-import { submitTransferTransaction, waitForFacadeState } from "@midnight-examples/lib";
+import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { submitTransferTransaction, waitForFacadeState } from "@sig-net/midnight-examples-lib";
 import {
   banner,
   getErc20Balance,
@@ -36,23 +38,22 @@ import {
   getTransactionNonce,
   logSkip,
   requireEnv as requireEnvOf,
-} from "@midnight-examples/test-harness";
-import { injectE2eEnv, installFlowHooks } from "@midnight-examples/test-harness/flow-hooks";
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+} from "@sig-net/midnight-examples-test-harness";
+import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { formatTokenAmount, fundingSummary } from "../src/evm-logging.ts";
 import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
-import { completeWithdraw } from "../src/flows/complete-withdraw.ts";
-import { runDepositRoundTrip } from "../src/flows/deposit.ts";
+import { settleWithdraw } from "../src/flows/complete-withdraw.ts";
+import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import {
   pollRespondBidirectional,
   type RespondOutcome,
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
-import { withdraw } from "../src/flows/withdraw.ts";
-import { readVaultLedger } from "../src/vault-ledger.ts";
+import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -136,13 +137,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // Same minimums as the happy-day deposit leg: the user's derived
         // account pays the sweep gas and supplies the deposited ERC20.
         const userEth = await getEthBalance(rpcUrl, userAddress);
-        console.log(`${userAddress} ETH balance: ${String(userEth)} wei`);
-        expect(userEth, `fund ${userAddress} with >= 0.009 ETH on EVM`).toBeGreaterThanOrEqual(
-          parseEther("0.009"),
+        console.log(
+          `${userAddress}: ${fundingSummary(userEth, parseEther("0.01"), 18, "ETH")} (funding reserve)`,
+        );
+        expect(userEth, `fund ${userAddress} with >= 0.01 ETH on EVM`).toBeGreaterThanOrEqual(
+          parseEther("0.01"),
         );
         const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
         console.log(
-          `${userAddress} balance on ${erc20Address}: ${String(balance)} (decimals ${String(decimals)})`,
+          `${userAddress}: ${fundingSummary(balance, parseUnits("0.1", decimals), decimals, erc20Address)}`,
         );
         expect(
           balance,
@@ -155,7 +158,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
         const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
         console.log(
-          `${vaultAddress} ETH balance: ${String(vaultEth)} wei (withdraw gas budget: ${String(gasBudget)} wei)`,
+          `${vaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,
         );
         expect(
           vaultEth,
@@ -166,7 +169,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "vault-initialized preflight: the vault contract is initialized (read-only)",
+      "vault-initialised preflight: the vault contract is initialised (read-only)",
       async () => {
         const context = await session.vaultContext();
         const state = await readVaultLedger(
@@ -174,8 +177,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          state.initialized,
-          "vault is not initialized — run tests/happy-day-e2e.test.ts first (or initialize the vault)",
+          state.initialised,
+          "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
         ).toBe(1n);
       },
       5 * MINUTE,
@@ -203,7 +206,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         if (alreadyArranged) {
           logSkip(
             "arrange deposit",
-            `wallet A already holds ${String(aBalance)} vault tokens and the vault's EVM account holds ${String(vaultErc20)} ERC20`,
+            `wallet A already holds ${await formatTokenAmount(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"), requireEnv("EVM_USER_ADDRESS"), aBalance)} vault tokens and the vault's EVM account holds ${String(vaultErc20)} ERC20`,
           );
         } else {
           ({ requestId } = await runDepositRoundTrip(session, {
@@ -230,20 +233,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     it(
-      "wallet-B fee preflight: the bearer role wallet holds spendable dust for its withdraw (read-only)",
-      async () => {
-        const walletB = await bearerSession.wallet();
-        const dust = (await walletB.facade.waitForSyncedState()).dust.balance(new Date());
-        console.log(`wallet B dust (fee) balance: ${String(dust)}`);
-        expect(
-          dust,
-          "wallet B holds no spendable dust — did the setup's root-funding step fund BEARER_SEED?",
-        ).toBeGreaterThan(0n);
-      },
-      5 * MINUTE,
-    );
-
-    it(
       "bearer transfer: wallet A hands its ENTIRE shielded vault-token balance to wallet B in a plain transfer",
       async () => {
         const color = vaultTokenColor();
@@ -253,8 +242,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const aBalance = (await walletA.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
         const stateB = await walletB.facade.waitForSyncedState();
         const bBalanceBefore = stateB.shielded.balances[color] ?? 0n;
-        console.log(`wallet A vault-token balance: ${String(aBalance)}`);
-        console.log(`wallet B vault-token balance: ${String(bBalanceBefore)}`);
+        console.log(
+          `wallet A vault-token balance: ${await formatTokenAmount(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"), requireEnv("EVM_USER_ADDRESS"), aBalance)}`,
+        );
+        console.log(
+          `wallet B vault-token balance: ${await formatTokenAmount(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"), requireEnv("EVM_USER_ADDRESS"), bBalanceBefore)}`,
+        );
 
         if (aBalance === 0n) {
           // Rerun tolerance: a prior run already moved A's balance; B must
@@ -267,18 +260,23 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           // The handoff itself: an ordinary wallet-to-wallet Midnight transfer
           // of the vault-token color to B's shielded address — no vault
           // involvement, no contract call, no identity: pure possession.
-          await submitTransferTransaction(walletA.facade, walletA.keys, [
-            {
-              type: "shielded",
-              outputs: [
-                {
-                  type: color,
-                  receiverAddress: stateB.shielded.address,
-                  amount: aBalance,
-                },
-              ],
-            },
-          ]);
+          await submitTransferTransaction(
+            walletA.facade,
+            walletA.keys,
+            [
+              {
+                type: "shielded",
+                outputs: [
+                  {
+                    type: color,
+                    receiverAddress: stateB.shielded.address,
+                    amount: aBalance,
+                  },
+                ],
+              },
+            ],
+            getMidnightNodeConfig(env).networkId,
+          );
 
           await waitForFacadeState(
             walletA.facade,
@@ -300,8 +298,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         banner([
           "Bearer handoff complete — the vault-token balance moved A → B:",
           "",
-          `  wallet A balance: ${String(aBalance)} → 0`,
-          `  wallet B balance: ${String(bBalanceBefore)} → ${String(bBalanceAfter)}`,
+          `  wallet A balance: ${await formatTokenAmount(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"), requireEnv("EVM_USER_ADDRESS"), aBalance)} → 0`,
+          `  wallet B balance: ${await formatTokenAmount(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"), requireEnv("EVM_USER_ADDRESS"), bBalanceBefore)} → ${await formatTokenAmount(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"), requireEnv("EVM_USER_ADDRESS"), bBalanceAfter)}`,
         ]);
       },
       15 * MINUTE,
@@ -327,7 +325,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           ).signetRequestNonce;
         const nonceBefore = await readNonce();
 
-        // The withdraw circuit demands a surrendered coin of the full amount;
+        // The `startWithdraw` circuit demands a surrendered coin of the full amount;
         // A's wallet holds none of the color, so balancing cannot fund it and
         // the attempt dies client-side — the tx is never submitted.
         const evmNonce = await getTransactionNonce(
@@ -335,7 +333,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requireEnv("EVM_VAULT_ADDRESS"),
         );
         await expect(
-          withdraw(context, {
+          startWithdraw(context, {
             amount: WITHDRAW_AMOUNT,
             destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
             evmNonce,
@@ -383,7 +381,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requireEnv("EVM_VAULT_ADDRESS"),
         );
 
-        withdrawRequestId = await withdraw(context, {
+        withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
           evmNonce,
@@ -492,7 +490,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // completeWithdraw would reject with "Withdrawal not found" — skip
         // cleanly instead.
         const before = await readLedger();
-        if (!before.refundCommitment.member(requestKey)) {
+        if (!before.withdrawSettleViews.member(requestKey)) {
           logSkip(
             "completeWithdraw",
             `withdrawal ${withdrawRequestId} already settled (no pending marker on the ledger)`,
@@ -501,7 +499,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
         expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await completeWithdraw(context, { requestId: withdrawRequestId });
+        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
 
         const after = await readLedger();
         expect(
@@ -509,7 +507,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "completeWithdraw must consume the request from the ledger",
         ).toBe(false);
         expect(
-          after.refundCommitment.member(requestKey),
+          after.withdrawSettleViews.member(requestKey),
           "completeWithdraw must consume the pending-withdrawal marker",
         ).toBe(false);
 

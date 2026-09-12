@@ -12,7 +12,8 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-eight-spec suite (62 tests). The pipeline itself (globalSetup steps + flow test
+twelve-spec suite (101 tests: eleven e2e specs carrying 95, plus the offline
+`benchmark-tooling` spec carrying 6). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest
 globalSetup before ANY flow file (including single-file runs), and flow files
@@ -63,13 +64,16 @@ environment is a hard error, not an overwrite. On the Sepolia-forked anvil
 are dealt ETH + real USDC via anvil cheatcodes, and the setup starts the fakenet
 responder itself mid-run. The FLOW files are another matter: on a
 16 GB Docker VM expect the proof-server OOM (see "Reading failures") to
-interrupt the suite at some proving leg partway through the eight files:
+interrupt the suite at some proving leg partway through the flow files:
 that is routine, not a defect. Recover per the playbook and the suite
 completes across two or three invocations.
 
 After the run, paste the setup's printed `.env` block into `.env` (the
 contract addresses in particular) so the next run is a fast rerun against
-kept contracts.
+kept contracts. `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already there: the setup
+appends it the moment the vault's base deploy is submitted, and a rerun with it
+set resumes the circuit installs the previous run left missing (a no-op on a
+vault with every circuit).
 
 ## Modes
 
@@ -78,10 +82,13 @@ kept contracts.
 - **`/e2e redeploy`**: a circuit changed (any `.compact` edit that alters a
   circuit, struct layout, or the request-id hash domain): comment out
   `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
-  `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS` (and `ERC20_ADDRESS` if the anvil
-  container restarted, its chain is in-memory) in `.env`, then rerun. The
-  whole redeploy completes in ONE run: setup re-compiles (zk keygen, ~10 min,
-  background the run), redeploys, re-derives, re-funds, and
+  `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS` (and
+  `ERC20_ADDRESS` if the anvil container restarted, its chain is in-memory)
+  in `.env`, then rerun. `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS` and
+  `EVM_USER_ADDRESS` all derive from the vault's contract address, so a stale
+  one left set stops the run with a mismatch error rather than being used.
+  The whole redeploy completes in ONE run: setup re-compiles (zk keygen,
+  ~10 min, background the run), redeploys, re-derives, re-funds, and
   `--force-recreate`s the responder automatically. Afterwards, update `.env`
   with the freshly printed values and delete the commented-out lines.
   (The derived EVM accounts move on a redeploy: `EVM_VAULT_ADDRESS` and
@@ -91,8 +98,8 @@ kept contracts.
 
 ## Ground rules (violating these wastes 10+ minutes per mistake)
 
-- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (all eight
-  specs) or `yarn test:erc20-vault:e2e tests/<spec-file>` for one spec (the
+- Run the suite from the repo root: `yarn test:erc20-vault:e2e` (the whole
+  suite) or `yarn test:erc20-vault:e2e tests/<spec-file>` for one spec (the
   setup pipeline still runs first, and extra args pass through to vitest).
 - **Background any run that may zk-compile or deploy** (fresh clone,
   redeploy): `> logfile 2>&1 &`, then watch the log. Never sit on a
@@ -103,9 +110,12 @@ kept contracts.
   order: it stops at the first failure.
 - Expected per-spec test counts, in run order: `happy-day-e2e` **15**,
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
-  **6**, `benchmark` **13**, `false-claimer` **6**, `bearer-transfer` **11**,
-  `swap-e2e` **1**, `swap-refund-e2e` **1**. 62 total (the two swap specs
-  self-skip if Uniswap is absent, e.g. an un-forked anvil).
+  **6**, `benchmark` **43**, `false-claimer` **6**, `bearer-transfer` **11**,
+  `swap-e2e` **1**, `supply-redeem-e2e` **1**, `supply-refund-e2e` **1**,
+  `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**, then the unpinned offline
+  `benchmark-tooling` **6** last. 101 total. The setup
+  pipeline verifies Uniswap and the stataUSDC wrapper are deployed on the fork,
+  so a fork missing either fails the run at setup rather than mid-spec.
 - **Wallets are role wallets funded from ROOT at setup.** The setup's
   wallet steps resolve/generate `ROOT_SEED` plus the role seeds
   (`DEPLOYER_SEED`, `USER_SEED`, `MPC_RESPONDER_SEED`, `BEARER_SEED`),
@@ -121,12 +131,12 @@ kept contracts.
   section. A signature/attestation poll timing out while earlier contract
   calls passed almost always means the responder is down or watching stale
   addresses.
-- Give the Docker VM **16 GB**: a single claim/settle proof peaks above
+- Give the Docker VM **16 GB**: a single completeDeposit/settle proof peaks above
   12 GiB inside the proof server (see the OOM playbook below).
 - On a 16 GB VM, **restarting the proof server between spec files is the
   DEFAULT cadence, not just OOM recovery**: the OOM consistently hits a
   proving leg once the same server instance has already served several
-  proofs (observed on claim legs and once on a benchmark deposit leg).
+  proofs (observed on completeDeposit legs and once on a benchmark startDeposit leg).
   For an attended run: `yarn test:erc20-vault:e2e tests/<spec-file>` per
   file in the pinned order, `docker restart midnight-proof-server` between
   files (only while the responder log is quiet, see the responder-killed
@@ -140,12 +150,7 @@ The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
 stand-in: it polls the signet contract's emitted notification events via the
 indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and
-posts responses through the proof server. It also serves the public
-`/responses/{requestId}` helper API on port 3040 (mapped to localhost by the
-compose file): the attestation poll and settle flows fetch each request's
-raw traced EVM output from it, so a poll that times out with
-`no fakenet response for … at http://localhost:3040/...` means the responder
-(or its API port mapping) is down, not the Midnight stack.
+posts responses through the proof server.
 
 - **Managed by setup (default):** the setup's hand-off steps append
   `MPC_ROOT_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
@@ -162,7 +167,7 @@ raw traced EVM output from it, so a poll that times out with
 - **Responder development:** set `FAKENET_MANAGED=0` so setup leaves the
   responder (and `.env`) alone, and run it yourself (`yarn response` in a
   solana-signet-program checkout, with the current signet address and root
-  key in its config, and it serves the responses API on 3040 automatically).
+  key in its config).
   Then a poll timeout is YOUR restart to do.
 - **Prover/verifier parity is by construction here:** the singleton is
   always deployed from the published `@sig-net/midnight-contract`, the same
@@ -172,12 +177,35 @@ raw traced EVM output from it, so a poll that times out with
   checkout's `signet-contract/src/managed` over the responder's keys in the
   `fakenet` compose service.
 
+## Running against the real MPC (a deployed network)
+
+The vault README's "Running against the real MPC on a deployed network"
+section is the runbook, the same on every deployed network (stagenet, preview,
+preprod, mainnet). The setup pipeline switches modes on `MPC_ROOT_KEY`
+(`mpcKind` in the test harness): absent on a deployed network, the run faces a
+real MPC named by `MPC_SECP256K1_PUBKEY` (NEAR `secp256k1:<base58>` or SEC1
+hex, canonicalised to `0x04…`, the SDK's published key filling it in when
+unset), takes the signet singleton the SDK publishes for the network instead
+of deploying one, skips the fakenet hand-off on its own, and skips anvil dealing on a
+non-anvil `EVM_RPC_URL` (fund the printed derived accounts by hand, `STEP_THROUGH=1`).
+Execution outputs come from `debug_traceTransaction` on `EVM_RPC_URL` on every
+network, and the setup step "verify EVM_RPC_URL serves debug_traceTransaction"
+refuses an endpoint without it. Only the specs that never
+sign as the vault can run there (`happy-day-e2e`, `bearer-transfer`,
+`swap-e2e`, `supply-redeem-e2e`, `swap-refund-e2e`); the rest re-derive the
+vault key from `MPC_ROOT_KEY` and stay fakenet-only. Start only the
+`proof-server` compose service for such a run, and start with one deposit
+round trip, not the whole spec:
+`STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts -t "initialise|[dD]eposit|sweep"`
+(vitest's `-t` is a case-sensitive regex over the full test title; this one
+keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
+
 ## Reading failures
 
-- **`connect ECONNREFUSED 127.0.0.1:6300` mid-claim/settle**, with
+- **`connect ECONNREFUSED 127.0.0.1:6300` mid-settle**, with
   `docker ps -a` showing `midnight-proof-server` `Exited (137)` (and
   `docker inspect midnight-proof-server --format '{{.State.OOMKilled}}'`
-  printing `true`): the proof server was OOM-killed. The claim/settle
+  printing `true`): the proof server was OOM-killed. The settle
   proofs peak above 12 GiB, so a 16 GB Docker VM is marginal. Recover with
   `docker restart midnight-proof-server`, then rerun the SAME spec file,
   resuming its pending request via its resume var so it does not spend
@@ -189,7 +217,10 @@ raw traced EVM output from it, so a poll that times out with
     `FAILURE_REFUND_DEPOSIT_REQUEST_ID` / `FAILURE_REFUND_WITHDRAW_REQUEST_ID`
   - `deposit-claimant-not-caller`:
     `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID`
-  - `benchmark`: `BENCHMARK_DEPOSIT_REQUEST_ID` / `BENCHMARK_WITHDRAW_REQUEST_ID`
+  - `benchmark`: `BENCHMARK_DEPOSIT_REQUEST_ID` / `BENCHMARK_WITHDRAW_REQUEST_ID` /
+    `BENCHMARK_SWAP_REQUEST_ID` / `BENCHMARK_SUPPLY_REQUEST_ID` /
+    `BENCHMARK_REDEEM_REQUEST_ID` /
+    `BENCHMARK_REFUND_DEPOSIT_REQUEST_ID` / `BENCHMARK_REFUND_WITHDRAW_REQUEST_ID`
   - `false-claimer`: `FALSE_CLAIMER_DEPOSIT_REQUEST_ID`
   - `bearer-transfer`: `BEARER_TRANSFER_DEPOSIT_REQUEST_ID` /
     `BEARER_TRANSFER_WITHDRAW_REQUEST_ID`
@@ -197,15 +228,42 @@ raw traced EVM output from it, so a poll that times out with
   `broadcastEvm` is idempotent, so already-mined transfers skip through, and
   every spec skips already-claimed/settled requests cleanly. Expect the OOM
   (when it comes) at a proving leg once the same server instance has served
-  several proofs, most often the CLAIM (by the time a claim proves, the
-  server has already done the deposit proof plus the responder's two posts),
-  but a file's first DEPOSIT prove can also be the victim when earlier spec
+  several proofs, most often the COMPLETE-DEPOSIT (by the time it proves, the
+  server has already done the startDeposit proof plus the responder's two posts),
+  but a file's first startDeposit prove can also be the victim when earlier spec
   files exhausted the server. If the OOM killed the prove itself (the spec
   failed at a `callTx.…` with `/prove … ECONNREFUSED` and printed NO
   request-id banner), there is nothing to resume: rerun the spec plain (it
   spends a fresh deposit). On the resumed/rerun invocation the interrupted
   proof is the FIRST on a fresh server and the rest of the file fits in the
   remaining headroom.
+- **A signature poll timing out on a request the responder NEVER logged as
+  "New request"**, while the responder container is up and its log shows no
+  errors (an idle poll loop, or only re-answers of OLD requests): the signet's
+  event history has outgrown a single indexer page and the responder's
+  request discovery is starved — it reads the event registry through
+  `@sig-net/midnight`'s `querySignetEvents`, and SDK versions up to
+  0.20.0-rc.1 issue ONE un-paged `queryContractEvents` call, which the
+  indexer provider caps at 100 events. Every notification past event #100 is
+  then invisible to a responder image built on those SDKs, and every response
+  past #100 is equally invisible to a test suite pinning them. This only
+  applies when a fakenet image before 0.17.0 (or an SDK before 0.21.0-rc.1,
+  the first version that paginates the read) is in play — with the compose
+  file's pins, both sides page and a full registry is harmless. Confirm by
+  counting (the threshold is 100):
+  ```bash
+  curl -s http://127.0.0.1:8088/api/v3/graphql -H 'Content-Type: application/json' \
+    -d '{"query":"query { contractEvents(filter: { contractAddress: \"<MIDNIGHT_SIGNET_CONTRACT_ADDRESS>\" }, limit: 1000) { id } }"}'
+  ```
+  Responder restarts do NOT help (the same first page is re-read, and each
+  re-answered old request emits MORE events, pushing live traffic further past
+  the horizon). Recover by moving to the paginating pins, or on a stack that
+  must keep an old image, by tearing the whole stack down and redeploying
+  (`docker compose --profile fakenet down && docker compose up -d`, then the
+  redeploy flow above) so the registry starts empty, keeping redeploy
+  campaigns short of ~30 requests. Every fresh vault deploy leaves its
+  requests in the shared registry forever, so frequent redeploys against one
+  long-lived stack are what fill the page.
 - **A signature poll timing out on a request the responder DID log as "New
   request"**, with `respond(0x…) … FAILED` + a proof-server
   transport error in `docker logs fakenet-responder`: the responder proves
@@ -224,7 +282,7 @@ raw traced EVM output from it, so a poll that times out with
 - **`Failed Proof Server response … /check … 400`** with
   `Inputs did not match alignment` in the proof-server docker logs: a
   circuit/runtime encoding disagreement. Known cause: a 1-variant enum in a
-  `persistentHash`ed struct (`bytes(0)` atom: the compiler allocates one
+  hashed struct (`bytes(0)` atom: the compiler allocates one
   field element, the ledger parses zero). Keep every enum in hashed structs
   at ≥ 2 variants (`TxParamType` carries a `reserved` padding variant for
   exactly this).
@@ -234,7 +292,7 @@ raw traced EVM output from it, so a poll that times out with
   the previous chain. Comment out the derived EVM address vars
   (`EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS`) and rerun so setup re-derives and
   re-deals ETH + real USDC to the accounts on the fork.
-- **`vault is already initialized`** on a kept address is informational: the
+- **`vault is already initialised`** on a kept address is informational: the
   test still asserts state and passes.
 - **`Insufficient funds: … Dust`** from a deploy/call: the wallet's NIGHT
   has not generated spendable DUST yet, and the setup's own retry loop

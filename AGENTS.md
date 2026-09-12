@@ -8,15 +8,31 @@ node-modules`), split between shared machinery and the examples integrators copy
 - **`packages/test-harness`** — test-only machinery (stack bring-up/teardown,
   mpc-keys setup, wallet funding, env/session handling, subprocess helpers).
   Test-only deps live here and never touch an example's manifests.
-- **`examples/*/*`** — one directory per example, each holding 1–2 workspace
-  packages: `contract` (required) and `integration-tests` (as warranted). An
-  example's flows are typed functions in `integration-tests/src/flows/`, run
-  in-process by its tests; `integration-tests/scripts/` holds thin `tsx`
-  entrypoints over those same flows for hand-driving a live stack.
+- **`examples/*/*`** — one directory per example, each holding up to three
+  workspace packages: `contract` (required), then `deploy` and
+  `integration-tests` as warranted. Each package holds exactly one kind of
+  thing, and the split is by WHAT the code is, never by who happens to call it:
+  - `contract` — the Compact contract plus its environment-agnostic client
+    surface: witnesses, circuit-id/private-state/provider TYPES, ledger reads,
+    and the contract's own constants. Runs unchanged in a browser.
+  - `deploy` — deploying and post-deploy initialisation (constructor args,
+    the deploy transaction, one-shot init circuits, and the configuration those
+    resolve) plus the Node half of the client surface those flows and the
+    integration tests share: the compiled-contract binding over `managed/`
+    and a live provider set. Anything a browser client needs belongs in
+    `contract`, never here.
+  - `integration-tests` — flows and specs.
+  An example's flows are typed functions in `integration-tests/src/flows/`, run
+  in-process by its tests, and its deploy / init flows are typed functions in
+  `deploy/src/`, run in-process by the setup pipeline. Both kinds get thin `tsx`
+  entrypoints over those SAME functions for hand-driving a live stack
+  (`integration-tests/scripts/` and `deploy/scripts/`) —
+  never a subprocess call with its output scraped, which is how the two paths
+  silently diverge.
 
 Run `yarn install` from the repo root — never from inside a member. Run
 `yarn compile` before `build`/`test`: contract packages typecheck against their
-generated `src/managed/` output. The full layout lives in [README.md](README.md).
+generated `src/managed/` output.
 
 # Examples-repo identity rules
 
@@ -34,21 +50,51 @@ any instinct carried in from product-repo conventions.
   this repo's CI a continuous compatibility test of the published packages.
 - **Hoist only *boring infra*; duplicate anything *instructive*.** Each example
   must read standalone: an integrator copying `examples/<name>/` should see the
-  whole integration without chasing imports. Generic wallet/provider/test plumbing
-  belongs in `packages/lib` / `packages/test-harness`; anything protocol-relevant
-  belongs in the published SDK, not in either. When in doubt, duplicate in the
+  whole integration without chasing imports. Wallet, node-config, seed and deploy
+  plumbing comes from `@sig-net/midnight-contract-deploy`; generic provider/test
+  plumbing the SDK does not publish belongs in `packages/lib` /
+  `packages/test-harness`; anything protocol-relevant belongs in the published
+  SDK, not in either. When in doubt, duplicate in the
   example — readability of the example outranks DRY here. Keep `packages/lib`
   ruthlessly small: every import from it is plumbing an integrator copying an
   example can't see, and it ideally shrinks toward zero as pieces graduate into
   the SDK. Test-only deps (vitest, hardhat, viem) live in
   `packages/test-harness` and never appear in an example's manifests.
-- **No workspace package is published by default.** Every member uses the
-  `@midnight-examples/*` scope and starts `"private": true`. The one exception
-  is contract packages: each is written to be publishable as-is (see the
-  environment-agnostic rule under "Contract packages"), and individual ones may
-  be published for consumption by downstream example applications that combine
-  many chains. Anything else worth publishing graduates to the protocol repo's
-  SDK packages.
+- **No workspace package is published by default.** Every member is named
+  `@sig-net/midnight-examples-*` and starts `"private": true`. That is the SAME
+  npm scope the published SDK uses (`@sig-net/midnight`,
+  `@sig-net/midnight-contract`), so the `midnight-examples-` prefix is the only
+  thing separating an example from a product package: never drop it, and never
+  clear `"private"` without meaning to publish into the SDK's scope. Anything
+  else worth publishing graduates to the protocol repo's SDK packages.
+  The one package published today is
+  `@sig-net/midnight-examples-erc20-vault-contract`, for downstream applications
+  that combine many chains. It alone drops `"private"` and carries `files`,
+  `publishConfig` and a `prepack`; every other member, `packages/lib` and the
+  example's `deploy` included, stays private and is consumed only inside this
+  workspace. A contract package ships no `*.prover`: keygen is deterministic
+  under the pinned toolchain (independent runs produce byte-identical keys), so
+  a consumer regenerates the prover keys locally and verifies them against the
+  `compiler/contract-manifest.json` the package ships, which pins every
+  artefact's size and sha256. The package ships that regeneration as its
+  `erc20-vault-zk-assets` bin (`src/bin/`, logic in `src/zk-assets/`, neither
+  reachable from the export surface): it compiles the shipped `.compact`
+  source with the pinned compiler, refuses anything that does not match the
+  manifest, and lays the vault's and the signet callee's trees out for a
+  fetch-based zk config provider.
+- **Intra-workspace deps are `"workspace:*"`, SDK deps a fixed npm version.** A
+  private member names its siblings with `"workspace:*"`, which yarn resolves to
+  the workspace copy whatever version the sibling carries (a bare `"*"` is a
+  semver range, which a prerelease version such as `0.1.0-rc.3` does not
+  satisfy, so yarn would fall through to npm and fail the install). It names
+  `@sig-net/midnight` / `@sig-net/midnight-contract` as a plain npm version:
+  never a `workspace:`, `link:`, `portal:` or `file:` reference back to the
+  protocol repo. The published contract package has no intra-workspace deps at
+  all (see the corollary below).
+- **The published package's version moves in lockstep with its example's release
+  tag.** A release is tagged `<example-dir>-vX.Y.Z` (or `-vX.Y.Z-rc.N`) and the
+  publish workflow refuses to run unless the package it publishes is already at
+  exactly `X.Y.Z`. Bump it in the commit that precedes the tag.
 
 Corollary: an example's `contract` package depends on the Signature Network SDK +
 compact tooling and **nothing else** — its dependency list is itself documentation
@@ -86,13 +132,19 @@ exception for that specific case.
   `yarn npm audit` reports no new advisory. The compact toolchain is likewise
   pinned: install it with `compact update 0.33.0-rc.2` (the exact version named
   in the README's prerequisites), and CI installs exactly that version. The
-  toolchain pin lives in several places that move TOGETHER: the workflow's
-  launcher URL (`compact-v0.5.1`) and compiler zip URL, the SHA-256 checksums
-  the workflow verifies for those two downloads (recompute each from a fresh
-  download of the new URL), the workflow cache keys, and the README's
-  Prerequisites table. This trigger is bidirectional: a request to "update the
-  compact version" AND a request to edit the version in the README's table
-  both mean updating every one of these sites in the same change.
+  toolchain pin lives in several places that move TOGETHER, in EVERY workflow
+  that installs the toolchain (`example-test.yaml`, `erc20-vault-publish.yml`
+  and `erc20-vault-deploy.yml` all do): each workflow's launcher URL
+  (`compact-v0.5.1`) and compiler zip
+  URL, the SHA-256 checksums it verifies for those two downloads (recompute
+  each from a fresh download of the new URL), the workflow cache keys, and the
+  README's Prerequisites table, and `COMPACT_COMPILER_VERSION` in
+  `examples/erc20-vault/contract/src/zk-assets/compact-toolchain.ts` (the
+  release the shipped bin regenerates keys with). This trigger is bidirectional: a request to
+  "update the compact version" AND a request to edit the version in the README's
+  table both mean updating every one of these sites in the same change. Grep
+  `.github/workflows/` for the old version rather than editing the workflows you
+  happen to remember.
   Corollary: a dependency shared by two members MUST resolve to the same
   version in every member. Bump it everywhere in the same change and
   `yarn install` from the root: a single shared version is what keeps the
@@ -103,6 +155,12 @@ exception for that specific case.
   No `dist/`, no `tsc --outDir`, no ts-node loaders, no copy steps. Tests run under
   vitest; entrypoints run under `tsx`. If you think you need a build step, stop and
   ask — a build step is a defect in this workspace, not a missing feature.
+  **The one exception is publishing:** the npm-published contract package
+  additionally emits `dist/` via a `tsconfig.build.json`, ships `dist/` plus its
+  `.compact` source (`files`), and swaps its entry to `dist/` through
+  `publishConfig.exports` at pack time. The emit belongs to `prepack`, never to
+  `build`, so `yarn build` keeps meaning "typecheck, no emit" everywhere and the
+  workspace itself always resolves raw `src/index.ts`, never `dist/`.
 - **ALWAYS finish a change with `yarn format:check && yarn lint && yarn build && yarn test`**
   in the member you touched (or from the root). `tsx` and vitest execute without
   typechecking — "it runs" is NOT verification. If you add a new top-level TS
@@ -157,10 +215,12 @@ exception for that specific case.
   compile is `--skip-zk` (fast; enough for typecheck + simulator tests); run
   `compile:zk` only when proving keys are actually needed (real deploys,
   integration tests).
-- **Unit tests are simulator-only.** A contract package's `tests/` run entirely
-  in-process via `@midnight-ntwrk/compact-runtime` — no network, no docker, no
-  proof server. Anything that needs a running stack belongs in that example's
-  `integration-tests` package, nowhere else.
+- **Unit tests are offline and in-process.** A contract package's `tests/` are
+  simulator tests via `@midnight-ntwrk/compact-runtime` plus pure tests of the
+  package's own tooling (the zk-assets logic over in-memory manifests) — no
+  network, no docker, no proof server, no compact toolchain. Anything that
+  needs a running stack belongs in that example's `integration-tests` package,
+  nowhere else.
 - **Tests must read at a glance — table-driven over helper-driven.** A reader must
   see a test's inputs and expected outcome in the test itself (or its table row)
   without tracing helper functions. Concretely:
@@ -238,10 +298,22 @@ apply to all of them:
   `node:` builtin imports (fs, path, crypto, …), no `process`/`process.env`
   access, no `Buffer` (use `Uint8Array`), no DOM/browser globals, no Node-only
   dependencies. Configuration enters as typed function parameters — never read
-  from the environment. `deploy.ts` sits outside the export surface precisely so
-  it can be a Node entrypoint: env access, filesystem, and
-  `@midnight-examples/lib` imports belong there (or in `integration-tests`),
-  never under `src/`.
+  from the environment. This is the rule that decides what may live here: the
+  ledger reads, the provider TYPE and the circuit-id union qualify, while the
+  Node binding and a live provider set do not and live in the example's
+  `deploy` package. Env access, filesystem and `@sig-net/midnight-examples-lib` imports
+  belong in `deploy` or `integration-tests`, never in a contract package.
+- **Every in-circuit hash is `transientHash`** (wrapped in
+  `upgradeFromTransient` where a `Bytes<32>` digest is needed), whatever the
+  persistence class of the hashed value. No circuit calls `persistentHash` or
+  `keccak256`: Poseidon costs ~90 constraint rows where SHA-256 costs ~3,800
+  and keccak ~4,600 per 136-byte block. `transientHash` is pinned by the
+  chain's ledger era and can change at a proof-system hard fork; that exposure
+  is accepted repo-wide and handled operationally, so each derivation site
+  documents its own consequence (drain pending requests before such a fork;
+  persisted digests need coordinated migration). `keccak256` stays correct in
+  off-chain code where a foreign spec fixes it (EVM ABI selectors and storage
+  slots, EIP-1559 transaction hashing, epsilon derivation).
 - **Compile before you check.** `yarn compile` regenerates `src/managed/`;
   typecheck and tests read its emitted `contract/index.d.ts`.
 - **`src/index.ts` is the curated export surface** — it re-exports the managed
@@ -257,11 +329,90 @@ apply to all of them:
   `ledger(ctx.callContext.currentQueryContext.state)`. Circuit failures reject the
   promise (`await expect(...).rejects.toThrow(...)`). Pure circuits are synchronous,
   called directly via `pureCircuits.<name>(...)`.
-- **The deploy split: generic plumbing in `packages/lib`, everything
-  contract-specific in the example's own `deploy.ts`.** lib's deploy/wallet
-  helpers know no contract; the deploy script owns the constructor args,
-  witnesses, private state and post-deploy circuit calls, statically importing its
-  own generated module so all of it stays fully typed. There is NO generic
-  deployer package: a generic deployer forces dynamic module loading and witness
-  stubs, which break the moment a constructor takes real args — keep deploy logic
-  static and fully typed in the example's own contract package.
+- **The deploy split: generic plumbing in `@sig-net/midnight-contract-deploy`
+  (wallet, node config, seeds, env) and `packages/lib` (the split-deploy
+  builders and midnight-js provider adapters), everything contract-specific in
+  the example's own `deploy` package.** Neither plumbing home knows a
+  contract; the example's deploy package owns the constructor
+  args, witnesses, private state and post-deploy circuit calls, statically
+  importing its own contract package's generated module so all of it stays fully
+  typed. There is NO generic deployer package: a generic deployer forces dynamic
+  module loading and witness stubs, which break the moment a constructor takes
+  real args — keep deploy logic static and fully typed in the example's own
+  packages.
+- **Every deploy flow is a typed function taking an `env` map, and the
+  entrypoint is a shell over it.** `deployX(env = process.env)` returns its
+  outcome (the contract address, an initialise outcome enum); the CLI entrypoint
+  and the e2e setup step both CALL it, so the multistage deploy a remote network
+  needs is exercised on every local run. Never spawn a deploy as a subprocess and
+  parse its stdout: config then differs per caller, the return value degrades to
+  a regex, and only one of the two paths gets tested. Config is read from the
+  passed map (never `process.env` directly, never mutated), so every process
+  reads the SAME variable for the same thing.
+
+# Diagrams
+
+- **The style guide and workflow in [docs/diagramming.md](docs/diagramming.md) are
+  binding** for every draw.io diagram in this repo: the committed `.drawio` +
+  `.drawio.png` pair, the palette, the label styles, the shapes, the icon bank. Copy
+  styled cells from `docs/diagram-palette.drawio` rather than authoring styles by hand.
+- **Diagram labels are verbatim from source**: circuit names with parentheses
+  (`startDeposit(...)`), event and ledger field names exactly as exported. A label is correct
+  iff it greps in the source. When a term exists in several sources, truth priority is
+  code > README > diagram: take it from the leftmost source that has it. One exemption: the generic protocol diagram
+  (`docs/sign-bidirectional-flow.*`) depicts a hypothetical integrating contract, so its
+  placeholder circuits (`startCrossChain(...)`, `completeCrossChain(...)`) grep nowhere
+  by design. Every real name in it (events, singleton circuits, ledger fields) still
+  must grep.
+- **An example's actor map is the ONLY diagram carrying the contract's full
+  anatomy** (every exported circuit, every witness, every exported ledger field,
+  exported pure circuits omitted by default). A flow diagram's
+  contract box shows only the members (ledger fields, circuits, witnesses)
+  that flow interacts with, membership read from the
+  contract source and the flow's
+  `integration-tests/src/flows/` files. Kept cells are the actor map's own,
+  value and style byte-identical, only geometry free to adapt: the full rule is
+  the "Flow diagram membership" section of [docs/diagramming.md](docs/diagramming.md).
+- **NEVER:** hand-export from the draw.io UI, screenshot, pass ad hoc scale or border
+  overrides (resolution changes are edits to [drawio.config.json](drawio.config.json),
+  re-rendering every pair in the same change), commit a PNG not rendered from the
+  `.drawio` source beside it, leave an edge without `source` and `target` attachments,
+  or embed a draw.io SVG export in docs (it renders theme-mangled in dark-mode viewers).
+  Never draw a diagonal or almost-straight edge segment (edges are strict horizontal and
+  vertical runs, `strokeWidth=2`, coloured step edges turning their corners as arcs and
+  derivation edges keeping sharp right angles), never let an edge cut
+  through a shape when a route around exists, never let two edges of the same step
+  colour cross each other, and never scatter one step's edges across distant anchors
+  when they can share a base: the full routing rules are the "Edge routing" section of
+  [docs/diagramming.md](docs/diagramming.md).
+- **`drawio.config.json` lives ONCE at the repo root**, exactly as `eslint.config.js` and
+  `.prettierrc.json` do: it is found by upward search from each diagram, and one root file
+  is what reaches both `docs/` and every `examples/*/docs/`. A copy inside a docs directory
+  would govern only its siblings and drift from the rest.
+- **Eyeball every render before finishing**: downscale the PNG and read it as an image.
+  Broken edge labels, escaped containment, missing icons and dead bands of empty space
+  (area only a deleted or moved cell explains) are visible at a glance and invisible in
+  the XML. Ask of every render: does any region read as "something used to be here"?
+
+# Flow pages
+
+- **The style guide in [docs/flow-pages.md](docs/flow-pages.md) is binding** for every
+  flow page (`examples/*/docs/<flow>/<flow>.md`): the page DESCRIBES the flow as one
+  flat golden step list — `- **N.**` dash bullets carrying bold manual ordinals, with
+  detail bullets indented two spaces beneath each headline — and links into the
+  contract source and flow files instead of quoting them. The bullet shape is
+  deliberate (renderers indent nested dash bullets reliably where ordered lists do
+  not), so never "fix" the bold numbers into an ordered list.
+- **Code snippets on a flow page default to ZERO.** A reader who wants the code reads
+  the code and its comments through the page's links. A snippet earns its place only
+  where prose cannot carry a specific point (argument order in a hash, a byte
+  layout), cut to the lines that make that point.
+- **One vocabulary, two renderings per flow, both on the page**: the step-list
+  bullets (ordinal + the canonical string's tail) and the mermaid `Note over` lines
+  (the full canonical string). The strings are frozen per flow in the correspondence
+  contract, and a change to one rendering is a change to both in the same commit.
+  The flow diagram carries NO step text: its numbered circles are exactly the frozen
+  strings' ordinals (a branch's arms share one ordinal, one circle per arm), and
+  every bit of text on or beside an arrow is an edge label under the diagramming
+  style guide's golden rules — bold acting party, colon, verb-led body — never a
+  free-standing caption.

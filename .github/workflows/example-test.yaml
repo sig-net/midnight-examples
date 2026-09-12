@@ -201,10 +201,28 @@ jobs:
         run: yarn "test:${EXAMPLE_DIR}:e2e"
       - name: Collect service logs
         if: failure()
+        # Per service, and TAILED. One unbounded `docker compose logs` across every service hit the
+        # 120s bound every time and produced a 500 MB file that stopped 45 minutes before the
+        # failure, because the proof server logs at debug. The end of each log is what diagnoses a
+        # failure, so bound each one and keep its tail.
+        #
+        # The service names come from the compose file itself. A hand-written list drifts: it is
+        # the SERVICE name that `logs` takes, not the container_name, so `fakenet-responder` here
+        # collected nothing and `|| true` reported success anyway.
         run: |
           mkdir -p ci-logs
-          docker compose --profile fakenet logs --no-color > ci-logs/compose.log 2>&1 || true
-          docker ps -a > ci-logs/docker-ps.txt 2>&1 || true
+          docker compose --profile fakenet config --services | while read -r service; do
+            echo "collecting ${service} logs"
+            timeout 30 docker compose --profile fakenet logs --no-color --tail 3000 "$service" \
+              > "ci-logs/${service}.log" 2>&1 || true
+          done
+          timeout 60 docker ps -a > ci-logs/docker-ps.txt 2>&1 || true
+          # Exit code, OOM kill and restart count per container: `docker ps` shows a container that
+          # died and came back as merely "Up", which hides the death that failed the run.
+          docker ps -aq | xargs -r timeout 60 docker inspect \
+            --format '{{.Name}} running={{.State.Running}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}} restarts={{.RestartCount}} startedAt={{.State.StartedAt}}' \
+            > ci-logs/docker-state.txt 2>&1 || true
+          timeout 30 free -m > ci-logs/memory.txt 2>&1 || true
       - name: Upload service logs
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

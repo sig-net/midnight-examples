@@ -3,9 +3,9 @@
 // attestation appears whose signature VERIFIES over the independently
 // recomputed serialized output for the request, and return the resolved
 // outcome. There is deliberately no push/websocket alternative.
-
 import type { RequestIdHex } from "@sig-net/midnight";
 
+import { PollProgress } from "../poll-progress.ts";
 import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { fetchAttestedRespondOutcome, type RespondOutcome } from "./respond-output.ts";
@@ -20,6 +20,13 @@ export interface PollRespondBidirectionalOptions {
   readonly intervalMs: number;
   /** Give-up timeout in milliseconds. */
   readonly timeoutMs: number;
+  /**
+   * The resolved ledger-tree path of the map holding the request. Deposits
+   * pass VAULT_DEPOSIT_REQUESTS_PATH (the depositEventMap); withdrawals take
+   * the default VAULT_REQUESTS_PATH (the signBidirectionalEventMap they share
+   * with the approves).
+   */
+  readonly requestsPath?: readonly number[];
 }
 
 /**
@@ -28,7 +35,7 @@ export interface PollRespondBidirectionalOptions {
  * and return the resolved outcome.
  *
  * The event carries only the MPC's signature, so each tick recomputes the
- * serialized output from the fakenet's cached raw EVM output and checks the
+ * serialized output from the observed raw EVM output and checks the
  * posted events' signatures against it (see `fetchAttestedRespondOutcome`):
  * the event log is unauthenticated, and that check is what makes a returned
  * record meaningful off-chain. The settle circuits run the same check
@@ -40,9 +47,9 @@ export interface PollRespondBidirectionalOptions {
  * @param options - What to poll for and how patiently.
  * @returns The resolved outcome (attested event + verified output bytes).
  * @throws {Error} When the contract has no state on-chain, or `timeoutMs`
- *   elapses with no verifying attestation posted (a fakenet /responses API
- *   that stays unreachable surfaces as this timeout: each tick's fetch
- *   failure is logged and retried, this loop owns the deadline).
+ *   elapses with no verifying attestation posted (an EVM endpoint that
+ *   stays unreachable surfaces as this timeout: each tick's trace failure
+ *   is logged and retried, this loop owns the deadline).
  */
 export async function pollRespondBidirectional(
   context: VaultContext,
@@ -56,13 +63,19 @@ export async function pollRespondBidirectional(
 
   // The reads are single-shot; this loop owns the cadence and the give-up
   // timeout.
+  const progress = new PollProgress(`attestation ${options.requestId}`, options.timeoutMs);
   const giveUp = new AbortController();
   const timer = setTimeout(() => {
     giveUp.abort();
   }, options.timeoutMs);
   try {
     while (!giveUp.signal.aborted) {
-      const outcome = await fetchAttestedRespondOutcome(context, options.requestId);
+      const outcome = await fetchAttestedRespondOutcome(
+        context,
+        options.requestId,
+        options.requestsPath,
+        progress,
+      );
       if (outcome !== undefined) {
         if (outcome.matchedFailureOutput) {
           console.log("remote execution FAILED (MPC failure output attested)");
@@ -73,9 +86,7 @@ export async function pollRespondBidirectional(
       }
       await sleepUnlessAborted(options.intervalMs, giveUp.signal);
     }
-    throw new Error(
-      `timed out after ${String(options.timeoutMs)}ms waiting for a verifying respond-bidirectional attestation to request ${options.requestId}`,
-    );
+    throw new Error(`timed out: ${progress.summary()}`);
   } finally {
     clearTimeout(timer);
   }
