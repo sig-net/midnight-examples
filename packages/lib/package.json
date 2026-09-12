@@ -20,7 +20,7 @@
     "@midnight-ntwrk/platform-js": "^3.0.0",
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
     "@midnightntwrk/wallet-sdk-facade": "5.0.0-beta.2",
-    "@sig-net/midnight-contract-deploy": "0.21.0-rc.10",
+    "@sig-net/midnight-contract-deploy": "0.21.0",
     "effect": "3.22.2",
     "ethers": "^6.17.0"
   },
