@@ -1,6 +1,8 @@
 import {
+  asciiPadded,
   parseRequestIdHex,
   type SignatureResponseVerdict,
+  type SignBidirectionalEvent,
   type SignetRequestResponseReader,
 } from "@sig-net/midnight";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,10 +10,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import * as outcomes from "../src/flows/respond-output.ts";
+import { ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES } from "../src/mpc-routing.ts";
+import { OutputSource } from "../src/output-source.ts";
 import * as contextModule from "../src/vault-context.ts";
 
 const REQUEST = parseRequestIdHex("ab".repeat(32));
-const CONTEXT = { signetContractAddress: "cd".repeat(32) } as contextModule.VaultContext;
+const CONTEXT = {
+  signetContractAddress: "cd".repeat(32),
+  respondOutputSource: OutputSource.EVMNode,
+} as contextModule.VaultContext;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -63,23 +70,47 @@ describe("signature timeout diagnostics", () => {
 });
 
 describe("attestation timeout diagnostics", () => {
-  it("retains the last execution observation failure", async () => {
+  // The schemas the poll hands every tick come off the request record, the
+  // vault's transfer schema in both directions.
+  const REQUEST_RECORD = {
+    outputDeserializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
+    respondSerializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
+  } as SignBidirectionalEvent;
+
+  it("retains the last execution observation failure and passes the record's schemas", async () => {
     vi.useFakeTimers();
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.spyOn(outcomes, "fetchAttestedRespondOutcome").mockImplementation(
-      (_context, _request, _path, progress) => {
+    const reader = {
+      getSignatureRequest: vi
+        .fn<SignetRequestResponseReader["getSignatureRequest"]>()
+        .mockResolvedValue(REQUEST_RECORD),
+    } as Partial<SignetRequestResponseReader> as SignetRequestResponseReader;
+    vi.spyOn(contextModule, "createResponseReader").mockReturnValue(reader);
+    const fetchOutcome = vi
+      .spyOn(outcomes, "fetchAttestedRespondOutcome")
+      .mockImplementation((_context, _request, _source, _schemas, _path, progress) => {
         progress?.update("1 attestation post observed");
         progress?.failure("observation", "execution observation failed: RPC timeout");
         return Promise.resolve(undefined);
-      },
-    );
+      });
     await Promise.all([
       expect(
         pollRespondBidirectional(CONTEXT, { requestId: REQUEST, intervalMs: 100, timeoutMs: 1000 }),
       ).rejects.toThrow("Last failure: execution observation failed: RPC timeout"),
       vi.advanceTimersByTimeAsync(1000),
     ]);
+    expect(fetchOutcome).toHaveBeenCalledWith(
+      CONTEXT,
+      REQUEST,
+      OutputSource.EVMNode,
+      {
+        outputDeserializationSchema: ERC20_TRANSFER_RESULT_SCHEMA,
+        respondSerializationSchema: ERC20_TRANSFER_RESULT_SCHEMA,
+      },
+      undefined,
+      expect.anything(),
+    );
     expect(vi.getTimerCount()).toBe(0);
   });
 });

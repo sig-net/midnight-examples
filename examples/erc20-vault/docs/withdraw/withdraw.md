@@ -112,17 +112,22 @@ As illustrated, the flow comprises 5 steps:
     id and the output bytes, so the client recomputes the output bytes
     independently and checks the signature against them, exactly as a
     [deposit](../deposit/deposit.md) does.
-  - [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L105)
-    recomputes TWO candidate outputs on every tick. **The success candidate** is
+  - [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L334)
+    recomputes TWO candidate outputs on every tick under
+    `RESPOND_OUTPUT_SOURCE=evm-node`. **The success candidate** is
     computable only when the transaction executed: the raw execution output,
     decoded per the request's `outputDeserializationSchema` and re-packed per
-    its `respondSerializationSchema`, which for a transfer turns the 32-byte ABI
-    `bool` word into one byte (`0x01` the transfer went through, `0x00` the
-    ERC20 returned false). **The failure candidate** is always available: the
+    its `respondSerializationSchema` (both read off the request's ledger
+    record), which for a transfer turns the 32-byte ABI `bool` word into one
+    byte (`0x01` the transfer went through, `0x00` the ERC20 returned false). **The failure candidate** is always available: the
     protocol's fixed 5-byte
     [`MPC_FAILURE_OUTPUT`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/constants.ts)
     (`0xdeadbeef01`), which the MPC attests for a transaction that never
-    executed at all, reverted on chain or replaced on the same nonce.
+    executed at all, reverted on chain or replaced on the same nonce. Under
+    `RESPOND_OUTPUT_SOURCE=mpc-cache` the one candidate is the object the MPC
+    uploaded to its output cache before posting
+    ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/mpc-output-cache.ts)),
+    success or failure output alike.
   - Selection is by signature verification alone, against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), the response
     key the vault pinned at initialise and reads back from its own ledger. The
@@ -131,7 +136,7 @@ As illustrated, the flow comprises 5 steps:
     stays UNTRUSTED: the verified bytes go into the settle circuit as an
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
-  - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L54)
+  - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L78)
     owns the poll deadline and hands the resolved outcome to the settle step.
 - **5.** completeWithdraw(...) settles on the attested output
   - An executed transfer settles through

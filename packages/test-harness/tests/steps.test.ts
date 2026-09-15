@@ -3,6 +3,10 @@
 // rejection the steps translate (which errors get the stack-reset hint, and
 // that every other error passes through untouched).
 
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -57,6 +61,8 @@ describe("ensureMpcRootKey", () => {
   });
 });
 
+const scratchEnvFile = (): string => join(mkdtempSync(join(tmpdir(), "steps-test-")), ".env");
+
 describe("ensureMpcSecp256k1Pubkey", () => {
   interface Case {
     readonly name: string;
@@ -98,8 +104,54 @@ describe("ensureMpcSecp256k1Pubkey", () => {
 
   it.each(CANONICALISED)("$name", ({ env, expected }) => {
     const accumulator = { ...env };
-    ensureMpcSecp256k1Pubkey(accumulator);
+    ensureMpcSecp256k1Pubkey(accumulator, scratchEnvFile());
     expect(accumulator.MPC_SECP256K1_PUBKEY).toBe(expected);
+  });
+
+  it("appends a freshly derived key to .env under a provenance comment", () => {
+    const file = scratchEnvFile();
+    const existing = `MPC_ROOT_KEY=${ROOT_KEY_ONE}\n`;
+    writeFileSync(file, existing, "utf8");
+
+    ensureMpcSecp256k1Pubkey({ NETWORK_ID: "undeployed", MPC_ROOT_KEY: ROOT_KEY_ONE }, file);
+
+    const written = readFileSync(file, "utf8");
+    expect(written.startsWith(existing)).toBe(true);
+    expect(written.slice(existing.length)).toMatch(
+      new RegExp(
+        "^\\n# appended by the test-harness setup \\(.*\\): MPC_SECP256K1_PUBKEY derived from MPC_ROOT_KEY\\n" +
+          `MPC_SECP256K1_PUBKEY=${GENERATOR_UNCOMPRESSED}\\n$`,
+      ),
+    );
+  });
+
+  it.each([
+    {
+      name: "the key was preset",
+      env: {
+        NETWORK_ID: "undeployed",
+        MPC_ROOT_KEY: ROOT_KEY_ONE,
+        MPC_SECP256K1_PUBKEY: GENERATOR_COMPRESSED,
+      },
+      fileContent: "",
+    },
+    {
+      name: "the shell blanks a key .env already holds",
+      env: { NETWORK_ID: "undeployed", MPC_ROOT_KEY: ROOT_KEY_ONE, MPC_SECP256K1_PUBKEY: "" },
+      fileContent: `MPC_SECP256K1_PUBKEY=${GENERATOR_COMPRESSED}\n`,
+    },
+    {
+      name: "a real MPC's published key is taken",
+      env: { NETWORK_ID: "stagenet" },
+      fileContent: "",
+    },
+  ])("leaves .env untouched when $name", ({ env, fileContent }) => {
+    const file = scratchEnvFile();
+    writeFileSync(file, fileContent, "utf8");
+
+    ensureMpcSecp256k1Pubkey({ ...env }, file);
+
+    expect(readFileSync(file, "utf8")).toBe(fileContent);
   });
 
   interface RefusedCase {
@@ -137,7 +189,7 @@ describe("ensureMpcSecp256k1Pubkey", () => {
 
   it.each(REFUSED)("refuses $name", ({ env, error }) => {
     expect(() => {
-      ensureMpcSecp256k1Pubkey({ ...env });
+      ensureMpcSecp256k1Pubkey({ ...env }, scratchEnvFile());
     }).toThrow(error);
   });
 });

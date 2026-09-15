@@ -55,7 +55,8 @@ deployment and real USDC are present. Without it anvil is a bare chain and the
 suites fail dealing tokens. (`SEPOLIA_FORK_BLOCK` is optional: pin a block for
 determinism, needs an archive RPC.) Everything else the setup pipeline creates:
 it appends the generated wallet seeds (root + the deployer/user/mpc
-responder/bearer roles, funded from root) and the fakenet hand-off values
+responder/bearer roles, funded from root), the MPC public key it derives from
+the root key (`MPC_SECP256K1_PUBKEY`) and the fakenet hand-off values
 (`MPC_ROOT_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`) plus prints a ready-to-paste
 block with everything else it deployed/derived. Appends are append-only:
 existing lines are never modified, and a value that conflicts with the shell
@@ -175,7 +176,9 @@ posts responses through the proof server.
   against a local protocol checkout is active AND that checkout's signet
   contract diverges from the published package. In that case bind-mount the
   checkout's `signet-contract/src/managed` over the responder's keys in the
-  `fakenet` compose service.
+  `fakenet` compose service. While a link is active, run the suite under
+  `NODE_OPTIONS=--experimental-transform-types`: the published deploy package
+  imports the linked SDK's TypeScript source natively through Node.
 
 ## Running against the real MPC (a deployed network)
 
@@ -189,8 +192,20 @@ unset), takes the signet singleton the SDK publishes for the network instead
 of deploying one, skips the fakenet hand-off on its own, and skips anvil dealing on a
 non-anvil `EVM_RPC_URL` (fund the printed derived accounts by hand, `STEP_THROUGH=1`).
 Execution outputs come from `debug_traceTransaction` on `EVM_RPC_URL` on every
-network, and the setup step "verify EVM_RPC_URL serves debug_traceTransaction"
-refuses an endpoint without it. Only the specs that never
+network, and under `RESPOND_OUTPUT_SOURCE=evm-node` (the default) the setup
+step "verify EVM_RPC_URL serves debug_traceTransaction" refuses an endpoint
+without it. The deposit and withdraw polls can instead download the attested
+bytes from the MPC's output cache, and the setup then skips that check (the
+swap, supply and redeem polls still trace, so their specs need a tracing
+endpoint):
+`RESPOND_OUTPUT_SOURCE=mpc-cache`, reading the cache the SDK publishes for the
+network (stagenet:
+`https://storage.googleapis.com/midnight-cache-storage-dev/v1/stagenet`) unless
+`MPC_OUTPUT_CACHE_URL` overrides it (the cache's URL down to the MPC's object
+prefix; the poll appends `/<network>/<signet address>/<request id>.bin`). On
+the local stack no cache is published, so set
+`MPC_OUTPUT_CACHE_URL=http://127.0.0.1:3040/v1/fakenet`, the compose fakenet's
+simulation. Only the specs that never
 sign as the vault can run there (`happy-day-e2e`, `bearer-transfer`,
 `swap-e2e`, `supply-redeem-e2e`, `swap-refund-e2e`); the rest re-derive the
 vault key from `MPC_ROOT_KEY` and stay fakenet-only. Start only the

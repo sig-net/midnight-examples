@@ -101,7 +101,7 @@ services:
     # service. Manual equivalent (and the FAKENET_MANAGED=0 path):
     #   docker compose --profile fakenet up -d --force-recreate fakenet
     container_name: 'fakenet-responder'
-    image: 'ghcr.io/sig-net/fakenet:0.23.0'
+    image: 'ghcr.io/sig-net/fakenet:0.24.0'
     profiles: ['fakenet']
     depends_on:
       indexer:
@@ -112,6 +112,12 @@ services:
         condition: service_started
     extra_hosts: # To let the container reach services on the HOST (e.g. a hardhat node)
       - 'host.docker.internal:host-gateway'
+    # The responder's output cache simulation: the exact bytes of every
+    # attestation it posts, served under the MPC's bucket layout. A run with
+    # RESPOND_OUTPUT_SOURCE=mpc-cache reads it at
+    # MPC_OUTPUT_CACHE_URL=http://127.0.0.1:3040/v1/fakenet.
+    ports:
+      - '127.0.0.1:3040:3040'
     environment:
       VERBOSE: '${VERBOSE:-false}'
       DISABLE_SOLANA: '${DISABLE_SOLANA:-true}'

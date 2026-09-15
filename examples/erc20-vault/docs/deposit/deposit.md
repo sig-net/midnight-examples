@@ -129,8 +129,9 @@ As illustrated, the flow comprises 6 steps:
     signature over the attestation digest
     `upgradeFromTransient(transientHash([requestId, serializedOutput]))`, and
     nothing else: neither the digest nor the serialised output goes on chain.
-  - The client must therefore rebuild the exact bytes the MPC hashed.
-    [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L105)
+  - The client must therefore obtain the exact bytes the MPC hashed, from the
+    source `RESPOND_OUTPUT_SOURCE` names. Under `evm-node`
+    [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L334)
     takes the mined call's raw EVM return data (read from `EVM_RPC_URL` with
     `debug_traceTransaction`, the RPC method the MPC itself uses), then
     decodes it per the request's output deserialisation schema with
@@ -138,7 +139,11 @@ As illustrated, the flow comprises 6 steps:
     and re-packs it per the respond serialisation schema with
     [`serializeRespondOutput`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/abi-serde.ts#L194):
     the exact two conversions the responder ran, the sweep's 32-byte ABI `bool`
-    word in and its 1-byte packed result out.
+    word in and its 1-byte packed result out, both schemas read off the
+    request's own ledger record. Under `mpc-cache` it downloads instead the
+    bytes the MPC uploaded to its output cache before posting
+    ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/mpc-output-cache.ts)),
+    one object per request id under `MPC_OUTPUT_CACHE_URL`.
   - Two candidates are checked, not one. The success candidate is the re-packed
     output above, and the failure candidate is the protocol's fixed 5-byte
     failure output
@@ -149,11 +154,11 @@ As illustrated, the flow comprises 6 steps:
     vault's own ledger, is the attested outcome. The success candidate is
     skipped when the transaction reverted (a failed execution has no output),
     and a decode failure drops it with a warning instead of crashing the poll.
-  - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L54)
+  - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L78)
     owns the loop, the timeout and the reporting. Everything resolved here stays
-    UNTRUSTED: the respond events are open to anyone and the traced output is
-    unauthenticated, and the authoritative check is the in-circuit verification
-    step 6 runs.
+    UNTRUSTED: the respond events are open to anyone and the traced or cached
+    output is unauthenticated, and the authoritative check is the in-circuit
+    verification step 6 runs.
 - **6.** completeDeposit(...) verifies and mints
   - The user calls [`completeDeposit(...)`](../../contract/src/erc20-vault.compact)
     with the request id, the attested event and the recomputed output bytes. The

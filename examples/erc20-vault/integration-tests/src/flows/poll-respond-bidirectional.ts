@@ -7,10 +7,18 @@ import type { RequestIdHex } from "@sig-net/midnight";
 
 import { PollProgress } from "../poll-progress.ts";
 import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
-import type { VaultContext } from "../vault-context.ts";
-import { fetchAttestedRespondOutcome, type RespondOutcome } from "./respond-output.ts";
+import { createResponseReader, type VaultContext } from "../vault-context.ts";
+import {
+  fetchAttestedRespondOutcome,
+  type RespondOutcome,
+  type RespondOutputSchemas,
+} from "./respond-output.ts";
 
-export { fetchAttestedRespondOutcome, type RespondOutcome } from "./respond-output.ts";
+export {
+  fetchAttestedRespondOutcome,
+  type RespondOutcome,
+  type RespondOutputSchemas,
+} from "./respond-output.ts";
 
 /** Options for {@link pollRespondBidirectional}. */
 export interface PollRespondBidirectionalOptions {
@@ -30,26 +38,42 @@ export interface PollRespondBidirectionalOptions {
 }
 
 /**
+ * The JSON text of an on-ledger schema field. The contract stores each
+ * schema NUL-padded to its declared Compact width (`pad(N, "...")`).
+ *
+ * @param padded - The schema bytes as the request record carries them.
+ * @returns The schema's JSON text, padding removed.
+ */
+function schemaJson(padded: Uint8Array): string {
+  return new TextDecoder().decode(padded).replace(/\0+$/u, "");
+}
+
+/**
  * Poll the signet contract until an MPC respond-bidirectional attestation
  * for `options.requestId` VERIFIES over the independently recomputed output,
  * and return the resolved outcome.
  *
- * The event carries only the MPC's signature, so each tick recomputes the
- * serialized output from the observed raw EVM output and checks the
- * posted events' signatures against it (see `fetchAttestedRespondOutcome`):
- * the event log is unauthenticated, and that check is what makes a returned
- * record meaningful off-chain. The settle circuits run the same check
- * in-circuit, which is the actual authentication gate. This flow owns the poll loop, the timeout,
- * and the reporting: it logs the outcome (success flag / MPC failure
- * output); acting on it (claiming, refunding) is the caller's job.
+ * The event carries only the MPC's signature, so each tick obtains the
+ * serialized output from the context's `respondOutputSource` (recomputed
+ * from the observed raw EVM output, or downloaded from the MPC's output
+ * cache) and checks the posted events' signatures against it (see
+ * `fetchAttestedRespondOutcome`): the event log is unauthenticated, and that
+ * check is what makes a returned record meaningful off-chain. The settle
+ * circuits run the same check in-circuit, which is the actual
+ * authentication gate. The schemas the recomputation runs are the request
+ * record's own, read once here: they are what the MPC ran. This flow owns
+ * the poll loop, the timeout, and the reporting: it logs the outcome
+ * (success flag / MPC failure output); acting on it (claiming, refunding) is
+ * the caller's job.
  *
  * @param context - The flow context.
  * @param options - What to poll for and how patiently.
  * @returns The resolved outcome (attested event + verified output bytes).
- * @throws {Error} When the contract has no state on-chain, or `timeoutMs`
- *   elapses with no verifying attestation posted (an EVM endpoint that
- *   stays unreachable surfaces as this timeout: each tick's trace failure
- *   is logged and retried, this loop owns the deadline).
+ * @throws {Error} When the contract has no state on-chain or holds no
+ *   request under `options.requestId`, or `timeoutMs` elapses with no
+ *   verifying attestation posted (an EVM endpoint or cache that stays
+ *   unreachable surfaces as this timeout: each tick's failure is logged and
+ *   retried, this loop owns the deadline).
  */
 export async function pollRespondBidirectional(
   context: VaultContext,
@@ -57,9 +81,18 @@ export async function pollRespondBidirectional(
 ): Promise<RespondOutcome> {
   console.log(`signet contract:   ${context.signetContractAddress}`);
   console.log(`request id:        ${options.requestId}`);
+  console.log(`output source:     ${context.respondOutputSource}`);
   console.log(
     `poll:              every ${String(options.intervalMs)}ms, up to ${String(options.timeoutMs)}ms`,
   );
+
+  const request = await createResponseReader(context, options.requestsPath).getSignatureRequest(
+    options.requestId,
+  );
+  const schemas: RespondOutputSchemas = {
+    outputDeserializationSchema: schemaJson(request.outputDeserializationSchema),
+    respondSerializationSchema: schemaJson(request.respondSerializationSchema),
+  };
 
   // The reads are single-shot; this loop owns the cadence and the give-up
   // timeout.
@@ -73,6 +106,8 @@ export async function pollRespondBidirectional(
       const outcome = await fetchAttestedRespondOutcome(
         context,
         options.requestId,
+        context.respondOutputSource,
+        schemas,
         options.requestsPath,
         progress,
       );
