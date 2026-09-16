@@ -267,7 +267,7 @@ keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
   file's pins, both sides page and a full registry is harmless. Confirm by
   counting (the threshold is 100):
   ```bash
-  curl -s http://127.0.0.1:8088/api/v3/graphql -H 'Content-Type: application/json' \
+  curl -s http://127.0.0.1:8088/api/v4/graphql -H 'Content-Type: application/json' \
     -d '{"query":"query { contractEvents(filter: { contractAddress: \"<MIDNIGHT_SIGNET_CONTRACT_ADDRESS>\" }, limit: 1000) { id } }"}'
   ```
   Responder restarts do NOT help (the same first page is re-read, and each
