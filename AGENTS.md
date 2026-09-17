@@ -45,7 +45,12 @@ any instinct carried in from product-repo conventions.
   `portal:`, or `file:` reference back to the protocol repo, and never a
   `resolutions` override pointing at a local checkout. Using `yarn link` (or a
   temporary `portal:`) against a local protocol checkout **is fine — encouraged —
-  for local development**; just never commit it. Committed manifests referencing
+  for local development**; just never commit it. A linked checkout resolves to
+  the SDK's raw TypeScript source, which the published JS packages
+  (`@sig-net/midnight-contract-deploy` and friends) import natively through
+  Node, and Node's default type stripping rejects that source's enums: run every
+  script and test under `NODE_OPTIONS=--experimental-transform-types` while a
+  link is active. Committed manifests referencing
   published versions are what make the protocol/examples split real, and they make
   this repo's CI a continuous compatibility test of the published packages.
 - **Hoist only *boring infra*; duplicate anything *instructive*.** Each example

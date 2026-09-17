@@ -12,7 +12,8 @@ import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
 // takes it explicitly). createVaultContext sets it once per construction.
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import {
-  signetEventSourceFromPublicDataProvider,
+  MpcOutputCacheReader,
+  signetEventSourceFromIndexer,
   SignetRequestResponseReader,
 } from "@sig-net/midnight";
 import { getMidnightNodeConfig, type MidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
@@ -30,16 +31,21 @@ import {
   vaultCompiledContract,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import type { ProofServerObserver } from "@sig-net/midnight-examples-lib";
-import { requireEnv, type SessionWallet } from "@sig-net/midnight-examples-test-harness";
+import {
+  optionalEnv,
+  requireEnv,
+  type SessionWallet,
+} from "@sig-net/midnight-examples-test-harness";
 
+import { OutputSource, parseOutputSource } from "./output-source.ts";
 import { resolveUserIdentity, type UserIdentity } from "./vault-identity.ts";
 
 /**
- * Everything a flow needs: the resolved configuration (all fields REQUIRED —
- * the setup pipeline populates every one before a flow runs), the vault's
- * midnight-js providers, and the joined vault contract. Flows receive this
- * instead of raw env; they never construct providers, wallets, or contract
- * handles themselves.
+ * Everything a flow needs: the resolved configuration (every field REQUIRED
+ * but {@link VaultContext.mpcOutputCache}: the setup pipeline populates the
+ * rest before a flow runs), the vault's midnight-js providers, and the joined
+ * vault contract. Flows receive this instead of raw env; they never construct
+ * providers, wallets, or contract handles themselves.
  */
 export interface VaultContext {
   /** Endpoints + network id of the Midnight network in use. */
@@ -50,6 +56,15 @@ export interface VaultContext {
   readonly signetContractAddress: string;
   /** JSON-RPC endpoint of the EVM chain the vault operates on. */
   readonly evmRpcUrl: string;
+  /** Where the attestation polls obtain the serialised output the MPC attested (`RESPOND_OUTPUT_SOURCE`). */
+  readonly respondOutputSource: OutputSource;
+  /**
+   * Reader over the MPC's output cache, what {@link OutputSource.MPCCache}
+   * reads through: the cache `MPC_OUTPUT_CACHE_URL` names, else the one the
+   * SDK publishes for the network. Undefined under {@link OutputSource.EVMNode}
+   * with no `MPC_OUTPUT_CACHE_URL`, which that source never needs.
+   */
+  readonly mpcOutputCache: MpcOutputCacheReader | undefined;
   /** Chain id of that EVM chain. */
   readonly evmChainId: bigint;
   /** Address of the ERC20 token the vault holds (20-byte 0x hex). */
@@ -76,7 +91,9 @@ export interface VaultContext {
  * @param wallet - The started wallet (from the harness session's `wallet()`).
  * @param proofObserver - Called after every proof-server /check and /prove round trip.
  * @returns The context to hand to the flow functions.
- * @throws {Error} If a required env value is missing/malformed or no contract answers
+ * @throws {Error} If a required env value is missing/malformed
+ *   (`RESPOND_OUTPUT_SOURCE=mpc-cache` without `MPC_OUTPUT_CACHE_URL` on a
+ *   network the SDK publishes no cache for included) or no contract answers
  *   at `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
  */
 export async function createVaultContext(
@@ -99,6 +116,17 @@ export async function createVaultContext(
   }
 
   const vaultContractAddress = requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
+  const signetContractAddress = requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
+  const respondOutputSource = parseOutputSource(requireEnv(env, "RESPOND_OUTPUT_SOURCE"));
+  const cacheUrl = optionalEnv(env, "MPC_OUTPUT_CACHE_URL");
+  const mpcOutputCache =
+    respondOutputSource === OutputSource.MPCCache || cacheUrl
+      ? new MpcOutputCacheReader({
+          cacheUrl,
+          networkId: nodeConfig.networkId,
+          signetContractAddress,
+        })
+      : undefined;
   const identity = resolveUserIdentity(env);
   const providers = buildVaultProviders(wallet.facade, wallet.keys, nodeConfig, proofObserver);
 
@@ -112,8 +140,10 @@ export async function createVaultContext(
   return {
     nodeConfig,
     vaultContractAddress,
-    signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
+    signetContractAddress,
     evmRpcUrl: requireEnv(env, "EVM_RPC_URL"),
+    respondOutputSource,
+    mpcOutputCache,
     evmChainId,
     erc20Address,
     evmVaultAddress: requireEnv(env, "EVM_VAULT_ADDRESS"),
@@ -149,8 +179,6 @@ export function createResponseReader(
     requesterRequestsPath: requestsPath,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,
-    // The MPC's responses are read from the contract events the signet
-    // contract emits, through the same provider.
-    eventSource: signetEventSourceFromPublicDataProvider(context.providers.publicDataProvider),
+    eventSource: signetEventSourceFromIndexer({ queryUrl: context.nodeConfig.indexerUrl }),
   });
 }

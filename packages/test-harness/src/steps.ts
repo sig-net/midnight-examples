@@ -11,7 +11,7 @@
 // via {@link file://./setup-pipeline.ts runSetupPipeline} in vitest's main
 // process, so no `vitest` imports here.
 
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -28,10 +28,10 @@ import {
   isLocalStandaloneNetwork,
   type WalletRegistry,
 } from "@sig-net/midnight-contract-deploy";
-import { getEvmChainId, loadRepoDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
+import { getEvmChainId, parseDotEnv, REPO_ROOT } from "@sig-net/midnight-examples-lib";
 
 import { requireEnv } from "./e2e-env.ts";
-import { appendRepoDotEnv } from "./env-file.ts";
+import { appendRepoDotEnv, persistToDotEnv } from "./env-file.ts";
 import { runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { MpcKind, mpcKind } from "./mpc-kind.ts";
@@ -204,6 +204,21 @@ export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvV
 }
 
 /**
+ * Whether the env file at `filePath` holds `key` (any value), the check
+ * {@link appendRepoDotEnv} leaves to its caller.
+ *
+ * @param filePath - The env file to read; a missing file holds nothing.
+ * @param key - The env-var name to look for.
+ * @returns True when the file assigns `key`.
+ */
+function dotEnvHolds(filePath: string, key: string): boolean {
+  if (!existsSync(filePath)) {
+    return false;
+  }
+  return parseDotEnv(readFileSync(filePath, "utf8"))[key] !== undefined;
+}
+
+/**
  * Ensure `MPC_SECP256K1_PUBKEY` holds the MPC's root public key in canonical
  * form (`0x04…` uncompressed SEC1 hex, what every derivation reads). With
  * `MPC_ROOT_KEY` held (a fakenet) the key is derived from it and any preset
@@ -211,11 +226,20 @@ export function ensureMpcResponseKey(env: NodeJS.ProcessEnv, contractAddressEnvV
  * accepted spelling, or the SDK's published key) is canonicalised into the
  * accumulator.
  *
+ * A key derived here is appended to `.env` (append-only, skipped when the
+ * file already holds one): the derived public key is what an operator
+ * configures other tooling with after a run, so it must outlive the process.
+ *
  * @param env - The suite's env accumulator.
+ * @param dotEnvPath - The env file a derived key is appended to; defaults to
+ *   the repo-root `.env` (overridable so tests can target a scratch file).
  * @throws {Error} If a preset key mismatches the one derived from `MPC_ROOT_KEY`, is
  *   malformed, or nothing at all supplies a key.
  */
-export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
+export function ensureMpcSecp256k1Pubkey(
+  env: NodeJS.ProcessEnv,
+  dotEnvPath: string = join(REPO_ROOT, ".env"),
+): void {
   if (env.MPC_ROOT_KEY) {
     // A held root key names a fakenet, whose key the SDK never publishes: only
     // an environment preset is checked, never the network's published key.
@@ -239,9 +263,18 @@ export function ensureMpcSecp256k1Pubkey(env: NodeJS.ProcessEnv): void {
     env.MPC_SECP256K1_PUBKEY = derived;
     console.log(`generated a fresh MPC_SECP256K1_PUBKEY=${env.MPC_SECP256K1_PUBKEY}`);
     console.log(` ➜ used by contracts to validate signatures`);
-    console.log(
-      ` ➜ 💡 Set as MPC_SECP256K1_PUBKEY in the environment to skip this step on the next run`,
+    if (dotEnvHolds(dotEnvPath, "MPC_SECP256K1_PUBKEY")) {
+      console.log(
+        ` ➜ 💡 .env already holds an MPC_SECP256K1_PUBKEY the shell environment blanks: left as is`,
+      );
+      return;
+    }
+    appendRepoDotEnv(
+      { MPC_SECP256K1_PUBKEY: derived },
+      `appended by the test-harness setup (${new Date().toISOString()}): MPC_SECP256K1_PUBKEY derived from MPC_ROOT_KEY`,
+      dotEnvPath,
     );
+    console.log(` ➜ 💡 appended MPC_SECP256K1_PUBKEY to .env, so the next run skips this step`);
     return;
   }
   const preset = findMpcRootPublicKey(env);
@@ -426,15 +459,13 @@ const FAKENET_HANDOFF_KEYS = ["MPC_ROOT_KEY", "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"
 let fakenetHandoffAppended = false;
 
 /**
- * Persist the fakenet hand-off values to the repo-root `.env`, append-only.
- * Each key is checked against the FILE (not the process env): already there
- * with the run's value → nothing to do; absent → appended under a provenance
- * comment; present with a DIFFERENT value → hard error, because docker
- * compose reads the file and would start the responder against the stale
- * value while this run uses another.
+ * Persist the fakenet hand-off values to the repo-root `.env` via
+ * {@link persistToDotEnv}: docker compose reads the file to start the
+ * responder, so a value the file holds differently from this run is a hard
+ * error rather than a silent override.
  *
  * @param env - The suite's env accumulator (holds the run's values).
- * @throws {Error} If a hand-off key in `.env` conflicts with the run's value.
+ * @throws {Error} If a hand-off value is missing or `.env` holds it with a different value.
  */
 export function persistFakenetHandoffToDotEnv(env: NodeJS.ProcessEnv): void {
   if (mpcKind(env) === MpcKind.Real) {
@@ -448,37 +479,22 @@ export function persistFakenetHandoffToDotEnv(env: NodeJS.ProcessEnv): void {
     );
     return;
   }
-  const fileEnv = loadRepoDotEnv();
-  const toAppend: Record<string, string> = {};
-  for (const key of FAKENET_HANDOFF_KEYS) {
-    const runValue = requireEnv(env, key);
-    const fileValue = fileEnv[key];
-    if (fileValue === runValue) {
-      continue;
-    }
-    if (fileValue !== undefined) {
-      throw new Error(
-        `${key} conflicts: this run uses ${runValue} (from your shell environment) but .env holds ${fileValue}.` +
-          ` docker compose reads .env, so the fakenet responder would start against the stale value.` +
-          ` Reconcile the two (usually: update .env and unset the shell override), then rerun.`,
-      );
-    }
-    toAppend[key] = runValue;
-  }
-  if (Object.keys(toAppend).length === 0) {
+  for (const key of FAKENET_HANDOFF_KEYS) requireEnv(env, key);
+  const appended = persistToDotEnv(
+    env,
+    FAKENET_HANDOFF_KEYS,
+    `appended by the test-harness setup (${new Date().toISOString()}): fakenet responder hand-off`,
+  );
+  if (appended.length === 0) {
     logSkip(
       "persist fakenet hand-off to .env",
       `${FAKENET_HANDOFF_KEYS.join(" and ")} are already in .env`,
     );
     return;
   }
-  appendRepoDotEnv(
-    toAppend,
-    `appended by the test-harness setup (${new Date().toISOString()}) — fakenet responder hand-off`,
-  );
   fakenetHandoffAppended = true;
-  for (const [key, value] of Object.entries(toAppend)) {
-    console.log(`appended ${key}=${value} to .env`);
+  for (const key of appended) {
+    console.log(`appended ${key}=${requireEnv(env, key)} to .env`);
   }
   console.log(` ➜ docker compose interpolates the fakenet service's environment from .env`);
   console.log(` ➜ append-only: existing .env lines are never modified`);

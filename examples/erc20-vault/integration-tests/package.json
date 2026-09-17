@@ -9,6 +9,7 @@
     "test": "vitest run --passWithNoTests",
     "test:e2e": "RUN_INTEGRATION_TESTS=1 vitest run --disable-console-intercept --bail 1",
     "read-state": "tsx scripts/read-state.ts",
+    "setup-local": "tsx scripts/setup-local.ts",
     "benchmark:static": "tsx scripts/benchmark-static.ts",
     "benchmark:report": "tsx scripts/benchmark-report.ts"
   },
@@ -16,8 +17,8 @@
     "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
     "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.6",
-    "@sig-net/midnight": "0.21.0",
-    "@sig-net/midnight-contract-deploy": "0.21.0",
+    "@sig-net/midnight": "0.22.0",
+    "@sig-net/midnight-contract-deploy": "0.22.0",
     "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
     "@sig-net/midnight-examples-erc20-vault-deploy": "workspace:*",
     "@sig-net/midnight-examples-lib": "workspace:*",
@@ -29,6 +30,7 @@
     "compact-zkir-lint": "0.2.0",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vite": "8.1.4",
+    "vitest": "^5.0.0"
   }
 }

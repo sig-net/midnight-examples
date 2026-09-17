@@ -396,6 +396,23 @@ docker compose up -d                # node, indexer, proof server, anvil forking
 yarn test:erc20-vault:e2e           # the full e2e suite, serially, bail on first failure
 ```
 
+To bring the same stack up WITHOUT running the suite (a local development
+environment for a client, or for hand-driving the flows), run the setup
+pipeline on its own after `docker compose up -d`:
+
+```sh
+yarn setup-local:erc20-vault        # deploy signet + vault, initialise, persist to .env
+```
+
+It runs the suite's own setup steps in-process, then the deploy package's
+`initialise`, and appends every value it generated to `.env` under the names
+the suite reads: the role wallet seeds, `MPC_ROOT_KEY`, `MPC_SECP256K1_PUBKEY`,
+both contract addresses, `MPC_RESPONSE_KEY`, the derived EVM addresses,
+`EVM_CHAIN_ID`, `ERC20_ADDRESS`, `VAULT_DEPLOYER_SECRET_KEY` and
+`MAINTENANCE_SIGNING_KEY`. Append-only: a value already in `.env` is left
+alone, and one that differs from the run's is an error. A following
+`yarn test:erc20-vault:e2e` reuses the stack with every setup step skipping.
+
 Offline checks that need no stack and no proving keys beyond `yarn compile`:
 
 ```sh
@@ -465,7 +482,11 @@ repo root, with stagenet as the example network:
 NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
 ROOT_SEED=                 # funded via the network's faucet (the first run prints the address and URL)
 MAINTENANCE_SIGNING_KEY=   # 32 bytes of hex, required on any deployed network
-EVM_RPC_URL=               # a REAL Sepolia RPC that serves debug_traceTransaction
+EVM_RPC_URL=               # a REAL Sepolia RPC; must serve debug_traceTransaction unless mpc-cache below
+# Optional: read the deposit and withdraw attestations' output bytes from the
+# MPC's output cache (the one the SDK publishes for the network) instead of
+# recomputing them from the trace.
+#RESPOND_OUTPUT_SOURCE=mpc-cache
 ```
 
 What differs from the local loop:
@@ -487,9 +508,21 @@ What differs from the local loop:
 - **A tracing RPC, as everywhere.** `EVM_RPC_URL` must serve
   `debug_traceTransaction` on every network (the attestation polls recover
   each execution output by tracing the mined transaction, the method the MPC
-  itself observes with), and the setup refuses an endpoint without it before
-  anything is deployed. The local anvil serves it, and hosted Sepolia
-  endpoints often gate it behind a paid tier.
+  itself observes with), and under `evm-node` the setup refuses an endpoint
+  without it before anything is deployed. The local anvil serves it, and
+  hosted Sepolia endpoints often gate it behind a paid tier.
+- **Optionally, the MPC's output cache.** An MPC configured with output
+  storage uploads the exact bytes it attests for each request to a public
+  bucket before it posts the attestation. `RESPOND_OUTPUT_SOURCE=mpc-cache`
+  makes the deposit and withdraw polls download those bytes from the cache
+  the SDK publishes for the network (`getMpcOutputCacheUrl`), or from
+  `MPC_OUTPUT_CACHE_URL` when set (the cache's URL down to the MPC's object
+  prefix, the poll appending `/<network>/<signet address>/<request id>.bin`),
+  instead of recomputing them from the trace; the same signature check then
+  selects them. The setup then accepts a non-tracing `EVM_RPC_URL`, which
+  is enough for the deposit and withdraw specs. The swap, supply and redeem
+  polls always trace, so their specs still need a tracing endpoint and fail
+  at the poll without one.
 - **Only the specs that never sign as the vault run here:** `happy-day-e2e`,
   `bearer-transfer`, `swap-e2e`, `supply-redeem-e2e` and `swap-refund-e2e`.
   The others force reverts with a vault key re-derived from `MPC_ROOT_KEY`
@@ -611,7 +644,8 @@ circuit later, so a deploy to any network other than the local standalone chain
 REQUIRES it and fails fast when it is unset. On the local chain, which is
 throwaway, an unset key makes the deploy generate an ephemeral one and print it,
 so a `yarn resume-deploy:erc20-vault` after a failed maintenance add can export
-it.
+it. The e2e setup and `yarn setup-local:erc20-vault` generate it before the
+deploy, so their printout and the persisted `.env` carry it.
 
 ### Deploying from CI
 

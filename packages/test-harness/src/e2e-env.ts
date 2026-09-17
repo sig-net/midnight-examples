@@ -22,3 +22,20 @@ export function requireEnv(env: NodeJS.ProcessEnv, name: string): string {
   }
   return value;
 }
+
+/**
+ * Read an optional env value, a blank one counting as unset: a `.env`
+ * template's empty `NAME=` line means "use the default", never "the empty
+ * string".
+ *
+ * @param env - The suite's env accumulator.
+ * @param name - The env-var name to read.
+ * @returns The non-empty value, or undefined.
+ */
+export function optionalEnv(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const value = env[name];
+  if (!value) {
+    return undefined;
+  }
+  return value;
+}
