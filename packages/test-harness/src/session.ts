@@ -7,10 +7,7 @@
 // contract-specific (providers, joined contract handles, identity) is the
 // example's: it wraps {@link E2eSession.wallet} to build its own context.
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
-import {
-  signetEventSourceFromPublicDataProvider,
-  SignetRequestResponseReader,
-} from "@sig-net/midnight";
+import { signetEventSourceFromIndexer, SignetRequestResponseReader } from "@sig-net/midnight";
 import {
   type AccountKeys,
   deriveAccountKeys,
@@ -130,9 +127,7 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
         requesterRequestsPath: requestsPath,
         signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
         publicDataProvider,
-        // The MPC's responses are read from the contract events the
-        // signet contract emits, through the same provider.
-        eventSource: signetEventSourceFromPublicDataProvider(publicDataProvider),
+        eventSource: signetEventSourceFromIndexer({ queryUrl: nodeConfig.indexerUrl }),
       });
       readersByPath.set(key, reader);
       return reader;

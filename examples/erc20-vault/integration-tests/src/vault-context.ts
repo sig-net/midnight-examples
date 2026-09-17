@@ -13,7 +13,7 @@ import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
 import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import {
   MpcOutputCacheReader,
-  signetEventSourceFromPublicDataProvider,
+  signetEventSourceFromIndexer,
   SignetRequestResponseReader,
 } from "@sig-net/midnight";
 import { getMidnightNodeConfig, type MidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
@@ -179,8 +179,6 @@ export function createResponseReader(
     requesterRequestsPath: requestsPath,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,
-    // The MPC's responses are read from the contract events the signet
-    // contract emits, through the same provider.
-    eventSource: signetEventSourceFromPublicDataProvider(context.providers.publicDataProvider),
+    eventSource: signetEventSourceFromIndexer({ queryUrl: context.nodeConfig.indexerUrl }),
   });
 }
