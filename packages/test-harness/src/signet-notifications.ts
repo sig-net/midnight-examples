@@ -3,38 +3,19 @@
 // means polling — this module owns only that plumbing; every assertion on
 // the decoded notification stays in the test bodies.
 
-import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import {
-  decodeSignBidirectionalEventNotificationPayload,
-  decodeSignBidirectionalNotification,
+  type DecodedSignetEventNamed,
+  decodeSignetEventNamed,
+  type IndexedSignetMiscEvent,
   type RequestIdHex,
-  requestIdHex,
   type SignBidirectionalNotification,
   SignetEventName,
-  signetEventSourceFromPublicDataProvider,
-  type SignetMiscEvent,
+  signetEventSourceFromIndexer,
   stripHexPrefix,
 } from "@sig-net/midnight";
 import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 
 import { requireEnv } from "./e2e-env.ts";
-
-/**
- * Whether a decoded signet event carries `name`.
- *
- * {@link SignetMiscEvent.name} is a bare `string` decoded off the wire, so a
- * direct `===` against the {@link SignetEventName} enum compares two values
- * that share no enum type. The widening belongs here, once, rather than at
- * each call site.
- *
- * @param event - The decoded signet event.
- * @param name - The event name to match.
- * @returns Whether the event carries that name.
- */
-export function isSignetEventNamed(event: SignetMiscEvent, name: SignetEventName): boolean {
-  const expected: string = name;
-  return event.name === expected;
-}
 
 /** What to poll the signet contract's notification events for. */
 export interface SignetNotificationPoll {
@@ -72,38 +53,31 @@ export async function pollSignetNotification(
   options: SignetNotificationPoll,
 ): Promise<SignBidirectionalNotification> {
   const signetAddress = requireEnv(options.env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
-  const nodeConfig = getMidnightNodeConfig(options.env);
-  const eventSource = signetEventSourceFromPublicDataProvider(
-    indexerPublicDataProvider({
-      queryURL: nodeConfig.indexerUrl,
-      subscriptionURL: nodeConfig.indexerWsUrl,
-    }),
-  );
+  const eventSource = signetEventSourceFromIndexer({
+    queryUrl: getMidnightNodeConfig(options.env).indexerUrl,
+  });
   const expectedCaller = stripHexPrefix(options.callerAddress).toLowerCase();
   const expectedPath = [...options.requestsPath];
 
   const timeoutMs = options.timeoutMs ?? 60_000;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const events = await eventSource.querySignetEvents(signetAddress);
-    for (const event of events) {
-      if (!isSignetEventNamed(event, SignetEventName.SignBidirectionalEvent)) continue;
-      let declaredId: RequestIdHex;
-      let decoded: SignBidirectionalNotification;
+    for await (const event of eventSource.streamSignetEvents(signetAddress)) {
+      let decoded:
+        | DecodedSignetEventNamed<SignetEventName.SignBidirectionalEvent, IndexedSignetMiscEvent>
+        | undefined;
       try {
-        const post = decodeSignBidirectionalEventNotificationPayload(event.payload);
-        declaredId = requestIdHex(post.requestId);
-        decoded = decodeSignBidirectionalNotification(post.event);
+        decoded = decodeSignetEventNamed(event, SignetEventName.SignBidirectionalEvent);
       } catch {
         continue;
       }
       if (
-        declaredId === options.requestId &&
-        decoded.callerAddress === expectedCaller &&
-        decoded.requestsPath.length === expectedPath.length &&
-        decoded.requestsPath.every((entry, i) => entry === expectedPath[i])
+        decoded?.requestId === options.requestId &&
+        decoded.record.callerAddress === expectedCaller &&
+        decoded.record.requestsPath.length === expectedPath.length &&
+        decoded.record.requestsPath.every((entry, i) => entry === expectedPath[i])
       ) {
-        return decoded;
+        return decoded.record;
       }
     }
     await new Promise((r) => setTimeout(r, 1000));
