@@ -9,11 +9,11 @@
 # Caches (keyed on the pinned compiler version and the contract sources):
 #   compact-*  : the compact toolchain (~/.compact + the launcher binary),
 #                keyed on the pinned compiler version.
-#   zk-keys-*  : the example contract's prover/verifier keys, keyed on the
-#                compiler version + every .compact source in the repo; a hit
-#                lets the suite's setup skip ~10 min of keygen via
-#                TRUST_PREBUILT_ZK_KEYS (fresh by construction: the key
-#                changes whenever any contract source changes).
+#   zk-keys-*  : the example contract's compiled managed/ output, prover and
+#                verifier keys included, keyed on the compiler version + every
+#                Compact source the compile reads (the example's own and the
+#                SDK's under node_modules); a hit lets the suite's setup skip
+#                ~10 min of keygen via TRUST_PREBUILT_ZK_KEYS.
 
 name: example-test
 
@@ -133,12 +133,34 @@ jobs:
       # imports, so lint cannot run on a clean checkout before compile.
       - name: Lint (eslint, type-aware)
         run: yarn lint
+      - name: Hash the Compact sources the contract compiles (part of the zk cache key)
+        id: compact-sources
+        env:
+          EXAMPLE_DIR: ${{ inputs.example-dir }}
+        run: |
+          # managed/ is a function of every Compact file the compile reads: the
+          # example's own sources and the SDK's, imported through
+          # COMPACT_PATH=node_modules. An SDK bump changes only the SDK's.
+          # Both sets must be non-empty: a glob that stops matching drops its
+          # files from the key while runs keep reporting hits. The SDK glob
+          # skips the workspace's own midnight-examples-* members, which yarn
+          # symlinks into node_modules/@sig-net.
+          shopt -s nullglob extglob
+          export LC_ALL=C
+          own=(examples/"$EXAMPLE_DIR"/contract/src/*.compact)
+          sdk=(node_modules/@sig-net/!(midnight-examples-*)/src/*.compact)
+          if [ "${#own[@]}" -eq 0 ] || [ "${#sdk[@]}" -eq 0 ]; then
+            echo "::error::zk cache key: found ${#own[@]} example and ${#sdk[@]} SDK Compact sources, and both sets must be non-empty"
+            exit 1
+          fi
+          sha256sum "${own[@]}" "${sdk[@]}"
+          echo "hash=$(sha256sum "${own[@]}" "${sdk[@]}" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Restore prebuilt zk proving keys
         id: zk
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: examples/${{ inputs.example-dir }}/contract/src/managed
-          key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
+          key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ steps.compact-sources.outputs.hash }}
       # Inputs reach run blocks via env, never inline ${{ }} interpolation:
       # inline expansion into shell is a code-injection surface.
       - name: zk keygen (cache miss only)
@@ -151,7 +173,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: examples/${{ inputs.example-dir }}/contract/src/managed
-          key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ hashFiles('examples/*/contract/src/*.compact') }}
+          key: zk-keys-${{ runner.os }}-${{ inputs.example-dir }}-${{ steps.compact.outputs.version }}-${{ steps.compact-sources.outputs.hash }}
       - name: Build (typecheck, no emit)
         run: yarn build
       - name: Unit tests (simulator-only; e2e files self-skip without RUN_INTEGRATION_TESTS)
