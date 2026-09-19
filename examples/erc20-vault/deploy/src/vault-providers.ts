@@ -27,6 +27,7 @@ import {
   type ProofServerObserver,
 } from "@sig-net/midnight-examples-lib";
 
+import { guaranteedOnlyProofProvider } from "./guaranteed-only.ts";
 import { VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
 
 /**
@@ -123,11 +124,15 @@ export function buildVaultProviders(
     // proof server only proves the wallet's own balancing additions when it
     // finalizes a recipe. The call transcript is proven here first. Spans the
     // vault AND the signet contract so deposit's cross-contract call
-    // resolves keys for the whole call tree.
-    proofProvider: createCrossContractProofServerProvider(
-      config.proofServerUrl,
-      [vaultZkConfigProvider, signetZkConfigProvider],
-      proofObserver,
+    // resolves keys for the whole call tree. Wrapped: Sig signs guaranteed
+    // calls only, so a request the ledger's builder demoted to the fallible
+    // section is refused here, before any proof is made.
+    proofProvider: guaranteedOnlyProofProvider(
+      createCrossContractProofServerProvider(
+        config.proofServerUrl,
+        [vaultZkConfigProvider, signetZkConfigProvider],
+        proofObserver,
+      ),
     ),
 
     // Creates proven, balanced transactions.
