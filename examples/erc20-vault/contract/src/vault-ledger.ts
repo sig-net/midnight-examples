@@ -75,3 +75,16 @@ function printRequestMap(
     console.log(`- ${requestIdHex} (requestNonce ${String(request.requestNonce)})`);
   }
 }
+
+/**
+ * The request nonce `startDeposit` will stamp on this caller's next deposit.
+ *
+ * @param state - The decoded vault ledger state.
+ * @param callerCommitment - The caller's 32-byte identity commitment.
+ * @returns The caller's next deposit request nonce.
+ */
+export function depositRequestNonce(state: VaultLedgerState, callerCommitment: Uint8Array): bigint {
+  return state.depositRequestNonces.member(callerCommitment)
+    ? state.depositRequestNonces.lookup(callerCommitment).read()
+    : 0n;
+}

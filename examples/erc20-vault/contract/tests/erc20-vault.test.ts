@@ -11,7 +11,7 @@ import {
 } from "@midnight-ntwrk/compact-runtime";
 // This tree's wasm ContractState class: see signetStateProvider for why the
 // portal-linked signet module's state must round-trip through it.
-import { ContractState } from "@midnightntwrk/onchain-runtime-v4";
+import { ContractState, CostModel, QueryContext } from "@midnightntwrk/onchain-runtime-v4";
 import {
   asciiPadded,
   bytesToHex,
@@ -526,8 +526,8 @@ describe("deposit round-trip", () => {
       amount: AMOUNT,
     });
 
-    // Nonce bumped for the next request.
-    expect(ledger(state).signetRequestNonce).toBe(1n);
+    expect(ledger(state).depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(1n);
+    expect(ledger(state).signetRequestNonce).toBe(0n);
   });
 });
 
@@ -595,6 +595,27 @@ describe("deposit validation", () => {
     expect(index.size).toBe(2);
     const nonces = [...index.values()].map((r) => r.requestNonce).sort();
     expect(nonces).toEqual([0n, 1n]);
+  });
+
+  it("the SAME caller depositing twice advances THEIR slot and leaves signetRequestNonce at 0", async () => {
+    const { contract, ctx } = await deployInitialised();
+
+    const stateBefore = ledger(ctx.callContext.currentQueryContext.state);
+    expect(stateBefore.depositRequestNonces.member(DEPLOYER_COMMITMENT)).toBe(false);
+    expect(stateBefore.signetRequestNonce).toBe(0n);
+
+    const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
+    const stateAfterFirst = ledger(afterFirst.callContext.currentQueryContext.state);
+    expect(stateAfterFirst.depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(1n);
+
+    const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
+    const stateAfterSecond = ledger(afterSecond.callContext.currentQueryContext.state);
+
+    expect(stateAfterSecond.depositRequestNonces.lookup(DEPLOYER_COMMITMENT).read()).toBe(2n);
+    expect(stateAfterSecond.signetRequestNonce).toBe(0n);
+
+    const index = toSignBidirectionalEventIndex(stateAfterSecond.depositEventMap);
+    expect([...index.values()].map((record) => record.requestNonce).sort()).toEqual([0n, 1n]);
   });
 
   it("two identities depositing identical requests get DISTINCT ids: the path differentiates them", async () => {
@@ -2364,4 +2385,96 @@ describe("cross-kind settle isolation", () => {
       await expect(settle(await approveRouterRequested())).rejects.toThrow(throws);
     },
   );
+});
+
+interface VaultCall {
+  contractAddress: string;
+  publicTranscript: unknown;
+  initialQueryContext: { block: unknown; state: unknown };
+  finalQueryContext: { effects: unknown };
+}
+const vaultCallOf = (run: { context: CircuitContext<VaultPrivateState> }): VaultCall => {
+  const trace = run.context.callProofDataTrace as unknown as VaultCall[];
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const call = trace[i];
+    if (call?.contractAddress === VAULT_ADDRESS) return call;
+  }
+  throw new Error("no vault call in the proof-data trace");
+};
+const gasOf = (run: { context: CircuitContext<VaultPrivateState> }): Record<string, unknown> => {
+  const gas = (run.context.gasCosts as Record<string, Record<string, unknown> | undefined>)[
+    VAULT_ADDRESS
+  ];
+  if (!gas) throw new Error("no vault gas cost on the run");
+  return gas;
+};
+
+const stateOf = (ctx: CircuitContext<VaultPrivateState>): unknown =>
+  ctx.callContext.currentQueryContext.state;
+
+const withHeadroom = (gas: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(gas).map(([k, v]) => [k, typeof v === "bigint" ? v * 8n : v]));
+
+const replay = (
+  state: unknown,
+  run: { context: CircuitContext<VaultPrivateState> },
+  headroom = false,
+): string => {
+  const call = vaultCallOf(run);
+  const qc = new QueryContext(state as never, VAULT_ADDRESS);
+  (qc as unknown as { block: unknown }).block = call.initialQueryContext.block;
+  const gas = gasOf(run);
+  const transcript = {
+    gas: headroom ? withHeadroom(gas) : gas,
+    effects: call.finalQueryContext.effects,
+    program: call.publicTranscript,
+  };
+  try {
+    qc.runTranscript(transcript as never, CostModel.initialCostModel());
+    return "applied";
+  } catch (e) {
+    return "REJECTED: " + String((e as { message?: string }).message ?? e).slice(0, 160);
+  }
+};
+
+describe("throughput: shared signetRequestNonce serializes vault requests", () => {
+  it("CONTROL: a deposit applies against the state it was built on (harness sanity)", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const builtOn = stateOf(ctx);
+    const run = await deposit(contract, ctx, VALID_DEPOSIT);
+    expect(replay(builtOn, run)).toBe("applied");
+  });
+
+  it("REQUIREMENT (red today): two concurrent startDeposits from different callers both apply", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const alice = await deposit(contract, ctx, VALID_DEPOSIT);
+    const stateAfterAlice = alice.context.callContext.currentQueryContext.state;
+    const bobCtx = await strangerContext("startDeposit", ctx);
+    const bob = await deposit(contract, bobCtx, VALID_DEPOSIT);
+    expect(replay(stateAfterAlice, bob, true)).toBe("applied");
+  });
+
+  it("CONTROL: the still-shared approve path fails exactly as the vault flows used to", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const alice = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
+    const stateAfterAlice = stateOf(alice.context);
+    const bobCtx = await strangerContext("approveRouter", ctx);
+    const bob = await contract.circuits.approveRouter(bobCtx, ERC20, 0n, 1n);
+    expect(replay(stateAfterAlice, bob, true)).toMatch(/mismatch between expected .* read/);
+  });
+
+  it("ANTI-REPLAY GUARD (must stay green): a caller's identical repeat gets a fresh id", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const idsOf = (c: CircuitContext<VaultPrivateState>): string[] => [
+      ...toSignBidirectionalEventIndex(
+        ledger(c.callContext.currentQueryContext.state).depositEventMap,
+      ).keys(),
+    ];
+    const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
+    const before = idsOf(afterFirst);
+    const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
+    const fresh = idsOf(afterSecond).filter((k) => !before.includes(k));
+    expect(fresh.length).toBe(1);
+    expect(before).not.toContain(fresh[0]);
+  });
 });

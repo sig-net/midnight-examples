@@ -16,7 +16,11 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
-import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  depositRequestNonce,
+  evmAddressBytes,
+  readVaultLedger,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import {
@@ -80,7 +84,6 @@ export async function startDeposit(
 
   console.log(`caller commitment: ${context.identity.commitmentHex}`);
 
-  // Pre-call ledger read: the request nonce the contract will use, the sealed
   // vault EVM address its calldata will pay to, and the pinned chain config.
   await logTokenAmount(
     context.evmRpcUrl,
@@ -96,7 +99,7 @@ export async function startDeposit(
   if (!before.initialised) {
     throw new Error("vault is not initialised, run the initialise flow first");
   }
-  const requestNonce = before.signetRequestNonce;
+  const requestNonce = depositRequestNonce(before, context.identity.commitment);
   const vaultEvmAddress = before.vaultEvmAddress;
 
   const gasLimit = ERC20_TRANSFER_GAS_LIMIT;
