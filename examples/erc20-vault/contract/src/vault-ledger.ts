@@ -75,3 +75,28 @@ function printRequestMap(
     console.log(`- ${requestIdHex} (requestNonce ${String(request.requestNonce)})`);
   }
 }
+
+/** The transaction kinds the vault signs with its own EVM account. */
+export type VaultGasKind = "withdraw" | "approve" | "swap" | "supply" | "redeem";
+
+/** The EIP-1559 gas envelope of one vault-signed transaction. */
+export interface VaultGasEnvelope {
+  readonly gasLimit: bigint;
+  readonly maxFeePerGas: bigint;
+  readonly maxPriorityFeePerGas: bigint;
+}
+
+/**
+ * The gas envelope the circuits stamp on a `kind` transaction, read from the ledger.
+ *
+ * @param state - The decoded vault ledger state.
+ * @param kind - The vault-signed operation.
+ * @returns The gas limit for that kind plus the fee ceiling and tip.
+ */
+export function vaultGasEnvelope(state: VaultLedgerState, kind: VaultGasKind): VaultGasEnvelope {
+  return {
+    gasLimit: state.vaultGasLimits[kind],
+    maxFeePerGas: state.vaultMaxFeePerGas,
+    maxPriorityFeePerGas: state.vaultMaxPriorityFeePerGas,
+  };
+}

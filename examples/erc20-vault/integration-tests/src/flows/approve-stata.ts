@@ -23,6 +23,7 @@ import {
   evmAddressBytes,
   readVaultLedger,
   STATA_USDC,
+  vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   type ContractReadMethod,
@@ -32,11 +33,6 @@ import {
 
 import { logEvmFeeCap } from "../evm-logging.ts";
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-stata.ts";
-import {
-  ERC20_TRANSFER_GAS_LIMIT,
-  ERC20_TRANSFER_MAX_FEE_PER_GAS,
-  ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
-} from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { VaultContext } from "../vault-context.ts";
@@ -59,6 +55,8 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
   if (!before.initialised)
     throw new Error("vault is not initialised, run the initialise flow first");
 
+  const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "approve");
+
   // approve(stataToken, MAX) on the underlying USDC, signed with the vault account (path
   // "vault"), the same 2-word map + bool schema as a transfer.
   const expectedRecord: SignBidirectionalEvent = {
@@ -72,9 +70,9 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
       to: evmAddressBytes(AAVE_USDC),
       chainId: before.evmChainId,
       nonce: evmNonce,
-      gasLimit: ERC20_TRANSFER_GAS_LIMIT,
-      maxFeePerGas: ERC20_TRANSFER_MAX_FEE_PER_GAS,
-      maxPriorityFeePerGas: ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
       value: 0n,
       accessListEntryCount: 0n,
       accessList: [],

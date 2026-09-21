@@ -10,7 +10,13 @@
 // its request instead of recording a fresh one, and a leg a prior run already settled skips
 // its settle.
 import type { RequestIdHex } from "@sig-net/midnight";
-import { AAVE_USDC, STATA_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  AAVE_USDC,
+  readVaultLedger,
+  STATA_USDC,
+  vaultGasEnvelope,
+  type VaultGasKind,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { banner, getErc20Balance, getEthBalance } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
@@ -18,8 +24,6 @@ import { formatEther, formatUnits, parseEther } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { fundingSummary } from "../src/evm-logging.ts";
-import { STATA_GAS_LIMIT, STATA_MAX_FEE_PER_GAS } from "../src/evm-stata.ts";
-import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runRedeemRoundTrip } from "../src/flows/redeem-round-trip.ts";
@@ -72,9 +76,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave lending e2
       ).toBeGreaterThanOrEqual(required);
 
       // The vault's derived account sends the wrapper approve (first use), the supply and the redeem.
-      const gasBudget =
-        ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS +
-        2n * STATA_GAS_LIMIT * STATA_MAX_FEE_PER_GAS;
+      const ledgerState = await readVaultLedger(
+        context.providers.publicDataProvider,
+        context.vaultContractAddress,
+      );
+      const cost = (kind: VaultGasKind): bigint => {
+        const envelope = vaultGasEnvelope(ledgerState, kind);
+        return envelope.gasLimit * envelope.maxFeePerGas;
+      };
+      const gasBudget = cost("approve") + cost("supply") + cost("redeem");
       const vaultEth = await getEthBalance(context.evmRpcUrl, context.evmVaultAddress);
       console.log(
         `${context.evmVaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,

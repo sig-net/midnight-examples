@@ -62,6 +62,8 @@ jobs:
       # mints tokenOut + change), and every refund branch (withdraw-failure, swap-failure,
       # supply-failure, redeem-failure), plus the Aave lending round-trip (supply USDC ->
       # stataUSDC -> redeem). One spec per refund circuit, so a broken refund branch
-      # fails the gate. The full suite stays opt-in via workflow_dispatch.
-      gate-spec: "tests/happy-day-e2e.test.ts tests/swap-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/swap-refund-e2e.test.ts tests/supply-redeem-e2e.test.ts tests/supply-refund-e2e.test.ts tests/redeem-refund-e2e.test.ts"
+      # fails the gate. Plus the break-glass nonce replacement, which is the only
+      # exercise of the one circuit that unstalls the vault's single EVM nonce
+      # sequence. The full suite stays opt-in via workflow_dispatch.
+      gate-spec: "tests/happy-day-e2e.test.ts tests/swap-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/swap-refund-e2e.test.ts tests/supply-redeem-e2e.test.ts tests/supply-refund-e2e.test.ts tests/redeem-refund-e2e.test.ts tests/admin-replace-nonce-e2e.test.ts"
       full-suite: ${{ github.event_name == 'workflow_dispatch' && inputs.full-suite == true }}

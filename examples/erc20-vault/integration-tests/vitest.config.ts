@@ -27,6 +27,7 @@ const FILE_ORDER = [
   "supply-refund-e2e.test.ts",
   "swap-refund-e2e.test.ts",
   "redeem-refund-e2e.test.ts",
+  "admin-replace-nonce-e2e.test.ts",
 ];
 
 const rank = (moduleId: string): number => {
