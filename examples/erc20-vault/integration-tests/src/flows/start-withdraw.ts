@@ -19,6 +19,7 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -29,6 +30,7 @@ import { ERC20_TRANSFER_SELECTOR } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
+import { flushUntilNumbered, newQueueKey } from "./vault-queue.ts";
 
 /** Options for {@link startWithdraw}. */
 export interface StartWithdrawOptions {
@@ -36,8 +38,6 @@ export interface StartWithdrawOptions {
   readonly amount: bigint;
   /** Destination EVM address (20-byte 0x hex) receiving the ERC20. */
   readonly destEvmAddress: string;
-  /** Nonce of the VAULT's derived EVM account (the withdraw tx sender). */
-  readonly evmNonce: bigint;
 }
 
 /**
@@ -72,9 +72,6 @@ export async function startWithdraw(
   if (options.amount <= 0n) {
     throw new Error(`amount must be a positive integer; got ${String(options.amount)}.`);
   }
-  if (options.evmNonce < 0n) {
-    throw new Error(`evmNonce must be non-negative; got ${String(options.evmNonce)}.`);
-  }
   const destEvmAddress = evmAddressBytes(options.destEvmAddress);
   const erc20 = evmAddressBytes(context.erc20Address);
   console.log(`vault contract: ${context.vaultContractAddress}`);
@@ -99,7 +96,7 @@ export async function startWithdraw(
   }
 
   const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "withdraw");
-  const requestNonce = before.signetRequestNonce;
+  const requestNonce = pureCircuits.vaultSignedRequestNonce();
 
   // The surrendered coin: the vault token for THIS erc20, of exactly
   // `amount`, under a fresh random nonce.
@@ -110,6 +107,19 @@ export async function startWithdraw(
   };
 
   const keyVersion = SIGNET_DEFAULT_KEY_VERSION;
+  const key = newQueueKey();
+  const queued = await context.vault.callTx.startWithdraw(
+    {
+      erc20Address: erc20,
+      amount: options.amount,
+      destEvmAddress,
+      keyVersion,
+    },
+    coin,
+    key,
+  );
+  console.log(`withdraw queued in tx ${queued.public.txId}`);
+  const evmNonce = await flushUntilNumbered(context, key);
 
   // The record the contract will store, reconstructed byte for byte: the
   // event's own sender (the vault contract, kernel.self() in-circuit), the
@@ -127,7 +137,7 @@ export async function startWithdraw(
     txParams: {
       to: erc20,
       chainId: before.evmChainId,
-      nonce: options.evmNonce,
+      nonce: evmNonce,
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -153,17 +163,8 @@ export async function startWithdraw(
     expectedRecord.txParams.maxPriorityFeePerGas,
   );
 
-  const result = await context.vault.callTx.startWithdraw(
-    options.evmNonce,
-    keyVersion,
-    {
-      erc20Address: erc20,
-      amount: options.amount,
-      destEvmAddress,
-    },
-    coin,
-  );
-  console.log(`withdraw finalized in tx ${result.public.txId}`);
+  const result = await context.vault.callTx.sendWithdraw(key);
+  console.log(`withdraw sent in tx ${result.public.txId}`);
 
   // The ledger map key IS the record's transientHash digest: recomputing it
   // off-chain and finding it on the ledger proves both sides agree on every

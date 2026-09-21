@@ -44,7 +44,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault admin-replace-n
 
       const n = await minedNonce();
 
-      const blockingId = await approveRouter(context, BigInt(n));
+      const blockingId = await approveRouter(context);
       const blocking = await pollSignatureResponse(context, {
         requestId: blockingId,
         intervalMs: 1000,
@@ -53,7 +53,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault admin-replace-n
       });
       expect(blocking.nonce).toBe(n);
 
-      const queuedId = await approveRouter(context, BigInt(n + 1));
+      const queuedId = await approveRouter(context);
       const queued = await pollSignatureResponse(context, {
         requestId: queuedId,
         intervalMs: 1000,

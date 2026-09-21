@@ -85,9 +85,9 @@ describe("the chunk-1 block holds the event maps at their pinned offsets", () =>
       .map((field) => [field.name, [...field.index]] as const);
 
     expect(chunkOne).toEqual([
-      ["vaultEvmAddress", [1, 0]],
-      ["evmChainId", [1, 1]],
-      ["deployer", [1, 2]],
+      ["vaultEvmNonce", [1, 0]],
+      ["pendingVaultRequests", [1, 1]],
+      ["assignedNonces", [1, 2]],
       ["depositEventMap", [1, 3]],
       ["depositSettleViews", [1, 4]],
       ["withdrawSettleViews", [1, 5]],

@@ -5,7 +5,7 @@ import {
   readVaultLedger,
   VAULT_SWAP_REQUESTS_PATH,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
+import { logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { logTokenAmount } from "../evm-logging.ts";
 import { quoteExactOutputSingle } from "../evm-swap.ts";
@@ -108,13 +108,11 @@ export async function runSwapRoundTrip(
       "swap maximum input",
     );
 
-    const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
     requestId = await startSwap(context, {
       tokenOut: opts.tokenOut,
       fee: opts.fee,
       amountOut: opts.amountOut,
       amountInMaximum,
-      evmNonce,
     });
   }
   if (!/^[0-9a-f]{64}$/.test(requestId)) {

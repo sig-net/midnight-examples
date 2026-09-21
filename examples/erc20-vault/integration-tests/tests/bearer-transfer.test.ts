@@ -35,7 +35,6 @@ import {
   banner,
   getErc20Balance,
   getEthBalance,
-  getTransactionNonce,
   logSkip,
   requireEnv as requireEnvOf,
 } from "@sig-net/midnight-examples-test-harness";
@@ -329,15 +328,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // The `startWithdraw` circuit demands a surrendered coin of the full amount;
         // A's wallet holds none of the color, so balancing cannot fund it and
         // the attempt dies client-side — the tx is never submitted.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
         await expect(
           startWithdraw(context, {
             amount: WITHDRAW_AMOUNT,
             destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-            evmNonce,
           }),
         ).rejects.toThrow(/[Ii]nsufficient funds/);
 
@@ -377,15 +371,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // The withdraw tx sender is the VAULT's derived EVM account; its next
         // nonce comes from the chain. The destination is the user's derived
         // account, so the suite's funds cycle.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
         withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-          evmNonce,
         });
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
 

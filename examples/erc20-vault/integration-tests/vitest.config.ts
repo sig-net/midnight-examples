@@ -27,6 +27,8 @@ const FILE_ORDER = [
   "supply-refund-e2e.test.ts",
   "swap-refund-e2e.test.ts",
   "redeem-refund-e2e.test.ts",
+  "vault-queue-e2e.test.ts",
+  "vault-queue-benchmark.test.ts",
   "admin-replace-nonce-e2e.test.ts",
 ];
 
