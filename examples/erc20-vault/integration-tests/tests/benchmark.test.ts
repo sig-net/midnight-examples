@@ -113,6 +113,7 @@ import { startRedeem } from "../src/flows/start-redeem.ts";
 import { startSupply } from "../src/flows/start-supply.ts";
 import { startSwap } from "../src/flows/start-swap.ts";
 import { startWithdraw } from "../src/flows/start-withdraw.ts";
+import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -336,7 +337,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedApproveTransaction = await pollSignatureResponse(context, {
           requestId: approveRequestId,
           intervalMs: 1000,
-          timeoutMs: 2 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
         });
         const ms = stop();
@@ -344,7 +345,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         timings.approve.pollSignatureResponse = ms;
         recorder.recordLeg(BenchmarkLeg.ApprovePollSignatureResponse, ms);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -428,7 +429,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedDepositSweepTransaction = await pollSignatureResponse(context, {
           requestId: depositRequestId,
           intervalMs: 1000,
-          timeoutMs: 2 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_USER_ADDRESS"),
           requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
         });
@@ -437,7 +438,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         timings.deposit.pollSignatureResponse = ms;
         recorder.recordLeg(BenchmarkLeg.DepositPollSignatureResponse, ms);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -473,7 +474,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         depositOutcome = await pollRespondBidirectional(context, {
           requestId: depositRequestId,
           intervalMs: 1000,
-          timeoutMs: 2 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
         });
         const ms = stop();
@@ -486,7 +487,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           true,
         );
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -599,7 +600,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedWithdrawTransaction = await pollSignatureResponse(context, {
           requestId: withdrawRequestId,
           intervalMs: 1000,
-          timeoutMs: 2 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
         });
         const ms = stop();
@@ -607,7 +608,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         timings.withdraw.pollSignatureResponse = ms;
         recorder.recordLeg(BenchmarkLeg.WithdrawPollSignatureResponse, ms);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -641,7 +642,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         withdrawOutcome = await pollRespondBidirectional(context, {
           requestId: withdrawRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -655,7 +656,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "the MPC must attest the withdraw transfer as succeeded",
         ).toBe(true);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -735,7 +736,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const { requestId } = await runDepositRoundTrip(session, { amount: amountInMaximum });
         expect(requestId).toMatch(/^[0-9a-f]{64}$/);
       },
-      30 * MINUTE,
+      2 * POLL_TIMEOUT_MS + 30 * MINUTE,
     );
 
     it(
@@ -800,7 +801,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedSwapTransaction = await pollSignatureResponse(context, {
           requestId: swapRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
           requestsPath: VAULT_SWAP_REQUESTS_PATH,
         });
@@ -809,7 +810,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         timings.swap.pollSignatureResponse = ms;
         recorder.recordLeg(BenchmarkLeg.SwapPollSignatureResponse, ms);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -847,7 +848,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         swapOutcome = await pollSwapOutcome(context, {
           requestId: swapRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -862,7 +863,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "the MPC must attest the swap as executed (amountIn), not the failure output",
         ).toBe(false);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -931,7 +932,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
         expect(requestId).toMatch(/^[0-9a-f]{64}$/);
       },
-      30 * MINUTE,
+      2 * POLL_TIMEOUT_MS + 30 * MINUTE,
     );
 
     // Populated by the request leg below for the sign + broadcast legs.
@@ -976,7 +977,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedApproveStataTransaction = await pollSignatureResponse(context, {
           requestId: approveStataRequestId,
           intervalMs: 1000,
-          timeoutMs: 2 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
         });
         const ms = stop();
@@ -984,7 +985,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         timings.approveStata.pollSignatureResponse = ms;
         recorder.recordLeg(BenchmarkLeg.ApproveStataPollSignatureResponse, ms);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -1066,7 +1067,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedSupplyTransaction = await pollSignatureResponse(context, {
           requestId: supplyRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
           requestsPath: VAULT_SUPPLY_REQUESTS_PATH,
         });
@@ -1075,7 +1076,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         timings.supply.pollSignatureResponse = ms;
         recorder.recordLeg(BenchmarkLeg.SupplyPollSignatureResponse, ms);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -1115,7 +1116,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         supplyOutcome = await pollSupplyOutcome(context, {
           requestId: supplyRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -1130,7 +1131,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "the MPC must attest the supply as executed (shares), not the failure output",
         ).toBe(false);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -1249,7 +1250,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedRedeemTransaction = await pollSignatureResponse(context, {
           requestId: redeemRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
           requestsPath: VAULT_REDEEM_REQUESTS_PATH,
         });
@@ -1258,7 +1259,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         timings.redeem.pollSignatureResponse = ms;
         recorder.recordLeg(BenchmarkLeg.RedeemPollSignatureResponse, ms);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -1292,7 +1293,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         redeemOutcome = await pollRedeemOutcome(context, {
           requestId: redeemRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -1304,7 +1305,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "the MPC must attest the redeem as executed (assets), not the failure output",
         ).toBe(false);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -1381,7 +1382,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         expect(requestId).toMatch(/^[0-9a-f]{64}$/);
       },
-      15 * MINUTE,
+      2 * POLL_TIMEOUT_MS + 15 * MINUTE,
     );
 
     it(
@@ -1472,7 +1473,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedDoomedWithdrawTransaction = await pollSignatureResponse(context, {
           requestId: refundWithdrawRequestId,
           intervalMs: 1000,
-          timeoutMs: 2 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
         });
         const ms = stop();
@@ -1480,7 +1481,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         timings.refund.pollSignatureResponse = ms;
         recorder.recordLeg(BenchmarkLeg.RefundPollSignatureResponse, ms);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -1520,7 +1521,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         refundOutcome = await pollRespondBidirectional(context, {
           requestId: refundWithdrawRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -1534,7 +1535,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "a mined revert must be attested as the fixed MPC failure output",
         ).toBe(true);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(

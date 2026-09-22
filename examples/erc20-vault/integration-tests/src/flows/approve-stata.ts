@@ -38,12 +38,11 @@ import {
   ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
 } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
+import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { VaultContext } from "../vault-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
-
-const MINUTE = 60_000;
 
 /**
  * Record the approveStata request and return its id.
@@ -139,7 +138,7 @@ export async function ensureStataApproved(session: VaultSession): Promise<void> 
   const signed = await pollSignatureResponse(context, {
     requestId,
     intervalMs: 1000,
-    timeoutMs: 2 * MINUTE,
+    timeoutMs: POLL_TIMEOUT_MS,
     expectedSigner: context.evmVaultAddress,
   });
   await broadcastEvm(context, { transaction: signed });

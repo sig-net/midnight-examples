@@ -5,14 +5,13 @@ import { VAULT_DEPOSIT_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-va
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
 
+import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { settleDeposit, type ShieldedTokenRecipient } from "./complete-deposit.ts";
 import { pollRespondBidirectional } from "./poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
 import { startDeposit } from "./start-deposit.ts";
-
-const MINUTE = 60_000;
 
 /** Options for {@link runDepositRoundTrip}. */
 export interface DepositRoundTripOptions {
@@ -107,7 +106,7 @@ export async function runDepositRoundTrip(
   const signedSweepTransaction = await pollSignatureResponse(context, {
     requestId,
     intervalMs: 1000,
-    timeoutMs: 2 * MINUTE,
+    timeoutMs: POLL_TIMEOUT_MS,
     expectedSigner: context.evmUserAddress,
     requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
   });
@@ -119,7 +118,7 @@ export async function runDepositRoundTrip(
   const outcome = await pollRespondBidirectional(context, {
     requestId,
     intervalMs: 1000,
-    timeoutMs: 2 * MINUTE,
+    timeoutMs: POLL_TIMEOUT_MS,
     requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
   });
   // This helper arranges a SUCCESSFUL deposit — a failure attestation means

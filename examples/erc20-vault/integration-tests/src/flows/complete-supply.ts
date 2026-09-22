@@ -21,6 +21,7 @@ import { logTokenAmount } from "../evm-logging.ts";
 import { SUPPLY_OUTPUT_SCHEMA, SUPPLY_RESPOND_SCHEMA } from "../evm-stata.ts";
 import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
 import { PollProgress } from "../poll-progress.ts";
+import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 
 /** The resolved attested outcome of a supply (uint64 shares minted, or the failure output). */
@@ -136,11 +137,9 @@ export interface PollSupplyOutcomeOptions {
   readonly requestId: RequestIdHex;
   /** Poll interval; 1s when omitted. */
   readonly intervalMs?: number;
-  /** Give-up horizon; 6 minutes when omitted. */
+  /** Give-up horizon; {@link POLL_TIMEOUT_MS} when omitted. */
   readonly timeoutMs?: number;
 }
-
-const MINUTE = 60_000;
 
 /**
  * Poll until the MPC posts a signature-verified attestation for the supply
@@ -171,9 +170,9 @@ export async function pollSupplyOutcome(
 
   const progress = new PollProgress(
     `supply attestation ${options.requestId}`,
-    options.timeoutMs ?? 6 * MINUTE,
+    options.timeoutMs ?? POLL_TIMEOUT_MS,
   );
-  const end = Date.now() + (options.timeoutMs ?? 6 * MINUTE);
+  const end = Date.now() + (options.timeoutMs ?? POLL_TIMEOUT_MS);
   let candidates: SupplyCandidate[] | undefined;
   while (Date.now() < end) {
     const events = await reader.getRespondBidirectionalEvents(options.requestId);

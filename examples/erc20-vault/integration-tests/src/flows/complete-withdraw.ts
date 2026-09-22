@@ -12,6 +12,7 @@ import {
   respondBidirectionalEventToCircuitInput,
 } from "@sig-net/midnight";
 
+import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { pollRespondBidirectional } from "./poll-respond-bidirectional.ts";
 import type { RespondOutcome } from "./respond-output.ts";
@@ -86,8 +87,6 @@ export interface CompleteWithdrawOptions {
   readonly requestId: RequestIdHex;
 }
 
-const MINUTE = 60_000;
-
 /**
  * Poll until the withdrawal's attestation resolves, then settle:
  * {@link pollRespondBidirectional} over the shared request map followed by
@@ -105,7 +104,7 @@ export async function completeWithdraw(
   const outcome = await pollRespondBidirectional(context, {
     requestId: options.requestId,
     intervalMs: 1000,
-    timeoutMs: 6 * MINUTE,
+    timeoutMs: POLL_TIMEOUT_MS,
   });
   await settleWithdraw(context, options.requestId, outcome);
 }
