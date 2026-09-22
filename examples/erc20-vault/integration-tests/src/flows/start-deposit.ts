@@ -17,8 +17,9 @@ import {
   TxParamType,
 } from "@sig-net/midnight";
 import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { getErc20Balance } from "@sig-net/midnight-examples-test-harness";
 
-import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
+import { fundingSummary, logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import {
   ERC20_TRANSFER_GAS_LIMIT,
   ERC20_TRANSFER_MAX_FEE_PER_GAS,
@@ -60,8 +61,9 @@ export interface StartDepositOptions {
  * @param context - The flow context.
  * @param options - The deposit arguments.
  * @returns The request id as 64-char lowercase hex.
- * @throws {Error} If an option is invalid, the vault is uninitialised, or the
- *   recomputed id does not appear on the ledger.
+ * @throws {Error} If an option is invalid, the user's derived account holds less
+ *   than `amount` of the ERC20, the vault is uninitialised, or the recomputed id
+ *   does not appear on the ledger.
  */
 export async function startDeposit(
   context: VaultContext,
@@ -89,6 +91,21 @@ export async function startDeposit(
     options.amount,
     "start-deposit amount",
   );
+  // The sweep the MPC signs moves `amount` out of the user's derived account, so a request
+  // that account cannot pay is refused here: once recorded, its sweep reverts only after a
+  // Midnight proof is paid and an EVM nonce burned, and the request strands on the ledger.
+  const { balance, decimals } = await getErc20Balance(
+    context.evmRpcUrl,
+    erc20Address,
+    context.evmUserAddress,
+  );
+  const funding = fundingSummary(balance, options.amount, decimals, erc20Address);
+  console.log(`${context.evmUserAddress}: ${funding}`);
+  if (balance < options.amount) {
+    throw new Error(
+      `${context.evmUserAddress} cannot pay this deposit's sweep (${funding}): fund it on EVM and rerun`,
+    );
+  }
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,

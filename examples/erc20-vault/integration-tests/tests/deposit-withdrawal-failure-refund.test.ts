@@ -50,6 +50,7 @@ import {
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startWithdraw } from "../src/flows/start-withdraw.ts";
+import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
 // ethers types `hash` nullable for the unsigned case; a transaction that came
@@ -171,7 +172,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         expect(requestId).toMatch(/^[0-9a-f]{64}$/);
       },
-      15 * MINUTE,
+      2 * POLL_TIMEOUT_MS + 15 * MINUTE,
     );
 
     it(
@@ -255,7 +256,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedWithdrawTransaction = await pollSignatureResponse(context, {
           requestId: withdrawRequestId,
           intervalMs: 1000,
-          timeoutMs: 2 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
         });
 
@@ -265,7 +266,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Signed tx hash: ${signedTxHash(signedWithdrawTransaction)}`,
         ]);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -309,7 +310,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         withdrawAttestation = await pollRespondBidirectional(context, {
           requestId: withdrawRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
         });
 
         // The observable contract of the failure leg: the attested output must
@@ -330,7 +331,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `  MPC failure output:  true (signature-verified)`,
         ]);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(

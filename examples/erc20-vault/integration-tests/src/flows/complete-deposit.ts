@@ -16,6 +16,7 @@ import {
 import type { EncPublicKey } from "@sig-net/midnight-contract-deploy";
 import { VAULT_DEPOSIT_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { pollRespondBidirectional } from "./poll-respond-bidirectional.ts";
 import type { RespondOutcome } from "./respond-output.ts";
@@ -139,8 +140,6 @@ export interface CompleteDepositOptions {
   readonly recipient?: ShieldedTokenRecipient;
 }
 
-const MINUTE = 60_000;
-
 /**
  * Poll until the deposit's attestation resolves, then settle:
  * {@link pollRespondBidirectional} over the deposit request map followed by
@@ -158,7 +157,7 @@ export async function completeDeposit(
   const outcome = await pollRespondBidirectional(context, {
     requestId: options.requestId,
     intervalMs: 1000,
-    timeoutMs: 6 * MINUTE,
+    timeoutMs: POLL_TIMEOUT_MS,
     requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
   });
   await settleDeposit(context, options.requestId, outcome, options.recipient);

@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-twelve-spec suite (101 tests: eleven e2e specs carrying 95, plus the offline
+twelve-spec suite (106 tests: eleven e2e specs carrying 100, plus the offline
 `benchmark-tooling` spec carrying 6). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest
@@ -239,6 +239,14 @@ keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
   - `false-claimer`: `FALSE_CLAIMER_DEPOSIT_REQUEST_ID`
   - `bearer-transfer`: `BEARER_TRANSFER_DEPOSIT_REQUEST_ID` /
     `BEARER_TRANSFER_WITHDRAW_REQUEST_ID`
+  - `swap-e2e`: `SWAP_E2E_DEPOSIT_REQUEST_ID` / `SWAP_E2E_SWAP_REQUEST_ID`
+  - `supply-redeem-e2e`: `SUPPLY_REDEEM_DEPOSIT_REQUEST_ID` /
+    `SUPPLY_REDEEM_SUPPLY_REQUEST_ID` / `SUPPLY_REDEEM_REDEEM_REQUEST_ID`
+  - `supply-refund-e2e`: `SUPPLY_REFUND_DEPOSIT_REQUEST_ID` /
+    `SUPPLY_REFUND_SUPPLY_REQUEST_ID`
+  - `swap-refund-e2e`: `SWAP_REFUND_DEPOSIT_REQUEST_ID` / `SWAP_REFUND_SWAP_REQUEST_ID`
+  - `redeem-refund-e2e`: `REDEEM_REFUND_DEPOSIT_REQUEST_ID` /
+    `REDEEM_REFUND_SUPPLY_REQUEST_ID` / `REDEEM_REFUND_REDEEM_REQUEST_ID`
 
   `broadcastEvm` is idempotent, so already-mined transfers skip through, and
   every spec skips already-claimed/settled requests cleanly. Expect the OOM

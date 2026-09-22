@@ -675,15 +675,15 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `benchmark` | 43 | Per-leg wall-clock report covering every vault circuit: initialise (fresh deploys), approveRouter, startDeposit/completeDeposit, startWithdraw/completeWithdraw, startSwap/completeSwap, approveStata, startSupply/completeSupply, startRedeem/completeRedeem, and forced-revert refunds (`BENCHMARK_TIMINGS_JSON` greppable line) | `BENCHMARK_DEPOSIT_REQUEST_ID`, `BENCHMARK_WITHDRAW_REQUEST_ID`, `BENCHMARK_SWAP_REQUEST_ID`, `BENCHMARK_SUPPLY_REQUEST_ID`, `BENCHMARK_REDEEM_REQUEST_ID`, `BENCHMARK_REFUND_DEPOSIT_REQUEST_ID`, `BENCHMARK_REFUND_WITHDRAW_REQUEST_ID` |
 | `false-claimer` | 6 | A deposit recorded for identity A is NOT claimable by identity B, even with the valid MPC attestation | `FALSE_CLAIMER_DEPOSIT_REQUEST_ID` |
 | `bearer-transfer` | 11 | Shielded vault tokens are bearer assets: a plain Midnight transfer hands the claim to wallet B, the emptied wallet A cannot withdraw, and B completes a full withdraw on the transferred balance | `BEARER_TRANSFER_DEPOSIT_REQUEST_ID`, `BEARER_TRANSFER_WITHDRAW_REQUEST_ID` |
-| `swap-e2e` | 1 | A deposit-funded `exactOutputSingle` swap mints exactly the requested `amountOut` of tokenOut plus the unspent tokenIn as change | none |
-| `supply-redeem-e2e` | 1 | A deposit-funded Aave supply mints the attested stataUSDC shares, and redeeming them mints back the attested USDC (principal + interest) | none |
-| `supply-refund-e2e` | 1 | A supply whose wrapper deposit reverts on-chain (drained vault balance) ends in an in-circuit REFUND of the surrendered USDC | none |
-| `swap-refund-e2e` | 1 | A swap whose `amountInMaximum` is below the real cost reverts on-chain and the settle re-mints the surrendered tokenIn | none |
-| `redeem-refund-e2e` | 1 | A redeem whose wrapper burn reverts on-chain (drained vault stataUSDC balance) ends in an in-circuit REFUND of the surrendered shares | none |
+| `swap-e2e` | 2 | A deposit-funded `exactOutputSingle` swap mints exactly the requested `amountOut` of tokenOut plus the unspent tokenIn as change | `SWAP_E2E_DEPOSIT_REQUEST_ID`, `SWAP_E2E_SWAP_REQUEST_ID` |
+| `supply-redeem-e2e` | 2 | A deposit-funded Aave supply mints the attested stataUSDC shares, and redeeming them mints back the attested USDC (principal + interest) | `SUPPLY_REDEEM_DEPOSIT_REQUEST_ID`, `SUPPLY_REDEEM_SUPPLY_REQUEST_ID`, `SUPPLY_REDEEM_REDEEM_REQUEST_ID` |
+| `supply-refund-e2e` | 2 | A supply whose wrapper deposit reverts on-chain (drained vault balance) ends in an in-circuit REFUND of the surrendered USDC | `SUPPLY_REFUND_DEPOSIT_REQUEST_ID`, `SUPPLY_REFUND_SUPPLY_REQUEST_ID` |
+| `swap-refund-e2e` | 2 | A swap whose `amountInMaximum` is below the real cost reverts on-chain and the settle re-mints the surrendered tokenIn | `SWAP_REFUND_DEPOSIT_REQUEST_ID`, `SWAP_REFUND_SWAP_REQUEST_ID` |
+| `redeem-refund-e2e` | 2 | A redeem whose wrapper burn reverts on-chain (drained vault stataUSDC balance) ends in an in-circuit REFUND of the surrendered shares | `REDEEM_REFUND_DEPOSIT_REQUEST_ID`, `REDEEM_REFUND_SUPPLY_REQUEST_ID`, `REDEEM_REFUND_REDEEM_REQUEST_ID` |
 
-95 tests total across these specs. The offline `benchmark-tooling` spec (6
+100 tests total across these specs. The offline `benchmark-tooling` spec (6
 tests, no stack needed) is not pinned and runs last, so a full run reports
-101. The suite runs against a Sepolia fork, and the setup pipeline
+106. The suite runs against a Sepolia fork, and the setup pipeline
 verifies that the Uniswap router and the stataUSDC wrapper are deployed on it
 before any spec runs, so a fork missing either fails the run at setup with an
 error naming the missing contract. A rerun
