@@ -28,6 +28,7 @@ import { createResponseReader, type VaultContext } from "../vault-context.ts";
 export interface RedeemOutcome {
   readonly event: RespondBidirectionalEvent;
   readonly serializedOutput: Uint8Array;
+  readonly blockHeight: bigint;
   readonly assets: bigint;
   readonly matchedFailureOutput: boolean;
 }
@@ -35,6 +36,7 @@ export interface RedeemOutcome {
 /** One output a posted attestation may commit to, and the assets settling on it yields. */
 interface RedeemCandidate {
   readonly serializedOutput: Uint8Array;
+  readonly blockHeight: bigint;
   readonly assets: bigint;
   readonly isFailureOutput: boolean;
 }
@@ -82,6 +84,7 @@ async function fetchRedeemCandidates(
       const decoded = deserializeEvmOutput(REDEEM_OUTPUT_SCHEMA, observed.output);
       candidates.push({
         serializedOutput: serializeRespondOutput(REDEEM_RESPOND_SCHEMA, decoded),
+        blockHeight: observed.blockNumber,
         assets: (decoded as { assets: bigint }).assets,
         isFailureOutput: false,
       });
@@ -89,7 +92,12 @@ async function fetchRedeemCandidates(
       progress.failure("decode", `execution output decode failed: ${String(error)}`);
     }
   }
-  candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, assets: 0n, isFailureOutput: true });
+  candidates.push({
+    serializedOutput: MPC_FAILURE_OUTPUT,
+    blockHeight: observed.blockNumber,
+    assets: 0n,
+    isFailureOutput: true,
+  });
   return candidates;
 }
 
@@ -114,6 +122,7 @@ function matchRedeemOutcome(
     const event = events.find((posted) =>
       verifyRespondBidirectionalSignature(
         requestIdBytes(requestId),
+        candidate.blockHeight,
         candidate.serializedOutput,
         posted,
         mpcResponseKey,
@@ -123,6 +132,7 @@ function matchRedeemOutcome(
       return {
         event,
         serializedOutput: candidate.serializedOutput,
+        blockHeight: candidate.blockHeight,
         assets: candidate.assets,
         matchedFailureOutput: candidate.isFailureOutput,
       };
@@ -220,6 +230,7 @@ export async function settleRedeem(
       requestIdBytes(requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
+      outcome.blockHeight,
       mintNonce,
     );
     console.log(`refund settled in tx ${r.public.txId}`);
@@ -229,6 +240,7 @@ export async function settleRedeem(
     requestIdBytes(requestId),
     respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
+    outcome.blockHeight,
     mintNonce,
   );
   console.log(`completeRedeem settled in tx ${r.public.txId}`);

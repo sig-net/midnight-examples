@@ -26,7 +26,7 @@ import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import { EXACT_OUTPUT_SINGLE_SELECTOR, SWAP_MPC_ROUTING } from "../evm-swap.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
-import { flushUntilNumbered, newQueueKey } from "./vault-queue.ts";
+import { flushUntilStamped, newQueueKey } from "./vault-queue.ts";
 
 /** Options for {@link startSwap}. */
 export interface StartSwapOptions {
@@ -78,7 +78,7 @@ export async function startSwap(
     key,
   );
   console.log(`swap queued in tx ${queued.public.txId}`);
-  const evmNonce = await flushUntilNumbered(context, key);
+  const evmNonce = (await flushUntilStamped(context, key)).evmNonce;
 
   // The record the contract composes: vault path/sender, router `to`, contract-fixed gas,
   // exactOutputSingle((tokenIn, tokenOut, fee, recipient=vault, amountOut, amountInMaximum, 0)).

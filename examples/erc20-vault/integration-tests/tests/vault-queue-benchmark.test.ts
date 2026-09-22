@@ -53,8 +53,9 @@ import {
   assignedNonce,
   FLUSH_WIDTH,
   flushPending,
-  flushUntilNumbered,
-  unnumberedKeys,
+  flushUntilStamped,
+  queueKey,
+  unstampedKeys,
 } from "../src/flows/vault-queue.ts";
 import type { VaultContext } from "../src/vault-context.ts";
 import { createVaultSession, type VaultSession } from "../src/vault-session.ts";
@@ -287,14 +288,14 @@ const drain = async (context: VaultContext, items: readonly QueuedApprove[]): Pr
 };
 
 const drainQueue = async (context: VaultContext): Promise<number> => {
-  while ((await unnumberedKeys(context)).length > 0) await flushPending(context);
+  while ((await unstampedKeys(context)).length > 0) await flushPending(context);
   const state = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
   const numbered = [...state.pendingVaultRequests]
-    .filter(([key]) => state.assignedNonces.member(key))
-    .map(([key, entry]) => ({ key, entry, nonce: state.assignedNonces.lookup(key) }))
+    .filter(([key]) => state.stamps.member(key))
+    .map(([key, entry]) => ({ key, entry, nonce: state.stamps.lookup(key).evmNonce }))
     .sort((a, b) => (a.nonce < b.nonce ? -1 : 1));
   const requestIds: RequestIdHex[] = [];
   for (const { key, entry } of numbered) {
@@ -557,7 +558,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       const queueProve = lastProve("approveRouter");
 
       const stopOne = startTimer();
-      expect(await flushUntilNumbered(context, item.key)).toBe(base);
+      expect((await flushUntilStamped(context, item.key)).evmNonce).toBe(base);
       const oneWallMs = stopOne();
       const oneProve = lastProve("flush");
 
@@ -611,7 +612,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       );
 
       const stopFlush = startTimer();
-      for (const item of items) await flushUntilNumbered(context, item.key);
+      for (const item of items) await flushUntilStamped(context, item.key);
       const flushWallMs = stopFlush();
       const flushProve = lastProve("flush");
       const nonces: bigint[] = [];
@@ -758,14 +759,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       expect(queue.maxPerBlock).toBeGreaterThan(1);
 
       const stopFlush = startTimer();
-      for (const item of items) await flushUntilNumbered(owner, item.key);
+      for (const item of items) await flushUntilStamped(owner, item.key);
       const flushWallMs = stopFlush();
       const flushProve = lastProve("flush");
       const ledgerFlushed = await readVaultLedger(
         owner.providers.publicDataProvider,
         owner.vaultContractAddress,
       );
-      const nonces = items.map((item) => ledgerFlushed.assignedNonces.lookup(item.key));
+      const nonces = items.map((item) => ledgerFlushed.stamps.lookup(item.key).evmNonce);
       expect(nonces).toEqual(items.map((_, i) => base + BigInt(i)));
 
       const stopSend = startTimer();

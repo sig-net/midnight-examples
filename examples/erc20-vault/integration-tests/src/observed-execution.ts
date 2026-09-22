@@ -35,6 +35,7 @@ export interface ObservedExecution {
   readonly output: string | null;
   /** The remote transaction's hash. */
   readonly txHash: string;
+  readonly blockNumber: bigint;
 }
 
 const TRACE_METHOD = "debug_traceTransaction";
@@ -180,7 +181,13 @@ export async function observeExecution(
       );
     }
     if (receipt.status !== 1) {
-      return { requestId, success: false, output: null, txHash: receipt.hash };
+      return {
+        requestId,
+        success: false,
+        output: null,
+        txHash: receipt.hash,
+        blockNumber: BigInt(receipt.blockNumber),
+      };
     }
     let frame: CallTracerFrame;
     try {
@@ -192,7 +199,13 @@ export async function observeExecution(
         { cause: error },
       );
     }
-    return { requestId, success: true, output: frame.output ?? "0x", txHash: receipt.hash };
+    return {
+      requestId,
+      success: true,
+      output: frame.output ?? "0x",
+      txHash: receipt.hash,
+      blockNumber: BigInt(receipt.blockNumber),
+    };
   } finally {
     provider.destroy();
   }

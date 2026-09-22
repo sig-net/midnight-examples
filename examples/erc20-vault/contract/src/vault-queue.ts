@@ -1,7 +1,7 @@
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 
 import type { DeployedVaultContract } from "./contract-surface.ts";
-import { pureCircuits } from "./managed/erc20-vault/contract/index.js";
+import { pureCircuits, type Stamp } from "./managed/erc20-vault/contract/index.js";
 import { readVaultLedger, type VaultLedgerState } from "./vault-ledger.ts";
 
 /** Keys one `flush` call carries. */
@@ -66,17 +66,46 @@ export function myQueuedKeys(state: VaultLedgerState, secretKey: Uint8Array): Ui
 }
 
 /**
- * Queued keys that have no EVM nonce yet, in ledger order.
+ * Queued keys the flush has not stamped yet, in ledger order.
  *
  * @param state - The vault ledger state.
- * @returns The keys a flush can still number.
+ * @returns The keys a flush can still stamp.
  */
-export function unnumberedKeys(state: VaultLedgerState): Uint8Array[] {
+export function unstampedKeys(state: VaultLedgerState): Uint8Array[] {
   const keys: Uint8Array[] = [];
   for (const [key] of state.pendingVaultRequests) {
-    if (!state.assignedNonces.member(key)) keys.push(key);
+    if (!state.stamps.member(key)) keys.push(key);
   }
   return keys;
+}
+
+/**
+ * Settled request ids whose attested block height the flush has not folded into the
+ * vault's last seen height yet, in ledger order.
+ *
+ * @param state - The vault ledger state.
+ * @returns The request ids a flush can still fold.
+ */
+export function seenRequestIds(state: VaultLedgerState): Uint8Array[] {
+  const ids: Uint8Array[] = [];
+  for (const [requestId] of state.seenEvmHeights) ids.push(requestId);
+  return ids;
+}
+
+/**
+ * The stamp a flush put on a queued key: its EVM nonce, zero for a deposit, and the
+ * vault's last seen block height at that time.
+ *
+ * @param state - The vault ledger state.
+ * @param key - The queued key.
+ * @returns The stamp.
+ * @throws {Error} When the key has no stamp yet.
+ */
+export function stampOf(state: VaultLedgerState, key: Uint8Array): Stamp {
+  if (!state.stamps.member(key)) {
+    throw new Error("the request key has no stamp; flush first");
+  }
+  return state.stamps.lookup(key);
 }
 
 /**
@@ -85,57 +114,55 @@ export function unnumberedKeys(state: VaultLedgerState): Uint8Array[] {
  * @param state - The vault ledger state.
  * @param key - The queued key.
  * @returns The assigned nonce.
- * @throws {Error} When the key has no nonce yet.
+ * @throws {Error} When the key has no stamp yet.
  */
 export function assignedNonce(state: VaultLedgerState, key: Uint8Array): bigint {
-  if (!state.assignedNonces.member(key)) {
-    throw new Error("the request key has no assigned EVM nonce; flush first");
-  }
-  return state.assignedNonces.lookup(key);
+  return stampOf(state, key).evmNonce;
 }
 
 /**
- * Numbers the first FLUSH_WIDTH unnumbered queued keys on the ledger, whoever queued them.
+ * Folds up to FLUSH_WIDTH settled heights into the last seen height, then stamps the
+ * first FLUSH_WIDTH unstamped queued keys on the ledger, whoever queued them.
  *
  * @param vault - The found vault contract to call.
  * @param publicDataProvider - The provider the ledger is read through.
  * @param vaultContractAddress - The vault's contract address.
- * @returns How many keys the flush carried.
+ * @returns How many keys the flush stamped.
  */
 export async function flushPending(
   vault: DeployedVaultContract,
   publicDataProvider: PublicDataProvider,
   vaultContractAddress: string,
 ): Promise<number> {
-  const batch = unnumberedKeys(
-    await readVaultLedger(publicDataProvider, vaultContractAddress),
-  ).slice(0, FLUSH_WIDTH);
-  await vault.callTx.flush(padKeys(batch));
+  const state = await readVaultLedger(publicDataProvider, vaultContractAddress);
+  const batch = unstampedKeys(state).slice(0, FLUSH_WIDTH);
+  const seen = seenRequestIds(state).slice(0, FLUSH_WIDTH);
+  await vault.callTx.flush(padKeys(batch), padKeys(seen));
   return batch.length;
 }
 
 /**
- * Flushes until the given queued key has an EVM nonce. A flush that loses its block to another
- * flush is retried.
+ * Flushes until the given queued key carries a stamp. A flush that loses its block to
+ * another flush is retried.
  *
  * @param vault - The found vault contract to call.
  * @param publicDataProvider - The provider the ledger is read through.
  * @param vaultContractAddress - The vault's contract address.
- * @param key - The queued key that needs a nonce.
+ * @param key - The queued key that needs a stamp.
  * @param attempts - How many flushes to try.
- * @returns The assigned nonce.
- * @throws {Error} When the key is still unnumbered after the attempts.
+ * @returns The stamp.
+ * @throws {Error} When the key is still unstamped after the attempts.
  */
-export async function flushUntilNumbered(
+export async function flushUntilStamped(
   vault: DeployedVaultContract,
   publicDataProvider: PublicDataProvider,
   vaultContractAddress: string,
   key: Uint8Array,
   attempts = 5,
-): Promise<bigint> {
+): Promise<Stamp> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const state = await readVaultLedger(publicDataProvider, vaultContractAddress);
-    if (state.assignedNonces.member(key)) return state.assignedNonces.lookup(key);
+    if (state.stamps.member(key)) return state.stamps.lookup(key);
     try {
       await flushPending(vault, publicDataProvider, vaultContractAddress);
     } catch (error) {
@@ -144,5 +171,5 @@ export async function flushUntilNumbered(
       );
     }
   }
-  return assignedNonce(await readVaultLedger(publicDataProvider, vaultContractAddress), key);
+  return stampOf(await readVaultLedger(publicDataProvider, vaultContractAddress), key);
 }

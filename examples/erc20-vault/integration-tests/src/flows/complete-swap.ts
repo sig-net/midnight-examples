@@ -28,6 +28,7 @@ import { createResponseReader, type VaultContext } from "../vault-context.ts";
 export interface SwapOutcome {
   readonly event: RespondBidirectionalEvent;
   readonly serializedOutput: Uint8Array;
+  readonly blockHeight: bigint;
   readonly amountIn: bigint;
   readonly matchedFailureOutput: boolean;
 }
@@ -35,6 +36,7 @@ export interface SwapOutcome {
 /** One output a posted attestation may commit to, and the amountIn settling on it yields. */
 interface SwapCandidate {
   readonly serializedOutput: Uint8Array;
+  readonly blockHeight: bigint;
   readonly amountIn: bigint;
   readonly isFailureOutput: boolean;
 }
@@ -82,6 +84,7 @@ async function fetchSwapCandidates(
       const decoded = deserializeEvmOutput(SWAP_OUTPUT_SCHEMA, observed.output);
       candidates.push({
         serializedOutput: serializeRespondOutput(SWAP_RESPOND_SCHEMA, decoded),
+        blockHeight: observed.blockNumber,
         amountIn: (decoded as { amountIn: bigint }).amountIn,
         isFailureOutput: false,
       });
@@ -89,7 +92,12 @@ async function fetchSwapCandidates(
       progress.failure("decode", `execution output decode failed: ${String(error)}`);
     }
   }
-  candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, amountIn: 0n, isFailureOutput: true });
+  candidates.push({
+    serializedOutput: MPC_FAILURE_OUTPUT,
+    blockHeight: observed.blockNumber,
+    amountIn: 0n,
+    isFailureOutput: true,
+  });
   return candidates;
 }
 
@@ -114,6 +122,7 @@ function matchSwapOutcome(
     const event = events.find((posted) =>
       verifyRespondBidirectionalSignature(
         requestIdBytes(requestId),
+        candidate.blockHeight,
         candidate.serializedOutput,
         posted,
         mpcResponseKey,
@@ -123,6 +132,7 @@ function matchSwapOutcome(
       return {
         event,
         serializedOutput: candidate.serializedOutput,
+        blockHeight: candidate.blockHeight,
         amountIn: candidate.amountIn,
         matchedFailureOutput: candidate.isFailureOutput,
       };
@@ -221,6 +231,7 @@ export async function settleSwap(
       requestIdBytes(requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
+      outcome.blockHeight,
       mintNonce,
     );
     console.log(`refund settled in tx ${r.public.txId}`);
@@ -233,6 +244,7 @@ export async function settleSwap(
     requestIdBytes(requestId),
     respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
+    outcome.blockHeight,
     mintNonce,
     changeNonce,
   );

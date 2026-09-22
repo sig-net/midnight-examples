@@ -16,7 +16,11 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
-import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  evmAddressBytes,
+  pureCircuits,
+  readVaultLedger,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import { getErc20Balance } from "@sig-net/midnight-examples-test-harness";
 
 import { fundingSummary, logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
@@ -28,6 +32,7 @@ import {
 } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
+import { flushUntilStamped, queueKey } from "./vault-queue.ts";
 
 /** Options for {@link startDeposit}. */
 export interface StartDepositOptions {
@@ -113,7 +118,7 @@ export async function startDeposit(
   if (!before.initialised) {
     throw new Error("vault is not initialised, run the initialise flow first");
   }
-  const requestNonce = before.signetRequestNonce;
+  const requestNonce = pureCircuits.vaultSignedRequestNonce();
   const vaultEvmAddress = before.vaultEvmAddress;
 
   const gasLimit = ERC20_TRANSFER_GAS_LIMIT;
@@ -164,7 +169,8 @@ export async function startDeposit(
     expectedRecord.txParams.maxPriorityFeePerGas,
   );
 
-  const result = await context.vault.callTx.startDeposit(
+  const key = queueKey(context, pureCircuits.depositBinder(options.evmNonce));
+  const queued = await context.vault.callTx.startDeposit(
     options.evmNonce,
     gasLimit,
     maxFeePerGas,
@@ -172,9 +178,13 @@ export async function startDeposit(
     {
       erc20Address: erc20,
       amount: options.amount,
+      keyVersion,
     },
   );
-  console.log(`deposit finalized in tx ${result.public.txId}`);
+  console.log(`deposit queued in tx ${queued.public.txId}`);
+  await flushUntilStamped(context, key);
+  const result = await context.vault.callTx.sendDeposit(key);
+  console.log(`deposit sent in tx ${result.public.txId}`);
 
   // The depositEventMap key IS the record's transientHash digest: recomputing
   // it off-chain and finding it on the ledger proves both sides agree on every

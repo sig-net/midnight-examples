@@ -1,3 +1,4 @@
+import { MpcOutputCacheReader } from "@sig-net/midnight";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { getAddress, JsonRpcProvider, type Transaction } from "ethers";
@@ -7,7 +8,9 @@ import { adminReplaceEvmNonce } from "../src/flows/admin-replace-evm-nonce.ts";
 import { approveRouter } from "../src/flows/approve-router.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { initialise } from "../src/flows/initialise.ts";
+import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
+import { OutputSource } from "../src/output-source.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
 const env = injectE2eEnv();
@@ -18,6 +21,7 @@ const MINUTE = 60_000;
 const REPLACEMENT_GAS_LIMIT = 21_000n;
 
 const STALL_OBSERVATION_MS = 15_000;
+const LOCAL_FAKENET_CACHE_URL = "http://127.0.0.1:3040/v1/fakenet";
 
 const signedHash = (transaction: Transaction, what: string): string => {
   const { hash } = transaction;
@@ -97,6 +101,21 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault admin-replace-n
       expect(queuedReceipt?.status).toBe(1);
 
       expect(await minedNonce()).toBe(n + 2);
+
+      const replaced = await pollRespondBidirectional(
+        {
+          ...context,
+          respondOutputSource: OutputSource.MPCCache,
+          mpcOutputCache: new MpcOutputCacheReader({
+            cacheUrl: env.MPC_OUTPUT_CACHE_URL ?? LOCAL_FAKENET_CACHE_URL,
+            networkId: context.nodeConfig.networkId,
+            signetContractAddress: context.signetContractAddress,
+          }),
+        },
+        { requestId: blockingId, intervalMs: 2000, timeoutMs: 3 * MINUTE },
+      );
+      expect(replaced.matchedFailureOutput).toBe(true);
+      expect(replaced.blockHeight).toBeGreaterThan(0n);
 
       console.log(
         `ADMIN REPLACE NONCE E2E OK: nonce ${String(n)} replaced with an empty self-transfer ` +

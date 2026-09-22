@@ -30,7 +30,7 @@ import { ERC20_TRANSFER_SELECTOR } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
-import { flushUntilNumbered, newQueueKey } from "./vault-queue.ts";
+import { flushUntilStamped, newQueueKey } from "./vault-queue.ts";
 
 /** Options for {@link startWithdraw}. */
 export interface StartWithdrawOptions {
@@ -118,7 +118,7 @@ export async function startWithdraw(
     key,
   );
   console.log(`withdraw queued in tx ${queued.public.txId}`);
-  const evmNonce = await flushUntilNumbered(context, key);
+  const evmNonce = (await flushUntilStamped(context, key)).evmNonce;
 
   // The record the contract will store, reconstructed byte for byte: the
   // event's own sender (the vault contract, kernel.self() in-circuit), the

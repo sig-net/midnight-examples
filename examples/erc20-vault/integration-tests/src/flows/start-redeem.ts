@@ -26,7 +26,7 @@ import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import { REDEEM_MPC_ROUTING, STATA_REDEEM_SELECTOR } from "../evm-stata.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
-import { flushUntilNumbered, newQueueKey } from "./vault-queue.ts";
+import { flushUntilStamped, newQueueKey } from "./vault-queue.ts";
 
 /** Options for {@link startRedeem}. */
 export interface StartRedeemOptions {
@@ -62,7 +62,7 @@ export async function startRedeem(
   const key = newQueueKey();
   const queued = await context.vault.callTx.startRedeem({ shares: options.shares }, coin, key);
   console.log(`redeem queued in tx ${queued.public.txId}`);
-  const evmNonce = await flushUntilNumbered(context, key);
+  const evmNonce = (await flushUntilStamped(context, key)).evmNonce;
 
   await logTokenAmount(
     context.evmRpcUrl,

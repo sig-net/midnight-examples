@@ -35,7 +35,7 @@ import {
   readVaultLedger,
   VAULT_PRIVATE_STATE_ID,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getEvmChainId } from "@sig-net/midnight-examples-lib";
+import { getEvmBlockNumber, getEvmChainId } from "@sig-net/midnight-examples-lib";
 
 import { resolveEvmTargets, type VaultEvmTargets } from "./evm-targets.ts";
 import { vaultCompiledContract } from "./vault-contract-binding.ts";
@@ -61,6 +61,12 @@ export interface VaultInitialiseConfig {
   readonly stataTokenAddress: string;
   /** EIP-155 chain id of the Ethereum network the vault's transactions are signed for. */
   readonly evmChainId: bigint;
+  /**
+   * The EVM block height the vault starts from: no attestation at or below it is
+   * accepted. `EVM_START_HEIGHT` when set, else the latest block `EVM_RPC_URL` reports,
+   * else zero.
+   */
+  readonly evmStartHeight: bigint;
   /**
    * The MPC response key for THIS vault contract (SEC1 hex): `f(MPC root key,
    * vault contract address, "midnight response key")`. The claim and
@@ -135,15 +141,37 @@ async function resolveEvmChainId(env: Record<string, string | undefined>): Promi
 // Everything initialise needs that does NOT depend on the vault's own address,
 // fully validated. Split out so a caller can fail on a missing or malformed
 // value BEFORE deploying the contract those values would configure.
+async function resolveEvmStartHeight(env: Record<string, string | undefined>): Promise<bigint> {
+  const preset = envOrUndefined(env, "EVM_START_HEIGHT");
+  if (preset !== undefined) {
+    if (!/^(0|[1-9]\d*)$/.test(preset)) {
+      throw new Error(`EVM_START_HEIGHT must be a non-negative integer, got "${preset}".`);
+    }
+    return BigInt(preset);
+  }
+  const rpcUrl = envOrUndefined(env, "EVM_RPC_URL");
+  if (rpcUrl === undefined) return 0n;
+  try {
+    return await getEvmBlockNumber(rpcUrl);
+  } catch (error) {
+    throw new Error(
+      `EVM_RPC_URL (${rpcUrl}) is not answering, so the start height cannot be read`,
+      { cause: error },
+    );
+  }
+}
+
 async function resolveAddressFreeInputs(env: Record<string, string | undefined>): Promise<{
   mpcSecp256k1PublicKey: string;
   evmChainId: bigint;
+  evmStartHeight: bigint;
   targets: VaultEvmTargets;
 }> {
   // The SDK's published key for a deployed network, or MPC_SECP256K1_PUBKEY in
   // any spelling, canonicalised so the derivations below read one form.
   const mpcSecp256k1PublicKey = resolveMpcRootPublicKey(env).value;
   const evmChainId = await resolveEvmChainId(env);
+  const evmStartHeight = await resolveEvmStartHeight(env);
 
   // Parse the targets up front: a malformed override must fail before
   // anything is submitted, not mid-initialise.
@@ -152,7 +180,7 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
   evmAddressBytes(targets.stataUnderlyingAddress);
   evmAddressBytes(targets.stataTokenAddress);
 
-  return { mpcSecp256k1PublicKey, evmChainId, targets };
+  return { mpcSecp256k1PublicKey, evmChainId, evmStartHeight, targets };
 }
 
 /**
@@ -178,7 +206,8 @@ export async function resolveInitialiseConfig(
   env: Record<string, string | undefined>,
   vaultContractAddress: string,
 ): Promise<VaultInitialiseConfig> {
-  const { mpcSecp256k1PublicKey, evmChainId, targets } = await resolveAddressFreeInputs(env);
+  const { mpcSecp256k1PublicKey, evmChainId, evmStartHeight, targets } =
+    await resolveAddressFreeInputs(env);
 
   const vaultEvmAddress = deriveVaultEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress);
   assertDerivedMatch(
@@ -196,6 +225,7 @@ export async function resolveInitialiseConfig(
     vaultEvmAddress,
     ...targets,
     evmChainId,
+    evmStartHeight,
     mpcResponseKey,
     mpcKeyVersion: SIGNET_DEFAULT_KEY_VERSION,
   };
@@ -278,6 +308,7 @@ export async function initialiseVaultContract(
   console.log(`router:            ${config.routerAddress}`);
   console.log(`stata pair:        ${config.stataUnderlyingAddress} -> ${config.stataTokenAddress}`);
   console.log(`EVM chain id:      ${String(config.evmChainId)}`);
+  console.log(`EVM start height:  ${String(config.evmStartHeight)}`);
   console.log(`MPC response key:  ${config.mpcResponseKey}`);
   console.log(`MPC key version:   ${String(config.mpcKeyVersion)}`);
 
@@ -288,7 +319,7 @@ export async function initialiseVaultContract(
     evmAddressBytes(config.stataTokenAddress),
     config.evmChainId,
     parseSecp256k1PublicKey(config.mpcResponseKey),
-    config.mpcKeyVersion,
+    config.evmStartHeight,
   );
   console.log(`initialise finalized in tx ${result.public.txId}`);
   return InitialiseVaultOutcome.Initialised;

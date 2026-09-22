@@ -66,11 +66,14 @@ import {
   type DeployedVaultContract,
   FLUSH_WIDTH,
   flushPending,
-  flushUntilNumbered,
+  flushUntilStamped,
   ledger,
   padKeys,
   pureCircuits,
-  unnumberedKeys,
+  queueKey,
+  seenRequestIds,
+  stampOf,
+  unstampedKeys,
   VAULT_DEPOSIT_REQUESTS_PATH,
   VAULT_NONCE_PATH,
   VAULT_REQUESTS_PATH,
@@ -123,7 +126,8 @@ const OTHER_COMMITMENT = pureCircuits.userCommitment(OTHER_SECRET_KEY);
 // depends on the contract's own address, so it cannot be a constructor arg).
 const MPC_RESPONSE_SECRET = bytes(32, 0x42);
 const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
-const MPC_KEY_VERSION = 1n;
+const EVM_START_HEIGHT = 100n;
+const ATTESTED_HEIGHT = 101n;
 
 // The signet contract (callee) the vault seals + cross-contract-calls. A valid
 // sample contract address so the runtime's address checks pass.
@@ -278,7 +282,7 @@ const flushOne = async (
   ctx: CircuitContext<VaultPrivateState>,
   key: Uint8Array,
 ): Promise<CircuitContext<VaultPrivateState>> =>
-  (await contract.circuits.flush(ctx, padKeys([key]))).context;
+  (await contract.circuits.flush(ctx, padKeys([key]), padKeys([]))).context;
 
 const approveStata = async (
   contract: Contract<VaultPrivateState>,
@@ -310,14 +314,14 @@ const deployInitialised = async () => {
       STATA_TOKEN,
       CHAIN_ID,
       MPC_RESPONSE_KEY,
-      MPC_KEY_VERSION,
+      EVM_START_HEIGHT,
     )
   ).context;
   return { contract, ctx: next };
 };
 
 /** Call deposit with its flat args spread in circuit order. */
-const deposit = (
+const queueDeposit = (
   contract: Contract<VaultPrivateState>,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startDeposit"]>[0],
   args: DepositCallArgs,
@@ -328,8 +332,21 @@ const deposit = (
     args.gasLimit,
     args.maxFeePerGas,
     args.maxPriorityFeePerGas,
-    args.deposit,
+    { ...args.deposit, keyVersion: args.keyVersion },
   );
+
+const depositKey = (ctx: CircuitContext<VaultPrivateState>, evmNonce: bigint): Uint8Array =>
+  pureCircuits.refundCommitment(secretOf(ctx), pureCircuits.depositBinder(evmNonce));
+
+const deposit = async (
+  contract: Contract<VaultPrivateState>,
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startDeposit"]>[0],
+  args: DepositCallArgs,
+) => {
+  const key = depositKey(ctx, args.evmNonce);
+  const queued = (await queueDeposit(contract, ctx, args)).context;
+  return contract.circuits.sendDeposit(await flushOne(contract, queued, key), key);
+};
 
 // ---- Tests ----
 
@@ -417,7 +434,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         CHAIN_ID,
         MPC_RESPONSE_KEY,
-        MPC_KEY_VERSION,
+        EVM_START_HEIGHT,
       ),
     ).rejects.toThrow(/Not the deployer/);
   });
@@ -449,7 +466,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         CHAIN_ID,
         MPC_RESPONSE_KEY,
-        MPC_KEY_VERSION,
+        EVM_START_HEIGHT,
       ),
     ).rejects.toThrow(/Already initialised/);
   });
@@ -465,7 +482,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         0n,
         MPC_RESPONSE_KEY,
-        MPC_KEY_VERSION,
+        EVM_START_HEIGHT,
       ),
     ).rejects.toThrow(/Chain ID must be positive/);
   });
@@ -581,10 +598,10 @@ describe("deposit round-trip", () => {
       commitment: DEPLOYER_COMMITMENT,
       erc20: ERC20,
       amount: AMOUNT,
+      knownHeight: EVM_START_HEIGHT,
     });
 
-    // Nonce bumped for the next request.
-    expect(ledger(state).signetRequestNonce).toBe(1n);
+    expect(ledger(state).signetRequestNonce).toBe(0n);
   });
 });
 
@@ -632,39 +649,31 @@ describe("deposit validation", () => {
     await expect(deposit(contract, ctx, VALID_DEPOSIT)).rejects.toThrow(/Not initialised/);
   });
 
-  it("identical deposits get DISTINCT ids: requestNonce differentiates them", async () => {
-    // The dedup assert (!member) is a belt-and-braces invariant: it cannot
-    // trip in the normal flow, as the nonce is part of the hashed record and
-    // an identical resubmission is therefore a NEW request. Document that here.
+  it("an identical repeat names the same transaction and is refused while the first is outstanding", async () => {
     const { contract, ctx } = await deployInitialised();
 
     const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
-    const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
-
-    const index = toSignBidirectionalEventIndex(
-      ledger(afterSecond.callContext.currentQueryContext.state).depositEventMap,
+    await expect(deposit(contract, afterFirst, VALID_DEPOSIT)).rejects.toThrow(
+      /Request already exists/,
     );
-    expect(index.size).toBe(2);
-    const nonces = [...index.values()].map((r) => r.requestNonce).sort();
-    expect(nonces).toEqual([0n, 1n]);
   });
 
-  it("two identities depositing identical requests get DISTINCT ids: the path differentiates them", async () => {
-    // The derivation path (the caller's commitment) is part of the hashed
-    // record too, so the same deposit by two different identities can never
-    // collide even at the same nonce.
+  it("the SAME caller depositing twice with different EVM nonces gets two ids and leaves every request nonce at 0", async () => {
     const { contract, ctx } = await deployInitialised();
-    const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
-    const stranger = await strangerContext("startDeposit", afterFirst);
-    const afterSecond = (await deposit(contract, stranger, VALID_DEPOSIT)).context;
 
-    const index = toSignBidirectionalEventIndex(
-      ledger(afterSecond.callContext.currentQueryContext.state).depositEventMap,
-    );
+    const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
+    const afterSecond = (
+      await deposit(contract, afterFirst, {
+        ...VALID_DEPOSIT,
+        evmNonce: VALID_DEPOSIT.evmNonce + 1n,
+      })
+    ).context;
+    const state = ledger(afterSecond.callContext.currentQueryContext.state);
+    expect(state.signetRequestNonce).toBe(0n);
+
+    const index = toSignBidirectionalEventIndex(state.depositEventMap);
     expect(index.size).toBe(2);
-    const paths = [...index.values()].map((r) => r.path);
-    expect(paths).toContainEqual(DEPLOYER_COMMITMENT);
-    expect(paths).toContainEqual(OTHER_COMMITMENT);
+    expect([...index.values()].map((record) => record.requestNonce)).toEqual([0n, 0n]);
   });
 });
 
@@ -808,6 +817,7 @@ describe("withdraw round-trip", () => {
       key: VALID_WITHDRAW.coin.nonce,
       erc20: ERC20,
       amount: AMOUNT,
+      knownHeight: EVM_START_HEIGHT,
     });
     expect(ledger(state).signetRequestNonce).toBe(0n);
 
@@ -987,11 +997,12 @@ const respond = (
   secretKey: Uint8Array,
   requestId: Uint8Array,
   serializedOutput: Uint8Array,
+  blockHeight: bigint,
 ): RespondBidirectionalEvent =>
   respondBidirectionalEventToCircuitInput({
     signature: ecdsaSignatureToMpcSignature(
       signAttestationDigest(
-        calculateSignetAttestationDigest(requestId, serializedOutput),
+        calculateSignetAttestationDigest(requestId, blockHeight, serializedOutput),
         secretKey,
       ),
     ),
@@ -1024,8 +1035,9 @@ describe("completeWithdraw settle", () => {
       await contract.circuits.completeWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1042,8 +1054,9 @@ describe("completeWithdraw settle", () => {
       await contract.circuits.completeWithdraw(
         await strangerContext("completeWithdraw", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1065,8 +1078,9 @@ describe("completeWithdraw settle", () => {
       await contract.circuits.completeWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_FALSE,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1086,8 +1100,9 @@ describe("completeWithdraw settle", () => {
       contract.circuits.completeWithdraw(
         await strangerContext("completeWithdraw", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_FALSE,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the withdrawer/);
@@ -1099,8 +1114,9 @@ describe("completeWithdraw settle", () => {
       contract.circuits.completeWithdraw(
         ctx,
         requestId,
-        respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -1116,8 +1132,9 @@ describe("completeWithdraw settle", () => {
       contract.circuits.completeWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -1132,8 +1149,9 @@ describe("completeWithdraw settle", () => {
       contract.circuits.completeWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, otherId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, otherId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -1146,8 +1164,9 @@ describe("completeWithdraw settle", () => {
       contract.circuits.completeWithdraw(
         ctx,
         unknownId,
-        respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
@@ -1159,8 +1178,9 @@ describe("completeWithdraw settle", () => {
       await contract.circuits.completeWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1168,8 +1188,9 @@ describe("completeWithdraw settle", () => {
       contract.circuits.completeWithdraw(
         next,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
@@ -1188,8 +1209,9 @@ describe("completeWithdraw settle", () => {
       contract.circuits.completeWithdraw(
         next,
         depositId,
-        respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
@@ -1209,8 +1231,9 @@ describe("refundWithdraw settle", () => {
       await contract.circuits.refundWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1226,8 +1249,9 @@ describe("refundWithdraw settle", () => {
       contract.circuits.refundWithdraw(
         await strangerContext("refundWithdraw", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the withdrawer/);
@@ -1242,8 +1266,9 @@ describe("refundWithdraw settle", () => {
       contract.circuits.refundWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, notTheSentinel),
+        respond(MPC_RESPONSE_SECRET, requestId, notTheSentinel, ATTESTED_HEIGHT),
         notTheSentinel,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the MPC failure output/);
@@ -1255,8 +1280,9 @@ describe("refundWithdraw settle", () => {
       contract.circuits.refundWithdraw(
         ctx,
         requestId,
-        respond(IMPOSTER_SECRET, requestId, OUTPUT_REVERTED),
+        respond(IMPOSTER_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -1271,8 +1297,9 @@ describe("refundWithdraw settle", () => {
       contract.circuits.refundWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, bytes(5, 0x01)),
+        respond(MPC_RESPONSE_SECRET, requestId, bytes(5, 0x01), ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -1291,8 +1318,9 @@ describe("refundWithdraw settle", () => {
       contract.circuits.refundWithdraw(
         next,
         depositId,
-        respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
       // Deposits never insert the pending-withdrawal marker, so a deposit id
@@ -1306,8 +1334,9 @@ describe("refundWithdraw settle", () => {
       await contract.circuits.refundWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1315,8 +1344,9 @@ describe("refundWithdraw settle", () => {
       contract.circuits.refundWithdraw(
         next,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
       // The first refund consumed the pending-withdrawal marker.
@@ -1392,8 +1422,9 @@ describe("completeDeposit settle", () => {
       await contract.circuits.completeDeposit(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         recipient,
       )
@@ -1410,8 +1441,9 @@ describe("completeDeposit settle", () => {
       contract.circuits.completeDeposit(
         ctx,
         requestId,
-        respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1424,8 +1456,9 @@ describe("completeDeposit settle", () => {
       contract.circuits.completeDeposit(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_FALSE,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1443,8 +1476,9 @@ describe("completeDeposit settle", () => {
       contract.circuits.completeDeposit(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1458,8 +1492,9 @@ describe("completeDeposit settle", () => {
       contract.circuits.completeDeposit(
         ctx,
         unknownId,
-        respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1472,8 +1507,9 @@ describe("completeDeposit settle", () => {
       await contract.circuits.completeDeposit(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       )
@@ -1482,8 +1518,9 @@ describe("completeDeposit settle", () => {
       contract.circuits.completeDeposit(
         next,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1499,8 +1536,9 @@ describe("completeDeposit settle", () => {
       contract.circuits.completeDeposit(
         await strangerContext("completeDeposit", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         OTHER_WALLET_RECIPIENT,
       ),
@@ -1722,8 +1760,9 @@ describe("completeSwap settle", () => {
       await contract.circuits.completeSwap(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       )
@@ -1739,8 +1778,9 @@ describe("completeSwap settle", () => {
       contract.circuits.completeSwap(
         await strangerContext("completeSwap", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       ),
@@ -1753,8 +1793,9 @@ describe("completeSwap settle", () => {
       contract.circuits.completeSwap(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         MINT_NONCE,
       ),
@@ -1767,8 +1808,9 @@ describe("completeSwap settle", () => {
       contract.circuits.completeSwap(
         ctx,
         requestId,
-        respond(IMPOSTER_SECRET, requestId, OUTPUT_SWAP),
+        respond(IMPOSTER_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       ),
@@ -1777,8 +1819,9 @@ describe("completeSwap settle", () => {
       contract.circuits.completeSwap(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
         swapOutput(1n),
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       ),
@@ -1792,8 +1835,9 @@ describe("completeSwap settle", () => {
       contract.circuits.completeSwap(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         padded,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       ),
@@ -1808,8 +1852,9 @@ describe("refundSwap settle", () => {
       await contract.circuits.refundSwap(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1824,8 +1869,9 @@ describe("refundSwap settle", () => {
       contract.circuits.refundSwap(
         await strangerContext("refundSwap", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the swapper/);
@@ -2002,8 +2048,9 @@ describe("completeSupply settle", () => {
       await contract.circuits.completeSupply(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, out),
+        respond(MPC_RESPONSE_SECRET, requestId, out, ATTESTED_HEIGHT),
         out,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -2019,8 +2066,9 @@ describe("completeSupply settle", () => {
       contract.circuits.completeSupply(
         await strangerContext("completeSupply", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, out),
+        respond(MPC_RESPONSE_SECRET, requestId, out, ATTESTED_HEIGHT),
         out,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the supplier/);
@@ -2129,8 +2177,9 @@ describe("completeRedeem settle", () => {
       contract.circuits.completeRedeem(
         await strangerContext("completeRedeem", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, out),
+        respond(MPC_RESPONSE_SECRET, requestId, out, ATTESTED_HEIGHT),
         out,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the redeemer/);
@@ -2143,8 +2192,9 @@ describe("completeRedeem settle", () => {
       await contract.circuits.completeRedeem(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, out),
+        respond(MPC_RESPONSE_SECRET, requestId, out, ATTESTED_HEIGHT),
         out,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -2161,8 +2211,9 @@ describe("refundSupply / refundRedeem settle", () => {
       await contract.circuits.refundSupply(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -2177,8 +2228,9 @@ describe("refundSupply / refundRedeem settle", () => {
       await contract.circuits.refundRedeem(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -2193,8 +2245,9 @@ describe("refundSupply / refundRedeem settle", () => {
       contract.circuits.refundSupply(
         await strangerContext("refundSupply", ctx),
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the supplier/);
@@ -2263,8 +2316,9 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
       contract.circuits.completeDeposit(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -2277,8 +2331,9 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
       contract.circuits.completeWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Withdrawal not found/,
@@ -2290,8 +2345,9 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
       contract.circuits.refundWithdraw(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Withdrawal not found/,
@@ -2303,8 +2359,9 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
       contract.circuits.completeSwap(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       ),
@@ -2317,8 +2374,9 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
       contract.circuits.refundSwap(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Swap not found/,
@@ -2330,8 +2388,9 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
       contract.circuits.completeSupply(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUPPLY),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUPPLY, ATTESTED_HEIGHT),
         OUTPUT_SUPPLY,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Supply not found/,
@@ -2343,8 +2402,9 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
       contract.circuits.refundSupply(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Supply not found/,
@@ -2356,8 +2416,9 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
       contract.circuits.completeRedeem(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REDEEM),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REDEEM, ATTESTED_HEIGHT),
         OUTPUT_REDEEM,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Redeem not found/,
@@ -2369,8 +2430,9 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
       contract.circuits.refundRedeem(
         ctx,
         requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED),
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
         OUTPUT_REVERTED,
+        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Redeem not found/,
@@ -2467,11 +2529,20 @@ const replay = (
 };
 
 describe("throughput: requests never pin shared state, only the flush does", () => {
-  it("CONTROL: a deposit applies against the state it was built on", async () => {
+  it("CONTROL: a queued deposit applies against the state it was built on", async () => {
     const { contract, ctx } = await deployInitialised();
     const builtOn = stateOf(ctx);
-    const run = await deposit(contract, ctx, VALID_DEPOSIT);
+    const run = await queueDeposit(contract, ctx, VALID_DEPOSIT);
     expect(replay(builtOn, run)).toBe("applied");
+  });
+
+  it("two concurrent startDeposits from different callers both apply", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const alice = await queueDeposit(contract, ctx, VALID_DEPOSIT);
+    const stateAfterAlice = alice.context.callContext.currentQueryContext.state;
+    const bobCtx = await strangerContext("startDeposit", ctx);
+    const bob = await queueDeposit(contract, bobCtx, VALID_DEPOSIT);
+    expect(replay(stateAfterAlice, bob, true)).toBe("applied");
   });
 
   it("two concurrent vault requests from different callers both apply", async () => {
@@ -2492,11 +2563,15 @@ describe("throughput: requests never pin shared state, only the flush does", () 
       .context;
     const two = (await contract.circuits.startWithdraw(one, request, second, keyForCoin(second)))
       .context;
-    await expect(contract.circuits.flush(two, padKeys([keyForCoin(first)]))).rejects.toThrow(
-      /Flush must number every waiting request/,
-    );
+    await expect(
+      contract.circuits.flush(two, padKeys([keyForCoin(first)]), padKeys([])),
+    ).rejects.toThrow(/Flush must stamp every waiting request/);
     const both = (
-      await contract.circuits.flush(two, padKeys([keyForCoin(first), keyForCoin(second)]))
+      await contract.circuits.flush(
+        two,
+        padKeys([keyForCoin(first), keyForCoin(second)]),
+        padKeys([]),
+      )
     ).context;
     expect(ledger(stateOf(both) as never).unflushed).toBe(0n);
   });
@@ -2517,7 +2592,9 @@ describe("throughput: requests never pin shared state, only the flush does", () 
 
   it("a full batch may leave the twenty-first request waiting", async () => {
     const { contract, current, keys } = await queueWithdraws(21, 0x60);
-    const flushed = (await contract.circuits.flush(current, padKeys(keys.slice(0, 20)))).context;
+    const flushed = (
+      await contract.circuits.flush(current, padKeys(keys.slice(0, 20)), padKeys([]))
+    ).context;
     expect(ledger(stateOf(flushed) as never).unflushed).toBe(1n);
   }, 60_000);
 
@@ -2526,6 +2603,7 @@ describe("throughput: requests never pin shared state, only the flush does", () 
     const partialFlush = await partial.contract.circuits.flush(
       partial.current,
       padKeys(partial.keys),
+      padKeys([]),
     );
     const late = { ...VALID_WITHDRAW.coin, nonce: bytes(32, 0x7f) };
     const partialAfterLate = (
@@ -2542,6 +2620,7 @@ describe("throughput: requests never pin shared state, only the flush does", () 
     const fullFlush = await full.contract.circuits.flush(
       full.current,
       padKeys(full.keys.slice(0, 20)),
+      padKeys([]),
     );
     const fullAfterLate = (
       await full.contract.circuits.startWithdraw(full.current, full.request, late, keyForCoin(late))
@@ -2560,8 +2639,16 @@ describe("throughput: requests never pin shared state, only the flush does", () 
         ERC20_OUT,
       )
     ).context;
-    const aliceFlush = await contract.circuits.flush(queuedBoth, padKeys([aliceKey, bobKey]));
-    const bobFlush = await contract.circuits.flush(queuedBoth, padKeys([bobKey, aliceKey]));
+    const aliceFlush = await contract.circuits.flush(
+      queuedBoth,
+      padKeys([aliceKey, bobKey]),
+      padKeys([]),
+    );
+    const bobFlush = await contract.circuits.flush(
+      queuedBoth,
+      padKeys([bobKey, aliceKey]),
+      padKeys([]),
+    );
     expect(replay(stateOf(aliceFlush.context), bobFlush, true)).toMatch(
       /mismatch between expected .* read/,
     );
@@ -2578,26 +2665,20 @@ describe("throughput: requests never pin shared state, only the flush does", () 
         ERC20_OUT,
       )
     ).context;
-    const flushed = (await contract.circuits.flush(queuedBoth, padKeys([aliceKey, bobKey])))
-      .context;
+    const flushed = (
+      await contract.circuits.flush(queuedBoth, padKeys([aliceKey, bobKey]), padKeys([]))
+    ).context;
     const aliceSend = await contract.circuits.sendApproveRouter(flushed, aliceKey);
     const bobSend = await contract.circuits.sendApproveRouter(flushed, bobKey);
     expect(replay(stateOf(aliceSend.context), bobSend, true)).toBe("applied");
   });
 
-  it("ANTI-REPLAY GUARD: a caller's identical repeat gets a fresh id", async () => {
+  it("ANTI-REPLAY GUARD: a caller's identical repeat is refused while the first is outstanding", async () => {
     const { contract, ctx } = await deployInitialised();
-    const idsOf = (c: CircuitContext<VaultPrivateState>): string[] => [
-      ...toSignBidirectionalEventIndex(
-        ledger(c.callContext.currentQueryContext.state).depositEventMap,
-      ).keys(),
-    ];
     const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
-    const before = idsOf(afterFirst);
-    const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
-    const fresh = idsOf(afterSecond).filter((k) => !before.includes(k));
-    expect(fresh.length).toBe(1);
-    expect(before).not.toContain(fresh[0]);
+    await expect(deposit(contract, afterFirst, VALID_DEPOSIT)).rejects.toThrow(
+      /Request already exists/,
+    );
   });
 });
 
@@ -2968,7 +3049,7 @@ const withIssuedNonces = async (
     keys.push(pureCircuits.approveRouterBinder(erc20));
     next = (await contract.circuits.approveRouter(next, erc20)).context;
   }
-  return (await contract.circuits.flush(next, padKeys(keys))).context;
+  return (await contract.circuits.flush(next, padKeys(keys), padKeys([]))).context;
 };
 
 describe("adminReplaceEvmNonce", () => {
@@ -3107,7 +3188,7 @@ describe("queue helpers", () => {
     ).rejects.toThrow(/Request already queued/);
   });
 
-  it("unnumberedKeys lists queued keys until a flush numbers them, in ledger order", async () => {
+  it("unstampedKeys lists queued keys until a flush stamps them, in ledger order", async () => {
     const { contract, ctx } = await deployInitialised();
     const aliceKey = pureCircuits.approveRouterBinder(ERC20);
     const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
@@ -3116,13 +3197,14 @@ describe("queue helpers", () => {
     const queuedBoth = (await contract.circuits.approveRouter(bobCtx, ERC20_OUT)).context;
 
     const before = ledger(stateOf(queuedBoth) as never);
-    const pending = unnumberedKeys(before);
+    const pending = unstampedKeys(before);
     expect(pending).toHaveLength(2);
     expect(() => assignedNonce(before, aliceKey)).toThrow(/flush first/);
 
-    const flushed = (await contract.circuits.flush(queuedBoth, padKeys(pending))).context;
+    const flushed = (await contract.circuits.flush(queuedBoth, padKeys(pending), padKeys([])))
+      .context;
     const after = ledger(stateOf(flushed) as never);
-    expect(unnumberedKeys(after)).toHaveLength(0);
+    expect(unstampedKeys(after)).toHaveLength(0);
     expect(new Set([assignedNonce(after, aliceKey), assignedNonce(after, bobKey)])).toEqual(
       new Set([0n, 1n]),
     );
@@ -3137,10 +3219,10 @@ describe("queue helpers", () => {
     };
     const vault = {
       callTx: {
-        flush: async (keys: Uint8Array[]) => {
+        flush: async (keys: Uint8Array[], seen: Uint8Array[]) => {
           flushes += 1;
           if (failFirst && flushes === 1) throw new Error("mismatch between expected read");
-          current = (await contract.circuits.flush(current, keys)).context;
+          current = (await contract.circuits.flush(current, keys, seen)).context;
           return { public: { txId: `flush-${String(flushes)}` } };
         },
       },
@@ -3176,9 +3258,9 @@ describe("queue helpers", () => {
     const { current, keys } = await queueMany(21);
     const stub = await stubVault(current);
     expect(await flushPending(stub.vault, stub.provider, VAULT_ADDRESS)).toBe(20);
-    expect(unnumberedKeys(stub.state())).toHaveLength(1);
+    expect(unstampedKeys(stub.state())).toHaveLength(1);
     expect(await flushPending(stub.vault, stub.provider, VAULT_ADDRESS)).toBe(1);
-    expect(unnumberedKeys(stub.state())).toHaveLength(0);
+    expect(unstampedKeys(stub.state())).toHaveLength(0);
     const nonces = keys
       .map((key) => assignedNonce(stub.state(), key))
       .sort((a, b) => (a < b ? -1 : 1));
@@ -3186,20 +3268,43 @@ describe("queue helpers", () => {
     expect(await flushPending(stub.vault, stub.provider, VAULT_ADDRESS)).toBe(0);
   }, 120_000);
 
-  it("flushUntilNumbered retries a lost flush and returns the key's nonce", async () => {
+  it("flushUntilStamped retries a lost flush and returns the key's stamp", async () => {
     const { current, keys } = await queueMany(2);
     const stub = await stubVault(current, true);
     const key = keys[1];
     if (!key) throw new Error("no key");
-    const nonce = await flushUntilNumbered(stub.vault, stub.provider, VAULT_ADDRESS, key);
+    const nonce = (await flushUntilStamped(stub.vault, stub.provider, VAULT_ADDRESS, key)).evmNonce;
     expect(stub.flushes()).toBe(2);
     expect(nonce).toBe(assignedNonce(stub.state(), key));
     expect(new Set(keys.map((k) => assignedNonce(stub.state(), k)))).toEqual(new Set([0n, 1n]));
-    expect(await flushUntilNumbered(stub.vault, stub.provider, VAULT_ADDRESS, key)).toBe(nonce);
+    expect((await flushUntilStamped(stub.vault, stub.provider, VAULT_ADDRESS, key)).evmNonce).toBe(
+      nonce,
+    );
     expect(stub.flushes()).toBe(2);
   }, 60_000);
 
-  it("flushUntilNumbered gives up after its attempts when every flush is lost", async () => {
+  it("flushPending folds the settled heights it finds into last seen", async () => {
+    const { contract, ctx, requestId } = await depositRequested();
+    const settledAt = 150n;
+    const settled = (
+      await contract.circuits.completeDeposit(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, settledAt),
+        OUTPUT_SUCCESS,
+        settledAt,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
+    ).context;
+    const stub = await stubVault(settled);
+    expect(seenRequestIds(stub.state())).toEqual([requestId]);
+    expect(await flushPending(stub.vault, stub.provider, VAULT_ADDRESS)).toBe(0);
+    expect(seenRequestIds(stub.state())).toHaveLength(0);
+    expect(stub.state().lastSeenEvmHeight).toBe(settledAt);
+  });
+
+  it("flushUntilStamped gives up after its attempts when every flush is lost", async () => {
     const { current, keys } = await queueMany(1);
     const stub = await stubVault(current);
     const lost = () => Promise.reject(new Error("mismatch between expected read"));
@@ -3207,7 +3312,142 @@ describe("queue helpers", () => {
     const key = keys[0];
     if (!key) throw new Error("no key");
     await expect(
-      flushUntilNumbered(stub.vault, stub.provider, VAULT_ADDRESS, key, 2),
+      flushUntilStamped(stub.vault, stub.provider, VAULT_ADDRESS, key, 2),
     ).rejects.toThrow(/flush first/);
   }, 60_000);
+});
+
+describe("attested block heights", () => {
+  it("initialise seals the start height as the last seen height", async () => {
+    const { ctx } = await deployInitialised();
+    expect(ledger(stateOf(ctx) as never).lastSeenEvmHeight).toBe(EVM_START_HEIGHT);
+  });
+
+  it("a flush stamps every queued key with the last seen height", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const depositQueued = (await queueDeposit(contract, ctx, VALID_DEPOSIT)).context;
+    const approveKey = queueKey(secretOf(ctx), pureCircuits.approveRouterBinder(ERC20));
+    const bothQueued = (await contract.circuits.approveRouter(depositQueued, ERC20, 1n)).context;
+    const flushed = (
+      await contract.circuits.flush(
+        bothQueued,
+        padKeys([depositKey(ctx, VALID_DEPOSIT.evmNonce), approveKey]),
+        padKeys([]),
+      )
+    ).context;
+    const state = ledger(stateOf(flushed) as never);
+    expect(stampOf(state, depositKey(ctx, VALID_DEPOSIT.evmNonce))).toEqual({
+      evmNonce: 0n,
+      knownHeight: EVM_START_HEIGHT,
+    });
+    expect(stampOf(state, approveKey)).toEqual({ evmNonce: 0n, knownHeight: EVM_START_HEIGHT });
+    expect(state.vaultEvmNonce).toBe(1n);
+  });
+
+  it("completeDeposit refuses an attestation at or below the request's known height", async () => {
+    const { contract, ctx, requestId } = await depositRequested();
+    await expect(
+      contract.circuits.completeDeposit(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, EVM_START_HEIGHT),
+        OUTPUT_SUCCESS,
+        EVM_START_HEIGHT,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      ),
+    ).rejects.toThrow(/Stale attestation/);
+  });
+
+  it("refundWithdraw refuses a stale failure attestation", async () => {
+    const { contract, ctx, requestId } = await withdrawRequested();
+    await expect(
+      contract.circuits.refundWithdraw(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, EVM_START_HEIGHT),
+        OUTPUT_REVERTED,
+        EVM_START_HEIGHT,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Stale attestation/);
+  });
+
+  it("a settled height is folded into last seen by the next flush and stamps later requests", async () => {
+    const { contract, ctx, requestId } = await depositRequested();
+    const settledAt = 150n;
+    const settled = (
+      await contract.circuits.completeDeposit(
+        ctx,
+        requestId,
+        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, settledAt),
+        OUTPUT_SUCCESS,
+        settledAt,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
+    ).context;
+    const afterSettle = ledger(stateOf(settled) as never);
+    expect(afterSettle.seenEvmHeights.lookup(requestId)).toBe(settledAt);
+    expect(afterSettle.lastSeenEvmHeight).toBe(EVM_START_HEIGHT);
+
+    const approveKey = queueKey(secretOf(ctx), pureCircuits.approveRouterBinder(ERC20));
+    const queued = (await contract.circuits.approveRouter(settled, ERC20, 1n)).context;
+    const flushed = (
+      await contract.circuits.flush(queued, padKeys([approveKey]), padKeys([requestId]))
+    ).context;
+    const afterFlush = ledger(stateOf(flushed) as never);
+    expect(afterFlush.lastSeenEvmHeight).toBe(settledAt);
+    expect(afterFlush.seenEvmHeights.member(requestId)).toBe(false);
+    expect(stampOf(afterFlush, approveKey).knownHeight).toBe(settledAt);
+  });
+
+  it("a re-issued deposit cannot reuse the attestation of its first execution", async () => {
+    const { contract, ctx, requestId } = await depositRequested();
+    const settledAt = 150n;
+    const attestation = respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, settledAt);
+    const settled = (
+      await contract.circuits.completeDeposit(
+        ctx,
+        requestId,
+        attestation,
+        OUTPUT_SUCCESS,
+        settledAt,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
+    ).context;
+    const folded = (await contract.circuits.flush(settled, padKeys([]), padKeys([requestId])))
+      .context;
+    const reissued = (await deposit(contract, folded, VALID_DEPOSIT)).context;
+    expect(
+      ledger(stateOf(reissued) as never).depositSettleViews.lookup(requestId).knownHeight,
+    ).toBe(settledAt);
+    await expect(
+      contract.circuits.completeDeposit(
+        reissued,
+        requestId,
+        attestation,
+        OUTPUT_SUCCESS,
+        settledAt,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      ),
+    ).rejects.toThrow(/Stale attestation/);
+  });
+
+  it("sendDeposit is permissionless", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const key = depositKey(ctx, VALID_DEPOSIT.evmNonce);
+    const queued = (await queueDeposit(contract, ctx, VALID_DEPOSIT)).context;
+    const flushed = await flushOne(contract, queued, key);
+    const sent = (
+      await contract.circuits.sendDeposit(await strangerContext("sendDeposit", flushed), key)
+    ).context;
+    const index = toSignBidirectionalEventIndex(ledger(stateOf(sent) as never).depositEventMap);
+    expect(index.size).toBe(1);
+    const record = first(index.values(), "deposit request");
+    expect(record.path).toEqual(DEPLOYER_COMMITMENT);
+    expect(record.txParams.nonce).toBe(VALID_DEPOSIT.evmNonce);
+  });
 });
