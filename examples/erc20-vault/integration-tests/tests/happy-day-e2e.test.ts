@@ -60,6 +60,7 @@ import {
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startDeposit } from "../src/flows/start-deposit.ts";
 import { startWithdraw } from "../src/flows/start-withdraw.ts";
+import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
 const MINUTE = 60_000;
@@ -265,7 +266,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       signedDepositSweepTransaction = await pollSignatureResponse(context, {
         requestId: depositTransactionSignatureRequestId,
         intervalMs: 1000,
-        timeoutMs: 1 * MINUTE,
+        timeoutMs: POLL_TIMEOUT_MS,
         expectedSigner: requireEnv("EVM_USER_ADDRESS"),
         requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
       });
@@ -276,7 +277,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         `Signature: ${signedDepositSweepTransaction.serialized}`,
       ]);
     },
-    5 * MINUTE,
+    POLL_TIMEOUT_MS + 5 * MINUTE,
   );
 
   it(
@@ -337,7 +338,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       depositSweepTransactionRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: depositTransactionSignatureRequestId,
         intervalMs: 1000,
-        timeoutMs: 1 * MINUTE,
+        timeoutMs: POLL_TIMEOUT_MS,
         requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
       });
 
@@ -377,7 +378,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         "signature verified over them.",
       ]);
     },
-    5 * MINUTE,
+    POLL_TIMEOUT_MS + 5 * MINUTE,
   );
 
   it(
@@ -582,7 +583,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       signedWithdrawTransaction = await pollSignatureResponse(context, {
         requestId: withdrawTransactionSignatureRequestId,
         intervalMs: 1000,
-        timeoutMs: 1 * MINUTE,
+        timeoutMs: POLL_TIMEOUT_MS,
         expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
       });
 
@@ -592,7 +593,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         `Signature: ${signedWithdrawTransaction.serialized}`,
       ]);
     },
-    5 * MINUTE,
+    POLL_TIMEOUT_MS + 5 * MINUTE,
   );
 
   it(
@@ -650,7 +651,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       withdrawRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: withdrawTransactionSignatureRequestId,
         intervalMs: 1000,
-        timeoutMs: 1 * MINUTE,
+        timeoutMs: POLL_TIMEOUT_MS,
       });
 
       // Happy-day flow: the broadcast step saw the transfer mine, so the MPC
@@ -666,7 +667,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
           `(payload 0x${bytesToHex(withdrawRespondBidirectional.serializedOutput)})`,
       ]);
     },
-    5 * MINUTE,
+    POLL_TIMEOUT_MS + 5 * MINUTE,
   );
 
   it(

@@ -54,6 +54,7 @@ import {
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startWithdraw } from "../src/flows/start-withdraw.ts";
+import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -229,7 +230,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "arrange must either find wallet A already funded or complete a deposit round trip",
         ).toBe(true);
       },
-      15 * MINUTE,
+      2 * POLL_TIMEOUT_MS + 15 * MINUTE,
     );
 
     it(
@@ -414,7 +415,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         signedWithdrawTransaction = await pollSignatureResponse(context, {
           requestId: withdrawRequestId,
           intervalMs: 1000,
-          timeoutMs: 2 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
         });
 
@@ -424,7 +425,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Signed tx hash: ${signedTxHash(signedWithdrawTransaction)}`,
         ]);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
@@ -459,7 +460,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         withdrawAttestation = await pollRespondBidirectional(context, {
           requestId: withdrawRequestId,
           intervalMs: 1000,
-          timeoutMs: 3 * MINUTE,
+          timeoutMs: POLL_TIMEOUT_MS,
         });
 
         // The broadcast step saw the transfer mine, so the MPC must attest
@@ -471,7 +472,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         banner([`Found success attestation for wallet B's withdraw ${withdrawRequestId}.`]);
       },
-      5 * MINUTE,
+      POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(

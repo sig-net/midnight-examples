@@ -47,6 +47,7 @@ import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import type { ShieldedTokenRecipient } from "../src/flows/complete-deposit.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
+import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -239,7 +240,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `  DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID=${requestId}`,
         ]);
       },
-      15 * MINUTE,
+      2 * POLL_TIMEOUT_MS + 15 * MINUTE,
     );
 
     it(

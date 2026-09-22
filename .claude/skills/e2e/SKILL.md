@@ -239,6 +239,14 @@ keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
   - `false-claimer`: `FALSE_CLAIMER_DEPOSIT_REQUEST_ID`
   - `bearer-transfer`: `BEARER_TRANSFER_DEPOSIT_REQUEST_ID` /
     `BEARER_TRANSFER_WITHDRAW_REQUEST_ID`
+  - `swap-e2e`: `SWAP_E2E_DEPOSIT_REQUEST_ID` / `SWAP_E2E_SWAP_REQUEST_ID`
+  - `supply-redeem-e2e`: `SUPPLY_REDEEM_DEPOSIT_REQUEST_ID` /
+    `SUPPLY_REDEEM_SUPPLY_REQUEST_ID` / `SUPPLY_REDEEM_REDEEM_REQUEST_ID`
+  - `supply-refund-e2e`: `SUPPLY_REFUND_DEPOSIT_REQUEST_ID` /
+    `SUPPLY_REFUND_SUPPLY_REQUEST_ID`
+  - `swap-refund-e2e`: `SWAP_REFUND_DEPOSIT_REQUEST_ID` / `SWAP_REFUND_SWAP_REQUEST_ID`
+  - `redeem-refund-e2e`: `REDEEM_REFUND_DEPOSIT_REQUEST_ID` /
+    `REDEEM_REFUND_SUPPLY_REQUEST_ID` / `REDEEM_REFUND_REDEEM_REQUEST_ID`
 
   `broadcastEvm` is idempotent, so already-mined transfers skip through, and
   every spec skips already-claimed/settled requests cleanly. Expect the OOM

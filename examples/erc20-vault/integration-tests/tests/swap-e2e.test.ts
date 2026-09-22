@@ -2,7 +2,14 @@
 // verifies: the Uniswap router is deployed there, and the derived accounts hold ETH + real USDC.
 // Here we deposit to fund the vault + mint the caller a shielded tokenIn coin, then swap it for
 // tokenOut.
+//
+// Recovery from a run that died mid-flow (proof-server OOM): rerun this file with
+// SWAP_E2E_DEPOSIT_REQUEST_ID / SWAP_E2E_SWAP_REQUEST_ID set to the ids the failed run
+// printed. Each leg then resumes its request instead of recording a fresh one, and a leg a
+// prior run already settled skips its settle.
+import type { RequestIdHex } from "@sig-net/midnight";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { banner } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -10,6 +17,7 @@ import { quoteExactOutputSingle } from "../src/evm-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
+import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -35,6 +43,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
     "deposits tokenIn, then swaps it for tokenOut and mints the shielded amountOut",
     async () => {
       const context = await session.vaultContext();
+      const depositResumeId = env.SWAP_E2E_DEPOSIT_REQUEST_ID as RequestIdHex | undefined;
+      const swapResumeId = env.SWAP_E2E_SWAP_REQUEST_ID as RequestIdHex | undefined;
 
       // The setup pipeline deploys the vault but does not initialise it (the key it pins
       // derives from the vault address), so seal the config here before any flow. A kept
@@ -52,7 +62,16 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
         AMOUNT_OUT,
         CAP_SLIPPAGE_BPS,
       );
-      await runDepositRoundTrip(session, { amount: amountInMaximum });
+      const deposit = await runDepositRoundTrip(session, {
+        amount: amountInMaximum,
+        reuseRequestId: depositResumeId,
+      });
+      banner([
+        `Deposit ${deposit.requestId} complete.`,
+        "",
+        "If a later step dies (e.g. proof-server OOM), resume with",
+        `  SWAP_E2E_DEPOSIT_REQUEST_ID=${deposit.requestId}`,
+      ]);
 
       // The caller's own shielded tokenOut balance before the swap: completeSwap mints exactly
       // the requested amountOut, so this must rise by AMOUNT_OUT (the owner can read it).
@@ -69,22 +88,30 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
         fee: FEE,
         amountOut: AMOUNT_OUT,
         amountInMaximum,
+        reuseRequestId: swapResumeId,
       });
       expect(result.refunded).toBe(false);
-      // exactOutput: exactly AMOUNT_OUT is minted, and less than the cap was spent (change exists).
+      // exactOutput: exactly AMOUNT_OUT is minted and some tokenIn was spent.
       expect(result.amountOut).toBe(AMOUNT_OUT);
       expect(result.amountIn).toBeGreaterThan(0n);
-      expect(result.amountIn).toBeLessThan(amountInMaximum);
+      // Less than the cap was spent (change exists). The cap is the one quoted above only when
+      // this run recorded the swap: a resumed request carries the cap a prior run quoted.
+      const underCap = swapResumeId === undefined ? result.amountIn < amountInMaximum : true;
+      expect(underCap, "less than the cap was spent (change exists)").toBe(true);
 
-      // The mint credited exactly AMOUNT_OUT to the caller's shielded tokenOut balance.
+      // The mint credited exactly AMOUNT_OUT to the caller's shielded tokenOut balance. A
+      // request a prior run settled minted back then, so this run's balance stays put.
       const outAfter = await readOut();
-      expect(outAfter - outBefore).toBe(AMOUNT_OUT);
-      const change = amountInMaximum - result.amountIn;
+      expect(outAfter - outBefore).toBe(result.settled ? AMOUNT_OUT : 0n);
+      const change =
+        swapResumeId === undefined
+          ? `, ${String(amountInMaximum - result.amountIn)} USDC change`
+          : "";
       console.log(
         `SWAP E2E OK: spent ${String(result.amountIn)} USDC -> ${String(AMOUNT_OUT)} EURC ` +
-          `(+${String(AMOUNT_OUT)} tokenOut, ${String(change)} USDC change)`,
+          `(+${String(AMOUNT_OUT)} tokenOut${change})`,
       );
     },
-    30 * 60_000,
+    5 * POLL_TIMEOUT_MS + 30 * 60_000,
   );
 });

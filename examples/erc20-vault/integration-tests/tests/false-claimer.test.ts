@@ -44,6 +44,7 @@ import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { completeDeposit } from "../src/flows/complete-deposit.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
+import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
 const MINUTE = 60_000;
@@ -185,7 +186,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `  FALSE_CLAIMER_DEPOSIT_REQUEST_ID=${requestId}`,
         ]);
       },
-      15 * MINUTE,
+      2 * POLL_TIMEOUT_MS + 15 * MINUTE,
     );
 
     it(
@@ -228,7 +229,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "The request is still on the vault ledger, claimable by the depositor.",
         ]);
       },
-      15 * MINUTE,
+      POLL_TIMEOUT_MS + 15 * MINUTE,
     );
 
     it(
@@ -259,7 +260,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "vault rejected for identity B went through for identity A.",
         ]);
       },
-      15 * MINUTE,
+      POLL_TIMEOUT_MS + 15 * MINUTE,
     );
 
     it(
