@@ -10,11 +10,15 @@
 // prior run already settled skips its settle.
 import type { RequestIdHex } from "@sig-net/midnight";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
-import { banner } from "@sig-net/midnight-examples-test-harness";
+import { banner, getErc20Balance, getEthBalance } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
+import { formatEther, formatUnits, parseEther } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { fundingSummary } from "../src/evm-logging.ts";
 import { quoteExactOutputSingle } from "../src/evm-swap.ts";
+import { SWAP_GAS_LIMIT, SWAP_MAX_FEE_PER_GAS } from "../src/evm-swap.ts";
+import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
@@ -37,6 +41,61 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
   afterAll(async () => {
     await session.stop();
   });
+
+  it(
+    "funding preflight: user EVM account holds the deposited cap, vault EVM account holds the approve + swap gas budget",
+    async () => {
+      const context = await session.vaultContext();
+      const depositResumeId = env.SWAP_REFUND_DEPOSIT_REQUEST_ID as RequestIdHex | undefined;
+
+      // The user's derived account pays the sweep gas and supplies the deposited ERC20.
+      const userEth = await getEthBalance(context.evmRpcUrl, context.evmUserAddress);
+      console.log(
+        `${context.evmUserAddress}: ${fundingSummary(userEth, parseEther("0.01"), 18, "ETH")} (funding reserve)`,
+      );
+      expect(
+        userEth,
+        `fund ${context.evmUserAddress} with >= 0.01 ETH on EVM`,
+      ).toBeGreaterThanOrEqual(parseEther("0.01"));
+      // Half the live quote, the cap the main test deposits (it re-quotes, and the pool does not
+      // move in between).
+      const { amountIn: quotedIn } = await quoteExactOutputSingle(
+        context.evmRpcUrl,
+        context.erc20Address,
+        EURC,
+        FEE,
+        AMOUNT_OUT,
+      );
+      // A resumed deposit already swept its ERC20, so nothing is required then.
+      const required = depositResumeId === undefined ? quotedIn / 2n : 0n;
+      const { balance, decimals } = await getErc20Balance(
+        context.evmRpcUrl,
+        context.erc20Address,
+        context.evmUserAddress,
+      );
+      console.log(
+        `${context.evmUserAddress}: ${fundingSummary(balance, required, decimals, context.erc20Address)} (deposited cap)`,
+      );
+      expect(
+        balance,
+        `fund ${context.evmUserAddress} with >= ${formatUnits(required, decimals)} of ERC20 ${context.erc20Address} on EVM`,
+      ).toBeGreaterThanOrEqual(required);
+
+      // The vault's derived account sends the router approve (first use) and the swap itself.
+      const gasBudget =
+        ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS +
+        SWAP_GAS_LIMIT * SWAP_MAX_FEE_PER_GAS;
+      const vaultEth = await getEthBalance(context.evmRpcUrl, context.evmVaultAddress);
+      console.log(
+        `${context.evmVaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,
+      );
+      expect(
+        vaultEth,
+        `fund the vault's derived account ${context.evmVaultAddress} with >= ${formatEther(gasBudget)} ETH on EVM`,
+      ).toBeGreaterThanOrEqual(gasBudget);
+    },
+    5 * 60_000,
+  );
 
   it(
     "refunds tokenIn when the swap reverts on-chain (amountInMaximum too low)",
@@ -77,7 +136,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
       const readBalance = async () =>
         (await (await session.wallet()).facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
       const balanceBefore = await readBalance();
-      // The coin the swap surrenders must be in hand before it is recorded; a resumed request
+      // The coin the swap surrenders must be in hand before it is recorded, and a resumed request
       // already burned it, so nothing is required.
       expect(balanceBefore).toBeGreaterThanOrEqual(swapResumeId === undefined ? cap : 0n);
 
@@ -92,7 +151,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
       expect(result.refunded).toBe(true);
 
       // The refund re-minted exactly the surrendered tokenIn. A fresh run burns and re-mints
-      // within this run (net-zero); a resumed request burned its coin in the prior run, so the
+      // within this run (net-zero). A resumed request burned its coin in the prior run, so the
       // run that settles observes only the re-mint, of the cap the prior run quoted (which this
       // run cannot read back, hence a strict rise rather than an exact delta).
       const balanceAfter = await readBalance();

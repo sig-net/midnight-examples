@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-twelve-spec suite (101 tests: eleven e2e specs carrying 95, plus the offline
+twelve-spec suite (106 tests: eleven e2e specs carrying 100, plus the offline
 `benchmark-tooling` spec carrying 6). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest

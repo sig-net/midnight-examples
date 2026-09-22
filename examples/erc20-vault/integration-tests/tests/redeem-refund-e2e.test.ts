@@ -13,10 +13,19 @@
 import type { RequestIdHex } from "@sig-net/midnight";
 import { AAVE_USDC, STATA_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
-import { banner, logSkip } from "@sig-net/midnight-examples-test-harness";
+import {
+  banner,
+  getErc20Balance,
+  getEthBalance,
+  logSkip,
+} from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
+import { formatEther, formatUnits, parseEther } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { fundingSummary } from "../src/evm-logging.ts";
+import { STATA_GAS_LIMIT, STATA_MAX_FEE_PER_GAS } from "../src/evm-stata.ts";
+import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
@@ -37,6 +46,52 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave redeem-ref
   afterAll(async () => {
     await session.stop();
   });
+
+  it(
+    "funding preflight: user EVM account holds the supplied USDC, vault EVM account holds the approve + supply + drain + redeem gas budget",
+    async () => {
+      const context = await session.vaultContext();
+      const depositResumeId = env.REDEEM_REFUND_DEPOSIT_REQUEST_ID as RequestIdHex | undefined;
+
+      // The user's derived account pays the sweep gas and supplies the deposited ERC20.
+      const userEth = await getEthBalance(context.evmRpcUrl, context.evmUserAddress);
+      console.log(
+        `${context.evmUserAddress}: ${fundingSummary(userEth, parseEther("0.01"), 18, "ETH")} (funding reserve)`,
+      );
+      expect(
+        userEth,
+        `fund ${context.evmUserAddress} with >= 0.01 ETH on EVM`,
+      ).toBeGreaterThanOrEqual(parseEther("0.01"));
+      // A resumed deposit already swept its ERC20, so nothing is required then.
+      const required = depositResumeId === undefined ? SUPPLY_AMOUNT : 0n;
+      const { balance, decimals } = await getErc20Balance(
+        context.evmRpcUrl,
+        AAVE_USDC,
+        context.evmUserAddress,
+      );
+      console.log(
+        `${context.evmUserAddress}: ${fundingSummary(balance, required, decimals, AAVE_USDC)} (supplied amount)`,
+      );
+      expect(
+        balance,
+        `fund ${context.evmUserAddress} with >= ${formatUnits(required, decimals)} of ERC20 ${AAVE_USDC} on EVM`,
+      ).toBeGreaterThanOrEqual(required);
+
+      // The vault's derived account sends the wrapper approve (first use), the supply, the drain and the redeem.
+      const gasBudget =
+        2n * ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS +
+        2n * STATA_GAS_LIMIT * STATA_MAX_FEE_PER_GAS;
+      const vaultEth = await getEthBalance(context.evmRpcUrl, context.evmVaultAddress);
+      console.log(
+        `${context.evmVaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,
+      );
+      expect(
+        vaultEth,
+        `fund the vault's derived account ${context.evmVaultAddress} with >= ${formatEther(gasBudget)} ETH on EVM`,
+      ).toBeGreaterThanOrEqual(gasBudget);
+    },
+    5 * 60_000,
+  );
 
   it(
     "refunds the shares when the redeem reverts on-chain (vault holds no stataUSDC)",
@@ -85,7 +140,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave redeem-ref
           stataColor
         ] ?? 0n;
       const balanceBefore = await readBalance();
-      // The shares the redeem surrenders must be in hand before it is recorded; a resumed
+      // The shares the redeem surrenders must be in hand before it is recorded, and a resumed
       // request already burned them, so nothing is required.
       expect(balanceBefore).toBeGreaterThanOrEqual(
         redeemResumeId === undefined ? supplyResult.shares : 0n,
@@ -111,7 +166,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault aave redeem-ref
       expect(result.assets).toBe(0n);
 
       // The refund re-minted exactly the surrendered shares. A fresh run burns and re-mints
-      // within this run (net-zero); a resumed request burned its shares in the prior run, so
+      // within this run (net-zero). A resumed request burned its shares in the prior run, so
       // this run observes only the re-mint, and only when it is the run that settles.
       const balanceAfter = await readBalance();
       const expectedDelta =
