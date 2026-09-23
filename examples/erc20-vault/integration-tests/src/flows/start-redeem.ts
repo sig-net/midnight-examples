@@ -15,7 +15,6 @@ import {
   TxParamType,
 } from "@sig-net/midnight";
 import {
-  pureCircuits,
   readVaultLedger,
   STATA_USDC,
   VAULT_PATH_BYTES,
@@ -73,7 +72,6 @@ export async function startRedeem(
   );
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...REDEEM_MPC_ROUTING,

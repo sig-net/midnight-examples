@@ -75,7 +75,6 @@ import {
   stampOf,
   unstampedKeys,
   VAULT_DEPOSIT_REQUESTS_PATH,
-  VAULT_NONCE_PATH,
   VAULT_REQUESTS_PATH,
   type VaultPrivateState,
   witnesses,
@@ -371,17 +370,12 @@ describe("erc20-vault ledger shape", () => {
     const node = signetFieldNodeByPath(rawState, VAULT_REQUESTS_PATH);
     expect(node.type()).toBe("map");
 
-    const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(
-      rawState,
-      VAULT_REQUESTS_PATH,
-      VAULT_NONCE_PATH,
-    );
+    const { requestsIndex } = readSignetRequestsLedgerFromState(rawState, VAULT_REQUESTS_PATH);
     const typedIndex = toSignBidirectionalEventIndex(
       ledger(ctx.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
     expect(requestsIndex).toEqual(typedIndex);
     expect(requestsIndex.size).toBe(0);
-    expect(nonce).toBe(0n);
   });
 });
 
@@ -508,16 +502,10 @@ describe("deposit round-trip", () => {
     // Read 1: generated ledger().
     const typedIndex = toSignBidirectionalEventIndex(ledger(state).depositEventMap);
     // Read 2: MPC-style raw read, no compiled contract involved.
-    const rawLedger = readSignetRequestsLedgerFromState(
-      state,
-      VAULT_DEPOSIT_REQUESTS_PATH,
-      VAULT_NONCE_PATH,
-    );
+    const rawLedger = readSignetRequestsLedgerFromState(state, VAULT_DEPOSIT_REQUESTS_PATH);
 
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
-    // The raw counter read matches the generated one.
-    expect(rawLedger.nonce).toBe(ledger(state).signetRequestNonce);
 
     const [idHex, record] = first(typedIndex.entries(), "indexed signBidirectional request");
 
@@ -573,7 +561,6 @@ describe("deposit round-trip", () => {
       EXPECTED_ROUTING.outputDeserializationSchema,
     );
     expect(record.respondSerializationSchema).toEqual(EXPECTED_ROUTING.respondSerializationSchema);
-    expect(record.requestNonce).toBe(0n);
 
     // Contract-built calldata: transfer(vaultEvmAddress, amount) as ABI-ready
     // big-endian words, stored exactly as broadcast.
@@ -600,8 +587,6 @@ describe("deposit round-trip", () => {
       amount: AMOUNT,
       knownHeight: EVM_START_HEIGHT,
     });
-
-    expect(ledger(state).signetRequestNonce).toBe(0n);
   });
 });
 
@@ -658,7 +643,7 @@ describe("deposit validation", () => {
     );
   });
 
-  it("the SAME caller depositing twice with different EVM nonces gets two ids and leaves every request nonce at 0", async () => {
+  it("the SAME caller depositing twice with different EVM nonces gets two ids", async () => {
     const { contract, ctx } = await deployInitialised();
 
     const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
@@ -669,11 +654,9 @@ describe("deposit validation", () => {
       })
     ).context;
     const state = ledger(afterSecond.callContext.currentQueryContext.state);
-    expect(state.signetRequestNonce).toBe(0n);
 
     const index = toSignBidirectionalEventIndex(state.depositEventMap);
     expect(index.size).toBe(2);
-    expect([...index.values()].map((record) => record.requestNonce)).toEqual([0n, 0n]);
   });
 });
 
@@ -794,7 +777,6 @@ describe("withdraw round-trip", () => {
       EXPECTED_ROUTING.outputDeserializationSchema,
     );
     expect(record.respondSerializationSchema).toEqual(EXPECTED_ROUTING.respondSerializationSchema);
-    expect(record.requestNonce).toBe(0n);
 
     // Contract-built calldata: transfer(destEvmAddress, amount) as ABI-ready
     // big-endian words, stored exactly as broadcast.
@@ -819,7 +801,6 @@ describe("withdraw round-trip", () => {
       amount: AMOUNT,
       knownHeight: EVM_START_HEIGHT,
     });
-    expect(ledger(state).signetRequestNonce).toBe(0n);
 
     // The burn, observable in the zswap local state: the coin is received (a
     // contract-owned output) and spent as the call's input, and the burn

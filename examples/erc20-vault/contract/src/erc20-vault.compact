@@ -25,9 +25,6 @@ sealed ledger signetSigner: SignetSigner;
 // Verifies every attestation (the Signet singleton emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
-// Nonce to keep otherwise identical requests hashing to distinct request ids.
-export ledger signetRequestNonce: Counter;
-
 export ledger vaultMaxFeePerGas: Uint<128>;
 export ledger vaultMaxPriorityFeePerGas: Uint<128>;
 
@@ -352,7 +349,7 @@ export circuit adminReplaceEvmNonce(
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), keyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -501,7 +498,7 @@ export circuit sendDeposit(key: Bytes<32>): [] {
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), pending.keyVersion, pending.requester,
+    kernel.self(), pending.keyVersion, pending.requester,
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -1053,9 +1050,6 @@ export circuit refundRedeem(
   mintShieldedToken(vaultTokenDomainSeparator(stataToken), view.shares, disclose(mintNonce), recipient);
 }
 
-export pure circuit vaultSignedRequestNonce(): Uint<64> {
-  return 0;
-}
 
 circuit flushVaultRequests<#N>(keys: Vector<N, Bytes<32>>, seen: Vector<N, RequestId>): [] {
   assert(initialised >= 1, "Not initialised");
@@ -1145,7 +1139,7 @@ circuit sendApprove(key: Bytes<32>, kind: PendingRequestKind): [] {
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), pending.keyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -1190,7 +1184,7 @@ export circuit sendWithdraw(key: Bytes<32>): [] {
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), pending.keyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -1238,7 +1232,7 @@ export circuit sendSwap(key: Bytes<32>): [] {
     accessList: []
   };
   const request = constructSignBidirectionalEvent<EvmType2TxParams<7, 0, 0>, 38, 37>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), pending.keyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), swapOutputSchema(), swapRespondSchema()
   );
@@ -1288,7 +1282,7 @@ export circuit sendSupply(key: Bytes<32>): [] {
     accessList: []
   };
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 36, 35>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), pending.keyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), supplyOutputSchema(), supplyRespondSchema()
   );
@@ -1336,7 +1330,7 @@ export circuit sendRedeem(key: Bytes<32>): [] {
     accessList: []
   };
   const request = constructSignBidirectionalEvent<EvmType2TxParams<3, 0, 0>, 36, 35>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), pending.keyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), redeemOutputSchema(), redeemRespondSchema()
   );

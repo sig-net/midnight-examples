@@ -19,7 +19,6 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
-  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -96,7 +95,6 @@ export async function startWithdraw(
   }
 
   const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "withdraw");
-  const requestNonce = pureCircuits.vaultSignedRequestNonce();
 
   // The surrendered coin: the vault token for THIS erc20, of exactly
   // `amount`, under a fresh random nonce.
@@ -128,7 +126,6 @@ export async function startWithdraw(
   // vault's own 32-byte derivation path, and the contract-fixed routing.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce,
     keyVersion,
     path: VAULT_PATH_BYTES,
     ...VAULT_MPC_ROUTING,

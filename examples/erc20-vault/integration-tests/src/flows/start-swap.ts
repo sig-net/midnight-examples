@@ -16,7 +16,6 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
-  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -98,7 +97,6 @@ export async function startSwap(
   );
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...SWAP_MPC_ROUTING,

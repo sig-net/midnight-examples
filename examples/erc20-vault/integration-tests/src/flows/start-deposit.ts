@@ -118,7 +118,6 @@ export async function startDeposit(
   if (!before.initialised) {
     throw new Error("vault is not initialised, run the initialise flow first");
   }
-  const requestNonce = pureCircuits.vaultSignedRequestNonce();
   const vaultEvmAddress = before.vaultEvmAddress;
 
   const gasLimit = ERC20_TRANSFER_GAS_LIMIT;
@@ -135,7 +134,6 @@ export async function startDeposit(
   // contract-fixed routing.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce,
     keyVersion,
     path: context.identity.commitment,
     ...VAULT_MPC_ROUTING,

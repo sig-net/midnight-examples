@@ -10,7 +10,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   VAULT_DEPOSIT_REQUESTS_PATH,
-  VAULT_NONCE_PATH,
   VAULT_REDEEM_REQUESTS_PATH,
   VAULT_REQUESTS_PATH,
   VAULT_SUPPLY_REQUESTS_PATH,
@@ -40,7 +39,6 @@ const compiledFieldIndex = (name: string): readonly number[] => {
 describe("exported ledger paths match the compiled contract-info.json", () => {
   it.each([
     ["signBidirectionalEventMap", VAULT_REQUESTS_PATH, [0, 0]],
-    ["signetRequestNonce", VAULT_NONCE_PATH, [0, 3]],
     ["depositEventMap", VAULT_DEPOSIT_REQUESTS_PATH, [1, 3]],
     ["swapEventMap", VAULT_SWAP_REQUESTS_PATH, [1, 7]],
     ["supplyEventMap", VAULT_SUPPLY_REQUESTS_PATH, [1, 11]],
@@ -56,9 +54,9 @@ describe("exported ledger paths match the compiled contract-info.json", () => {
 
 describe("the admin-updateable gas parameters sit in chunk 0", () => {
   it.each([
-    ["vaultMaxFeePerGas", [0, 4]],
-    ["vaultMaxPriorityFeePerGas", [0, 5]],
-    ["vaultGasLimits", [0, 6]],
+    ["vaultMaxFeePerGas", [0, 3]],
+    ["vaultMaxPriorityFeePerGas", [0, 4]],
+    ["vaultGasLimits", [0, 5]],
   ] as const)("%s", (fieldName, compiledPath) => {
     expect(compiledFieldIndex(fieldName)).toEqual(compiledPath);
   });

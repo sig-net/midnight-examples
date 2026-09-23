@@ -17,7 +17,6 @@ import {
 } from "@sig-net/midnight";
 import {
   AAVE_USDC,
-  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -76,7 +75,6 @@ export async function startSupply(
   );
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...SUPPLY_MPC_ROUTING,

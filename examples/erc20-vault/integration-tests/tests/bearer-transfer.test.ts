@@ -316,14 +316,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         ).toBe(0n);
 
         const context = await session.vaultContext();
-        const readNonce = async () =>
+        const readPendingRequests = async () =>
           (
             await readVaultLedger(
               context.providers.publicDataProvider,
               context.vaultContractAddress,
             )
-          ).signetRequestNonce;
-        const nonceBefore = await readNonce();
+          ).signBidirectionalEventMap.size();
+        const pendingBefore = await readPendingRequests();
 
         // The `startWithdraw` circuit demands a surrendered coin of the full amount;
         // A's wallet holds none of the color, so balancing cannot fund it and
@@ -335,11 +335,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           }),
         ).rejects.toThrow(/[Ii]nsufficient funds/);
 
-        // Client-side death leaves no trace: the request counter is unchanged.
+        // Client-side death leaves no trace: the request map is unchanged.
         expect(
-          await readNonce(),
+          await readPendingRequests(),
           "the failed withdraw must not record a request on the ledger",
-        ).toBe(nonceBefore);
+        ).toBe(pendingBefore);
 
         banner([
           "Wallet A can no longer withdraw: its shielded vault-token balance is 0,",
