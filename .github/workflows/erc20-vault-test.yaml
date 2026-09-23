@@ -10,6 +10,7 @@
 name: erc20-vault-test
 
 on:
+  # Schedule trigger always runs on default branch (dev)
   schedule:
     # Weekly, Monday 04:17 UTC
     - cron: "17 4 * * 1"
