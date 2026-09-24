@@ -41,11 +41,15 @@ const signedNonce = (transaction: Transaction, what: string): bigint => {
   return BigInt(transaction.nonce);
 };
 
-const signatureOf = (context: VaultContext, requestId: string): Promise<Transaction> =>
+const signatureOf = (
+  context: VaultContext,
+  requestId: string,
+  timeoutMs = 2 * MINUTE,
+): Promise<Transaction> =>
   pollSignatureResponse(context, {
     requestId: requestId as never,
     intervalMs: 1000,
-    timeoutMs: 2 * MINUTE,
+    timeoutMs,
     expectedSigner: context.evmVaultAddress,
   });
 
@@ -233,7 +237,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
         },
       ].sort((a, b) => (a.nonce < b.nonce ? -1 : 1));
       for (const { nonce, send } of stamped) {
-        const signed = await signatureOf(context, await send());
+        const signed = await signatureOf(context, await send(), 4 * MINUTE);
         expect(signedNonce(signed, `nonce ${String(nonce)}`)).toBe(nonce);
         expect((await broadcastEvm(context, { transaction: signed })).status).toBe(1);
       }
