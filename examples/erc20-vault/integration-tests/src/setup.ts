@@ -64,8 +64,8 @@ import type { TestProject } from "vitest/node";
 
 import { stataAvailable } from "./evm-stata.ts";
 import { uniswapAvailable } from "./evm-swap.ts";
-import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
 import { initialise } from "./flows/initialise.ts";
+import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
 import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
