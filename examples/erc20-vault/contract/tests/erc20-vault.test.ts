@@ -22,10 +22,10 @@ import {
   decodeSignetLogEvents,
   evmAddressAbiWord,
   hexToBytes,
-  MPC_FAILURE_OUTPUT,
   MPCDestination,
   MPCSignatureAlgorithm,
   numericAbiWord,
+  OutputKind,
   pureCircuits as signetCircuits,
   readSignetRequestsLedgerFromState,
   type RequestId,
@@ -40,12 +40,7 @@ import {
   toSignBidirectionalEventIndex,
   TxParamType,
 } from "@sig-net/midnight";
-import {
-  calculateSignetAttestationDigest,
-  ecdsaSignatureToMpcSignature,
-  secp256k1PublicKeyOf,
-  signAttestationDigest,
-} from "@sig-net/midnight/testing";
+import { attestRespondBidirectional, secp256k1PublicKeyOf } from "@sig-net/midnight/testing";
 import { describe, expect, it } from "vitest";
 
 // The ERC20 transfer(address,uint256) selector: the TS mirror of the literal
@@ -185,9 +180,9 @@ const VAULT_ADDRESS_BYTES = hexToBytes(VAULT_ADDRESS);
 const EXPECTED_SCHEMA = asciiPadded('[{"name":"success","type":"bool"}]', 34);
 const EXPECTED_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
-  dest: MPCDestination.unused,
+  signatureDest: MPCDestination.unused,
   params: new Uint8Array(64),
-  caip2Id: signetCircuits.ethereumCaip2Id(),
+  executionDest: signetCircuits.ethereumCaip2Id(),
   outputDeserializationSchema: EXPECTED_SCHEMA,
   respondSerializationSchema: EXPECTED_SCHEMA,
 };
@@ -564,10 +559,10 @@ describe("deposit round-trip", () => {
     // literal at its exact 34-byte width).
     expect(record.sender).toEqual({ bytes: VAULT_ADDRESS_BYTES });
     expect(record.path).toEqual(DEPLOYER_COMMITMENT);
-    expect(record.caip2Id).toEqual(EXPECTED_ROUTING.caip2Id);
+    expect(record.executionDest).toEqual(EXPECTED_ROUTING.executionDest);
     expect(record.keyVersion).toBe(MPC_KEY_VERSION);
     expect(record.algo).toBe(EXPECTED_ROUTING.algo);
-    expect(record.dest).toBe(EXPECTED_ROUTING.dest);
+    expect(record.signatureDest).toBe(EXPECTED_ROUTING.signatureDest);
     expect(record.params).toEqual(EXPECTED_ROUTING.params);
     expect(record.txParamType).toBe(TxParamType.evmType2);
     expect(record.outputDeserializationSchema).toEqual(
@@ -780,10 +775,10 @@ describe("withdraw round-trip", () => {
     });
 
     // Contract-fixed routing, same constants as deposits.
-    expect(record.caip2Id).toEqual(EXPECTED_ROUTING.caip2Id);
+    expect(record.executionDest).toEqual(EXPECTED_ROUTING.executionDest);
     expect(record.keyVersion).toBe(MPC_KEY_VERSION);
     expect(record.algo).toBe(EXPECTED_ROUTING.algo);
-    expect(record.dest).toBe(EXPECTED_ROUTING.dest);
+    expect(record.signatureDest).toBe(EXPECTED_ROUTING.signatureDest);
     expect(record.params).toEqual(EXPECTED_ROUTING.params);
     expect(record.txParamType).toBe(TxParamType.evmType2);
     expect(record.outputDeserializationSchema).toEqual(
@@ -971,36 +966,34 @@ const OUTPUT_SUCCESS = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: 
 // completeWithdraw's refund branch.
 const OUTPUT_FALSE = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: false });
 
-// A NEVER-EXECUTED transfer/swap (reverted or replaced): the protocol's fixed
-// 5-byte failure output. Settles through the per-kind refund circuits, whose
-// output argument is Bytes<5>.
-const OUTPUT_REVERTED = MPC_FAILURE_OUTPUT;
+// A NEVER-EXECUTED transaction (reverted, or its nonce taken by another
+// transaction): the protocol attests an EMPTY output under OutputKind.failed
+// or OutputKind.unviable. Settles through the per-kind refund circuits, whose
+// output argument is Bytes<0>.
+const OUTPUT_FAILURE = new Uint8Array(0);
 
 /**
- * Sign a REAL RespondBidirectionalEvent for (requestId, serializedOutput)
- * with `secretKey`: the digest comes from the library's sanctioned TS twin
- * (pinned byte-for-byte against the compiled oracles in signet-midnight's
- * own tests), exactly like the MPC. The wire event carries ONLY the
- * stored-form signature (big-endian SEC1, bigR as a full point), and it is
- * returned flipped to verifyRespondBidirectionalEvent's circuit-input form,
- * which is what a client hands to the settle circuits: the digest is
- * recomputed by whoever verifies, and the output travels as a separate
- * circuit argument.
+ * Sign a REAL RespondBidirectionalEvent for (requestId, blockHeight,
+ * outputKind, serializedOutput) with `secretKey`: the record comes from the
+ * library's sanctioned minting helper (pinned byte-for-byte against the
+ * compiled oracles in signet-midnight's own tests), exactly like the MPC.
+ * The wire event carries the request id, block height, kind, output width,
+ * digest and the stored-form signature (big-endian SEC1, bigR as a full
+ * point), never the output, and it is returned flipped to
+ * verifyRespondBidirectionalEvent's circuit-input form, which is what a
+ * client hands to the settle circuits: the digest is recomputed by whoever
+ * verifies, and the output travels as a separate circuit argument.
  */
 const respond = (
   secretKey: Uint8Array,
   requestId: Uint8Array,
+  outputKind: OutputKind,
   serializedOutput: Uint8Array,
   blockHeight: bigint,
 ): RespondBidirectionalEvent =>
-  respondBidirectionalEventToCircuitInput({
-    signature: ecdsaSignatureToMpcSignature(
-      signAttestationDigest(
-        calculateSignetAttestationDigest(requestId, blockHeight, serializedOutput),
-        secretKey,
-      ),
-    ),
-  });
+  respondBidirectionalEventToCircuitInput(
+    attestRespondBidirectional({ requestId, blockHeight, outputKind, serializedOutput }, secretKey),
+  );
 
 // ---- Complete-withdraw fixtures ----
 
@@ -1028,10 +1021,14 @@ describe("completeWithdraw settle", () => {
     const next = (
       await contract.circuits.completeWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1047,10 +1044,14 @@ describe("completeWithdraw settle", () => {
     const next = (
       await contract.circuits.completeWithdraw(
         await strangerContext("completeWithdraw", ctx),
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1071,10 +1072,8 @@ describe("completeWithdraw settle", () => {
     const next = (
       await contract.circuits.completeWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_FALSE,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -1093,10 +1092,8 @@ describe("completeWithdraw settle", () => {
     await expect(
       contract.circuits.completeWithdraw(
         await strangerContext("completeWithdraw", ctx),
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_FALSE,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the withdrawer/);
@@ -1107,10 +1104,8 @@ describe("completeWithdraw settle", () => {
     await expect(
       contract.circuits.completeWithdraw(
         ctx,
-        requestId,
-        respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(IMPOSTER_SECRET, requestId, OutputKind.executed, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -1120,35 +1115,46 @@ describe("completeWithdraw settle", () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     // Signed over the FALSE result, presented as a success byte: the digest
     // recomputed in-circuit is not the one the signature covers. This is the
-    // attack the signature-only event must stop: settling a failed transfer
-    // as a success.
+    // attack the output-free event must stop: settling a false return as a
+    // success.
     await expect(
       contract.circuits.completeWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
 
-  it("rejects a genuine response presented under a different request id", async () => {
-    const { contract, ctx, requestId } = await withdrawRequested();
-    // Signed for some OTHER id: the digest binds the request id, so the
-    // signature cannot be replayed onto this pending withdrawal.
+  it("rejects a genuine response for another request id: the id the event names is consumed", async () => {
+    const { contract, ctx } = await withdrawRequested();
+    // The digest binds the event's request id and the circuit consumes THAT
+    // id, so a genuine attestation of some other id cannot settle this
+    // pending withdrawal: it looks up the other id and finds nothing.
     const otherId = bytes(32, 0xab);
     await expect(
       contract.circuits.completeWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, otherId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, otherId, OutputKind.executed, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Invalid attestation signature/);
+    ).rejects.toThrow(/Withdrawal not found/);
+  });
+
+  it("rejects a genuinely signed failure kind at the executed width", async () => {
+    const { contract, ctx, requestId } = await withdrawRequested();
+    // The kind is inside the signed digest: a failure attestation, even one
+    // the MPC signed over a 1-byte output, never settles as an execution.
+    await expect(
+      contract.circuits.completeWithdraw(
+        ctx,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        OUTPUT_SUCCESS,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Attestation is not an execution/);
   });
 
   it("rejects a genuinely signed id that has no pending withdrawal", async () => {
@@ -1157,10 +1163,14 @@ describe("completeWithdraw settle", () => {
     await expect(
       contract.circuits.completeWithdraw(
         ctx,
-        unknownId,
-        respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          unknownId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
@@ -1171,20 +1181,28 @@ describe("completeWithdraw settle", () => {
     const next = (
       await contract.circuits.completeWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
     await expect(
       contract.circuits.completeWithdraw(
         next,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
@@ -1202,10 +1220,14 @@ describe("completeWithdraw settle", () => {
     await expect(
       contract.circuits.completeWithdraw(
         next,
-        depositId,
-        respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          depositId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Withdrawal not found/);
@@ -1215,57 +1237,65 @@ describe("completeWithdraw settle", () => {
 // ---- Refund-withdraw tests ----
 
 describe("refundWithdraw settle", () => {
-  it("failure output: the WITHDRAWER re-mints the surrendered value and consumes the withdrawal", async () => {
-    const { contract, ctx, requestId } = await withdrawRequested();
+  it.each([
+    { name: "a reverted transfer (failed)", outputKind: OutputKind.failed },
+    {
+      name: "a transfer whose nonce another transaction took (unviable)",
+      outputKind: OutputKind.unviable,
+    },
+  ])(
+    "$name: the WITHDRAWER re-mints the surrendered value and consumes the withdrawal",
+    async ({ outputKind }) => {
+      const { contract, ctx, requestId } = await withdrawRequested();
 
-    // Same shielded-mint reasoning as completeWithdraw's refund branch: the
-    // call resolving proves the mint executed, the observable effect is the
-    // consumption of the request and its pending-withdrawal marker.
-    const next = (
-      await contract.circuits.refundWithdraw(
-        ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
-        MINT_NONCE,
-      )
-    ).context;
+      // Same shielded-mint reasoning as completeWithdraw's refund branch: the
+      // call resolving proves the mint executed, the observable effect is the
+      // consumption of the request and its pending-withdrawal marker.
+      const next = (
+        await contract.circuits.refundWithdraw(
+          ctx,
+          respond(MPC_RESPONSE_SECRET, requestId, outputKind, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+          OUTPUT_FAILURE,
+          MINT_NONCE,
+        )
+      ).context;
 
-    const state = ledger(next.callContext.currentQueryContext.state);
-    expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
-    expect(state.withdrawSettleViews.isEmpty()).toBe(true);
-  });
+      const state = ledger(next.callContext.currentQueryContext.state);
+      expect(state.signBidirectionalEventMap.isEmpty()).toBe(true);
+      expect(state.withdrawSettleViews.isEmpty()).toBe(true);
+    },
+  );
 
   it("a caller other than the withdrawer cannot take the refund", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
     await expect(
       contract.circuits.refundWithdraw(
         await strangerContext("refundWithdraw", ctx),
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the withdrawer/);
   });
 
-  it("rejects a genuinely attested 5-byte output that is not the failure output", async () => {
+  it("rejects a genuinely signed executed kind at the failure width", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
-    // Digest and signature check out, but the bytes are not the sentinel:
-    // no refund. Guards against width collisions as respond schemas grow.
-    const notTheSentinel = bytes(5, 0x01);
+    // Digest and signature check out over an empty output, but the signed
+    // kind says the transaction executed: no refund.
     await expect(
       contract.circuits.refundWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, notTheSentinel, ATTESTED_HEIGHT),
-        notTheSentinel,
-        ATTESTED_HEIGHT,
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_FAILURE,
+          ATTESTED_HEIGHT,
+        ),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
-    ).rejects.toThrow(/Not the MPC failure output/);
+    ).rejects.toThrow(/Attestation is not a failure/);
   });
 
   it("rejects a failure output signed by a key other than the stored MPC response key", async () => {
@@ -1273,10 +1303,8 @@ describe("refundWithdraw settle", () => {
     await expect(
       contract.circuits.refundWithdraw(
         ctx,
-        requestId,
-        respond(IMPOSTER_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(IMPOSTER_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -1284,16 +1312,14 @@ describe("refundWithdraw settle", () => {
 
   it("rejects presented output bytes that differ from what was signed", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
-    // Signed over some other 5-byte output, presented as the sentinel: the
-    // recomputed digest no longer matches what the signature covers, so the
-    // signature check rejects it before the sentinel gate.
+    // Signed over a 1-byte output under the failure kind, presented as the
+    // empty output: the recomputed digest is not the one the signature
+    // covers, so the signature check rejects it before the kind gate.
     await expect(
       contract.circuits.refundWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, bytes(5, 0x01), ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
@@ -1311,10 +1337,8 @@ describe("refundWithdraw settle", () => {
     await expect(
       contract.circuits.refundWithdraw(
         next,
-        depositId,
-        respond(MPC_RESPONSE_SECRET, depositId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, depositId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
       // Deposits never insert the pending-withdrawal marker, so a deposit id
@@ -1327,20 +1351,16 @@ describe("refundWithdraw settle", () => {
     const next = (
       await contract.circuits.refundWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       )
     ).context;
     await expect(
       contract.circuits.refundWithdraw(
         next,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
       // The first refund consumed the pending-withdrawal marker.
@@ -1415,10 +1435,14 @@ describe("completeDeposit settle", () => {
     const next = (
       await contract.circuits.completeDeposit(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         recipient,
       )
@@ -1434,10 +1458,8 @@ describe("completeDeposit settle", () => {
     await expect(
       contract.circuits.completeDeposit(
         ctx,
-        requestId,
-        respond(IMPOSTER_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(IMPOSTER_SECRET, requestId, OutputKind.executed, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1449,10 +1471,8 @@ describe("completeDeposit settle", () => {
     await expect(
       contract.circuits.completeDeposit(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_FALSE,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1463,20 +1483,33 @@ describe("completeDeposit settle", () => {
     const { contract, ctx, requestId } = await depositRequested();
     // Signed over the FALSE result, presented as a success byte: the digest
     // recomputed in-circuit is not the one the signature covers. This is the
-    // attack the signature-only event must stop: claiming a failed sweep as a
+    // attack the output-free event must stop: claiming a false return as a
     // success. (The reverse presentation would trip the return-value assert
     // first.)
     await expect(
       contract.circuits.completeDeposit(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_FALSE, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_FALSE, ATTESTED_HEIGHT),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
+  });
+
+  it("rejects a genuinely signed failure kind at the executed width", async () => {
+    const { contract, ctx, requestId } = await depositRequested();
+    // The kind is inside the signed digest: a failure attestation over a
+    // 1-byte success output never claims.
+    await expect(
+      contract.circuits.completeDeposit(
+        ctx,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        OUTPUT_SUCCESS,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      ),
+    ).rejects.toThrow(/Attestation is not an execution/);
   });
 
   it("rejects a genuinely signed id that has no pending deposit", async () => {
@@ -1485,10 +1518,14 @@ describe("completeDeposit settle", () => {
     await expect(
       contract.circuits.completeDeposit(
         ctx,
-        unknownId,
-        respond(MPC_RESPONSE_SECRET, unknownId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          unknownId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1500,10 +1537,14 @@ describe("completeDeposit settle", () => {
     const next = (
       await contract.circuits.completeDeposit(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       )
@@ -1511,10 +1552,14 @@ describe("completeDeposit settle", () => {
     await expect(
       contract.circuits.completeDeposit(
         next,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -1529,10 +1574,14 @@ describe("completeDeposit settle", () => {
     await expect(
       contract.circuits.completeDeposit(
         await strangerContext("completeDeposit", ctx),
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         OTHER_WALLET_RECIPIENT,
       ),
@@ -1753,10 +1802,8 @@ describe("completeSwap settle", () => {
     const next = (
       await contract.circuits.completeSwap(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       )
@@ -1771,10 +1818,8 @@ describe("completeSwap settle", () => {
     await expect(
       contract.circuits.completeSwap(
         await strangerContext("completeSwap", ctx),
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       ),
@@ -1786,10 +1831,8 @@ describe("completeSwap settle", () => {
     await expect(
       contract.circuits.completeSwap(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         MINT_NONCE,
       ),
@@ -1801,10 +1844,8 @@ describe("completeSwap settle", () => {
     await expect(
       contract.circuits.completeSwap(
         ctx,
-        requestId,
-        respond(IMPOSTER_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
+        respond(IMPOSTER_SECRET, requestId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       ),
@@ -1812,26 +1853,22 @@ describe("completeSwap settle", () => {
     await expect(
       contract.circuits.completeSwap(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
         swapOutput(1n),
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
-  it("rejects a failure attestation presented as a zero-padded success output", async () => {
+  it("rejects a failure attestation presented as an 8-byte zero output", async () => {
     const { contract, ctx, requestId } = await swapRequested();
-    const padded = new Uint8Array(8);
-    padded.set(OUTPUT_REVERTED);
+    // The digest commits to the output's width: an empty output signed under
+    // a failure kind never verifies over 8 zero bytes.
     await expect(
       contract.circuits.completeSwap(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        padded,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        new Uint8Array(8),
         MINT_NONCE,
         CHANGE_NONCE,
       ),
@@ -1840,15 +1877,13 @@ describe("completeSwap settle", () => {
 });
 
 describe("refundSwap settle", () => {
-  it("on the MPC failure output, re-mints tokenIn to the swapper and cleans up", async () => {
+  it("on a failure attestation, re-mints tokenIn to the swapper and cleans up", async () => {
     const { contract, ctx, requestId } = await swapRequested();
     const next = (
       await contract.circuits.refundSwap(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       )
     ).context;
@@ -1862,10 +1897,8 @@ describe("refundSwap settle", () => {
     await expect(
       contract.circuits.refundSwap(
         await strangerContext("refundSwap", ctx),
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the swapper/);
@@ -2041,10 +2074,8 @@ describe("completeSupply settle", () => {
     const next = (
       await contract.circuits.completeSupply(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, out, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, out, ATTESTED_HEIGHT),
         out,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -2059,10 +2090,8 @@ describe("completeSupply settle", () => {
     await expect(
       contract.circuits.completeSupply(
         await strangerContext("completeSupply", ctx),
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, out, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, out, ATTESTED_HEIGHT),
         out,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the supplier/);
@@ -2170,10 +2199,8 @@ describe("completeRedeem settle", () => {
     await expect(
       contract.circuits.completeRedeem(
         await strangerContext("completeRedeem", ctx),
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, out, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, out, ATTESTED_HEIGHT),
         out,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the redeemer/);
@@ -2185,10 +2212,8 @@ describe("completeRedeem settle", () => {
     const next = (
       await contract.circuits.completeRedeem(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, out, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, out, ATTESTED_HEIGHT),
         out,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       )
     ).context;
@@ -2199,15 +2224,13 @@ describe("completeRedeem settle", () => {
 });
 
 describe("refundSupply / refundRedeem settle", () => {
-  it("supply: on the MPC failure output, re-mints the underlying to the supplier and cleans up", async () => {
+  it("supply: on a failure attestation, re-mints the underlying to the supplier and cleans up", async () => {
     const { contract, ctx, requestId } = await supplyRequested();
     const next = (
       await contract.circuits.refundSupply(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       )
     ).context;
@@ -2216,15 +2239,13 @@ describe("refundSupply / refundRedeem settle", () => {
     expect(state.supplySettleViews.isEmpty()).toBe(true);
   });
 
-  it("redeem: on the MPC failure output, re-mints the stataToken to the redeemer and cleans up", async () => {
+  it("redeem: on a failure attestation, re-mints the stataToken to the redeemer and cleans up", async () => {
     const { contract, ctx, requestId } = await redeemRequested();
     const next = (
       await contract.circuits.refundRedeem(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       )
     ).context;
@@ -2238,10 +2259,8 @@ describe("refundSupply / refundRedeem settle", () => {
     await expect(
       contract.circuits.refundSupply(
         await strangerContext("refundSupply", ctx),
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Not the supplier/);
@@ -2309,10 +2328,14 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
     settle: ({ contract, ctx, requestId }) =>
       contract.circuits.completeDeposit(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -2324,10 +2347,14 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
     settle: ({ contract, ctx, requestId }) =>
       contract.circuits.completeWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Withdrawal not found/,
@@ -2338,10 +2365,8 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
     settle: ({ contract, ctx, requestId }) =>
       contract.circuits.refundWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     throws: /Withdrawal not found/,
@@ -2352,10 +2377,8 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
     settle: ({ contract, ctx, requestId }) =>
       contract.circuits.completeSwap(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SWAP, ATTESTED_HEIGHT),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
         CHANGE_NONCE,
       ),
@@ -2367,10 +2390,8 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
     settle: ({ contract, ctx, requestId }) =>
       contract.circuits.refundSwap(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     throws: /Swap not found/,
@@ -2381,10 +2402,14 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
     settle: ({ contract, ctx, requestId }) =>
       contract.circuits.completeSupply(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUPPLY, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUPPLY,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_SUPPLY,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Supply not found/,
@@ -2395,10 +2420,8 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
     settle: ({ contract, ctx, requestId }) =>
       contract.circuits.refundSupply(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     throws: /Supply not found/,
@@ -2409,10 +2432,14 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
     settle: ({ contract, ctx, requestId }) =>
       contract.circuits.completeRedeem(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REDEEM, ATTESTED_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_REDEEM,
+          ATTESTED_HEIGHT,
+        ),
         OUTPUT_REDEEM,
-        ATTESTED_HEIGHT,
         MINT_NONCE,
       ),
     throws: /Redeem not found/,
@@ -2423,10 +2450,8 @@ const CROSS_KIND_TARGETS: CrossKindTarget[] = [
     settle: ({ contract, ctx, requestId }) =>
       contract.circuits.refundRedeem(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, ATTESTED_HEIGHT),
-        OUTPUT_REVERTED,
-        ATTESTED_HEIGHT,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_FAILURE, ATTESTED_HEIGHT),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     throws: /Redeem not found/,
@@ -3283,10 +3308,8 @@ describe("queue helpers", () => {
     const settled = (
       await contract.circuits.completeDeposit(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, settledAt),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SUCCESS, settledAt),
         OUTPUT_SUCCESS,
-        settledAt,
         MINT_NONCE,
         CALLER_RECIPIENT,
       )
@@ -3343,10 +3366,14 @@ describe("attested block heights", () => {
     await expect(
       contract.circuits.completeDeposit(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, EVM_START_HEIGHT),
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.executed,
+          OUTPUT_SUCCESS,
+          EVM_START_HEIGHT,
+        ),
         OUTPUT_SUCCESS,
-        EVM_START_HEIGHT,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),
@@ -3358,10 +3385,14 @@ describe("attested block heights", () => {
     await expect(
       contract.circuits.refundWithdraw(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_REVERTED, EVM_START_HEIGHT),
-        OUTPUT_REVERTED,
-        EVM_START_HEIGHT,
+        respond(
+          MPC_RESPONSE_SECRET,
+          requestId,
+          OutputKind.failed,
+          OUTPUT_FAILURE,
+          EVM_START_HEIGHT,
+        ),
+        OUTPUT_FAILURE,
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Stale attestation/);
@@ -3373,10 +3404,8 @@ describe("attested block heights", () => {
     const settled = (
       await contract.circuits.completeDeposit(
         ctx,
-        requestId,
-        respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, settledAt),
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SUCCESS, settledAt),
         OUTPUT_SUCCESS,
-        settledAt,
         MINT_NONCE,
         CALLER_RECIPIENT,
       )
@@ -3399,14 +3428,18 @@ describe("attested block heights", () => {
   it("a re-issued deposit cannot reuse the attestation of its first execution", async () => {
     const { contract, ctx, requestId } = await depositRequested();
     const settledAt = 150n;
-    const attestation = respond(MPC_RESPONSE_SECRET, requestId, OUTPUT_SUCCESS, settledAt);
+    const attestation = respond(
+      MPC_RESPONSE_SECRET,
+      requestId,
+      OutputKind.executed,
+      OUTPUT_SUCCESS,
+      settledAt,
+    );
     const settled = (
       await contract.circuits.completeDeposit(
         ctx,
-        requestId,
         attestation,
         OUTPUT_SUCCESS,
-        settledAt,
         MINT_NONCE,
         CALLER_RECIPIENT,
       )
@@ -3420,10 +3453,8 @@ describe("attested block heights", () => {
     await expect(
       contract.circuits.completeDeposit(
         reissued,
-        requestId,
         attestation,
         OUTPUT_SUCCESS,
-        settledAt,
         MINT_NONCE,
         CALLER_RECIPIENT,
       ),

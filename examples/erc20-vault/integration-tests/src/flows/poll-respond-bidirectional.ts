@@ -3,7 +3,7 @@
 // attestation appears whose signature VERIFIES over the independently
 // recomputed serialized output for the request, and return the resolved
 // outcome. There is deliberately no push/websocket alternative.
-import type { RequestIdHex } from "@sig-net/midnight";
+import { OutputKind, type RequestIdHex } from "@sig-net/midnight";
 
 import { PollProgress } from "../poll-progress.ts";
 import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
@@ -53,18 +53,18 @@ function schemaJson(padded: Uint8Array): string {
  * for `options.requestId` VERIFIES over the independently recomputed output,
  * and return the resolved outcome.
  *
- * The event carries only the MPC's signature, so each tick obtains the
- * serialized output from the context's `respondOutputSource` (recomputed
- * from the observed raw EVM output, or downloaded from the MPC's output
- * cache) and checks the posted events' signatures against it (see
- * `fetchAttestedRespondOutcome`): the event log is unauthenticated, and that
- * check is what makes a returned record meaningful off-chain. The settle
- * circuits run the same check in-circuit, which is the actual
- * authentication gate. The schemas the recomputation runs are the request
- * record's own, read once here: they are what the MPC ran. This flow owns
- * the poll loop, the timeout, and the reporting: it logs the outcome
- * (success flag / MPC failure output); acting on it (claiming, refunding) is
- * the caller's job.
+ * The event never carries the serialized output, so each tick obtains it
+ * from the context's `respondOutputSource` (recomputed from the observed raw
+ * EVM output, or downloaded from the MPC's output cache) and checks the
+ * posted events' signatures against it (see `fetchAttestedRespondOutcome`):
+ * the event log is unauthenticated, and that check is what makes a returned
+ * record meaningful off-chain. The settle circuits run the same check
+ * in-circuit, which is the actual authentication gate. The schemas the
+ * recomputation runs are the request record's own, read once here: they are
+ * what the MPC ran. This flow owns the poll loop, the timeout, and the
+ * reporting: it logs the outcome (the verified output kind and, for an
+ * executed transfer, its success flag); acting on it (claiming, refunding)
+ * is the caller's job.
  *
  * @param context - The flow context.
  * @param options - What to poll for and how patiently.
@@ -112,10 +112,12 @@ export async function pollRespondBidirectional(
         progress,
       );
       if (outcome !== undefined) {
-        if (outcome.matchedFailureOutput) {
-          console.log("remote execution FAILED (MPC failure output attested)");
-        } else {
+        if (outcome.event.outputKind === OutputKind.executed) {
           console.log(`remote execution ${outcome.succeeded ? "succeeded" : "returned false"}`);
+        } else {
+          console.log(
+            `remote execution ${OutputKind[outcome.event.outputKind]} at block ${String(outcome.event.blockHeight)}: the transaction never executed`,
+          );
         }
         return outcome;
       }

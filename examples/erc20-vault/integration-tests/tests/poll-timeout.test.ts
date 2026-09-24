@@ -1,6 +1,7 @@
 import {
   asciiPadded,
   parseRequestIdHex,
+  requestIdBytes,
   type SignatureResponseVerdict,
   type SignBidirectionalEvent,
   type SignetRequestResponseReader,
@@ -31,6 +32,7 @@ describe("signature timeout diagnostics", () => {
     signer: "0x456",
     rejectedReason: "wrong signer",
     response: {
+      requestId: requestIdBytes(REQUEST),
       signature: {
         bigR: { x: new Uint8Array(32), y: new Uint8Array(32) },
         s: new Uint8Array(32),

@@ -215,33 +215,38 @@ export pure circuit refundCommitment(sk: Bytes<32>, binder: Bytes<32>): Bytes<32
   ]));
 }
 
-// The gate every refund circuit runs first: the fixed 5-byte failure output
-// (MPC_FAILURE_OUTPUT) is attested only for a transaction that NEVER EXECUTED, and its
-// width routes it here (an executed result only type-fits its complete* circuit).
-circuit assertAttestedFailureOutput(
-  disclosedRequestId: RequestId,
+// The gate every refund circuit runs first: a transaction that NEVER EXECUTED (reverted,
+// or its nonce taken by another transaction) is attested over an EMPTY output under a
+// failure kind. The Bytes<0> argument routes it here (an executed result only type-fits
+// its complete* circuit) and the kind check stops an executed attestation refunding.
+circuit assertAttestedFailure(
   respondBidirectionalEvent: RespondBidirectionalEvent,
-  serializedOutput: Bytes<5>,
-  blockHeight: Uint<64>
+  serializedOutput: Bytes<0>
 ): [] {
   assert(initialised >= 1, "Not initialised");
   assert(
-    verifyRespondBidirectionalEvent<5>(
-      disclosedRequestId,
-      blockHeight,
+    verifyRespondBidirectionalEvent<0>(
       serializedOutput,
       disclose(respondBidirectionalEvent),
       mpcResponseKey
     ),
     "Invalid attestation signature"
   );
-  const failureOutput = Bytes [0xde, 0xad, 0xbe, 0xef, 0x01];
-  assert(serializedOutput == failureOutput, "Not the MPC failure output");
+  const outputKind = disclose(respondBidirectionalEvent.outputKind);
+  assert(
+    outputKind == OutputKind.failed || outputKind == OutputKind.unviable,
+    "Attestation is not a failure"
+  );
 }
 
-circuit settleHeight(disclosedRequestId: RequestId, knownHeight: Uint<64>, blockHeight: Uint<64>): [] {
+circuit settleHeight(
+  disclosedRequestId: RequestId,
+  knownHeight: Uint<64>,
+  respondBidirectionalEvent: RespondBidirectionalEvent
+): [] {
+  const blockHeight = disclose(respondBidirectionalEvent.blockHeight);
   assert(blockHeight > knownHeight, "Stale attestation");
-  seenEvmHeights.insert(disclosedRequestId, disclose(blockHeight));
+  seenEvmHeights.insert(disclosedRequestId, blockHeight);
 }
 
 // Pins WHO may configure. Everything needing the contract's own address waits for
@@ -524,31 +529,31 @@ export circuit sendDeposit(key: Bytes<32>): [] {
 // Depositor-gated, one settle per request. mintNonce must be caller-chosen RANDOM: one
 // derived from the (public) requestId would link the minted coin to the deposit.
 export circuit completeDeposit(
-  requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<1>,
-  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
   recipient: Maybe<Either<ZswapCoinPublicKey, ContractAddress>>,
 ): [] {
-  const disclosedRequestId = disclose(requestId);
+  const disclosedRequestId = disclose(respondBidirectionalEvent.requestId);
 
   assert(initialised >= 1, "Not initialised");
 
   const response = deserialize<VaultResponse, 1>(serializedOutput);
   assert(response.success, "ERC20 transfer returned false");
 
-  // The only authentication gate: the attestation digest is recomputed from the
-  // presented output and the signature must verify against mpcResponseKey.
+  // The only authentication gate: the singleton emits posts unverified. The digest
+  // binds the event's request id, so that id, never a caller-supplied one, is consumed.
   assert(
     verifyRespondBidirectionalEvent<1>(
-      disclosedRequestId,
-      blockHeight,
       serializedOutput,
       disclose(respondBidirectionalEvent),
       mpcResponseKey
     ),
     "Invalid attestation signature"
+  );
+  assert(
+    respondBidirectionalEvent.outputKind == OutputKind.executed,
+    "Attestation is not an execution"
   );
 
   assert(depositEventMap.member(disclosedRequestId), "Deposit not found");
@@ -557,7 +562,7 @@ export circuit completeDeposit(
   const view = depositSettleViews.lookup(disclosedRequestId);
   assert(userCommitment(callerSecretKey()) == view.commitment, "Not the depositor");
   depositSettleViews.remove(disclosedRequestId);
-  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
+  settleHeight(disclosedRequestId, view.knownHeight, respondBidirectionalEvent);
 
   const claimRecipient = disclose(recipient).is_some
     ? disclose(recipient).value
@@ -621,25 +626,25 @@ export circuit startWithdraw(
 // bool, never the caller: on success only cleanup (anyone may settle it), on a false
 // return a withdrawer-only re-mint. One settle per request.
 export circuit completeWithdraw(
-  requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<1>,
-  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
-  const disclosedRequestId = disclose(requestId);
+  const disclosedRequestId = disclose(respondBidirectionalEvent.requestId);
 
   assert(initialised >= 1, "Not initialised");
 
   assert(
     verifyRespondBidirectionalEvent<1>(
-      disclosedRequestId,
-      blockHeight,
       serializedOutput,
       disclose(respondBidirectionalEvent),
       mpcResponseKey
     ),
     "Invalid attestation signature"
+  );
+  assert(
+    respondBidirectionalEvent.outputKind == OutputKind.executed,
+    "Attestation is not an execution"
   );
 
   // Deposits never insert withdrawSettleViews, so a deposit cannot be settled here.
@@ -647,7 +652,7 @@ export circuit completeWithdraw(
   const view = withdrawSettleViews.lookup(disclosedRequestId);
   signBidirectionalEventMap.remove(disclosedRequestId);
 
-  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
+  settleHeight(disclosedRequestId, view.knownHeight, respondBidirectionalEvent);
   const succeeded = disclose(deserialize<VaultResponse, 1>(serializedOutput).success);
   const domainSep = vaultTokenDomainSeparator(view.erc20);
 
@@ -666,18 +671,16 @@ export circuit completeWithdraw(
 
 // Withdrawer-only re-mint of the surrendered amount when the transfer never executed.
 export circuit refundWithdraw(
-  requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
-  serializedOutput: Bytes<5>,
-  blockHeight: Uint<64>,
+  serializedOutput: Bytes<0>,
   mintNonce: Bytes<32>,
 ): [] {
-  const disclosedRequestId = disclose(requestId);
-  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput, blockHeight);
+  const disclosedRequestId = disclose(respondBidirectionalEvent.requestId);
+  assertAttestedFailure(respondBidirectionalEvent, serializedOutput);
 
   assert(withdrawSettleViews.member(disclosedRequestId), "Withdrawal not found");
   const view = withdrawSettleViews.lookup(disclosedRequestId);
-  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
+  settleHeight(disclosedRequestId, view.knownHeight, respondBidirectionalEvent);
   assert(
     refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the withdrawer"
@@ -759,14 +762,12 @@ struct ExactOutputSingleReturnValue {
 // tokenIn as change. Swapper-gated, one settle per request. A swap whose transaction
 // never executed settles through refundSwap.
 export circuit completeSwap(
-  requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
-  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
   changeNonce: Bytes<32>,
 ): [] {
-  const disclosedRequestId = disclose(requestId);
+  const disclosedRequestId = disclose(respondBidirectionalEvent.requestId);
 
   assert(initialised >= 1, "Not initialised");
   // The two mints need distinct nonces or their coins link, so changeNonce must carry
@@ -775,13 +776,15 @@ export circuit completeSwap(
 
   assert(
     verifyRespondBidirectionalEvent<8>(
-      disclosedRequestId,
-      blockHeight,
       serializedOutput,
       disclose(respondBidirectionalEvent),
       mpcResponseKey
     ),
     "Invalid attestation signature"
+  );
+  assert(
+    respondBidirectionalEvent.outputKind == OutputKind.executed,
+    "Attestation is not an execution"
   );
 
   assert(swapSettleViews.member(disclosedRequestId), "Swap not found");
@@ -799,7 +802,7 @@ export circuit completeSwap(
   mintShieldedToken(vaultTokenDomainSeparator(view.tokenOut), view.amountOut, disclose(mintNonce), recipient);
 
   // change <= amountInMaximum, so it fits Uint<64>. An exact spend mints a 0-value coin.
-  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
+  settleHeight(disclosedRequestId, view.knownHeight, respondBidirectionalEvent);
   const amountIn = disclose(deserialize<ExactOutputSingleReturnValue, 8>(serializedOutput).amountIn);
   const change = view.amountInMaximum - amountIn;
   mintShieldedToken(vaultTokenDomainSeparator(view.tokenIn), change as Uint<64>, disclose(changeNonce), recipient);
@@ -807,18 +810,16 @@ export circuit completeSwap(
 
 // Swapper-only re-mint of the full amountInMaximum when the swap never executed.
 export circuit refundSwap(
-  requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
-  serializedOutput: Bytes<5>,
-  blockHeight: Uint<64>,
+  serializedOutput: Bytes<0>,
   mintNonce: Bytes<32>,
 ): [] {
-  const disclosedRequestId = disclose(requestId);
-  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput, blockHeight);
+  const disclosedRequestId = disclose(respondBidirectionalEvent.requestId);
+  assertAttestedFailure(respondBidirectionalEvent, serializedOutput);
 
   assert(swapSettleViews.member(disclosedRequestId), "Swap not found");
   const view = swapSettleViews.lookup(disclosedRequestId);
-  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
+  settleHeight(disclosedRequestId, view.knownHeight, respondBidirectionalEvent);
   assert(
     refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the swapper"
@@ -885,19 +886,21 @@ struct DepositReturnValue {
 // Settles a successful supply: mints shielded(stataToken) for the attested shares.
 // Supplier-gated, one settle per request.
 export circuit completeSupply(
-  requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
-  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
-  const disclosedRequestId = disclose(requestId);
+  const disclosedRequestId = disclose(respondBidirectionalEvent.requestId);
   assert(initialised >= 1, "Not initialised");
   assert(
     verifyRespondBidirectionalEvent<8>(
-      disclosedRequestId, blockHeight, serializedOutput, disclose(respondBidirectionalEvent), mpcResponseKey
+      serializedOutput, disclose(respondBidirectionalEvent), mpcResponseKey
     ),
     "Invalid attestation signature"
+  );
+  assert(
+    respondBidirectionalEvent.outputKind == OutputKind.executed,
+    "Attestation is not an execution"
   );
 
   assert(supplyEventMap.member(disclosedRequestId), "Supply not found");
@@ -909,7 +912,7 @@ export circuit completeSupply(
   );
   supplySettleViews.remove(disclosedRequestId);
 
-  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
+  settleHeight(disclosedRequestId, view.knownHeight, respondBidirectionalEvent);
   const shares = disclose(deserialize<DepositReturnValue, 8>(serializedOutput).shares);
   const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
   mintShieldedToken(vaultTokenDomainSeparator(stataToken), shares, disclose(mintNonce), recipient);
@@ -917,18 +920,16 @@ export circuit completeSupply(
 
 // Supplier-only re-mint of the surrendered amount when the deposit never executed.
 export circuit refundSupply(
-  requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
-  serializedOutput: Bytes<5>,
-  blockHeight: Uint<64>,
+  serializedOutput: Bytes<0>,
   mintNonce: Bytes<32>,
 ): [] {
-  const disclosedRequestId = disclose(requestId);
-  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput, blockHeight);
+  const disclosedRequestId = disclose(respondBidirectionalEvent.requestId);
+  assertAttestedFailure(respondBidirectionalEvent, serializedOutput);
 
   assert(supplySettleViews.member(disclosedRequestId), "Supply not found");
   const view = supplySettleViews.lookup(disclosedRequestId);
-  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
+  settleHeight(disclosedRequestId, view.knownHeight, respondBidirectionalEvent);
   assert(
     refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the supplier"
@@ -995,19 +996,21 @@ struct RedeemReturnValue {
 // Settles a successful redeem: mints shielded(stataUnderlying) for the attested assets
 // (principal + accrued interest). Redeemer-gated, one settle per request.
 export circuit completeRedeem(
-  requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
-  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
-  const disclosedRequestId = disclose(requestId);
+  const disclosedRequestId = disclose(respondBidirectionalEvent.requestId);
   assert(initialised >= 1, "Not initialised");
   assert(
     verifyRespondBidirectionalEvent<8>(
-      disclosedRequestId, blockHeight, serializedOutput, disclose(respondBidirectionalEvent), mpcResponseKey
+      serializedOutput, disclose(respondBidirectionalEvent), mpcResponseKey
     ),
     "Invalid attestation signature"
+  );
+  assert(
+    respondBidirectionalEvent.outputKind == OutputKind.executed,
+    "Attestation is not an execution"
   );
 
   assert(redeemEventMap.member(disclosedRequestId), "Redeem not found");
@@ -1019,7 +1022,7 @@ export circuit completeRedeem(
   );
   redeemSettleViews.remove(disclosedRequestId);
 
-  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
+  settleHeight(disclosedRequestId, view.knownHeight, respondBidirectionalEvent);
   const assets = disclose(deserialize<RedeemReturnValue, 8>(serializedOutput).assets);
   const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
   mintShieldedToken(vaultTokenDomainSeparator(stataUnderlying), assets, disclose(mintNonce), recipient);
@@ -1027,18 +1030,16 @@ export circuit completeRedeem(
 
 // Redeemer-only re-mint of the surrendered shares when the redeem never executed.
 export circuit refundRedeem(
-  requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
-  serializedOutput: Bytes<5>,
-  blockHeight: Uint<64>,
+  serializedOutput: Bytes<0>,
   mintNonce: Bytes<32>,
 ): [] {
-  const disclosedRequestId = disclose(requestId);
-  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput, blockHeight);
+  const disclosedRequestId = disclose(respondBidirectionalEvent.requestId);
+  assertAttestedFailure(respondBidirectionalEvent, serializedOutput);
 
   assert(redeemSettleViews.member(disclosedRequestId), "Redeem not found");
   const view = redeemSettleViews.lookup(disclosedRequestId);
-  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
+  settleHeight(disclosedRequestId, view.knownHeight, respondBidirectionalEvent);
   assert(
     refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the redeemer"

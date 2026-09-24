@@ -156,26 +156,28 @@ As illustrated, the flow comprises 6 steps:
 - **5.** poll for the MPC's attestation
   - The MPC watches the EVM chain for the transaction's execution and posts an
     attestation of its output through the singleton's
-    `respondBidirectional(...)`. The event carries only the request id it
-    answers and the MPC's ECDSA signature over the attestation digest of that
-    id and the output bytes, so the client recomputes the output bytes
+    `respondBidirectional(...)`. The event carries the request id it answers,
+    the finalised EVM block height, the MPC's verdict (`outputKind`), the
+    output's byte width, the attestation digest and the MPC's ECDSA signature
+    over it, never the output bytes, so the client recomputes those
     independently and checks the signature against them, exactly as a
     [deposit](../deposit/deposit.md) does.
-  - [`complete-swap.ts`](../../integration-tests/src/flows/complete-swap.ts) builds TWO
-    candidate outputs once, when the first post appears, and holds them for the
-    rest of the poll. **The success candidate** is computable
-    only when the transaction executed: the raw execution output, decoded per
-    the request's `uint256` output schema and re-packed per its `uint64`
+  - [`complete-swap.ts`](../../integration-tests/src/flows/complete-swap.ts)
+    checks each post over the bytes its declared `outputKind` selects. A post
+    declaring **`executed`** is checked over the raw execution output, decoded
+    per the request's `uint256` output schema and re-packed per its `uint64`
     respond schema, giving the 8 bytes that carry the `amountIn` the router
-    really spent. **The failure candidate** is always available: the protocol's
-    fixed 5-byte
-    [`MPC_FAILURE_OUTPUT`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/constants.ts)
-    (`0xdeadbeef01`), which the MPC attests for a transaction that never
-    executed at all, reverted on chain or was replaced on the same nonce.
+    really spent, recomputed once when the first such post appears and held
+    for the rest of the poll. A post declaring **`failed`** (reverted on chain)
+    or **`unviable`** (another transaction took its nonce) is checked over the
+    EMPTY output the protocol attests for a transaction that never executed,
+    which needs no trace at all.
   - Selection is by signature verification alone, against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), the response
-    key the vault pinned at initialise and reads back from its own ledger.
-  - Which candidate verifies is also what routes step 6. Everything fetched
+    key the vault pinned at initialise and reads back from its own ledger. A
+    post's declared kind is routing data: the kind is inside the signed
+    digest, so a post cannot present a failure as a success.
+  - The verified kind is also what routes step 6. Everything fetched
     here stays UNTRUSTED: the verified bytes go into the settle circuit as an
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
@@ -186,7 +188,9 @@ As illustrated, the flow comprises 6 steps:
     [`completeSwap`](../../contract/src/erc20-vault.compact), whose
     `Bytes<8>` output argument is the packed `amountIn`.
     `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
-    against `mpcResponseKey` before anything else happens.
+    and the event's request id, block height and kind against `mpcResponseKey`
+    before anything else happens, the verified kind must be `executed`, and the
+    request consumed is the one the event names.
   - Membership of `swapSettleViews` is the double-settle protection and the
     proof that this request is a pending swap. Withdrawals mark a separate map,
     so a withdrawal can never be settled here and a swap can never be settled
@@ -210,16 +214,17 @@ As illustrated, the flow comprises 6 steps:
 - **6.** refundSwap(...) re-mints when the swap never executed
   - A swap that never ran on the EVM chain settles through
     [`refundSwap`](../../contract/src/erc20-vault.compact) instead, and the
-    attested output's WIDTH is what routes the call: the fixed 5-byte failure
-    output cannot type-fit `completeSwap`'s `Bytes<8>`, and an executed result
-    cannot type-fit `refundSwap`'s `Bytes<5>`.
-  - The same authentication gate runs at the failure width
-    (`verifyRespondBidirectionalEvent<5>`), followed by an exact-bytes check:
-    only `0xdeadbeef01` refunds, and any other attested 5-byte output is not a
-    failure.
+    verified `outputKind` is what routes the call, with the attested output's
+    WIDTH keeping the two apart by type as well: a failure's empty output
+    cannot type-fit `completeSwap`'s `Bytes<8>`, and an executed result cannot
+    type-fit `refundSwap`'s `Bytes<0>`.
+  - The same authentication gate runs at width 0
+    (`verifyRespondBidirectionalEvent<0>`), followed by a kind check: only a
+    verified `failed` or `unviable` kind refunds, and an `executed` attestation
+    is not a failure whatever its width.
   - Each request kind has its own refund circuit (`refundWithdraw`,
     `refundSwap`, `refundSupply`, `refundRedeem`) sharing one signature and one
-    failure check, and `refundSwap` reads ONLY the swap settle-view map: a
+    kind check, and `refundSwap` reads ONLY the swap settle-view map: a
     request id of another kind, or one already settled, fails with a clean
     "not found".
   - For a swap that map is `swapSettleViews`, and the re-minted colour and
@@ -302,7 +307,7 @@ sequenceDiagram
     alt the swap executed (8-byte attested amountIn)
         Note over User,Vault: Step 6: completeSwap(...) mints amountOut of tokenOut plus the unspent tokenIn
         User->>Vault: completeSwap(...)
-    else the swap never executed (5-byte failure output)
+    else the swap never executed (failed or unviable, empty output)
         Note over User,Vault: Step 6: refundSwap(...) re-mints when the swap never executed
         User->>Vault: refundSwap(...)
     end

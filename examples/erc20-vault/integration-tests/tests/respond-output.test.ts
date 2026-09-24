@@ -7,25 +7,19 @@
 import { createServer, type Server } from "node:http";
 
 import {
-  type AttestedOutput,
-  encodeAttestedOutput,
-  MPC_FAILURE_OUTPUT,
   MpcOutputCacheReader,
+  OutputKind,
   parseRequestIdHex,
   requestIdBytes,
   type RespondBidirectionalEvent,
   type SignetRequestResponseReader,
 } from "@sig-net/midnight";
-import {
-  calculateSignetAttestationDigest,
-  ecdsaSignatureToMpcSignature,
-  secp256k1PublicKeyOf,
-  signAttestationDigest,
-} from "@sig-net/midnight/testing";
+import { attestRespondBidirectional, secp256k1PublicKeyOf } from "@sig-net/midnight/testing";
 import type { VaultProviders } from "@sig-net/midnight-examples-erc20-vault-contract";
 import * as vaultContract from "@sig-net/midnight-examples-erc20-vault-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { EMPTY_OUTPUT } from "../src/empty-output.ts";
 import { fetchAttestedRespondOutcome } from "../src/flows/respond-output.ts";
 import { ERC20_TRANSFER_RESULT_SCHEMA } from "../src/mpc-routing.ts";
 import { OutputSource } from "../src/output-source.ts";
@@ -45,34 +39,23 @@ const SCHEMAS = {
   outputDeserializationSchema: ERC20_TRANSFER_RESULT_SCHEMA,
   respondSerializationSchema: ERC20_TRANSFER_RESULT_SCHEMA,
 };
+// This suite plays the MPC, so the attested destination height is whatever
+// it claims: the check is that the height is signed, not that it is real.
 const BLOCK_HEIGHT = 77n;
-const TRANSFER_TRUE: AttestedOutput = {
-  blockHeight: BLOCK_HEIGHT,
-  serializedOutput: new Uint8Array([0x01]),
-};
-const TRANSFER_FALSE: AttestedOutput = {
-  blockHeight: BLOCK_HEIGHT,
-  serializedOutput: new Uint8Array([0x00]),
-};
-const TRANSFER_FAILED: AttestedOutput = {
-  blockHeight: BLOCK_HEIGHT,
-  serializedOutput: MPC_FAILURE_OUTPUT,
-};
+const TRANSFER_TRUE = new Uint8Array([0x01]);
+const TRANSFER_FALSE = new Uint8Array([0x00]);
 
-/** An MPC post attesting `attested` for {@link REQUEST_ID} under the pinned key. */
-function attest(attested: AttestedOutput): RespondBidirectionalEvent {
-  return {
-    signature: ecdsaSignatureToMpcSignature(
-      signAttestationDigest(
-        calculateSignetAttestationDigest(
-          requestIdBytes(REQUEST_ID),
-          attested.blockHeight,
-          attested.serializedOutput,
-        ),
-        MPC_RESPONSE_SECRET,
-      ),
-    ),
-  };
+/** An MPC post attesting `serializedOutput` under `outputKind` for {@link REQUEST_ID}. */
+function attest(outputKind: OutputKind, serializedOutput: Uint8Array): RespondBidirectionalEvent {
+  return attestRespondBidirectional(
+    {
+      requestId: requestIdBytes(REQUEST_ID),
+      blockHeight: BLOCK_HEIGHT,
+      outputKind,
+      serializedOutput,
+    },
+    MPC_RESPONSE_SECRET,
+  );
 }
 
 let server: Server | undefined;
@@ -157,42 +140,76 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
   it.each([
     {
       name: "a transfer that returned true",
+      outputKind: OutputKind.executed,
       cached: TRANSFER_TRUE,
-      expected: { succeeded: true, matchedFailureOutput: false },
+      succeeded: true,
     },
     {
       name: "a transfer that returned false",
+      outputKind: OutputKind.executed,
       cached: TRANSFER_FALSE,
-      expected: { succeeded: false, matchedFailureOutput: false },
+      succeeded: false,
     },
     {
-      name: "the MPC failure output",
-      cached: TRANSFER_FAILED,
-      expected: { succeeded: false, matchedFailureOutput: true },
+      name: "a reverted transfer (failed, empty output)",
+      outputKind: OutputKind.failed,
+      cached: EMPTY_OUTPUT,
+      succeeded: false,
     },
-  ])("resolves $name from the cached bytes the attestation signs", async ({ cached, expected }) => {
-    const paths: string[] = [];
-    const baseUrl = await serveBucket({ status: 200, body: encodeAttestedOutput(cached) }, paths);
-    const event = attest(cached);
-    stubChainReads([event]);
+    {
+      name: "a transfer whose nonce another transaction took (unviable, empty output)",
+      outputKind: OutputKind.unviable,
+      cached: EMPTY_OUTPUT,
+      succeeded: false,
+    },
+  ])(
+    "resolves $name from the cached bytes the attestation signs",
+    async ({ outputKind, cached, succeeded }) => {
+      const paths: string[] = [];
+      const baseUrl = await serveBucket({ status: 200, body: cached }, paths);
+      const event = attest(outputKind, cached);
+      stubChainReads([event]);
+
+      const outcome = await fetchAttestedRespondOutcome(
+        contextWithCache(baseUrl),
+        REQUEST_ID,
+        OutputSource.MPCCache,
+        SCHEMAS,
+      );
+
+      expect(outcome).toEqual({ event, serializedOutput: cached, succeeded });
+      expect(paths).toEqual([EXPECTED_OBJECT_PATH]);
+    },
+  );
+
+  it("rejects a post whose signature covers other bytes than the cache holds", async () => {
+    const baseUrl = await serveBucket({ status: 200, body: TRANSFER_TRUE }, []);
+    stubChainReads([attest(OutputKind.executed, TRANSFER_FALSE)]);
+    const progress = new PollProgress("test", 1000);
 
     const outcome = await fetchAttestedRespondOutcome(
       contextWithCache(baseUrl),
       REQUEST_ID,
       OutputSource.MPCCache,
       SCHEMAS,
+      undefined,
+      progress,
     );
 
-    expect(outcome).toEqual({ event, ...cached, ...expected });
-    expect(paths).toEqual([EXPECTED_OBJECT_PATH]);
+    expect(outcome).toBeUndefined();
+    expect(progress.summary()).toContain(
+      "no signature verifies against the vault response key and the mpc-cache output",
+    );
   });
 
-  it("rejects a post whose signature covers other bytes than the cache holds", async () => {
-    const baseUrl = await serveBucket(
-      { status: 200, body: encodeAttestedOutput(TRANSFER_TRUE) },
-      [],
-    );
-    stubChainReads([attest(TRANSFER_FALSE)]);
+  it("rejects a post whose declared kind is not the one its signature covers", async () => {
+    // A genuine executed attestation re-declared as a failure: the kind is
+    // inside the signed digest, so the post fails to verify over the cached
+    // bytes, and an empty cache would not rescue it either.
+    const baseUrl = await serveBucket({ status: 200, body: TRANSFER_TRUE }, []);
+    stubChainReads([
+      { ...attest(OutputKind.executed, TRANSFER_TRUE), outputKind: OutputKind.failed },
+    ]);
     const progress = new PollProgress("test", 1000);
 
     const outcome = await fetchAttestedRespondOutcome(
@@ -212,7 +229,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
 
   it("yields nothing while the cache holds no object yet, naming the object URL", async () => {
     const baseUrl = await serveBucket({ status: 404, body: new Uint8Array() }, []);
-    stubChainReads([attest(TRANSFER_TRUE)]);
+    stubChainReads([attest(OutputKind.executed, TRANSFER_TRUE)]);
     const progress = new PollProgress("test", 1000);
 
     const outcome = await fetchAttestedRespondOutcome(
@@ -232,10 +249,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
 
   it("reads nothing from the cache before an attestation is posted", async () => {
     const paths: string[] = [];
-    const baseUrl = await serveBucket(
-      { status: 200, body: encodeAttestedOutput(TRANSFER_TRUE) },
-      paths,
-    );
+    const baseUrl = await serveBucket({ status: 200, body: TRANSFER_TRUE }, paths);
     stubChainReads([]);
 
     const outcome = await fetchAttestedRespondOutcome(
@@ -250,7 +264,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
   });
 
   it("refuses a context configured without a cache", async () => {
-    stubChainReads([attest(TRANSFER_TRUE)]);
+    stubChainReads([attest(OutputKind.executed, TRANSFER_TRUE)]);
 
     await expect(
       fetchAttestedRespondOutcome(

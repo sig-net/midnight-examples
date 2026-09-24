@@ -1,11 +1,12 @@
 // Settle side of the supply flow: resolve the MPC's attested outcome by signature
-// verification, then settle through the circuit the output selects (completeSupply mints the
-// attested stataUSDC shares, refundSupply re-mints the surrendered underlying).
+// verification, then settle through the circuit its verified output kind selects
+// (completeSupply mints the attested stataUSDC shares, refundSupply re-mints the surrendered
+// underlying).
 import {
   deserializeEvmOutput,
-  MPC_FAILURE_OUTPUT,
-  requestIdBytes,
+  OutputKind,
   type RequestIdHex,
+  requestIdHex,
   type RespondBidirectionalEvent,
   respondBidirectionalEventToCircuitInput,
   type Secp256k1Point,
@@ -17,6 +18,7 @@ import { STATA_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { VAULT_SUPPLY_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { EMPTY_OUTPUT } from "../empty-output.ts";
 import { logTokenAmount } from "../evm-logging.ts";
 import { SUPPLY_OUTPUT_SCHEMA, SUPPLY_RESPOND_SCHEMA } from "../evm-stata.ts";
 import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
@@ -24,21 +26,20 @@ import { PollProgress } from "../poll-progress.ts";
 import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 
-/** The resolved attested outcome of a supply (uint64 shares minted, or the failure output). */
+/**
+ * The resolved attested outcome of a supply: the verified event (its `outputKind` the MPC's
+ * verdict), the bytes it signs, and the shares they carry (0 under a failure kind).
+ */
 export interface SupplyOutcome {
   readonly event: RespondBidirectionalEvent;
   readonly serializedOutput: Uint8Array;
-  readonly blockHeight: bigint;
   readonly shares: bigint;
-  readonly matchedFailureOutput: boolean;
 }
 
-/** One output a posted attestation may commit to, and the shares settling on it yields. */
-interface SupplyCandidate {
+/** An executed supply's recomputed output and the shares settling on it yields. */
+interface ExecutedSupplyOutput {
   readonly serializedOutput: Uint8Array;
-  readonly blockHeight: bigint;
   readonly shares: bigint;
-  readonly isFailureOutput: boolean;
 }
 
 // How long one candidate build waits on the trace. Short on purpose: the poll
@@ -46,25 +47,26 @@ interface SupplyCandidate {
 const OBSERVATION_TICK_TIMEOUT_MS = 3_000;
 
 /**
- * Recompute both candidate outputs the protocol allows for a supply (the supply-schema twin of
- * complete-swap.ts's candidate build): the success candidate is the observed traced
- * output decoded per the uint256 output schema and re-packed per the uint64 respond schema, the
- * failure candidate is the protocol's fixed 5-byte output. A decode failure drops the success
- * candidate with a warning. An execution has one fixed observation per request, so a caller
- * resolving this once holds the candidates for its whole poll.
+ * Recompute the output an executed supply attests (the supply-schema twin of complete-swap.ts's
+ * candidate build): the observed traced output decoded per the uint256 output schema and
+ * re-packed per the uint64 respond schema. A reverted transaction has no output, and a decode
+ * failure drops the candidate with a warning: either way only failure posts can then verify,
+ * over the empty output that needs no observation. An execution has one fixed observation per
+ * request, so a caller resolving this once holds the candidate for its whole poll.
  *
  * @param context - The flow context, whose EVM endpoint serves the trace.
  * @param reader - The reader over the supply request map, which rebuilds the mined transaction.
  * @param requestId - The supply request id whose execution result to recompute.
  * @param progress - Diagnostics for the enclosing poll.
- * @returns The candidates, failure last, or undefined when the execution cannot be observed this tick.
+ * @returns The executed output, or undefined when the execution cannot be observed this tick
+ *   or did not produce one.
  */
-async function fetchSupplyCandidates(
+async function fetchExecutedSupplyOutput(
   context: VaultContext,
   reader: SignetRequestResponseReader,
   requestId: RequestIdHex,
   progress: PollProgress,
-): Promise<SupplyCandidate[] | undefined> {
+): Promise<ExecutedSupplyOutput | undefined> {
   let observed: ObservedExecution;
   try {
     observed = await observeExecution(
@@ -77,65 +79,47 @@ async function fetchSupplyCandidates(
     progress.failure("observation", `execution observation failed: ${String(error)}`);
     return undefined;
   }
-
-  const candidates: SupplyCandidate[] = [];
-  if (observed.success && observed.output !== null) {
-    try {
-      const decoded = deserializeEvmOutput(SUPPLY_OUTPUT_SCHEMA, observed.output);
-      candidates.push({
-        serializedOutput: serializeRespondOutput(SUPPLY_RESPOND_SCHEMA, decoded),
-        blockHeight: observed.blockNumber,
-        shares: (decoded as { shares: bigint }).shares,
-        isFailureOutput: false,
-      });
-    } catch (error) {
-      progress.failure("decode", `execution output decode failed: ${String(error)}`);
-    }
+  if (!observed.success || observed.output === null) {
+    return undefined;
   }
-  candidates.push({
-    serializedOutput: MPC_FAILURE_OUTPUT,
-    blockHeight: observed.blockNumber,
-    shares: 0n,
-    isFailureOutput: true,
-  });
-  return candidates;
+  try {
+    const decoded = deserializeEvmOutput(SUPPLY_OUTPUT_SCHEMA, observed.output);
+    return {
+      serializedOutput: serializeRespondOutput(SUPPLY_RESPOND_SCHEMA, decoded),
+      shares: (decoded as { shares: bigint }).shares,
+    };
+  } catch (error) {
+    progress.failure("decode", `execution output decode failed: ${String(error)}`);
+    return undefined;
+  }
 }
 
 /**
- * Select the outcome of the first posted event whose ECDSA signature verifies over one of
- * `candidates`. The signature-only event carries no digest, so this signature check against the
- * vault-pinned response key is the whole of candidate selection.
+ * Select the outcome of the first posted event whose ECDSA signature verifies over the bytes
+ * its declared kind selects: the recomputed executed output for an executed post, the empty
+ * output for a failed or unviable one. The declared kind is unauthenticated routing data, so
+ * this signature check against the vault-pinned response key is the whole of selection.
  *
- * @param events - The posts declared under `requestId`, unverified as the event log allows.
- * @param requestId - The supply request id the attestation must commit to.
- * @param candidates - The recomputed outputs to try, in preference order.
+ * @param events - The posts declared under the request id, unverified as the event log allows.
+ * @param executed - The recomputed executed output, or undefined when none is available yet.
  * @param mpcResponseKey - The response key the vault pinned at initialise.
- * @returns The matching outcome, or undefined when no post attests any candidate.
+ * @returns The matching outcome, or undefined when no post verifies.
  */
 function matchSupplyOutcome(
   events: readonly RespondBidirectionalEvent[],
-  requestId: RequestIdHex,
-  candidates: readonly SupplyCandidate[],
+  executed: ExecutedSupplyOutput | undefined,
   mpcResponseKey: Secp256k1Point,
 ): SupplyOutcome | undefined {
-  for (const candidate of candidates) {
-    const event = events.find((posted) =>
-      verifyRespondBidirectionalSignature(
-        requestIdBytes(requestId),
-        candidate.blockHeight,
-        candidate.serializedOutput,
-        posted,
-        mpcResponseKey,
-      ),
-    );
-    if (event !== undefined) {
-      return {
-        event,
-        serializedOutput: candidate.serializedOutput,
-        blockHeight: candidate.blockHeight,
-        shares: candidate.shares,
-        matchedFailureOutput: candidate.isFailureOutput,
-      };
+  for (const event of events) {
+    if (event.outputKind === OutputKind.executed) {
+      if (
+        executed !== undefined &&
+        verifyRespondBidirectionalSignature(executed.serializedOutput, event, mpcResponseKey)
+      ) {
+        return { event, serializedOutput: executed.serializedOutput, shares: executed.shares };
+      }
+    } else if (verifyRespondBidirectionalSignature(EMPTY_OUTPUT, event, mpcResponseKey)) {
+      return { event, serializedOutput: EMPTY_OUTPUT, shares: 0n };
     }
   }
   return undefined;
@@ -157,12 +141,13 @@ export interface PollSupplyOutcomeOptions {
  *
  * Everything a tick would otherwise redo is resolved once: the reader, whose request-record
  * cache a rebuild would throw away, the response key the vault pinned at initialise, and the
- * candidates {@link fetchSupplyCandidates} builds from the execution's fixed observation. A tick
- * costs one event read plus a signature check per candidate.
+ * executed output {@link fetchExecutedSupplyOutput} recomputes from the execution's fixed
+ * observation, built only once a post declares an executed transaction. A tick costs one
+ * event read plus a signature check per post.
  *
  * @param context - The flow context.
  * @param options - The request id and poll cadence.
- * @returns The resolved outcome (attested shares minted, or the failure output).
+ * @returns The resolved outcome (attested shares minted, or a failure kind).
  * @throws {Error} If no matching attestation posts within the timeout.
  */
 export async function pollSupplyOutcome(
@@ -183,25 +168,23 @@ export async function pollSupplyOutcome(
     options.timeoutMs ?? POLL_TIMEOUT_MS,
   );
   const end = Date.now() + (options.timeoutMs ?? POLL_TIMEOUT_MS);
-  let candidates: SupplyCandidate[] | undefined;
+  let executed: ExecutedSupplyOutput | undefined;
   while (Date.now() < end) {
     const events = await reader.getRespondBidirectionalEvents(options.requestId);
     progress.update(`${String(events.length)} attestation posts observed`);
-    // A posted attestation means the transaction has executed and its result is observable, so
-    // the candidates are worth building only once a post appears.
     if (events.length > 0) {
-      candidates ??= await fetchSupplyCandidates(context, reader, options.requestId, progress);
-      if (candidates !== undefined) {
-        const outcome = matchSupplyOutcome(events, options.requestId, candidates, mpcResponseKey);
-        if (outcome !== undefined) return outcome;
-        progress.update(
-          `${String(events.length)} attestation posts rejected against ${String(candidates.length)} output candidates`,
-        );
-        progress.failure(
-          "verification",
-          "no signature verifies against the vault response key and observed output",
-        );
+      // A post declaring an executed transaction means its result is observable, so the
+      // executed output is worth recomputing only once such a post appears.
+      if (events.some((posted) => posted.outputKind === OutputKind.executed)) {
+        executed ??= await fetchExecutedSupplyOutput(context, reader, options.requestId, progress);
       }
+      const outcome = matchSupplyOutcome(events, executed, mpcResponseKey);
+      if (outcome !== undefined) return outcome;
+      progress.update(`${String(events.length)} attestation posts rejected`);
+      progress.failure(
+        "verification",
+        "no signature verifies against the vault response key and the output its kind selects",
+      );
     }
     await new Promise((r) => setTimeout(r, options.intervalMs ?? 1000));
   }
@@ -209,41 +192,40 @@ export async function pollSupplyOutcome(
 }
 
 /**
- * Settle a resolved supply outcome through the circuit its content selects:
- * `completeSupply` for attested shares (mints the stataUSDC), `refundSupply`
- * for the fixed MPC failure output (re-mints the surrendered underlying).
+ * Settle a resolved supply outcome through the circuit its verified kind selects:
+ * `completeSupply` for an executed attestation (mints the stataUSDC shares), `refundSupply`
+ * for a failed or unviable one (re-mints the surrendered underlying). Both consume the request
+ * the event names.
  *
  * @param context - The flow context.
- * @param requestId - The supply request id being settled.
  * @param outcome - The attested outcome from {@link pollSupplyOutcome}.
  * @returns The attested shares minted (0 on refund) and whether the supply was refunded.
  */
 export async function settleSupply(
   context: VaultContext,
-  requestId: RequestIdHex,
   outcome: SupplyOutcome,
 ): Promise<{ shares: bigint; refunded: boolean }> {
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
-  if (outcome.matchedFailureOutput) {
-    console.log("supply tx never executed: refunding the underlying to this wallet");
+  if (outcome.event.outputKind !== OutputKind.executed) {
+    console.log(
+      `supply tx never executed (${OutputKind[outcome.event.outputKind]}): refunding the underlying to this wallet`,
+    );
     const r = await context.vault.callTx.refundSupply(
-      requestIdBytes(requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
-      outcome.blockHeight,
       mintNonce,
     );
     console.log(`refund settled in tx ${r.public.txId}`);
     return { shares: 0n, refunded: true };
   }
   const r = await context.vault.callTx.completeSupply(
-    requestIdBytes(requestId),
     respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
-    outcome.blockHeight,
     mintNonce,
   );
-  console.log(`completeSupply settled in tx ${r.public.txId}`);
+  console.log(
+    `completeSupply settled ${requestIdHex(outcome.event.requestId)} in tx ${r.public.txId}`,
+  );
   await logTokenAmount(
     context.evmRpcUrl,
     STATA_USDC,
@@ -267,5 +249,5 @@ export async function completeSupply(
   requestId: RequestIdHex,
 ): Promise<{ shares: bigint; refunded: boolean }> {
   const outcome = await pollSupplyOutcome(context, { requestId });
-  return settleSupply(context, requestId, outcome);
+  return settleSupply(context, outcome);
 }
