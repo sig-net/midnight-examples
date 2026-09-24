@@ -113,8 +113,9 @@ vault with every circuit).
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
   **6**, `benchmark` **43**, `false-claimer` **6**, `bearer-transfer` **11**,
   `swap-e2e` **1**, `supply-redeem-e2e` **1**, `supply-refund-e2e` **1**,
-  `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**, then the unpinned offline
-  `benchmark-tooling` **6** last. 101 total. The setup
+  `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**,
+  `admin-replace-nonce-e2e` **1**, then the unpinned offline
+  `benchmark-tooling` **6** last. 102 total. The setup
   pipeline verifies Uniswap and the stataUSDC wrapper are deployed on the fork,
   so a fork missing either fails the run at setup rather than mid-spec.
 - **Wallets are role wallets funded from ROOT at setup.** The setup's

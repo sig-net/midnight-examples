@@ -18,16 +18,11 @@ import {
   readVaultLedger,
   STATA_USDC,
   VAULT_PATH_BYTES,
+  vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
-import {
-  REDEEM_MPC_ROUTING,
-  STATA_GAS_LIMIT,
-  STATA_MAX_FEE_PER_GAS,
-  STATA_MAX_PRIORITY_FEE_PER_GAS,
-  STATA_REDEEM_SELECTOR,
-} from "../evm-stata.ts";
+import { REDEEM_MPC_ROUTING, STATA_REDEEM_SELECTOR } from "../evm-stata.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
 
@@ -56,6 +51,8 @@ export async function startRedeem(
   if (!before.initialised)
     throw new Error("vault is not initialised, run the initialise flow first");
 
+  const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "redeem");
+
   const coin = {
     nonce: crypto.getRandomValues(new Uint8Array(32)),
     color: hexToBytes(vaultTokenType(STATA_USDC, context.vaultContractAddress)),
@@ -80,9 +77,9 @@ export async function startRedeem(
       to: before.stataToken,
       chainId: before.evmChainId,
       nonce: options.evmNonce,
-      gasLimit: STATA_GAS_LIMIT,
-      maxFeePerGas: STATA_MAX_FEE_PER_GAS,
-      maxPriorityFeePerGas: STATA_MAX_PRIORITY_FEE_PER_GAS,
+      gasLimit,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
       value: 0n,
       accessListEntryCount: 0n,
       accessList: [],

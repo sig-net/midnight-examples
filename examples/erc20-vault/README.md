@@ -661,7 +661,7 @@ failed after that point, the PR says to run it by hand before merging).
 
 ## The e2e suite
 
-Eleven e2e specs run serially in a pinned order (see
+Twelve e2e specs run serially in a pinned order (see
 `integration-tests/vitest.config.ts`). `happy-day-e2e` runs first because it
 initialises the vault and cycles the funds that the later flows build on.
 Each spec is rerun-tolerant against kept contract addresses and prints resume
@@ -680,6 +680,7 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `supply-refund-e2e` | 2 | A supply whose wrapper deposit reverts on-chain (drained vault balance) ends in an in-circuit REFUND of the surrendered USDC | `SUPPLY_REFUND_DEPOSIT_REQUEST_ID`, `SUPPLY_REFUND_SUPPLY_REQUEST_ID` |
 | `swap-refund-e2e` | 2 | A swap whose `amountInMaximum` is below the real cost reverts on-chain and the settle re-mints the surrendered tokenIn | `SWAP_REFUND_DEPOSIT_REQUEST_ID`, `SWAP_REFUND_SWAP_REQUEST_ID` |
 | `redeem-refund-e2e` | 2 | A redeem whose wrapper burn reverts on-chain (drained vault stataUSDC balance) ends in an in-circuit REFUND of the surrendered shares | `REDEEM_REFUND_DEPOSIT_REQUEST_ID`, `REDEEM_REFUND_SUPPLY_REQUEST_ID`, `REDEEM_REFUND_REDEEM_REQUEST_ID` |
+| `admin-replace-nonce-e2e` | 1 | A signed-but-unbroadcast vault transaction strands the account's nonce, and `adminReplaceEvmNonce` replaces it with an empty self-transfer so the transaction queued behind it mines | none |
 
 100 tests total across these specs. The offline `benchmark-tooling` spec (6
 tests, no stack needed) is not pinned and runs last, so a full run reports

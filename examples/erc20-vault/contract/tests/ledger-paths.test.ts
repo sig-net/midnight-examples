@@ -53,3 +53,63 @@ describe("exported ledger paths match the compiled contract-info.json", () => {
     expect(exportedPath).toEqual(compiledPath);
   });
 });
+
+describe("the admin-updateable gas parameters sit in chunk 0", () => {
+  it.each([
+    ["vaultMaxFeePerGas", [0, 4]],
+    ["vaultMaxPriorityFeePerGas", [0, 5]],
+    ["vaultGasLimits", [0, 6]],
+  ] as const)("%s", (fieldName, compiledPath) => {
+    expect(compiledFieldIndex(fieldName)).toEqual(compiledPath);
+  });
+});
+
+describe("the state tree stays TWO chunks deep", () => {
+  it("holds at most 30 fields, the two chunks' worth", () => {
+    expect(contractInfo.ledger.length).toBeLessThanOrEqual(30);
+  });
+
+  it("uses exactly two chunks, at depth 2", () => {
+    const chunks = new Set(contractInfo.ledger.map((field) => field.index[0]));
+    const depths = new Set(contractInfo.ledger.map((field) => field.index.length));
+
+    expect([...chunks].sort()).toEqual([0, 1]);
+    expect([...depths]).toEqual([2]);
+  });
+});
+
+describe("the chunk-1 block holds the event maps at their pinned offsets", () => {
+  it("holds the same 15 fields at the same offsets", () => {
+    const chunkOne = contractInfo.ledger
+      .filter((field) => field.index[0] === 1)
+      .map((field) => [field.name, [...field.index]] as const);
+
+    expect(chunkOne).toEqual([
+      ["vaultEvmAddress", [1, 0]],
+      ["evmChainId", [1, 1]],
+      ["deployer", [1, 2]],
+      ["depositEventMap", [1, 3]],
+      ["depositSettleViews", [1, 4]],
+      ["withdrawSettleViews", [1, 5]],
+      ["uniswapRouter", [1, 6]],
+      ["swapEventMap", [1, 7]],
+      ["swapSettleViews", [1, 8]],
+      ["stataUnderlying", [1, 9]],
+      ["stataToken", [1, 10]],
+      ["supplyEventMap", [1, 11]],
+      ["supplySettleViews", [1, 12]],
+      ["redeemEventMap", [1, 13]],
+      ["redeemSettleViews", [1, 14]],
+    ]);
+  });
+
+  it("is exactly the last 15 declared fields, so nothing may be appended", () => {
+    const names = contractInfo.ledger.map((field) => field.name);
+    const chunkOneNames = contractInfo.ledger
+      .filter((field) => field.index[0] === 1)
+      .map((field) => field.name);
+
+    expect(chunkOneNames).toHaveLength(15);
+    expect(names.slice(-15)).toEqual(chunkOneNames);
+  });
+});

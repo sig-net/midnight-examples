@@ -8,6 +8,11 @@
 // printed. Each leg then resumes its request instead of recording a fresh one, and a leg a
 // prior run already settled skips its settle.
 import type { RequestIdHex } from "@sig-net/midnight";
+import {
+  readVaultLedger,
+  vaultGasEnvelope,
+  type VaultGasKind,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { banner, getErc20Balance, getEthBalance } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
@@ -16,8 +21,6 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { fundingSummary } from "../src/evm-logging.ts";
 import { quoteExactOutputSingle } from "../src/evm-swap.ts";
-import { SWAP_GAS_LIMIT, SWAP_MAX_FEE_PER_GAS } from "../src/evm-swap.ts";
-import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
@@ -83,9 +86,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
       ).toBeGreaterThanOrEqual(required);
 
       // The vault's derived account sends the router approve (first use) and the swap itself.
-      const gasBudget =
-        ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS +
-        SWAP_GAS_LIMIT * SWAP_MAX_FEE_PER_GAS;
+      const ledgerState = await readVaultLedger(
+        context.providers.publicDataProvider,
+        context.vaultContractAddress,
+      );
+      const cost = (kind: VaultGasKind): bigint => {
+        const envelope = vaultGasEnvelope(ledgerState, kind);
+        return envelope.gasLimit * envelope.maxFeePerGas;
+      };
+      const gasBudget = cost("approve") + cost("swap");
       const vaultEth = await getEthBalance(context.evmRpcUrl, context.evmVaultAddress);
       console.log(
         `${context.evmVaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,

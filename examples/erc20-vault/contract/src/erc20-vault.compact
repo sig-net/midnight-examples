@@ -28,6 +28,18 @@ export ledger mpcResponseKey: Secp256k1Point;
 // Nonce to keep otherwise identical requests hashing to distinct request ids.
 export ledger signetRequestNonce: Counter;
 
+export ledger vaultMaxFeePerGas: Uint<128>;
+export ledger vaultMaxPriorityFeePerGas: Uint<128>;
+
+struct VaultGasLimits {
+  withdraw: Uint<64>;
+  approve: Uint<64>;
+  swap: Uint<64>;
+  supply: Uint<64>;
+  redeem: Uint<64>;
+}
+export ledger vaultGasLimits: VaultGasLimits;
+
 // Becomes 1 once initialise() has run.
 export ledger initialised: Counter;
 
@@ -224,6 +236,103 @@ export circuit initialise(
   stataToken = disclose(stataTokenAddr);
   evmChainId = disclose(chainId);
   mpcResponseKey = disclose(responseKey);
+
+  vaultMaxFeePerGas = 150000000000 as Uint<128>;
+  vaultMaxPriorityFeePerGas = 1000000000 as Uint<128>;
+
+  vaultGasLimits = VaultGasLimits {
+    withdraw: 100000 as Uint<64>,
+    approve: 100000 as Uint<64>,
+    swap: 700000 as Uint<64>,
+    supply: 500000 as Uint<64>,
+    redeem: 500000 as Uint<64>
+  };
+}
+
+export circuit setGasParams(
+  newMaxFeePerGas: Uint<128>,
+  newMaxPriorityFeePerGas: Uint<128>,
+  newWithdrawGasLimit: Uint<64>,
+  newApproveGasLimit: Uint<64>,
+  newSwapGasLimit: Uint<64>,
+  newSupplyGasLimit: Uint<64>,
+  newRedeemGasLimit: Uint<64>
+): [] {
+  assert(initialised >= 1, "Not initialised");
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+
+  assert(newMaxFeePerGas > 0 as Uint<128>, "maxFeePerGas must be positive");
+  assert(
+    newMaxPriorityFeePerGas <= newMaxFeePerGas,
+    "maxPriorityFeePerGas cannot exceed maxFeePerGas"
+  );
+  assert(newWithdrawGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  assert(newApproveGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  assert(newSwapGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  assert(newSupplyGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  assert(newRedeemGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+
+  vaultMaxFeePerGas = disclose(newMaxFeePerGas);
+  vaultMaxPriorityFeePerGas = disclose(newMaxPriorityFeePerGas);
+  vaultGasLimits = VaultGasLimits {
+    withdraw: disclose(newWithdrawGasLimit),
+    approve: disclose(newApproveGasLimit),
+    swap: disclose(newSwapGasLimit),
+    supply: disclose(newSupplyGasLimit),
+    redeem: disclose(newRedeemGasLimit)
+  };
+}
+
+export circuit adminReplaceEvmNonce(
+  evmNonce: Uint<64>,
+  keyVersion: Uint<8>
+): [] {
+  assert(initialised >= 1, "Not initialised");
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+
+  const txParams = EvmType2TxParams<2, 0, 0> {
+    chainId: evmChainId,
+    nonce: evmNonce,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: 21000 as Uint<64>,
+    to: vaultEvmAddress,
+    value: 0 as Uint<128>,
+    calldata: none<EvmCalldata<2>>(),
+    accessListEntryCount: 0,
+    accessList: []
+  };
+
+  const path = pad(32, "vault");
+  const schema = vaultResponseSchema();
+  const requestNonce = signetRequestNonce as Uint<64>;
+  const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
+    kernel.self(),
+    requestNonce,
+    keyVersion,
+    path,
+    MPCSignatureAlgorithm.ecdsa,
+    MPCDestination.unused,
+    pad(64, ""),
+    TxParamType.evmType2,
+    txParams,
+    ethereumCaip2Id(),
+    schema,
+    schema
+  );
+  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
+  assert(!signBidirectionalEventMap.member(requestId), "Request already exists");
+  signetRequestNonce.increment(1);
+  signBidirectionalEventMap.insert(requestId, disclose(request));
+
+  signetSigner.signBidirectional(
+    requestId,
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(),
+      2 as Uint<8>,
+      [0, 0, 0, 0] as Vector<4, Uint<8>>,
+    ),
+  );
 }
 
 // One-time MPC-signed approve(stataToken, unlimitedAllowance()) on the underlying
@@ -245,9 +354,9 @@ export circuit approveStata(
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
-    maxFeePerGas: 30000000000 as Uint<128>,        // 30 gwei
-    gasLimit: 100000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.approve,
     to: stataUnderlying,                            // approve is called ON the underlying token
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
@@ -299,9 +408,9 @@ export circuit approveRouter(
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
-    maxFeePerGas: 30000000000 as Uint<128>,        // 30 gwei
-    gasLimit: 100000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.approve,
     to: disclose(erc20Address),                    // approve is called ON the ERC20
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
@@ -519,9 +628,9 @@ export circuit startWithdraw(
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
-    maxFeePerGas: 30000000000 as Uint<128>,       // 30 gwei
-    gasLimit: 100000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.withdraw,
     to: withdrawRequest.erc20Address,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
@@ -704,9 +813,9 @@ export circuit startSwap(
   const txParams = EvmType2TxParams<7, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>, // 1 gwei
-    maxFeePerGas: 30000000000 as Uint<128>,        // 30 gwei
-    gasLimit: 700000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.swap,
     to: uniswapRouter,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<7>>(calldata),
@@ -869,9 +978,9 @@ export circuit startSupply(
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>,
-    maxFeePerGas: 30000000000 as Uint<128>,
-    gasLimit: 500000 as Uint<64>,   // Aave supply through the ERC-4626 wrapper
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.supply,
     to: stataToken,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
@@ -1009,9 +1118,9 @@ export circuit startRedeem(
   const txParams = EvmType2TxParams<3, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
-    maxPriorityFeePerGas: 1000000000 as Uint<128>,
-    maxFeePerGas: 30000000000 as Uint<128>,
-    gasLimit: 500000 as Uint<64>,
+    maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    maxFeePerGas: vaultMaxFeePerGas,
+    gasLimit: vaultGasLimits.redeem,
     to: stataToken,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<3>>(calldata),
