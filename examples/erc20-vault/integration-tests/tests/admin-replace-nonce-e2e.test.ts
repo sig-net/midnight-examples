@@ -1,4 +1,4 @@
-import { MpcOutputCacheReader } from "@sig-net/midnight";
+import { MpcOutputCacheReader, OutputKind } from "@sig-net/midnight";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { getAddress, JsonRpcProvider, type Transaction } from "ethers";
@@ -114,8 +114,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault admin-replace-n
         },
         { requestId: blockingId, intervalMs: 2000, timeoutMs: 3 * MINUTE },
       );
-      expect(replaced.matchedFailureOutput).toBe(true);
-      expect(replaced.blockHeight).toBeGreaterThan(0n);
+      // The replacement took the blocking request's nonce, so the MPC attests
+      // it unviable at the block that spent the nonce.
+      expect(replaced.event.outputKind).toBe(OutputKind.unviable);
+      expect(replaced.event.blockHeight).toBe(BigInt(replacementReceipt.blockNumber));
 
       console.log(
         `ADMIN REPLACE NONCE E2E OK: nonce ${String(n)} replaced with an empty self-transfer ` +

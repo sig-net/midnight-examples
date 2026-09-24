@@ -124,11 +124,13 @@ As illustrated, the flow comprises 6 steps:
 - **5.** poll for the MPC's attestation
   - The MPC watches the EVM chain for the transaction's execution and posts an
     attestation of its output through the singleton's
-    [`respondBidirectional`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-contract/src/signet-contract.compact#L78).
-    The emitted event carries the request id it answers and the MPC's ECDSA
-    signature over the attestation digest
-    `upgradeFromTransient(transientHash([requestId, serializedOutput]))`, and
-    nothing else: neither the digest nor the serialised output goes on chain.
+    [`respondBidirectional`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-contract/src/signet-contract.compact#L79).
+    The emitted event carries the request id it answers, the finalised EVM
+    block height, the MPC's verdict (`outputKind`: `executed`, `failed` or
+    `unviable`), the output's byte width, the attestation digest
+    `upgradeFromTransient(transientHash([requestId, blockHeight, outputKind, serializedOutputLength, serializedOutput]))`
+    and the MPC's ECDSA signature over it. The serialised output itself never
+    goes on chain.
   - The client must therefore obtain the exact bytes the MPC hashed, from the
     source `RESPOND_OUTPUT_SOURCE` names. Under `evm-node`
     [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L334)
@@ -144,16 +146,17 @@ As illustrated, the flow comprises 6 steps:
     bytes the MPC uploaded to its output cache before posting
     ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/mpc-output-cache.ts)),
     one object per request id under `MPC_OUTPUT_CACHE_URL`.
-  - Two candidates are checked, not one. The success candidate is the re-packed
-    output above, and the failure candidate is the protocol's fixed 5-byte
-    failure output
-    [`MPC_FAILURE_OUTPUT`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/constants.ts#L29)
-    (`0xdeadbeef01`), which the MPC attests when the transaction reverted or was
-    replaced. Whichever candidate a posted signature verifies over, against the
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact) read from the
-    vault's own ledger, is the attested outcome. The success candidate is
-    skipped when the transaction reverted (a failed execution has no output),
-    and a decode failure drops it with a warning instead of crashing the poll.
+  - A post's declared `outputKind` picks the bytes it is checked over. A post
+    declaring `executed` is checked over the re-packed output above, and a post
+    declaring `failed` (the transaction reverted) or `unviable` (another
+    transaction took its nonce) is checked over the EMPTY output the protocol
+    attests for a transaction that never executed, which needs no trace at
+    all. The first post whose signature verifies over its candidate, against
+    the [`mpcResponseKey`](../../contract/src/erc20-vault.compact) read from
+    the vault's own ledger, is the attested outcome: the kind is inside the
+    signed digest, so a post cannot present a failure as a success. A decode
+    failure drops the executed candidate with a warning instead of crashing
+    the poll.
   - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts#L78)
     owns the loop, the timeout and the reporting. Everything resolved here stays
     UNTRUSTED: the respond events are open to anyone and the traced or cached
@@ -161,16 +164,18 @@ As illustrated, the flow comprises 6 steps:
     verification step 6 runs.
 - **6.** completeDeposit(...) verifies and mints
   - The user calls [`completeDeposit(...)`](../../contract/src/erc20-vault.compact)
-    with the request id, the attested event and the recomputed output bytes. The
-    circuit re-hashes those bytes into the attestation digest and verifies the
-    event's ECDSA signature over it against the initialise-pinned
+    with the attested event and the recomputed output bytes. The circuit
+    re-hashes those bytes, with the request id, block height and output kind
+    the event carries, into the attestation digest and verifies the event's
+    ECDSA signature over it against the initialise-pinned
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact) with
-    [`verifyRespondBidirectionalEvent`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L327).
+    [`verifyRespondBidirectionalEvent`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L400).
     The singleton emits MPC posts unverified, so this is the only authentication
-    gate.
-  - The one-byte output is deserialised into the schema's `VaultResponse` and
-    its `success` flag asserted, so only an attested successful transfer mints.
-    A sweep the MPC attested as failed cannot be claimed at all, and
+    gate, and the request it settles is the one the verified event names.
+  - The verified kind must be `executed`, and the one-byte output is
+    deserialised into the schema's `VaultResponse` and its `success` flag
+    asserted, so only an attested successful transfer mints. A sweep the MPC
+    attested as `failed` or `unviable` cannot be claimed at all, and
     [`complete-deposit.ts`](../../integration-tests/src/flows/complete-deposit.ts) refuses to call
     the circuit for one.
   - The stored request is looked up and removed from

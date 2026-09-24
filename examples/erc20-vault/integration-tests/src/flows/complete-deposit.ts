@@ -1,16 +1,18 @@
-// Settle side of the deposit flow: present the MPC's signature-only
-// RespondBidirectionalEvent for the EVM sweep together with the recomputed
-// serialized output to the vault's `completeDeposit` circuit, which re-hashes
-// the output into the attestation digest and verifies the signature over it
-// in-circuit against its stored MPC response key, then mints shielded tokens
-// to the caller (or a recipient the caller names) under a fresh RANDOM mint
-// nonce, so the minted coin cannot be linked back to the request.
+// Settle side of the deposit flow: present the MPC's RespondBidirectionalEvent
+// for the EVM sweep together with the recomputed serialized output to the
+// vault's `completeDeposit` circuit, which re-hashes the output into the
+// attestation digest and verifies the signature over it in-circuit against
+// its stored MPC response key, consumes the request the event names, then
+// mints shielded tokens to the caller (or a recipient the caller names) under
+// a fresh RANDOM mint nonce, so the minted coin cannot be linked back to the
+// request.
 
 import { type CoinPublicKey, encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
 import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
 import {
-  requestIdBytes,
+  OutputKind,
   type RequestIdHex,
+  requestIdHex,
   respondBidirectionalEventToCircuitInput,
 } from "@sig-net/midnight";
 import type { EncPublicKey } from "@sig-net/midnight-contract-deploy";
@@ -39,13 +41,12 @@ export interface ShieldedTokenRecipient {
  * Settle a resolved deposit outcome through the vault's `completeDeposit`
  * circuit, passing the attested event AND the recomputed output bytes. The
  * circuit re-hashes the bytes, verifies the ECDSA signature in-circuit along
- * with the EVM success flag and the caller identity against the stored
- * request, and mints shielded vault tokens: to `recipient` when given,
+ * with the EVM success flag and the caller identity against the request the
+ * event names, and mints shielded vault tokens: to `recipient` when given,
  * otherwise to the caller. The mint's coin handling is midnight-js's job: the
  * callTx balances the resulting offer like any other call.
  *
  * @param context - The flow context.
- * @param requestId - The deposit request id being settled.
  * @param outcome - The attested outcome from {@link pollRespondBidirectional}.
  * @param recipient - The wallet receiving the minted tokens, or the caller's
  *   own wallet when omitted. Only the DEPOSITOR may settle either way: this
@@ -55,10 +56,10 @@ export interface ShieldedTokenRecipient {
  */
 export async function settleDeposit(
   context: VaultContext,
-  requestId: RequestIdHex,
   outcome: RespondOutcome,
   recipient?: ShieldedTokenRecipient,
 ): Promise<void> {
+  const requestId = requestIdHex(outcome.event.requestId);
   console.log(`vault contract:  ${context.vaultContractAddress}`);
   console.log(`request id:      ${requestId}`);
   if (recipient !== undefined) {
@@ -68,7 +69,7 @@ export async function settleDeposit(
   if (!outcome.succeeded) {
     throw new Error(
       `the MPC attested the sweep for request ${requestId} as ` +
-        `${outcome.matchedFailureOutput ? "failed (MPC failure output)" : "returned false"}: ` +
+        `${outcome.event.outputKind === OutputKind.executed ? "returned false" : OutputKind[outcome.event.outputKind]}: ` +
         `a failed sweep mints nothing`,
     );
   }
@@ -106,10 +107,8 @@ export async function settleDeposit(
           async (txCtx) => {
             await context.vault.callTx.completeDeposit(
               txCtx,
-              requestIdBytes(requestId),
               respondBidirectionalEventToCircuitInput(outcome.event),
               outcome.serializedOutput,
-              outcome.blockHeight,
               mintNonce,
               mintRecipient,
             );
@@ -121,10 +120,8 @@ export async function settleDeposit(
           },
         )
       : await context.vault.callTx.completeDeposit(
-          requestIdBytes(requestId),
           respondBidirectionalEventToCircuitInput(outcome.event),
           outcome.serializedOutput,
-          outcome.blockHeight,
           mintNonce,
           mintRecipient,
         );
@@ -162,5 +159,5 @@ export async function completeDeposit(
     timeoutMs: POLL_TIMEOUT_MS,
     requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
   });
-  await settleDeposit(context, options.requestId, outcome, options.recipient);
+  await settleDeposit(context, outcome, options.recipient);
 }

@@ -452,7 +452,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         // The broadcast step saw the transfer mine, so the MPC must attest
-        // success (the 1-byte 0x01 result), not its failure output.
+        // success (the 1-byte 0x01 result), not a failure kind.
         expect(
           withdrawAttestation.succeeded,
           "the MPC must attest wallet B's withdraw transfer as succeeded",
@@ -488,7 +488,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
         expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
+        await settleWithdraw(context, withdrawAttestation);
 
         const after = await readLedger();
         expect(

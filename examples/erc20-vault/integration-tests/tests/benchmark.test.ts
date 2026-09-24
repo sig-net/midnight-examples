@@ -53,7 +53,7 @@
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
   VAULT_DEPOSIT_REQUESTS_PATH,
   VAULT_REDEEM_REQUESTS_PATH,
@@ -509,7 +509,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // cost), so this span is the prove-and-submit alone.
         recorder.setLeg(BenchmarkLeg.DepositComplete);
         const stop = startTimer();
-        await settleDeposit(context, depositRequestId, depositOutcome);
+        await settleDeposit(context, depositOutcome);
         const ms = stop();
         recorder.clearLeg();
         timings.deposit.completeDeposit = ms;
@@ -671,7 +671,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // cost), so this span is the prove-and-submit alone.
         recorder.setLeg(BenchmarkLeg.WithdrawComplete);
         const stop = startTimer();
-        await settleWithdraw(context, withdrawRequestId, withdrawOutcome);
+        await settleWithdraw(context, withdrawOutcome);
         const ms = stop();
         recorder.clearLeg();
         timings.withdraw.completeWithdraw = ms;
@@ -836,9 +836,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // round trip is the happy path (the swap-refund spec owns the
         // refundSwap benchmark).
         expect(
-          swapOutcome.matchedFailureOutput,
-          "the MPC must attest the swap as executed (amountIn), not the failure output",
-        ).toBe(false);
+          swapOutcome.event.outputKind,
+          "the MPC must attest the swap as executed (amountIn), not as a failure",
+        ).toBe(OutputKind.executed);
       },
       POLL_TIMEOUT_MS + 5 * MINUTE,
     );
@@ -863,7 +863,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         recorder.setLeg(BenchmarkLeg.SwapComplete);
         const stop = startTimer();
-        const settled = await settleSwap(context, swapRequestId, swapOutcome);
+        const settled = await settleSwap(context, swapOutcome);
         const ms = stop();
         recorder.clearLeg();
         timings.swap.completeSwap = ms;
@@ -1089,9 +1089,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // supply round trip is the happy path (the supply-refund spec owns
         // the refundSupply benchmark).
         expect(
-          supplyOutcome.matchedFailureOutput,
-          "the MPC must attest the supply as executed (shares), not the failure output",
-        ).toBe(false);
+          supplyOutcome.event.outputKind,
+          "the MPC must attest the supply as executed (shares), not as a failure",
+        ).toBe(OutputKind.executed);
       },
       POLL_TIMEOUT_MS + 5 * MINUTE,
     );
@@ -1119,7 +1119,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         recorder.setLeg(BenchmarkLeg.SupplyComplete);
         const stop = startTimer();
-        const settled = await settleSupply(context, supplyRequestId, supplyOutcome);
+        const settled = await settleSupply(context, supplyOutcome);
         const ms = stop();
         recorder.clearLeg();
         timings.supply.completeSupply = ms;
@@ -1256,9 +1256,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         recorder.recordLeg(BenchmarkLeg.RedeemPollOutcome, ms);
 
         expect(
-          redeemOutcome.matchedFailureOutput,
-          "the MPC must attest the redeem as executed (assets), not the failure output",
-        ).toBe(false);
+          redeemOutcome.event.outputKind,
+          "the MPC must attest the redeem as executed (assets), not as a failure",
+        ).toBe(OutputKind.executed);
       },
       POLL_TIMEOUT_MS + 5 * MINUTE,
     );
@@ -1286,7 +1286,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         recorder.setLeg(BenchmarkLeg.RedeemComplete);
         const stop = startTimer();
-        const settled = await settleRedeem(context, redeemRequestId, redeemOutcome);
+        const settled = await settleRedeem(context, redeemOutcome);
         const ms = stop();
         recorder.clearLeg();
         timings.redeem.completeRedeem = ms;
@@ -1308,7 +1308,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     // The deposit-withdrawal-failure recipe (see
     // tests/deposit-withdrawal-failure-refund.test.ts): drain the vault's
     // EVM ERC20 balance so the withdraw transfer mines and REVERTS, the MPC
-    // attests the fixed 5-byte failure output, and the settle proves
+    // attests it as failed over an empty output, and the settle proves
     // refundWithdraw. Works on any stack (no Uniswap needed), and the drain
     // is fakenet-only, like the source recipe.
 
@@ -1441,7 +1441,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // The transfer exceeds the vault's (zero) ERC20 balance: it mines
         // with `status 0` and broadcastEvm surfaces that as its
         // reverted-on-chain error — the mined receipt is what the responder
-        // attests the failure output from.
+        // attests the failure from.
         recorder.setLeg(BenchmarkLeg.RefundBroadcastEvm);
         const stop = startTimer();
         await expect(
@@ -1476,12 +1476,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         timings.refund.pollRespondBidirectional = ms;
         recorder.recordLeg(BenchmarkLeg.RefundPollRespondBidirectional, ms);
 
-        // Only the fixed failure output routes the settle to refundWithdraw,
+        // Only a verified failure kind routes the settle to refundWithdraw,
         // the whole point of this sequence.
         expect(
-          refundOutcome.matchedFailureOutput,
-          "a mined revert must be attested as the fixed MPC failure output",
-        ).toBe(true);
+          refundOutcome.event.outputKind,
+          "a mined revert must be attested under OutputKind.failed",
+        ).toBe(OutputKind.failed);
       },
       POLL_TIMEOUT_MS + 5 * MINUTE,
     );
@@ -1508,13 +1508,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           return;
         }
 
-        // The settle flow routes the failure output to refundWithdraw (see
+        // The settle flow routes the failure kind to refundWithdraw (see
         // src/flows/complete-withdraw.ts), the prove this leg exists to
         // record. The attestation is already resolved (the poll leg above
         // owns that cost), so this span is the prove-and-submit alone.
         recorder.setLeg(BenchmarkLeg.RefundWithdraw);
         const stop = startTimer();
-        await settleWithdraw(context, refundWithdrawRequestId, refundOutcome);
+        await settleWithdraw(context, refundOutcome);
         const ms = stop();
         recorder.clearLeg();
         timings.refund.refundWithdraw = ms;

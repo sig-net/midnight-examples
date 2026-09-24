@@ -1,6 +1,6 @@
 // The full supply journey as one arrange-stage helper: approve the wrapper, startSupply, MPC
 // signature, broadcast, completeSupply.
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
   readVaultLedger,
   VAULT_SUPPLY_REQUESTS_PATH,
@@ -103,10 +103,10 @@ export async function runSupplyRoundTrip(
     return {
       requestId,
       shares: outcome.shares,
-      refunded: outcome.matchedFailureOutput,
+      refunded: outcome.event.outputKind !== OutputKind.executed,
       settled: false,
     };
   }
-  const { shares, refunded } = await settleSupply(context, requestId, outcome);
+  const { shares, refunded } = await settleSupply(context, outcome);
   return { requestId, shares, refunded, settled: true };
 }

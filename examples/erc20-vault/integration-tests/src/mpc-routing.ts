@@ -33,12 +33,12 @@ export const VAULT_SCHEMA_BYTES = ERC20_TRANSFER_RESULT_SCHEMA.length;
 export interface VaultMpcRouting {
   /** Signature algorithm: an `MPCSignatureAlgorithm` variant index (ecdsa). */
   readonly algo: number;
-  /** Destination field: an `MPCDestination` variant index (unused). */
-  readonly dest: number;
+  /** Signature destination: an `MPCDestination` variant index (unused, reserved). */
+  readonly signatureDest: number;
   /** Extra MPC parameters (reserved, zeroed); 64 bytes. */
   readonly params: Uint8Array;
-  /** The MPC's Ethereum routing key (`ethereumCaip2Id()`), zero-padded to 32 bytes. */
-  readonly caip2Id: Uint8Array;
+  /** Execution destination: the MPC's Ethereum routing key (`ethereumCaip2Id()`), zero-padded to 32 bytes. */
+  readonly executionDest: Uint8Array;
   /** MPC output_deserialization_schema at its declared 34-byte width. */
   readonly outputDeserializationSchema: Uint8Array;
   /** MPC respond_serialization_schema at its declared 34-byte width. */
@@ -47,14 +47,15 @@ export interface VaultMpcRouting {
 
 /**
  * The routing the vault contract bakes into every event it records: ECDSA,
- * an unused destination field, no extras, the MPC's Ethereum routing key, and the
- * ERC20 `transfer` bool result schema in both directions.
+ * an unused signature destination, no extras, the MPC's Ethereum routing key
+ * as the execution destination, and the ERC20 `transfer` bool result schema
+ * in both directions.
  */
 export const VAULT_MPC_ROUTING: VaultMpcRouting = {
   algo: MPCSignatureAlgorithm.ecdsa,
-  dest: MPCDestination.unused,
+  signatureDest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
-  caip2Id: pureCircuits.ethereumCaip2Id(),
+  executionDest: pureCircuits.ethereumCaip2Id(),
   outputDeserializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
   respondSerializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
 };

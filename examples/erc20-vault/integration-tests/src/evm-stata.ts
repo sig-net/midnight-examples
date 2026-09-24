@@ -46,9 +46,9 @@ export async function stataAvailable(evmRpcUrl: string): Promise<boolean> {
 /** Contract-fixed routing of a supply event (the supply-schema variant of VAULT_MPC_ROUTING). */
 export const SUPPLY_MPC_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
-  dest: MPCDestination.unused,
+  signatureDest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
-  caip2Id: signetPureCircuits.ethereumCaip2Id(),
+  executionDest: signetPureCircuits.ethereumCaip2Id(),
   outputDeserializationSchema: SUPPLY_OUTPUT_SCHEMA,
   respondSerializationSchema: SUPPLY_RESPOND_SCHEMA,
 };
@@ -56,9 +56,9 @@ export const SUPPLY_MPC_ROUTING = {
 /** Contract-fixed routing of a redeem event. */
 export const REDEEM_MPC_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
-  dest: MPCDestination.unused,
+  signatureDest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
-  caip2Id: signetPureCircuits.ethereumCaip2Id(),
+  executionDest: signetPureCircuits.ethereumCaip2Id(),
   outputDeserializationSchema: REDEEM_OUTPUT_SCHEMA,
   respondSerializationSchema: REDEEM_RESPOND_SCHEMA,
 };
