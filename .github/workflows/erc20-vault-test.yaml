@@ -1,6 +1,7 @@
-# Thin per-example caller: paths-filter + one `uses:` of the reusable
-# example-test workflow. PRs/pushes run the gate specs listed below, and the
-# full e2e suite is opt-in via workflow_dispatch. The weekly schedule runs
+# Thin per-example caller: paths-filter + sharded `uses:` of the reusable
+# example-test workflow. PRs/pushes/schedule run the gate specs split across
+# two parallel shards (each with its own stack), and the full e2e suite is
+# opt-in via workflow_dispatch. The weekly schedule runs
 # the same gate on the default branch: a pull_request run can restore caches
 # only from its own or the DEFAULT branch's scope, and nothing else runs on
 # dev — without it every fresh PR misses the zk-keys cache and pays ~5.5 min
@@ -58,7 +59,17 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
+  # Sharded gate: each shard is a full pipeline (stack + funding + deploy +
+  # initialise + its specs) on its own runner, running in parallel. Sound
+  # because every spec is self-funded and file-order independent (the setup
+  # pipeline initialises the vault). Balance is by measured per-file
+  # wall-clock; rebalance when a shard drifts materially.
+  gate:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.full-suite != true }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [happy-day-aave, swap-refunds]
     uses: ./.github/workflows/example-test.yaml
     # The reusable workflow sees no secrets unless the caller passes them.
     # Passed by name (never `secrets: inherit`): the callee's declared
@@ -67,10 +78,16 @@ jobs:
       SEPOLIA_FORK_RPC_URL: ${{ secrets.SEPOLIA_FORK_RPC_URL }}
     with:
       example-dir: erc20-vault
-      # PR/push gate: happy-day (deposit+withdraw), the swap success path (exactOutput
-      # mints tokenOut + change), and every refund branch (withdraw-failure, swap-failure,
-      # supply-failure, redeem-failure), plus the Aave lending round-trip (supply USDC ->
-      # stataUSDC -> redeem). One spec per refund circuit, so a broken refund branch
-      # fails the gate. The full suite stays opt-in via workflow_dispatch.
-      gate-spec: "tests/happy-day-e2e.test.ts tests/swap-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/swap-refund-e2e.test.ts tests/supply-redeem-e2e.test.ts tests/supply-refund-e2e.test.ts tests/redeem-refund-e2e.test.ts"
-      full-suite: ${{ github.event_name == 'workflow_dispatch' && inputs.full-suite == true }}
+      # ~21 min each: Aave round trip + redeem refund + happy-day | swap
+      # success path + the remaining refund branches.
+      gate-spec: ${{ matrix.shard == 'happy-day-aave' && 'tests/happy-day-e2e.test.ts tests/supply-redeem-e2e.test.ts tests/redeem-refund-e2e.test.ts' || 'tests/swap-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/swap-refund-e2e.test.ts tests/supply-refund-e2e.test.ts' }}
+  # The full suite stays a single job: it runs every e2e file regardless of
+  # gate-spec, so sharding it would only duplicate the work.
+  full:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.full-suite == true }}
+    uses: ./.github/workflows/example-test.yaml
+    secrets:
+      SEPOLIA_FORK_RPC_URL: ${{ secrets.SEPOLIA_FORK_RPC_URL }}
+    with:
+      example-dir: erc20-vault
+      full-suite: true

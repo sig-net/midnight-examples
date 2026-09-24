@@ -2,7 +2,7 @@
 // (environment check -> wallet seeds + root funding -> EVM chain + output
 // source + trace RPC check + test token -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
 // vault zk compile + deploy -> MPC response key -> derived EVM addresses ->
-// fork dealing -> fork dependency check -> MPC hand-off printout) from the
+// vault initialise -> fork dealing -> fork dependency check -> MPC hand-off printout) from the
 // harness's generic steps plus the vault-specific steps below. The vitest
 // globalSetup `setup` runs it via `runSetupPipeline` in vitest's main process,
 // and `scripts/setup-local.ts` runs the same steps outside vitest to bring up
@@ -12,7 +12,13 @@
 // deploy: the key derives from the vault's own contract address, and the
 // initialise flow pins it on-chain.
 
-import { bytesToHex, deriveEvmAddress, getMpcOutputCacheUrl } from "@sig-net/midnight";
+import {
+  bytesToHex,
+  deriveEvmAddress,
+  formatSecp256k1PublicKey,
+  getMpcOutputCacheUrl,
+  normaliseSecp256k1PublicKey,
+} from "@sig-net/midnight";
 import {
   deployedNetwork,
   generateHexSeed,
@@ -22,10 +28,17 @@ import {
 } from "@sig-net/midnight-contract-deploy";
 import {
   deriveVaultEvmAddress,
+  printVaultState,
+  readVaultLedger,
   STATA_USDC,
   UNISWAP_SWAP_ROUTER_02,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { deployVault, resumeVaultDeploy } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import {
+  deployVault,
+  InitialiseVaultOutcome,
+  resolveInitialiseConfig,
+  resumeVaultDeploy,
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
   appendRepoDotEnv,
   assertEnvironment,
@@ -51,10 +64,12 @@ import type { TestProject } from "vitest/node";
 
 import { stataAvailable } from "./evm-stata.ts";
 import { uniswapAvailable } from "./evm-swap.ts";
+import { initialise } from "./flows/initialise.ts";
 import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
 import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
+import { createVaultSession } from "./vault-session.ts";
 
 /**
  * The env keys the setup steps populate beyond the wallet seeds, in
@@ -379,6 +394,65 @@ async function verifyForkDependencies(env: NodeJS.ProcessEnv): Promise<void> {
   );
 }
 
+/**
+ * Call the vault's `initialise` circuit through the same session-shaped flow
+ * the suites drive (the deployer-gated one-off sealing the vault's EVM
+ * address, chain, EVM targets and MPC response key), then verify the sealed
+ * ledger state against the resolved config — the invariants every flow file
+ * assumes. Running it here instead of as happy-day's first test makes every
+ * flow file independent of file order, which is what lets the gate run
+ * sharded across jobs against separate stacks.
+ *
+ * @param env - The suite's env accumulator (reads everything the deploy
+ *   package's `resolveInitialiseConfig` reads).
+ * @throws {Error} If the circuit rejects the caller, or the sealed ledger
+ *   state contradicts the resolved configuration.
+ */
+async function initialiseVaultStep(env: NodeJS.ProcessEnv): Promise<void> {
+  const session = createVaultSession(env);
+  try {
+    const context = await session.vaultContext();
+    const readLedger = () =>
+      readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+    const config = await resolveInitialiseConfig(env, context.vaultContractAddress);
+    const outcome = await initialise(context, config);
+    if (outcome === InitialiseVaultOutcome.AlreadyInitialised) {
+      logSkip(
+        "initialise vault contract",
+        "vault is already initialised (rerun against a kept contract)",
+      );
+    }
+    await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
+    const state = await readLedger();
+    if (state.initialised !== 1n) {
+      throw new Error(
+        `the vault ledger reports initialised=${String(state.initialised)}, expected 1n`,
+      );
+    }
+    const sealedVaultEvmAddress = `0x${bytesToHex(state.vaultEvmAddress)}`.toLowerCase();
+    if (sealedVaultEvmAddress !== config.vaultEvmAddress.toLowerCase()) {
+      throw new Error(
+        `the sealed vault EVM address ${sealedVaultEvmAddress} does not match the resolved config ${config.vaultEvmAddress}`,
+      );
+    }
+    const evmChainId = requireEnv(env, "EVM_CHAIN_ID");
+    if (state.evmChainId !== BigInt(evmChainId)) {
+      throw new Error(
+        `the sealed EVM chain id ${String(state.evmChainId)} does not match EVM_CHAIN_ID=${evmChainId}`,
+      );
+    }
+    const sealedResponseKey = formatSecp256k1PublicKey(state.mpcResponseKey);
+    const resolvedResponseKey = normaliseSecp256k1PublicKey(config.mpcResponseKey);
+    if (sealedResponseKey !== resolvedResponseKey) {
+      throw new Error(
+        `the sealed MPC response key 0x${sealedResponseKey} does not match the resolved config 0x${resolvedResponseKey}`,
+      );
+    }
+  } finally {
+    await session.stop();
+  }
+}
+
 // Step names match what the operator greps for and what STEP_THROUGH prompts show.
 const STEPS: readonly SetupStep[] = [
   [
@@ -422,6 +496,10 @@ const STEPS: readonly SetupStep[] = [
   ],
   ["setup: check/derive vault EVM address", ensureVaultEvmAddress],
   ["setup: check/derive user EVM address", ensureUserEvmAddress],
+  [
+    "setup: initialise vault contract (seal vault EVM address + MPC response key)",
+    initialiseVaultStep,
+  ],
   [
     "setup: deal derived EVM accounts (ETH + real USDC on an anvil fork, funding hints on a real chain)",
     dealForkEvmAccounts,
