@@ -1,6 +1,6 @@
-// The happy-day e2e flow: initialisation → deposit round trip → withdraw
-// round trip, against contracts the globalSetup pipeline (src/setup.ts) has
-// already compiled/deployed/derived — vitest.config.ts holds the
+// The happy-day e2e flow: deposit round trip → withdraw round trip, against
+// contracts the globalSetup pipeline (src/setup.ts) has already
+// compiled/deployed/derived/initialised — vitest.config.ts holds the
 // orchestration contract (setup runs first, flow files run one at a time in
 // a pinned order). Tests in THIS file run in source order and feed each
 // other through module-scoped state, so the file is one ordered pipeline on
@@ -15,7 +15,6 @@
 import {
   abiWordToUint128,
   bytesToHex,
-  parseSecp256k1PublicKey,
   requestIdBytes,
   type RequestIdHex,
   stripHexPrefix,
@@ -29,10 +28,6 @@ import {
   VAULT_PATH_BYTES,
   VAULT_REQUESTS_PATH,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
-  InitialiseVaultOutcome,
-  resolveInitialiseConfig,
-} from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
   banner,
   getErc20Balance,
@@ -52,7 +47,6 @@ import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { settleDeposit } from "../src/flows/complete-deposit.ts";
 import { settleWithdraw } from "../src/flows/complete-withdraw.ts";
-import { initialise } from "../src/flows/initialise.ts";
 import {
   pollRespondBidirectional,
   type RespondOutcome,
@@ -97,36 +91,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   afterAll(async () => {
     await session.stop();
   });
-
-  it(
-    "initialise [erc-vault contract method call]: seal vault EVM address + MPC response key and read back state",
-    async () => {
-      const context = await session.vaultContext();
-      const readLedger = () =>
-        readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
-
-      // The same arguments the stagenet deploy+initialise entrypoint resolves, from the
-      // same env. A rerun against a kept, initialised contract is a no-op inside initialise.
-      const config = await resolveInitialiseConfig(env, context.vaultContractAddress);
-      const outcome = await initialise(context, config);
-      if (outcome === InitialiseVaultOutcome.AlreadyInitialised) {
-        logSkip("initialise", "vault is already initialised (rerun against a kept contract)");
-      }
-
-      await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
-
-      const state = await readLedger();
-      expect(state.initialised).toBe(1n);
-      expect(`0x${bytesToHex(state.vaultEvmAddress)}`.toLowerCase()).toBe(
-        config.vaultEvmAddress.toLowerCase(),
-      );
-      expect(state.evmChainId).toBe(BigInt(requireEnv("EVM_CHAIN_ID")));
-      // The stored MPC response key, verbatim: the sender-scoped key claim and
-      // completeWithdraw verify responses against.
-      expect(state.mpcResponseKey).toEqual(parseSecp256k1PublicKey(config.mpcResponseKey));
-    },
-    15 * MINUTE,
-  );
 
   it(
     "deposit funding preflight: check user EVM account for minimum ETH and USDC balances.",
