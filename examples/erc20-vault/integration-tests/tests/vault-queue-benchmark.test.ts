@@ -310,7 +310,7 @@ const drainQueue = async (context: VaultContext): Promise<number> => {
       throw new Error(`cannot drain a queued request of kind ${String(entry.kind)}`);
     }
     requestIds.push(
-      await sendApproveRouter(context, key, `0x${Buffer.from(entry.tokenA).toString("hex")}`),
+      await sendApproveRouter(context, key, `0x${Buffer.from(entry.addressA).toString("hex")}`),
     );
   }
   if (requestIds.length > 0) await signAndBroadcast(context, requestIds);

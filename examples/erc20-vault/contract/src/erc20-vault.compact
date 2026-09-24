@@ -58,8 +58,8 @@ export enum PendingRequestKind { withdraw, swap, supply, redeem, approveRouter, 
 struct PendingVaultRequest {
   kind: PendingRequestKind;
   keyVersion: Uint<8>;
-  tokenA: Bytes<20>;
-  tokenB: Bytes<20>;
+  addressA: Bytes<20>;
+  addressB: Bytes<20>;
   fee: Uint<24>;
   amountA: Uint<128>;
   amountB: Uint<128>;
@@ -360,8 +360,8 @@ export circuit approveStata(
   pendingVaultRequests.insert(key, PendingVaultRequest {
     kind: PendingRequestKind.approveStata,
     keyVersion: disclose(keyVersion),
-    tokenA: stataUnderlying,
-    tokenB: stataToken,
+    addressA: stataUnderlying,
+    addressB: stataToken,
     fee: 0 as Uint<24>,
     amountA: 0 as Uint<128>,
     amountB: 0 as Uint<128>,
@@ -384,8 +384,8 @@ export circuit approveRouter(
   pendingVaultRequests.insert(key, PendingVaultRequest {
     kind: PendingRequestKind.approveRouter,
     keyVersion: disclose(keyVersion),
-    tokenA: disclose(erc20Address),
-    tokenB: uniswapRouter,
+    addressA: disclose(erc20Address),
+    addressB: uniswapRouter,
     fee: 0 as Uint<24>,
     amountA: 0 as Uint<128>,
     amountB: 0 as Uint<128>,
@@ -563,8 +563,8 @@ export circuit startWithdraw(
   pendingVaultRequests.insert(disclosedKey, disclose(PendingVaultRequest {
     kind: PendingRequestKind.withdraw,
     keyVersion: withdrawRequest.keyVersion,
-    tokenA: withdrawRequest.erc20Address,
-    tokenB: withdrawRequest.destEvmAddress,
+    addressA: withdrawRequest.erc20Address,
+    addressB: withdrawRequest.destEvmAddress,
     fee: 0 as Uint<24>,
     amountA: withdrawRequest.amount,
     amountB: 0 as Uint<128>,
@@ -689,8 +689,8 @@ export circuit startSwap(
   pendingVaultRequests.insert(disclosedKey, disclose(PendingVaultRequest {
     kind: PendingRequestKind.swap,
     keyVersion: swapRequest.keyVersion,
-    tokenA: swapRequest.tokenIn,
-    tokenB: swapRequest.tokenOut,
+    addressA: swapRequest.tokenIn,
+    addressB: swapRequest.tokenOut,
     fee: swapRequest.fee,
     amountA: swapRequest.amountOut,
     amountB: swapRequest.amountInMaximum,
@@ -809,8 +809,8 @@ export circuit startSupply(
   pendingVaultRequests.insert(disclosedKey, disclose(PendingVaultRequest {
     kind: PendingRequestKind.supply,
     keyVersion: supplyRequest.keyVersion,
-    tokenA: stataUnderlying,
-    tokenB: stataToken,
+    addressA: stataUnderlying,
+    addressB: stataToken,
     fee: 0 as Uint<24>,
     amountA: supplyRequest.amount,
     amountB: 0 as Uint<128>,
@@ -913,8 +913,8 @@ export circuit startRedeem(
   pendingVaultRequests.insert(disclosedKey, disclose(PendingVaultRequest {
     kind: PendingRequestKind.redeem,
     keyVersion: redeemRequest.keyVersion,
-    tokenA: stataToken,
-    tokenB: stataUnderlying,
+    addressA: stataToken,
+    addressB: stataUnderlying,
     fee: 0 as Uint<24>,
     amountA: redeemRequest.shares,
     amountB: 0 as Uint<128>,
@@ -1045,7 +1045,7 @@ circuit sendApprove(key: Bytes<32>, kind: PendingRequestKind): [] {
     selector: Bytes [0x09, 0x5e, 0xa7, 0xb3],
     noWords: 2 as Uint<16>,
     words: [
-      evmAddressAbiWord(pending.tokenB),
+      evmAddressAbiWord(pending.addressB),
       numericAbiWord(unlimitedAllowance()),
     ]
   };
@@ -1055,7 +1055,7 @@ circuit sendApprove(key: Bytes<32>, kind: PendingRequestKind): [] {
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.approve,
-    to: pending.tokenA,
+    to: pending.addressA,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
     accessListEntryCount: 0,
@@ -1090,7 +1090,7 @@ export circuit sendWithdraw(key: Bytes<32>): [] {
     selector: Bytes [0xa9, 0x05, 0x9c, 0xbb],
     noWords: 2 as Uint<16>,
     words: [
-      evmAddressAbiWord(pending.tokenB),
+      evmAddressAbiWord(pending.addressB),
       numericAbiWord(pending.amountA),
     ]
   };
@@ -1100,7 +1100,7 @@ export circuit sendWithdraw(key: Bytes<32>): [] {
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.withdraw,
-    to: pending.tokenA,
+    to: pending.addressA,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
     accessListEntryCount: 0,
@@ -1118,7 +1118,7 @@ export circuit sendWithdraw(key: Bytes<32>): [] {
   withdrawSettleViews.insert(requestId, WithdrawSettleView {
     commitment: pending.commitment,
     key: disclosedKey,
-    erc20: pending.tokenA,
+    erc20: pending.addressA,
     amount: pending.amountA as Uint<64>,
   });
   notifyRequests(requestId);
@@ -1133,8 +1133,8 @@ export circuit sendSwap(key: Bytes<32>): [] {
     selector: Bytes [0x50, 0x23, 0xb4, 0xdf],
     noWords: 7 as Uint<16>,
     words: [
-      evmAddressAbiWord(pending.tokenA),
-      evmAddressAbiWord(pending.tokenB),
+      evmAddressAbiWord(pending.addressA),
+      evmAddressAbiWord(pending.addressB),
       numericAbiWord(pending.fee as Uint<128>),
       evmAddressAbiWord(vaultEvmAddress),
       numericAbiWord(pending.amountA),
@@ -1165,8 +1165,8 @@ export circuit sendSwap(key: Bytes<32>): [] {
   swapSettleViews.insert(requestId, SwapSettleView {
     commitment: pending.commitment,
     key: disclosedKey,
-    tokenIn: pending.tokenA,
-    tokenOut: pending.tokenB,
+    tokenIn: pending.addressA,
+    tokenOut: pending.addressB,
     amountOut: pending.amountA as Uint<64>,
     amountInMaximum: pending.amountB as Uint<64>,
   });
