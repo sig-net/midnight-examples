@@ -614,8 +614,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       for (const item of items) await flushUntilStamped(context, item.key);
       const flushWallMs = stopFlush();
       const flushProve = lastProve("flush");
+      // The flush numbers keys in the ledger map's own order, which is not
+      // the submission order, so the assertion is on the set of nonces, and
+      // the sends below go out in ascending nonce order as a relayer's would.
       const nonces: bigint[] = [];
       for (const item of items) nonces.push(await assignedNonce(context, item.key));
+      nonces.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
       expect(nonces).toEqual(items.map((_, i) => base + BigInt(i)));
 
       const send = await runBurst(
@@ -765,7 +769,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
         owner.providers.publicDataProvider,
         owner.vaultContractAddress,
       );
-      const nonces = items.map((item) => ledgerFlushed.stamps.lookup(item.key).evmNonce);
+      // As in the burst above: the flush numbers keys in ledger map order,
+      // so the set of nonces is asserted and the signatures are collected in
+      // ascending nonce order.
+      const nonces = items
+        .map((item) => ledgerFlushed.stamps.lookup(item.key).evmNonce)
+        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
       expect(nonces).toEqual(items.map((_, i) => base + BigInt(i)));
 
       const stopSend = startTimer();
