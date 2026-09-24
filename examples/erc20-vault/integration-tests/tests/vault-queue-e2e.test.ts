@@ -1,4 +1,9 @@
-import { AAVE_USDC, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { SIGNET_DEFAULT_KEY_VERSION } from "@sig-net/midnight";
+import {
+  AAVE_USDC,
+  evmAddressBytes,
+  readVaultLedger,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { JsonRpcProvider, type Transaction } from "ethers";
@@ -9,7 +14,13 @@ import { queueApproveStata, sendApproveStata } from "../src/flows/approve-stata.
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
-import { flushPending, flushUntilNumbered, unnumberedKeys } from "../src/flows/vault-queue.ts";
+import { proveAhead, submitProven } from "../src/flows/prove-ahead.ts";
+import {
+  flushPending,
+  flushUntilNumbered,
+  proveFlush,
+  unnumberedKeys,
+} from "../src/flows/vault-queue.ts";
 import type { VaultContext } from "../src/vault-context.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 
@@ -163,6 +174,52 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
         {
           nonce: await flushUntilNumbered(context, stata),
           send: () => sendApproveStata(context, stata),
+        },
+      ].sort((a, b) => (a.nonce < b.nonce ? -1 : 1));
+      for (const { nonce, send } of stamped) {
+        const signed = await signatureOf(context, await send());
+        expect(signedNonce(signed, `nonce ${String(nonce)}`)).toBe(nonce);
+        expect((await broadcastEvm(context, { transaction: signed })).status).toBe(1);
+      }
+    },
+    15 * MINUTE,
+  );
+
+  it(
+    "a flush proven before another request lands is refused unless it numbered every waiting request",
+    async () => {
+      const context = await session.vaultContext();
+      const stranger = await strangerSession.vaultContext();
+      const router = await queueApproveRouter(context);
+      const waiting = await unnumberedKeys(context);
+      expect(waiting).toContainEqual(router);
+
+      const staleFlush = await proveFlush(context, waiting);
+      const lateApprove = await proveAhead(context, "approveRouter", [
+        evmAddressBytes(AAVE_USDC),
+        SIGNET_DEFAULT_KEY_VERSION,
+      ]);
+      const stata = await queueApproveStata(stranger);
+
+      expect(await submitProven(context, lateApprove)).toBe("SucceedEntirely");
+      expect(await submitProven(context, staleFlush)).not.toBe("SucceedEntirely");
+      expect(await unnumberedKeys(context)).toHaveLength(waiting.length + 2);
+
+      await flushUntilNumbered(stranger, stata);
+      expect(await unnumberedKeys(context)).toHaveLength(0);
+      expect(
+        (await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress))
+          .unflushed,
+      ).toBe(0n);
+
+      const stamped = [
+        {
+          nonce: await flushUntilNumbered(context, router),
+          send: () => sendApproveRouter(context, router),
+        },
+        {
+          nonce: await flushUntilNumbered(context, stata),
+          send: () => sendApproveStata(stranger, stata),
         },
       ].sort((a, b) => (a.nonce < b.nonce ? -1 : 1));
       for (const { nonce, send } of stamped) {

@@ -2,12 +2,14 @@ import {
   assignedNonce as assignedNonceOf,
   flushPending as flushPendingOn,
   flushUntilNumbered as flushUntilNumberedOn,
+  padKeys,
   queueKey as queueKeyOf,
   readVaultLedger,
   unnumberedKeys as unnumberedKeysOf,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import type { VaultContext } from "../vault-context.ts";
+import { proveAhead, type ProvenCall } from "./prove-ahead.ts";
 
 export { FLUSH_WIDTH, newQueueKey, padKeys } from "@sig-net/midnight-examples-erc20-vault-contract";
 
@@ -78,4 +80,18 @@ export async function assignedNonce(context: VaultContext, key: Uint8Array): Pro
     await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress),
     key,
   );
+}
+
+/**
+ * Proves a flush of the given keys against the ledger as it is now and returns it unsubmitted.
+ *
+ * @param context - The vault context.
+ * @param keys - The queued keys the flush numbers.
+ * @returns The proven flush, to submit with `submitProven`.
+ */
+export function proveFlush(
+  context: VaultContext,
+  keys: readonly Uint8Array[],
+): Promise<ProvenCall> {
+  return proveAhead(context, "flush", [padKeys(keys)]);
 }
