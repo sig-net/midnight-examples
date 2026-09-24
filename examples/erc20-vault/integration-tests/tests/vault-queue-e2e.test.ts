@@ -2,6 +2,7 @@ import { SIGNET_DEFAULT_KEY_VERSION } from "@sig-net/midnight";
 import {
   AAVE_USDC,
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
@@ -19,6 +20,7 @@ import {
   flushPending,
   flushUntilNumbered,
   proveFlush,
+  queueKey,
   unnumberedKeys,
 } from "../src/flows/vault-queue.ts";
 import type { VaultContext } from "../src/vault-context.ts";
@@ -195,14 +197,18 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
       expect(waiting).toContainEqual(router);
 
       const staleFlush = await proveFlush(context, waiting);
+      const usdc = evmAddressBytes(AAVE_USDC);
       const lateApprove = await proveAhead(context, "approveRouter", [
-        evmAddressBytes(AAVE_USDC),
+        usdc,
         SIGNET_DEFAULT_KEY_VERSION,
       ]);
+      const late = queueKey(context, pureCircuits.approveRouterBinder(usdc));
       const stata = await queueApproveStata(stranger);
 
       expect(await submitProven(context, lateApprove)).toBe("SucceedEntirely");
-      expect(await submitProven(context, staleFlush)).not.toBe("SucceedEntirely");
+      const staleStatus = await submitProven(context, staleFlush);
+      console.log(`stale flush: ${staleStatus}`);
+      expect(staleStatus).not.toBe("SucceedEntirely");
       expect(await unnumberedKeys(context)).toHaveLength(waiting.length + 2);
 
       await flushUntilNumbered(stranger, stata);
@@ -216,6 +222,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
         {
           nonce: await flushUntilNumbered(context, router),
           send: () => sendApproveRouter(context, router),
+        },
+        {
+          nonce: await flushUntilNumbered(context, late),
+          send: () => sendApproveRouter(context, late, AAVE_USDC),
         },
         {
           nonce: await flushUntilNumbered(context, stata),
