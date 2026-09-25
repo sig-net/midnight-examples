@@ -1,4 +1,3 @@
-import { SIGNET_DEFAULT_KEY_VERSION } from "@sig-net/midnight";
 import {
   AAVE_USDC,
   evmAddressBytes,
@@ -20,7 +19,6 @@ import {
   flushPending,
   flushUntilNumbered,
   proveFlush,
-  queueKey,
   unnumberedKeys,
 } from "../src/flows/vault-queue.ts";
 import type { VaultContext } from "../src/vault-context.ts";
@@ -202,11 +200,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
 
       const staleFlush = await proveFlush(context, waiting);
       const usdc = evmAddressBytes(AAVE_USDC);
-      const lateApprove = await proveAhead(context, "approveRouter", [
-        usdc,
-        SIGNET_DEFAULT_KEY_VERSION,
-      ]);
-      const late = queueKey(context, pureCircuits.approveRouterBinder(usdc));
+      const lateApprove = await proveAhead(context, "approveRouter", [usdc]);
+      const late = pureCircuits.approveRouterBinder(usdc);
       const stata = await queueApproveStata(stranger);
 
       expect(await submitProven(context, lateApprove)).toBe("SucceedEntirely");

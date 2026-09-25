@@ -50,6 +50,7 @@ export ledger vaultEvmAddress: Bytes<20>;
 
 // EIP-155 chain id of the ONE Ethereum network this vault operates on, set by initialise().
 export ledger evmChainId: Uint<64>;
+export ledger mpcKeyVersion: Uint<8>;
 
 // Identity commitment of the deployer. Only they may call initialise().
 sealed ledger deployer: Bytes<32>;
@@ -57,7 +58,6 @@ sealed ledger deployer: Bytes<32>;
 export enum PendingRequestKind { withdraw, swap, supply, redeem, approveRouter, approveStata }
 struct PendingVaultRequest {
   kind: PendingRequestKind;
-  keyVersion: Uint<8>;
   addressA: Bytes<20>;
   addressB: Bytes<20>;
   fee: Uint<24>;
@@ -242,10 +242,12 @@ export circuit initialise(
   stataUnderlyingAddr: Bytes<20>,
   stataTokenAddr: Bytes<20>,
   chainId: Uint<64>,
-  responseKey: Secp256k1Point
+  responseKey: Secp256k1Point,
+  responseKeyVersion: Uint<8>
 ): [] {
   assert(initialised == 0, "Already initialised");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+  assert(responseKeyVersion >= 1, "keyVersion must be >= 1");
   assert(chainId > 0 as Uint<64>, "Chain ID must be positive");
   assert(swapRouter as Field != 0 as Field, "Router cannot be zero");
   assert(stataUnderlyingAddr as Field != 0 as Field, "stataUnderlying cannot be zero");
@@ -258,6 +260,7 @@ export circuit initialise(
   evmChainId = disclose(chainId);
   mpcResponseKey = disclose(responseKey);
 
+  mpcKeyVersion = disclose(responseKeyVersion);
   vaultMaxFeePerGas = 150000000000 as Uint<128>;
   vaultMaxPriorityFeePerGas = 1000000000 as Uint<128>;
 
@@ -305,8 +308,7 @@ export circuit setGasParams(
 }
 
 export circuit adminReplaceEvmNonce(
-  evmNonce: Uint<64>,
-  keyVersion: Uint<8>
+  evmNonce: Uint<64>
 ): [] {
   assert(initialised >= 1, "Not initialised");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
@@ -325,7 +327,7 @@ export circuit adminReplaceEvmNonce(
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), keyVersion, pad(32, "vault"),
+    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -347,19 +349,15 @@ export pure circuit approveStataBinder(): Bytes<32> {
 }
 
 export pure circuit approveRouterBinder(erc20Address: Bytes<20>): Bytes<32> {
-  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "vault:approve:router"), persistentHash<Bytes<20>>(erc20Address)]);
+  return upgradeFromTransient(transientHash<[Bytes<32>, Bytes<20>]>([pad(32, "vault:approve:router"), erc20Address]));
 }
 
-export circuit approveStata(
-  keyVersion: Uint<8>
-): [] {
+export circuit approveStata(): [] {
   assert(initialised >= 1, "Not initialised");
-  assert(keyVersion >= 1, "keyVersion must be >= 1");
-  const key = disclose(refundCommitment(callerSecretKey(), approveStataBinder()));
+  const key = approveStataBinder();
   assert(!pendingVaultRequests.member(key), "Request already queued");
   pendingVaultRequests.insert(key, PendingVaultRequest {
     kind: PendingRequestKind.approveStata,
-    keyVersion: disclose(keyVersion),
     addressA: stataUnderlying,
     addressB: stataToken,
     fee: 0 as Uint<24>,
@@ -373,17 +371,14 @@ export circuit approveStata(
 // Permissionless per-token router allowance, signed with the VAULT account. Spender
 // and amount are contract-fixed, so the caller chooses ONLY the token.
 export circuit approveRouter(
-  erc20Address: Bytes<20>,
-  keyVersion: Uint<8>
+  erc20Address: Bytes<20>
 ): [] {
   assert(initialised >= 1, "Not initialised");
   assert(erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
-  assert(keyVersion >= 1, "keyVersion must be >= 1");
-  const key = disclose(refundCommitment(callerSecretKey(), approveRouterBinder(erc20Address)));
+  const key = disclose(approveRouterBinder(erc20Address));
   assert(!pendingVaultRequests.member(key), "Request already queued");
   pendingVaultRequests.insert(key, PendingVaultRequest {
     kind: PendingRequestKind.approveRouter,
-    keyVersion: disclose(keyVersion),
     addressA: disclose(erc20Address),
     addressB: uniswapRouter,
     fee: 0 as Uint<24>,
@@ -408,7 +403,6 @@ export circuit startDeposit(
   gasLimit: Uint<64>,
   maxFeePerGas: Uint<128>,
   maxPriorityFeePerGas: Uint<128>,
-  keyVersion: Uint<8>,
   depositRequest: DepositRequest
 ): [] {
   assert(initialised >= 1, "Not initialised");
@@ -448,7 +442,7 @@ export circuit startDeposit(
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
     kernel.self(),
     requestNonce,
-    keyVersion,
+    mpcKeyVersion,
     caller,
     MPCSignatureAlgorithm.ecdsa,
     MPCDestination.unused,
@@ -534,7 +528,6 @@ struct WithdrawRequest {
   erc20Address: Bytes<20>;   // the ERC20 token contract on the target chain
   amount: Uint<128>;         // token amount to pull out of the vault
   destEvmAddress: Bytes<20>; // EVM recipient of the vault's transfer
-  keyVersion: Uint<8>;       // MPC key version the request is signed under
 }
 
 // Starts a withdrawal, optimistically: burns the surrendered vault coin up front and
@@ -549,7 +542,6 @@ export circuit startWithdraw(
   assert(withdrawRequest.erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
   assert(withdrawRequest.amount > 0 as Uint<128>, "Amount must be positive");
   assert(withdrawRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
-  assert(withdrawRequest.keyVersion >= 1, "keyVersion must be >= 1");
   const color = tokenType(
     vaultTokenDomainSeparator(disclose(withdrawRequest.erc20Address)),
     kernel.self()
@@ -562,7 +554,6 @@ export circuit startWithdraw(
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
   pendingVaultRequests.insert(disclosedKey, disclose(PendingVaultRequest {
     kind: PendingRequestKind.withdraw,
-    keyVersion: withdrawRequest.keyVersion,
     addressA: withdrawRequest.erc20Address,
     addressB: withdrawRequest.destEvmAddress,
     fee: 0 as Uint<24>,
@@ -656,7 +647,6 @@ struct SwapRequest {
   fee: Uint<24>;               // Uniswap V3 pool fee tier (e.g. 500, 3000)
   amountOut: Uint<128>;        // exact output amount to receive
   amountInMaximum: Uint<128>;  // max input to spend (slippage cap; router reverts above it)
-  keyVersion: Uint<8>;         // MPC key version the request is signed under
 }
 
 // Starts a swap, optimistically: burns the surrendered amountInMaximum of tokenIn and
@@ -675,7 +665,6 @@ export circuit startSwap(
   assert(swapRequest.amountInMaximum > 0 as Uint<128>, "amountInMaximum must be positive");
   assert(swapRequest.amountOut <= 18446744073709551615 as Uint<128>, "amountOut exceeds Uint<64> max");
   assert(swapRequest.amountInMaximum <= 18446744073709551615 as Uint<128>, "amountInMaximum exceeds Uint<64> max");
-  assert(swapRequest.keyVersion >= 1, "keyVersion must be >= 1");
   const color = tokenType(
     vaultTokenDomainSeparator(disclose(swapRequest.tokenIn)),
     kernel.self()
@@ -688,7 +677,6 @@ export circuit startSwap(
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
   pendingVaultRequests.insert(disclosedKey, disclose(PendingVaultRequest {
     kind: PendingRequestKind.swap,
-    keyVersion: swapRequest.keyVersion,
     addressA: swapRequest.tokenIn,
     addressB: swapRequest.tokenOut,
     fee: swapRequest.fee,
@@ -787,7 +775,6 @@ export pure circuit supplyRespondSchema(): Bytes<35> {
 // signed by the VAULT account (exact-input, so no change).
 struct SupplyRequest {
   amount: Uint<128>;   // underlying (USDC) amount to supply
-  keyVersion: Uint<8>; // MPC key version the request is signed under
 }
 
 export circuit startSupply(
@@ -798,7 +785,6 @@ export circuit startSupply(
   assert(initialised >= 1, "Not initialised");
   assert(supplyRequest.amount > 0 as Uint<128>, "amount must be positive");
   assert(supplyRequest.amount <= 18446744073709551615 as Uint<128>, "amount exceeds Uint<64> max");
-  assert(supplyRequest.keyVersion >= 1, "keyVersion must be >= 1");
   const color = tokenType(vaultTokenDomainSeparator(stataUnderlying), kernel.self());
   assert(coin.color == color, "Coin is not the vault token for the underlying");
   assert(coin.value == supplyRequest.amount, "Coin value must equal amount");
@@ -808,7 +794,6 @@ export circuit startSupply(
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
   pendingVaultRequests.insert(disclosedKey, disclose(PendingVaultRequest {
     kind: PendingRequestKind.supply,
-    keyVersion: supplyRequest.keyVersion,
     addressA: stataUnderlying,
     addressB: stataToken,
     fee: 0 as Uint<24>,
@@ -891,7 +876,6 @@ export pure circuit redeemRespondSchema(): Bytes<35> {
 // vault, vault), signed by the VAULT account.
 struct RedeemRequest {
   shares: Uint<128>;   // stataToken shares to redeem
-  keyVersion: Uint<8>; // MPC key version the request is signed under
 }
 
 export circuit startRedeem(
@@ -902,7 +886,6 @@ export circuit startRedeem(
   assert(initialised >= 1, "Not initialised");
   assert(redeemRequest.shares > 0 as Uint<128>, "shares must be positive");
   assert(redeemRequest.shares <= 18446744073709551615 as Uint<128>, "shares exceeds Uint<64> max");
-  assert(redeemRequest.keyVersion >= 1, "keyVersion must be >= 1");
   const color = tokenType(vaultTokenDomainSeparator(stataToken), kernel.self());
   assert(coin.color == color, "Coin is not the vault token for the wrapper");
   assert(coin.value == redeemRequest.shares, "Coin value must equal shares");
@@ -912,7 +895,6 @@ export circuit startRedeem(
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
   pendingVaultRequests.insert(disclosedKey, disclose(PendingVaultRequest {
     kind: PendingRequestKind.redeem,
-    keyVersion: redeemRequest.keyVersion,
     addressA: stataToken,
     addressB: stataUnderlying,
     fee: 0 as Uint<24>,
@@ -998,19 +980,15 @@ circuit numberIfUnnumbered(key: Bytes<32>): Uint<8> {
 
 // A flush numbers a full batch or every request still waiting: a flush that leaves
 // a waiting request unnumbered while it had room is refused.
-circuit flushVaultRequests<#N>(keys: Vector<N, Bytes<32>>): [] {
+export circuit flush(keys: Vector<20, Bytes<32>>): [] {
   assert(initialised >= 1, "Not initialised");
   const numbered = fold(
     (count: Uint<8>, key: Bytes<32>): Uint<8> => (count + numberIfUnnumbered(disclose(key))) as Uint<8>,
     0 as Uint<8>,
     keys
   );
-  assert(numbered == N || unflushed.lessThan((numbered + 1) as Uint<64>), "Flush must number every waiting request");
+  assert(numbered == 20 || unflushed.lessThan((numbered + 1) as Uint<64>), "Flush must number every waiting request");
   unflushed.decrement(numbered as Uint<16>);
-}
-
-export circuit flush(keys: Vector<20, Bytes<32>>): [] {
-  flushVaultRequests<20>(keys);
 }
 
 circuit takePending(key: Bytes<32>, kind: PendingRequestKind): PendingVaultRequest {
@@ -1063,7 +1041,7 @@ circuit sendApprove(key: Bytes<32>, kind: PendingRequestKind): [] {
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), pending.keyVersion, pad(32, "vault"),
+    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -1108,7 +1086,7 @@ export circuit sendWithdraw(key: Bytes<32>): [] {
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), pending.keyVersion, pad(32, "vault"),
+    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -1155,7 +1133,7 @@ export circuit sendSwap(key: Bytes<32>): [] {
     accessList: []
   };
   const request = constructSignBidirectionalEvent<EvmType2TxParams<7, 0, 0>, 38, 37>(
-    kernel.self(), vaultSignedRequestNonce(), pending.keyVersion, pad(32, "vault"),
+    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), swapOutputSchema(), swapRespondSchema()
   );
@@ -1204,7 +1182,7 @@ export circuit sendSupply(key: Bytes<32>): [] {
     accessList: []
   };
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 36, 35>(
-    kernel.self(), vaultSignedRequestNonce(), pending.keyVersion, pad(32, "vault"),
+    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), supplyOutputSchema(), supplyRespondSchema()
   );
@@ -1251,7 +1229,7 @@ export circuit sendRedeem(key: Bytes<32>): [] {
     accessList: []
   };
   const request = constructSignBidirectionalEvent<EvmType2TxParams<3, 0, 0>, 36, 35>(
-    kernel.self(), vaultSignedRequestNonce(), pending.keyVersion, pad(32, "vault"),
+    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), redeemOutputSchema(), redeemRespondSchema()
   );

@@ -60,11 +60,7 @@ export async function startRedeem(
     value: options.shares,
   };
   const key = newQueueKey();
-  const queued = await context.vault.callTx.startRedeem(
-    { shares: options.shares, keyVersion: SIGNET_DEFAULT_KEY_VERSION },
-    coin,
-    key,
-  );
+  const queued = await context.vault.callTx.startRedeem({ shares: options.shares }, coin, key);
   console.log(`redeem queued in tx ${queued.public.txId}`);
   const evmNonce = await flushUntilNumbered(context, key);
 

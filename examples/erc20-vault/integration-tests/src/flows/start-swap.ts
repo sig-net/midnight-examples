@@ -73,7 +73,6 @@ export async function startSwap(
       fee: options.fee,
       amountOut: options.amountOut,
       amountInMaximum: options.amountInMaximum,
-      keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     },
     coin,
     key,

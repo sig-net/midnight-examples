@@ -3,7 +3,6 @@ import {
   flushPending as flushPendingOn,
   flushUntilNumbered as flushUntilNumberedOn,
   padKeys,
-  queueKey as queueKeyOf,
   readVaultLedger,
   unnumberedKeys as unnumberedKeysOf,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
@@ -12,17 +11,6 @@ import type { VaultContext } from "../vault-context.ts";
 import { proveAhead, type ProvenCall } from "./prove-ahead.ts";
 
 export { FLUSH_WIDTH, newQueueKey, padKeys } from "@sig-net/midnight-examples-erc20-vault-contract";
-
-/**
- * The queue key of a request the context's identity made with this binder.
- *
- * @param context - The vault context whose identity made the request.
- * @param binder - The coin nonce or approve binder of the request.
- * @returns The 32-byte queue key.
- */
-export function queueKey(context: VaultContext, binder: Uint8Array): Uint8Array {
-  return queueKeyOf(context.identity.secretKey, binder);
-}
 
 /**
  * Queued keys on the ledger that have no EVM nonce yet.

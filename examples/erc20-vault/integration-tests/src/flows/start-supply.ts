@@ -61,11 +61,7 @@ export async function startSupply(
     value: options.amount,
   };
   const key = newQueueKey();
-  const queued = await context.vault.callTx.startSupply(
-    { amount: options.amount, keyVersion: SIGNET_DEFAULT_KEY_VERSION },
-    coin,
-    key,
-  );
+  const queued = await context.vault.callTx.startSupply({ amount: options.amount }, coin, key);
   console.log(`supply queued in tx ${queued.public.txId}`);
   const evmNonce = await flushUntilNumbered(context, key);
 

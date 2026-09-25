@@ -113,7 +113,6 @@ export async function startWithdraw(
       erc20Address: erc20,
       amount: options.amount,
       destEvmAddress,
-      keyVersion,
     },
     coin,
     key,

@@ -15,6 +15,7 @@ import {
   deriveMidnightResponseKey,
   formatSecp256k1PublicKey,
   parseSecp256k1PublicKey,
+  SIGNET_DEFAULT_KEY_VERSION,
 } from "@sig-net/midnight";
 import {
   deriveAccountKeys,
@@ -66,6 +67,8 @@ export interface VaultInitialiseConfig {
    * completeWithdraw circuits accept only responses ECDSA-signed by it.
    */
   readonly mpcResponseKey: string;
+  /** The MPC root key version the response key and every vault request are derived under. */
+  readonly mpcKeyVersion: bigint;
 }
 
 // A required environment value, with a message naming what produces it.
@@ -194,6 +197,7 @@ export async function resolveInitialiseConfig(
     ...targets,
     evmChainId,
     mpcResponseKey,
+    mpcKeyVersion: SIGNET_DEFAULT_KEY_VERSION,
   };
 }
 
@@ -275,6 +279,7 @@ export async function initialiseVaultContract(
   console.log(`stata pair:        ${config.stataUnderlyingAddress} -> ${config.stataTokenAddress}`);
   console.log(`EVM chain id:      ${String(config.evmChainId)}`);
   console.log(`MPC response key:  ${config.mpcResponseKey}`);
+  console.log(`MPC key version:   ${String(config.mpcKeyVersion)}`);
 
   const result = await vault.callTx.initialise(
     evmAddressBytes(config.vaultEvmAddress),
@@ -283,6 +288,7 @@ export async function initialiseVaultContract(
     evmAddressBytes(config.stataTokenAddress),
     config.evmChainId,
     parseSecp256k1PublicKey(config.mpcResponseKey),
+    config.mpcKeyVersion,
   );
   console.log(`initialise finalized in tx ${result.public.txId}`);
   return InitialiseVaultOutcome.Initialised;

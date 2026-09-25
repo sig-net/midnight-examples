@@ -24,17 +24,6 @@ export function padKeys(keys: readonly Uint8Array[]): Uint8Array[] {
 }
 
 /**
- * The queue key of an approve request made with this identity and binder.
- *
- * @param secretKey - The requester's identity secret key.
- * @param binder - The approve binder of the request.
- * @returns The 32-byte queue key.
- */
-export function queueKey(secretKey: Uint8Array, binder: Uint8Array): Uint8Array {
-  return pureCircuits.refundCommitment(secretKey, binder);
-}
-
-/**
  * A fresh queue key for a withdraw, swap, supply or redeem: 32 random bytes.
  *
  * @returns The key to queue the request under.

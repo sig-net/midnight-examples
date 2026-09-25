@@ -35,7 +35,7 @@ import type { VaultContext } from "../vault-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
-import { assignedNonce, flushUntilNumbered, queueKey } from "./vault-queue.ts";
+import { assignedNonce, flushUntilNumbered } from "./vault-queue.ts";
 
 /**
  * Queues an approve(router) request for an ERC20 and returns its queue key.
@@ -56,8 +56,8 @@ export async function queueApproveRouter(
   );
   if (!before.initialised)
     throw new Error("vault is not initialised, run the initialise flow first");
-  const key = queueKey(context, pureCircuits.approveRouterBinder(erc20));
-  const queued = await context.vault.callTx.approveRouter(erc20, SIGNET_DEFAULT_KEY_VERSION);
+  const key = pureCircuits.approveRouterBinder(erc20);
+  const queued = await context.vault.callTx.approveRouter(erc20);
   console.log(`approveRouter queued in tx ${queued.public.txId}`);
   return key;
 }
