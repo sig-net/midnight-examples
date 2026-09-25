@@ -2653,6 +2653,26 @@ const setGasParams = (
     args.redeemGasLimit,
   );
 
+/** The one request in the map with no calldata: the admin's empty self-transfer. */
+const replacementRecord = (map: Parameters<typeof toSignBidirectionalEventIndex>[0]) => {
+  const replacements = [...toSignBidirectionalEventIndex(map).values()].filter(
+    (record) => !record.txParams.calldata.is_some,
+  );
+  expect(replacements).toHaveLength(1);
+  return first(replacements, "the admin replacement request");
+};
+
+const replacementEnvelope = (
+  map: Parameters<typeof toSignBidirectionalEventIndex>[0],
+): { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; gasLimit: bigint } => {
+  const { txParams } = replacementRecord(map);
+  return {
+    maxFeePerGas: txParams.maxFeePerGas,
+    maxPriorityFeePerGas: txParams.maxPriorityFeePerGas,
+    gasLimit: txParams.gasLimit,
+  };
+};
+
 const envelopeOf = (
   map: Parameters<typeof toSignBidirectionalEventIndex>[0],
 ): { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; gasLimit: bigint } => {
@@ -2918,6 +2938,24 @@ describe("gas parameters reach the constructed transaction", () => {
 
 const STUCK_NONCE = 7n;
 
+/** Queues, flushes AND sends `count` approves, so their nonces are issued and no longer held. */
+const withSentNonces = async (
+  contract: Contract<VaultPrivateState>,
+  ctx: CircuitContext<VaultPrivateState>,
+  count: number,
+): Promise<CircuitContext<VaultPrivateState>> => {
+  let next = await withIssuedNonces(contract, ctx, count);
+  for (let i = 0; i < count; i++) {
+    next = (
+      await contract.circuits.sendApproveRouter(
+        next,
+        pureCircuits.approveRouterBinder(bytes(20, 0xb0 + i)),
+      )
+    ).context;
+  }
+  return next;
+};
+
 const withIssuedNonces = async (
   contract: Contract<VaultPrivateState>,
   ctx: CircuitContext<VaultPrivateState>,
@@ -2934,6 +2972,26 @@ const withIssuedNonces = async (
 };
 
 describe("adminReplaceEvmNonce", () => {
+  it("refuses a nonce a flushed but unsent request still holds", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const issued = await withIssuedNonces(contract, ctx, 8);
+    await expect(contract.circuits.adminReplaceEvmNonce(issued, STUCK_NONCE)).rejects.toThrow(
+      /Nonce held by an unsent request/,
+    );
+  });
+
+  it("allows the replacement once that request is sent", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const sent = await withSentNonces(contract, ctx, 8);
+    expect(ledger(stateOf(sent) as never).nonceOwners.member(STUCK_NONCE)).toBe(false);
+    const next = (await contract.circuits.adminReplaceEvmNonce(sent, STUCK_NONCE)).context;
+    expect(
+      toSignBidirectionalEventIndex(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ).size,
+    ).toBe(9);
+  });
+
   it("rejects a nonce the contract has not issued yet", async () => {
     const { contract, ctx } = await deployInitialised();
     await expect(contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE)).rejects.toThrow(
@@ -2965,14 +3023,12 @@ describe("adminReplaceEvmNonce", () => {
 
   it("builds an empty 21000-gas self-transfer at the nonce the caller named", async () => {
     const { contract, ctx } = await deployInitialised();
-    const issued = await withIssuedNonces(contract, ctx, 8);
-    const next = (await contract.circuits.adminReplaceEvmNonce(issued, STUCK_NONCE)).context;
+    const sent = await withSentNonces(contract, ctx, 8);
+    const next = (await contract.circuits.adminReplaceEvmNonce(sent, STUCK_NONCE)).context;
 
-    const index = toSignBidirectionalEventIndex(
+    const record = replacementRecord(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
-    expect(index.size).toBe(1);
-    const record = first(index.values(), "recorded replacement request");
     const { txParams } = record;
 
     expect({
@@ -2998,11 +3054,13 @@ describe("adminReplaceEvmNonce", () => {
 
   it("takes its fee values from the ledger, defaulting to initialise's", async () => {
     const { contract, ctx } = await deployInitialised();
-    const issued = await withIssuedNonces(contract, ctx, 8);
-    const next = (await contract.circuits.adminReplaceEvmNonce(issued, STUCK_NONCE)).context;
+    const sent = await withSentNonces(contract, ctx, 8);
+    const next = (await contract.circuits.adminReplaceEvmNonce(sent, STUCK_NONCE)).context;
 
     expect(
-      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+      replacementEnvelope(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ),
     ).toEqual({
       maxFeePerGas: DEFAULT_MAX_FEE_PER_GAS,
       maxPriorityFeePerGas: DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
@@ -3013,11 +3071,13 @@ describe("adminReplaceEvmNonce", () => {
   it("reflects a prior setGasParams, which is why the admin raises the fees FIRST", async () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
-    const issued = await withIssuedNonces(contract, configured, 8);
-    const next = (await contract.circuits.adminReplaceEvmNonce(issued, STUCK_NONCE)).context;
+    const sent = await withSentNonces(contract, configured, 8);
+    const next = (await contract.circuits.adminReplaceEvmNonce(sent, STUCK_NONCE)).context;
 
     expect(
-      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+      replacementEnvelope(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ),
     ).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
       maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,

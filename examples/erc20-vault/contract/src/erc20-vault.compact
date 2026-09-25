@@ -68,6 +68,7 @@ struct PendingVaultRequest {
 export ledger vaultEvmNonce: Counter;
 export ledger pendingVaultRequests: Map<Bytes<32>, PendingVaultRequest>;
 export ledger assignedNonces: Map<Bytes<32>, Uint<64>>;
+export ledger nonceOwners: Map<Uint<64>, Bytes<32>>;
 
 // Deposit requests (2-word ERC20 transfer, 34-byte schemas).
 // Compiled path for MPC notification: [1, 3] (read from managed/erc20-vault/compiler/contract-info.json).
@@ -246,8 +247,8 @@ export circuit initialise(
   responseKeyVersion: Uint<8>
 ): [] {
   assert(initialised == 0, "Already initialised");
-  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
   assert(responseKeyVersion >= 1, "keyVersion must be >= 1");
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
   assert(chainId > 0 as Uint<64>, "Chain ID must be positive");
   assert(swapRouter as Field != 0 as Field, "Router cannot be zero");
   assert(stataUnderlyingAddr as Field != 0 as Field, "stataUnderlying cannot be zero");
@@ -259,8 +260,8 @@ export circuit initialise(
   stataToken = disclose(stataTokenAddr);
   evmChainId = disclose(chainId);
   mpcResponseKey = disclose(responseKey);
-
   mpcKeyVersion = disclose(responseKeyVersion);
+
   vaultMaxFeePerGas = 150000000000 as Uint<128>;
   vaultMaxPriorityFeePerGas = 1000000000 as Uint<128>;
 
@@ -313,6 +314,7 @@ export circuit adminReplaceEvmNonce(
   assert(initialised >= 1, "Not initialised");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
   assert(evmNonce < vaultEvmNonce as Uint<64>, "Nonce not issued yet");
+  assert(!nonceOwners.member(disclose(evmNonce)), "Nonce held by an unsent request");
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
     nonce: evmNonce,
@@ -971,6 +973,7 @@ export pure circuit vaultSignedRequestNonce(): Uint<64> {
 circuit numberIfUnnumbered(key: Bytes<32>): Uint<8> {
   if (pendingVaultRequests.member(key) && !assignedNonces.member(key)) {
     assignedNonces.insert(key, vaultEvmNonce as Uint<64>);
+    nonceOwners.insert(vaultEvmNonce as Uint<64>, key);
     vaultEvmNonce.increment(1);
     return 1;
   } else {
@@ -1003,6 +1006,7 @@ circuit takeNonce(key: Bytes<32>): Uint<64> {
   assert(assignedNonces.member(key), "Nonce not assigned");
   const evmNonce = assignedNonces.lookup(key);
   assignedNonces.remove(key);
+  nonceOwners.remove(evmNonce);
   return evmNonce;
 }
 
