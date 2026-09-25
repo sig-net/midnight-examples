@@ -93,7 +93,7 @@ As illustrated, the flow comprises 6 steps:
     bought tokens come back to the pool, and the price bound is 0: slippage is
     enforced on chain by `amountInMaximum` alone, and a trade that would cost
     more reverts into step 6's refund arm.
-  - The assembled **SignBidirectionalEvent** goes into
+  - The assembled **SignBidirectionalEventV1** goes into
     [`swapEventMap`](../../contract/src/erc20-vault.compact) under the
     **RequestId** (the record's own hash), and the singleton's
     `signBidirectional(...)` call carries that map's own ledger-tree path,
@@ -187,7 +187,7 @@ As illustrated, the flow comprises 6 steps:
   - An executed swap settles through
     [`completeSwap`](../../contract/src/erc20-vault.compact), whose
     `Bytes<8>` output argument is the packed `amountIn`.
-    `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
+    `verifyRespondBidirectionalEventV1<8>` re-verifies the MPC's signature over it
     and the event's request id, block height and kind against `mpcResponseKey`
     before anything else happens, the verified kind must be `executed`, and the
     request consumed is the one the event names.
@@ -219,7 +219,7 @@ As illustrated, the flow comprises 6 steps:
     cannot type-fit `completeSwap`'s `Bytes<8>`, and an executed result cannot
     type-fit `refundSwap`'s `Bytes<0>`.
   - The same authentication gate runs at width 0
-    (`verifyRespondBidirectionalEvent<0>`), followed by a kind check: only a
+    (`verifyRespondBidirectionalEventV1<0>`), followed by a kind check: only a
     verified `failed` or `unviable` kind refunds, and an `executed` attestation
     is not a failure whatever its width.
   - Each request kind has its own refund circuit (`refundWithdraw`,

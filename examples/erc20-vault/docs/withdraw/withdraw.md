@@ -51,7 +51,7 @@ As illustrated, the flow comprises 5 steps:
   - The circuit builds contract-enforced calldata for
     `transfer(destEvmAddress, amount)` on the ERC20 named in the
     [`WithdrawRequest`](../../contract/src/erc20-vault.compact),
-    constructs the **SignBidirectionalEvent** around it, stores that record in
+    constructs the **SignBidirectionalEventV1** around it, stores that record in
     [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact)
     under the **RequestId** (the record's own hash), and calls the Sig Network
     singleton's `signBidirectional(...)` so the MPC picks the request up.
@@ -143,7 +143,7 @@ As illustrated, the flow comprises 5 steps:
   - An executed transfer settles through
     [`completeWithdraw`](../../contract/src/erc20-vault.compact), whose
     `Bytes<1>` output argument is the transfer's packed bool.
-    `verifyRespondBidirectionalEvent<1>` re-verifies the MPC's signature over it
+    `verifyRespondBidirectionalEventV1<1>` re-verifies the MPC's signature over it
     and the event's request id, block height and kind against `mpcResponseKey`
     before anything else happens, the verified kind must be `executed`, and the
     request consumed is the one the event names.
@@ -171,7 +171,7 @@ As illustrated, the flow comprises 5 steps:
     cannot type-fit `completeWithdraw`'s `Bytes<1>`, and an executed result
     cannot type-fit `refundWithdraw`'s `Bytes<0>`.
   - The same authentication gate runs at width 0
-    (`verifyRespondBidirectionalEvent<0>`), followed by a kind check: only a
+    (`verifyRespondBidirectionalEventV1<0>`), followed by a kind check: only a
     verified `failed` or `unviable` kind refunds, and an `executed` attestation
     is not a failure whatever its width.
   - Each request kind has its own refund circuit (`refundWithdraw`,

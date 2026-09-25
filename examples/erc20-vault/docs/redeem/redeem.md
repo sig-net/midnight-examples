@@ -160,7 +160,7 @@ As illustrated, the flow comprises 5 steps:
   - An executed redemption settles through
     [`completeRedeem`](../../contract/src/erc20-vault.compact), whose
     `Bytes<8>` output argument is the wrapper's packed `uint64` assets.
-    `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
+    `verifyRespondBidirectionalEventV1<8>` re-verifies the MPC's signature over it
     and the event's request id, block height and kind against `mpcResponseKey`
     before anything else happens, the verified kind must be `executed`, and the
     request consumed is the one the event names.
@@ -194,7 +194,7 @@ As illustrated, the flow comprises 5 steps:
     cannot type-fit `completeRedeem`'s `Bytes<8>`, and an executed result
     cannot type-fit `refundRedeem`'s `Bytes<0>`.
   - The same authentication gate runs at width 0
-    (`verifyRespondBidirectionalEvent<0>`), followed by a kind check: only a
+    (`verifyRespondBidirectionalEventV1<0>`), followed by a kind check: only a
     verified `failed` or `unviable` kind refunds, and an `executed` attestation
     is not a failure whatever its width.
   - Each request kind has its own refund circuit (`refundWithdraw`,

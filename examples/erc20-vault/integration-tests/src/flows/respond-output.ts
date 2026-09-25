@@ -31,7 +31,7 @@
 // failed or unviable one is unclaimable on a sweep and goes to
 // `refundWithdraw` on a transfer. The fetched output is UNTRUSTED until that
 // check: the verified bytes go into the settle circuit as an argument, where
-// `verifyRespondBidirectionalEvent<N>` re-hashes them and verifies the same
+// `verifyRespondBidirectionalEventV1<N>` re-hashes them and verifies the same
 // signature in-circuit. That in-circuit check is the authentication gate, so
 // a forged post merely wastes a proof here, it cannot mint.
 import {

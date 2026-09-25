@@ -273,6 +273,9 @@ const signAndBroadcast = async (
     );
   }
   const signMs = stopSign();
+  // The flush numbers keys in ledger map order, so the signed transactions
+  // are broadcast in ascending nonce order, as a relayer would.
+  signed.sort((a, b) => a.nonce - b.nonce);
   const stopBroadcast = startTimer();
   for (const transaction of signed) {
     expect((await broadcastEvm(context, { transaction })).status).toBe(1);
@@ -707,8 +710,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
         context.vaultContractAddress,
       );
       expect(afterRace.vaultEvmNonce).toBe(before + 2n);
-      expect(await assignedNonce(context, keys[0] ?? new Uint8Array(32))).toBe(before);
-      expect(await assignedNonce(context, keys[1] ?? new Uint8Array(32))).toBe(before + 1n);
+      // The winning flush numbers keys in ledger map order (see the burst
+      // above), so the two assigned nonces are asserted as a set.
+      const assigned: bigint[] = [];
+      for (const key of keys) assigned.push(await assignedNonce(context, key));
+      assigned.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      expect(assigned).toEqual([before, before + 1n]);
 
       const loser = outcomes[0].status === "rejected" ? context : stranger;
       const stopRetry = startTimer();
