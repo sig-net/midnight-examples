@@ -28,8 +28,8 @@ const FILE_ORDER = [
   "swap-refund-e2e.test.ts",
   "redeem-refund-e2e.test.ts",
   "vault-queue-e2e.test.ts",
-  "vault-queue-benchmark.test.ts",
   "admin-replace-nonce-e2e.test.ts",
+  "vault-queue-benchmark.test.ts",
 ];
 
 const rank = (moduleId: string): number => {
