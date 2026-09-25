@@ -29,16 +29,17 @@ const padGas = (transcript: Transcript | undefined): Transcript | undefined =>
   transcript && {
     ...transcript,
     gas: {
-      readTime: transcript.gas.readTime * GAS_HEADROOM,
-      computeTime: transcript.gas.computeTime * GAS_HEADROOM,
+      ...transcript.gas,
       bytesWritten: transcript.gas.bytesWritten * GAS_HEADROOM,
       bytesDeleted: transcript.gas.bytesDeleted * GAS_HEADROOM,
     },
   };
 
 /**
- * Proves a vault call against the current ledger with double gas headroom and returns it
- * unsubmitted, so a later ledger change can be landed before it is submitted.
+ * Proves a vault call against the current ledger and returns it unsubmitted, so a later ledger
+ * change can be landed before it is submitted. The bytes the call writes and deletes get double
+ * headroom, since a map that grew in between raises them; the time budget stays as measured,
+ * because the ledger refuses a call whose guaranteed section claims more time than its size allows.
  *
  * @param context - The vault context whose wallet and proof server prove the call.
  * @param circuitId - The vault circuit to call.
