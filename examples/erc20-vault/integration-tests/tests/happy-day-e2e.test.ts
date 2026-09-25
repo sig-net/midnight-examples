@@ -332,7 +332,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
-      // The attestation never carries the output it signs over: the poll
+      // The output the attestation signs over travels off chain: the poll
       // traces the sweep's mined transaction for its raw output, re-packs it
       // per the schema and verifies the posted events' signatures over it
       // against the response key the vault pinned.
@@ -382,7 +382,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         "",
         `Recomputed digest: 0x${bytesToHex(digest)}`,
         "",
-        "The output never went on-chain: the raw bytes came from a",
+        "The output stayed off chain: the raw bytes came from a",
         "debug_traceTransaction of the mined sweep transaction, were",
         "re-packed here, and the posted signature verified over them.",
       ]);

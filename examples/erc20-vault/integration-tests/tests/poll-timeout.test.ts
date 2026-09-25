@@ -112,6 +112,7 @@ describe("attestation timeout diagnostics", () => {
       },
       undefined,
       expect.anything(),
+      expect.any(outcomes.RespondPollMemo),
     );
     expect(vi.getTimerCount()).toBe(0);
   });

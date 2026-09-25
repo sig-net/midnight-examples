@@ -3,27 +3,22 @@
 // mints the exact amountOut of tokenOut plus the unspent tokenIn as change, refundSwap re-mints
 // the surrendered amountInMaximum).
 import {
-  deserializeEvmOutput,
   OutputKind,
   type RequestIdHex,
   requestIdHex,
   type RespondBidirectionalEvent,
   respondBidirectionalEventToCircuitInput,
-  type Secp256k1Point,
-  serializeRespondOutput,
-  type SignetRequestResponseReader,
-  verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
 import { VAULT_SWAP_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
-import { EMPTY_OUTPUT } from "../empty-output.ts";
 import { logTokenAmount } from "../evm-logging.ts";
 import { SWAP_OUTPUT_SCHEMA, SWAP_RESPOND_SCHEMA } from "../evm-swap.ts";
-import { type ObservedExecution, observeExecution } from "../observed-execution.ts";
-import { PollProgress } from "../poll-progress.ts";
-import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
-import { createResponseReader, type VaultContext } from "../vault-context.ts";
+import type { VaultContext } from "../vault-context.ts";
+import {
+  type AttestedExecutionSpec,
+  pollAttestedExecution,
+  type PollAttestedExecutionOptions,
+} from "./attested-execution.ts";
 
 /**
  * The resolved attested outcome of a swap: the verified event (its `outputKind` the MPC's
@@ -35,114 +30,19 @@ export interface SwapOutcome {
   readonly amountIn: bigint;
 }
 
-/** An executed swap's recomputed output and the amountIn settling on it yields. */
-interface ExecutedSwapOutput {
-  readonly serializedOutput: Uint8Array;
-  readonly amountIn: bigint;
-}
-
-// How long one candidate build waits on the trace. Short on purpose: the poll
-// loop owns the deadline, so a tick that cannot observe gives up fast and the next retries.
-const OBSERVATION_TICK_TIMEOUT_MS = 3_000;
-
-/**
- * Recompute the output an executed swap attests: the observed traced output decoded per the
- * uint256 output schema and re-packed per the uint64 respond schema (the asymmetric packing the
- * MPC posts). A reverted transaction has no output, and a decode failure drops the candidate
- * with a warning: either way only failure posts can then verify, over the empty output that
- * needs no observation. An execution has one fixed observation per request, so a caller
- * resolving this once holds the candidate for its whole poll.
- *
- * @param context - The flow context, whose EVM endpoint serves the trace.
- * @param reader - The reader over the swap request map, which rebuilds the mined transaction.
- * @param requestId - The swap request id whose execution result to recompute.
- * @param progress - Diagnostics for the enclosing poll.
- * @returns The executed output, or undefined when the execution cannot be observed this tick
- *   or did not produce one.
- */
-async function fetchExecutedSwapOutput(
-  context: VaultContext,
-  reader: SignetRequestResponseReader,
-  requestId: RequestIdHex,
-  progress: PollProgress,
-): Promise<ExecutedSwapOutput | undefined> {
-  let observed: ObservedExecution;
-  try {
-    observed = await observeExecution(
-      reader,
-      context.evmRpcUrl,
-      requestId,
-      OBSERVATION_TICK_TIMEOUT_MS,
-    );
-  } catch (error) {
-    progress.failure("observation", `execution observation failed: ${String(error)}`);
-    return undefined;
-  }
-  if (!observed.success || observed.output === null) {
-    return undefined;
-  }
-  try {
-    const decoded = deserializeEvmOutput(SWAP_OUTPUT_SCHEMA, observed.output);
-    return {
-      serializedOutput: serializeRespondOutput(SWAP_RESPOND_SCHEMA, decoded),
-      amountIn: (decoded as { amountIn: bigint }).amountIn,
-    };
-  } catch (error) {
-    progress.failure("decode", `execution output decode failed: ${String(error)}`);
-    return undefined;
-  }
-}
-
-/**
- * Select the outcome of the first posted event whose ECDSA signature verifies over the bytes
- * its declared kind selects: the recomputed executed output for an executed post, the empty
- * output for a failed or unviable one. The declared kind is unauthenticated routing data, so
- * this signature check against the vault-pinned response key is the whole of selection.
- *
- * @param events - The posts declared under the request id, unverified as the event log allows.
- * @param executed - The recomputed executed output, or undefined when none is available yet.
- * @param mpcResponseKey - The response key the vault pinned at initialise.
- * @returns The matching outcome, or undefined when no post verifies.
- */
-function matchSwapOutcome(
-  events: readonly RespondBidirectionalEvent[],
-  executed: ExecutedSwapOutput | undefined,
-  mpcResponseKey: Secp256k1Point,
-): SwapOutcome | undefined {
-  for (const event of events) {
-    if (event.outputKind === OutputKind.executed) {
-      if (
-        executed !== undefined &&
-        verifyRespondBidirectionalSignature(executed.serializedOutput, event, mpcResponseKey)
-      ) {
-        return { event, serializedOutput: executed.serializedOutput, amountIn: executed.amountIn };
-      }
-    } else if (verifyRespondBidirectionalSignature(EMPTY_OUTPUT, event, mpcResponseKey)) {
-      return { event, serializedOutput: EMPTY_OUTPUT, amountIn: 0n };
-    }
-  }
-  return undefined;
-}
-
-/** Options for {@link pollSwapOutcome}. */
-export interface PollSwapOutcomeOptions {
-  /** The swap request id to resolve. */
-  readonly requestId: RequestIdHex;
-  /** Poll interval; 1s when omitted. */
-  readonly intervalMs?: number;
-  /** Give-up horizon; {@link POLL_TIMEOUT_MS} when omitted. */
-  readonly timeoutMs?: number;
-}
+// The swap's contribution to the shared attestation poll: exactOutputSingle returns a uint256
+// amountIn, which the MPC attests re-packed as uint64 (the asymmetric packing the schemas fix).
+const SWAP_EXECUTION: AttestedExecutionSpec = {
+  label: "swap",
+  requestsPath: VAULT_SWAP_REQUESTS_PATH,
+  outputSchema: SWAP_OUTPUT_SCHEMA,
+  respondSchema: SWAP_RESPOND_SCHEMA,
+  amountOf: (decoded) => (decoded as { amountIn: bigint }).amountIn,
+};
 
 /**
  * Poll until the MPC posts a signature-verified attestation for the swap
- * (see {@link matchSwapOutcome} for candidate selection).
- *
- * Everything a tick would otherwise redo is resolved once: the reader, whose request-record
- * cache a rebuild would throw away, the response key the vault pinned at initialise, and the
- * executed output {@link fetchExecutedSwapOutput} recomputes from the execution's fixed
- * observation, built only once a post declares an executed transaction. A tick costs one
- * event read plus a signature check per post.
+ * ({@link pollAttestedExecution} over the swap request map).
  *
  * @param context - The flow context.
  * @param options - The request id and poll cadence.
@@ -151,43 +51,14 @@ export interface PollSwapOutcomeOptions {
  */
 export async function pollSwapOutcome(
   context: VaultContext,
-  options: PollSwapOutcomeOptions,
+  options: PollAttestedExecutionOptions,
 ): Promise<SwapOutcome> {
-  const reader = createResponseReader(context, VAULT_SWAP_REQUESTS_PATH);
-  // The key the settle circuit verifies against, read from the vault's own ledger: checking
-  // off-chain against anything else risks accepting a post that cannot prove. initialise
-  // writes it once and nothing rewrites it, so one read serves every tick.
-  const { mpcResponseKey } = await readVaultLedger(
-    context.providers.publicDataProvider,
-    context.vaultContractAddress,
+  const { event, serializedOutput, amount } = await pollAttestedExecution(
+    context,
+    SWAP_EXECUTION,
+    options,
   );
-
-  const progress = new PollProgress(
-    `swap attestation ${options.requestId}`,
-    options.timeoutMs ?? POLL_TIMEOUT_MS,
-  );
-  const end = Date.now() + (options.timeoutMs ?? POLL_TIMEOUT_MS);
-  let executed: ExecutedSwapOutput | undefined;
-  while (Date.now() < end) {
-    const events = await reader.getRespondBidirectionalEvents(options.requestId);
-    progress.update(`${String(events.length)} attestation posts observed`);
-    if (events.length > 0) {
-      // A post declaring an executed transaction means its result is observable, so the
-      // executed output is worth recomputing only once such a post appears.
-      if (events.some((posted) => posted.outputKind === OutputKind.executed)) {
-        executed ??= await fetchExecutedSwapOutput(context, reader, options.requestId, progress);
-      }
-      const outcome = matchSwapOutcome(events, executed, mpcResponseKey);
-      if (outcome !== undefined) return outcome;
-      progress.update(`${String(events.length)} attestation posts rejected`);
-      progress.failure(
-        "verification",
-        "no signature verifies against the vault response key and the output its kind selects",
-      );
-    }
-    await new Promise((r) => setTimeout(r, options.intervalMs ?? 1000));
-  }
-  throw new Error(`timed out: ${progress.summary()}`);
+  return { event, serializedOutput, amountIn: amount };
 }
 
 /**

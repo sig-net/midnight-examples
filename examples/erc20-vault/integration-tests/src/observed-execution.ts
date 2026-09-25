@@ -1,5 +1,5 @@
 // What the EVM did with an MPC-signed transaction, as a client obtains it on
-// its own: the MPC's attestation never carries the output it signs over, so
+// its own: the output the MPC's attestation signs over travels off chain, so
 // the client recovers the raw execution output independently and checks the
 // signature against it. The
 // mined transaction is rebuilt from chain data alone (the request record plus

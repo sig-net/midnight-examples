@@ -86,7 +86,7 @@ As illustrated, the flow comprises 5 steps:
     through the singleton's `respond(...)`.
   - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L66)
     polls the singleton's emitted signature events through the SDK's
-    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-response-reader.ts),
+    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.3/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
     recovers to the expected signer.
   - For a withdrawal the expected signer is the vault's own account,
@@ -126,7 +126,7 @@ As illustrated, the flow comprises 5 steps:
     attests for a transaction that never executed, which needs no trace at
     all. Under `RESPOND_OUTPUT_SOURCE=mpc-cache` every post is checked over the
     object the MPC uploaded to its output cache before posting
-    ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/mpc-output-cache.ts)), the attested bytes verbatim, empty for a failure.
+    ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.3/packages/signet-midnight/src/mpc-output-cache.ts)), the attested bytes verbatim, empty for a failure.
   - Selection is by signature verification alone, against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), the response
     key the vault pinned at initialise and reads back from its own ledger. The

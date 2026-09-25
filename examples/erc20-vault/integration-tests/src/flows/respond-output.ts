@@ -2,8 +2,8 @@
 // The MPC's RespondBidirectionalEvent carries the request id, the
 // destination block height, its verdict (the output kind), the output's
 // width, the attestation digest and the ECDSA signature over that digest,
-// never the serialised output itself, so the client obtains the output bytes
-// independently and checks the signature against them. A post's declared
+// while the serialised output itself travels off chain, so the client obtains
+// the output bytes independently and checks the signature against them. A post's declared
 // kind picks the bytes it is checked over, and the chosen OutputSource yields
 // them:
 //
@@ -41,6 +41,7 @@ import {
   OutputKind,
   type RequestIdHex,
   type RespondBidirectionalEvent,
+  type Secp256k1Point,
   serializeRespondOutput,
   type SignetRequestResponseReader,
   verifyRespondBidirectionalSignature,
@@ -88,7 +89,7 @@ export interface RespondOutputSchemas {
 }
 
 /** The bytes a source yields this tick, by the kind a post declares. */
-interface OutputCandidates {
+export interface OutputCandidates {
   /**
    * What a post declaring an executed transaction is checked over, or
    * `undefined` when the source cannot yield it this tick.
@@ -96,6 +97,32 @@ interface OutputCandidates {
   readonly executed: Uint8Array | undefined;
   /** What a post declaring a failed or unviable transaction is checked over. */
   readonly failure: Uint8Array;
+}
+
+/**
+ * What one attestation poll resolves once and every later tick of
+ * {@link fetchAttestedRespondOutcome} reuses: the reader, whose
+ * request-record cache a rebuild would throw away, the response key the
+ * vault pinned at initialise (written once, never rewritten), and the
+ * candidates once the source has yielded the executed one, which an
+ * execution fixes for good.
+ */
+export class RespondPollMemo {
+  /** The reader over the request map the poll targets. */
+  readonly reader: SignetRequestResponseReader;
+  /** The vault's pinned response key, once read. */
+  mpcResponseKey: Secp256k1Point | undefined;
+  /** The source's candidates, once the executed one is among them. */
+  candidates: OutputCandidates | undefined;
+
+  /**
+   * Start a memo over the poll's reader.
+   *
+   * @param reader - The reader over the request map the poll targets.
+   */
+  constructor(reader: SignetRequestResponseReader) {
+    this.reader = reader;
+  }
 }
 
 /**
@@ -331,6 +358,9 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
  *   request: `VAULT_DEPOSIT_REQUESTS_PATH` for a deposit sweep, the default
  *   `VAULT_REQUESTS_PATH` for a withdraw transfer.
  * @param progress - Optional diagnostics for the enclosing poll.
+ * @param memo - The enclosing poll's {@link RespondPollMemo}, so later ticks
+ *   skip the ledger read and the observation this one resolved; a single
+ *   call resolves everything afresh when omitted.
  * @returns The verified outcome, or `undefined` when no attestation has been
  *   posted yet, none verifies over its candidate, or the source could not
  *   yield the candidates this tick.
@@ -344,9 +374,9 @@ export async function fetchAttestedRespondOutcome(
   schemas: RespondOutputSchemas,
   requestsPath?: readonly number[],
   progress?: PollProgress,
+  memo: RespondPollMemo = new RespondPollMemo(createResponseReader(context, requestsPath)),
 ): Promise<RespondOutcome | undefined> {
-  const reader = createResponseReader(context, requestsPath);
-  const events = await reader.getRespondBidirectionalEvents(requestId);
+  const events = await memo.reader.getRespondBidirectionalEvents(requestId);
   progress?.update(`${String(events.length)} attestation posts observed`);
   if (events.length === 0) {
     return undefined;
@@ -355,25 +385,32 @@ export async function fetchAttestedRespondOutcome(
   // The key the settle circuit will verify against, read from the vault's own
   // ledger: checking off-chain against anything else risks accepting a post
   // that cannot prove.
-  const { mpcResponseKey } = await readVaultLedger(
-    context.providers.publicDataProvider,
-    context.vaultContractAddress,
-  );
+  memo.mpcResponseKey ??= (
+    await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)
+  ).mpcResponseKey;
+  const mpcResponseKey = memo.mpcResponseKey;
 
   // An attestation is posted, so the attested output exists at the source:
   // the transaction is final and the MPC cached its bytes before posting.
   // UNTRUSTED until the signature check below.
-  const candidates = await candidatesFromSource(
-    context,
-    reader,
-    requestId,
-    outputSource,
-    schemas,
-    events.some((posted) => posted.outputKind === OutputKind.executed),
-    progress,
-  );
+  const candidates =
+    memo.candidates ??
+    (await candidatesFromSource(
+      context,
+      memo.reader,
+      requestId,
+      outputSource,
+      schemas,
+      events.some((posted) => posted.outputKind === OutputKind.executed),
+      progress,
+    ));
   if (candidates === undefined) {
     return undefined;
+  }
+  // An execution has one observation and the cache holds one object, so the
+  // candidates are final once the executed one is in hand.
+  if (candidates.executed !== undefined) {
+    memo.candidates = candidates;
   }
 
   for (const event of events) {

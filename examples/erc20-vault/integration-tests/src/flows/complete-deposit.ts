@@ -1,11 +1,7 @@
-// Settle side of the deposit flow: present the MPC's RespondBidirectionalEvent
-// for the EVM sweep together with the recomputed serialized output to the
-// vault's `completeDeposit` circuit, which re-hashes the output into the
-// attestation digest and verifies the signature over it in-circuit against
-// its stored MPC response key, consumes the request the event names, then
-// mints shielded tokens to the caller (or a recipient the caller names) under
-// a fresh RANDOM mint nonce, so the minted coin cannot be linked back to the
-// request.
+// Settle side of the deposit flow: hand the verified attestation of the EVM
+// sweep and the output bytes it signs to the vault's `completeDeposit`
+// circuit, with a fresh RANDOM mint nonce so the minted coin cannot be linked
+// back to the request, and the recipient wallet when the caller names one.
 
 import { type CoinPublicKey, encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
 import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
@@ -39,12 +35,11 @@ export interface ShieldedTokenRecipient {
 
 /**
  * Settle a resolved deposit outcome through the vault's `completeDeposit`
- * circuit, passing the attested event AND the recomputed output bytes. The
- * circuit re-hashes the bytes, verifies the ECDSA signature in-circuit along
- * with the EVM success flag and the caller identity against the request the
- * event names, and mints shielded vault tokens: to `recipient` when given,
- * otherwise to the caller. The mint's coin handling is midnight-js's job: the
- * callTx balances the resulting offer like any other call.
+ * circuit. This caller supplies the event in circuit-input form, the output
+ * bytes its signature verified over, a random mint nonce, and the wallet
+ * the mint goes to: `recipient` when given, otherwise the caller's own. The
+ * mint's coin handling is midnight-js's job: the callTx balances the
+ * resulting offer like any other call.
  *
  * @param context - The flow context.
  * @param outcome - The attested outcome from {@link pollRespondBidirectional}.
