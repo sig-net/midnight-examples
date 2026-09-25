@@ -54,7 +54,6 @@ import {
   FLUSH_WIDTH,
   flushPending,
   flushUntilStamped,
-  queueKey,
   unstampedKeys,
 } from "../src/flows/vault-queue.ts";
 import type { VaultContext } from "../src/vault-context.ts";

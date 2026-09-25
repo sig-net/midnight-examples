@@ -319,6 +319,7 @@ export async function initialiseVaultContract(
     evmAddressBytes(config.stataTokenAddress),
     config.evmChainId,
     parseSecp256k1PublicKey(config.mpcResponseKey),
+    config.mpcKeyVersion,
     config.evmStartHeight,
   );
   console.log(`initialise finalized in tx ${result.public.txId}`);

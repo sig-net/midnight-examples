@@ -32,7 +32,7 @@ import {
 } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
-import { flushUntilStamped, queueKey } from "./vault-queue.ts";
+import { flushUntilStamped } from "./vault-queue.ts";
 
 /** Options for {@link startDeposit}. */
 export interface StartDepositOptions {
@@ -167,7 +167,10 @@ export async function startDeposit(
     expectedRecord.txParams.maxPriorityFeePerGas,
   );
 
-  const key = queueKey(context, pureCircuits.depositBinder(options.evmNonce));
+  const key = pureCircuits.refundCommitment(
+    context.identity.secretKey,
+    pureCircuits.depositBinder(options.evmNonce),
+  );
   const queued = await context.vault.callTx.startDeposit(
     options.evmNonce,
     gasLimit,
@@ -176,7 +179,6 @@ export async function startDeposit(
     {
       erc20Address: erc20,
       amount: options.amount,
-      keyVersion,
     },
   );
   console.log(`deposit queued in tx ${queued.public.txId}`);

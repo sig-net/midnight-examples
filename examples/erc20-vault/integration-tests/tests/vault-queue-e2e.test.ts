@@ -19,7 +19,6 @@ import {
   flushPending,
   flushUntilStamped,
   proveFlush,
-  queueKey,
   unstampedKeys,
 } from "../src/flows/vault-queue.ts";
 import type { VaultContext } from "../src/vault-context.ts";

@@ -70,7 +70,6 @@ import {
   ledger,
   padKeys,
   pureCircuits,
-  queueKey,
   seenRequestIds,
   stampOf,
   unstampedKeys,
@@ -126,6 +125,7 @@ const OTHER_COMMITMENT = pureCircuits.userCommitment(OTHER_SECRET_KEY);
 const MPC_RESPONSE_SECRET = bytes(32, 0x42);
 const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
 const EVM_START_HEIGHT = 100n;
+const MPC_KEY_VERSION = 1n;
 const ATTESTED_HEIGHT = 101n;
 
 // The signet contract (callee) the vault seals + cross-contract-calls. A valid
@@ -313,6 +313,7 @@ const deployInitialised = async () => {
       STATA_TOKEN,
       CHAIN_ID,
       MPC_RESPONSE_KEY,
+      MPC_KEY_VERSION,
       EVM_START_HEIGHT,
     )
   ).context;
@@ -331,8 +332,16 @@ const queueDeposit = (
     args.gasLimit,
     args.maxFeePerGas,
     args.maxPriorityFeePerGas,
-    { ...args.deposit, keyVersion: args.keyVersion },
+    args.deposit,
   );
+
+const secretOf = (ctx: CircuitContext<VaultPrivateState>): Uint8Array => {
+  const secretKey = ctx.callContext.currentPrivateState?.secretKey;
+  if (!secretKey) {
+    throw new Error("expected a caller secret key on the circuit context");
+  }
+  return secretKey;
+};
 
 const depositKey = (ctx: CircuitContext<VaultPrivateState>, evmNonce: bigint): Uint8Array =>
   pureCircuits.refundCommitment(secretOf(ctx), pureCircuits.depositBinder(evmNonce));
@@ -428,6 +437,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         CHAIN_ID,
         MPC_RESPONSE_KEY,
+        MPC_KEY_VERSION,
         EVM_START_HEIGHT,
       ),
     ).rejects.toThrow(/Not the deployer/);
@@ -445,6 +455,7 @@ describe("initialise", () => {
         CHAIN_ID,
         MPC_RESPONSE_KEY,
         0n,
+        EVM_START_HEIGHT,
       ),
     ).rejects.toThrow(/keyVersion must be >= 1/);
   });
@@ -460,6 +471,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         CHAIN_ID,
         MPC_RESPONSE_KEY,
+        MPC_KEY_VERSION,
         EVM_START_HEIGHT,
       ),
     ).rejects.toThrow(/Already initialised/);
@@ -476,6 +488,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         0n,
         MPC_RESPONSE_KEY,
+        MPC_KEY_VERSION,
         EVM_START_HEIGHT,
       ),
     ).rejects.toThrow(/Chain ID must be positive/);
@@ -3307,8 +3320,8 @@ describe("attested block heights", () => {
   it("a flush stamps every queued key with the last seen height", async () => {
     const { contract, ctx } = await deployInitialised();
     const depositQueued = (await queueDeposit(contract, ctx, VALID_DEPOSIT)).context;
-    const approveKey = queueKey(secretOf(ctx), pureCircuits.approveRouterBinder(ERC20));
-    const bothQueued = (await contract.circuits.approveRouter(depositQueued, ERC20, 1n)).context;
+    const approveKey = pureCircuits.approveRouterBinder(ERC20);
+    const bothQueued = (await contract.circuits.approveRouter(depositQueued, ERC20)).context;
     const flushed = (
       await contract.circuits.flush(
         bothQueued,
@@ -3372,8 +3385,8 @@ describe("attested block heights", () => {
     expect(afterSettle.seenEvmHeights.lookup(requestId)).toBe(settledAt);
     expect(afterSettle.lastSeenEvmHeight).toBe(EVM_START_HEIGHT);
 
-    const approveKey = queueKey(secretOf(ctx), pureCircuits.approveRouterBinder(ERC20));
-    const queued = (await contract.circuits.approveRouter(settled, ERC20, 1n)).context;
+    const approveKey = pureCircuits.approveRouterBinder(ERC20);
+    const queued = (await contract.circuits.approveRouter(settled, ERC20)).context;
     const flushed = (
       await contract.circuits.flush(queued, padKeys([approveKey]), padKeys([requestId]))
     ).context;

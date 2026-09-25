@@ -35,7 +35,7 @@ import type { VaultContext } from "../vault-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
-import { assignedNonce, flushUntilStamped, queueKey } from "./vault-queue.ts";
+import { assignedNonce, flushUntilStamped } from "./vault-queue.ts";
 
 /**
  * Queues an approve(router) request for an ERC20 and returns its queue key.
