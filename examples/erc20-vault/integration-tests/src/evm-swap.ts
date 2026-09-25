@@ -89,9 +89,9 @@ export async function quoteExactOutputSingle(
 /** The contract-fixed routing of a swap event (the swap-schema variant of VAULT_MPC_ROUTING). */
 export const SWAP_MPC_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
+  executionDest: signetPureCircuits.ethereumCaip2Id(),
   signatureDest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
-  executionDest: signetPureCircuits.ethereumCaip2Id(),
   outputDeserializationSchema: SWAP_OUTPUT_SCHEMA,
   respondSerializationSchema: SWAP_RESPOND_SCHEMA,
 };

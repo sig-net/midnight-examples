@@ -70,11 +70,13 @@ As illustrated, the flow comprises 6 steps:
     MPC signs with THIS caller's deposit account and no one else's. The caller
     supplies only what is genuinely theirs to choose: their account's nonce, the
     gas envelope their account pays, and the MPC key version.
-  - The assembled **SignBidirectionalEvent**
-    ([`constructSignBidirectionalEvent`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L135))
+  - The assembled **SignBidirectionalEventV1**
+    ([`constructSignBidirectionalEventV1`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L144))
     is stored in the ledger's
     [`depositEventMap`](../../contract/src/erc20-vault.compact)
-    under its **request id**, the hash of the record itself, and the circuit
+    under its **request id**, the hash of the fields that name one execution (the
+    signing key, the sender, a digest of the used transaction entries and the
+    execution destination), and the circuit
     then calls the singleton's
     [`signBidirectional`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-contract/src/signet-contract.compact#L31)
     to notify the MPC, carrying the map's resolved ledger-tree path.
@@ -93,7 +95,7 @@ As illustrated, the flow comprises 6 steps:
   - Off-chain, [`start-deposit.ts`](../../integration-tests/src/flows/start-deposit.ts)
     reconstructs that expected record byte for byte, hashes it with the
     library's
-    [`calculateRequestId`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-id.ts#L28)
+    [`calculateRequestId`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-id.ts#L30)
     TypeScript twin, and asserts the recomputed id appears as a ledger map key.
     That id is what every later step keys on.
 - **3.** poll for the MPC's signature
@@ -169,7 +171,7 @@ As illustrated, the flow comprises 6 steps:
     the event carries, into the attestation digest and verifies the event's
     ECDSA signature over it against the initialise-pinned
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact) with
-    [`verifyRespondBidirectionalEvent`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L400).
+    [`verifyRespondBidirectionalEventV1`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/Signet.compact#L401).
     The singleton emits MPC posts unverified, so this is the only authentication
     gate, and the request it settles is the one the verified event names.
   - The verified kind must be `executed`, and the one-byte output is
@@ -209,11 +211,11 @@ The off-chain steps (3 to 5) each build a `SignetRequestResponseReader` over
 the vault and singleton pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts#L149). The
 expected signer of the deposit sweep is the user's deposit account, derived with
-[`deriveEvmAddress`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/epsilon-derivation.ts#L73)
+[`deriveEvmAddress`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/epsilon-derivation.ts#L119)
 from the caller's identity commitment rendered as full-width lowercase hex, the
 MPC's rendering of every request's 32 opaque path bytes. The key `completeDeposit` verifies
 against is derived with
-[`deriveMidnightResponseKey`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/epsilon-derivation.ts#L144).
+[`deriveMidnightResponseKey`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/epsilon-derivation.ts#L231).
 Those two functions are the concrete work behind the diagram's abstract
 `keyDerivation(...)` notes, and the commitment itself is computed with the
 vault's own compiled `userCommitment` circuit, never a TypeScript

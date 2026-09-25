@@ -33,12 +33,12 @@ export const VAULT_SCHEMA_BYTES = ERC20_TRANSFER_RESULT_SCHEMA.length;
 export interface VaultMpcRouting {
   /** Signature algorithm: an `MPCSignatureAlgorithm` variant index (ecdsa). */
   readonly algo: number;
+  /** Execution destination: the MPC's Ethereum routing key (`ethereumCaip2Id()`), zero-padded to 32 bytes. */
+  readonly executionDest: Uint8Array;
   /** Signature destination: an `MPCDestination` variant index (unused, reserved). */
   readonly signatureDest: number;
   /** Extra MPC parameters (reserved, zeroed); 64 bytes. */
   readonly params: Uint8Array;
-  /** Execution destination: the MPC's Ethereum routing key (`ethereumCaip2Id()`), zero-padded to 32 bytes. */
-  readonly executionDest: Uint8Array;
   /** MPC output_deserialization_schema at its declared 34-byte width. */
   readonly outputDeserializationSchema: Uint8Array;
   /** MPC respond_serialization_schema at its declared 34-byte width. */
@@ -53,9 +53,9 @@ export interface VaultMpcRouting {
  */
 export const VAULT_MPC_ROUTING: VaultMpcRouting = {
   algo: MPCSignatureAlgorithm.ecdsa,
+  executionDest: pureCircuits.ethereumCaip2Id(),
   signatureDest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
-  executionDest: pureCircuits.ethereumCaip2Id(),
   outputDeserializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
   respondSerializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
 };

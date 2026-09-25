@@ -67,7 +67,7 @@ steps and 5 per-request runtime steps.
 Setup entails:
 1. Installing `@sig-net/midnight` into your project.
 2. Importing the Signet Compact module into your contract.
-3. Declaring the required protocol state in your ledger (the `SignBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits invoke via cross contract call to notify the MPC of requests).
+3. Declaring the required protocol state in your ledger (the `SignBidirectionalEventMapV1` your requests live in and the `SignetSigner` singleton reference your circuits invoke via cross contract call to notify the MPC of requests).
 4. Setting the contract's own `mpcResponseKey` with an initialisation circuit call after deploy (its derivation takes the contract's address as input, which exists only once the contract is deployed).
 
 At runtime you integrate the [Sign Bidirectional Protocol Flow above](#sign-bidirectional-protocol-flow):
@@ -146,7 +146,7 @@ Scripts targeting a particular example carry that example's directory name in fu
 
 The e2e integration test suites need a local stack of services. To bring it up:
 
-1. Populate a minimal `.env` file at the root of the repository with at least the `SEPOLIA_FORK_RPC_URL` variable (see [`.env.example`](.env.example)).
+1. Populate a minimal `.env` file at the root of the repository with at least the `SEPOLIA_FORK_RPC_URL` variable, an archive-capable Sepolia RPC (see [`.env.example`](.env.example)).
 2. Run `docker compose up -d` from the root of the repository.
 
 With the stack running, each example's e2e suite runs from the root:

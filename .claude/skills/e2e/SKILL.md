@@ -50,10 +50,14 @@ recipe in `.github/workflows/example-test.yaml` (the `Install / update the
 compact toolchain` step).
 
 One value MUST be in `.env` before the stack comes up: `SEPOLIA_FORK_RPC_URL`
-(any Sepolia RPC). The compose anvil forks Sepolia from it so the real Uniswap V3
-deployment and real USDC are present. Without it anvil is a bare chain and the
-suites fail dealing tokens. (`SEPOLIA_FORK_BLOCK` is optional: pin a block for
-determinism, needs an archive RPC.) Everything else the setup pipeline creates:
+(an ARCHIVE Sepolia RPC, e.g. `https://sepolia.gateway.tenderly.co`). The
+compose anvil forks Sepolia from it so the real Uniswap V3 deployment and real
+USDC are present. Without it anvil is a bare chain and the suites fail dealing
+tokens. Archive matters for `admin-replace-nonce-e2e`: the fakenet locates the
+block that consumed the replaced nonce by bisecting the account nonce over chain
+history, and a pruned RPC (publicnode) fails that read with "state at block #N
+is pruned", so the unviable attestation never posts and the spec times out.
+(`SEPOLIA_FORK_BLOCK` is optional: pin a block for determinism.) Everything else the setup pipeline creates:
 it appends the generated wallet seeds (root + the deployer/user/mpc
 responder/bearer roles, funded from root), the MPC public key it derives from
 the root key (`MPC_SECP256K1_PUBKEY`) and the fakenet hand-off values
