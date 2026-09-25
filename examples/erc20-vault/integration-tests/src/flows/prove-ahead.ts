@@ -22,6 +22,8 @@ type Transcript = NonNullable<
 
 const GAS_HEADROOM = 2n;
 const TTL_MINUTES = 5;
+const SUBMIT_ATTEMPTS = 3;
+const SUBMIT_RETRY_MS = 10_000;
 
 const padGas = (transcript: Transcript | undefined): Transcript | undefined =>
   transcript && {
@@ -96,20 +98,28 @@ export async function proveAhead(
 }
 
 /**
- * Balances and submits a proven call and waits for the node's verdict on it.
+ * Balances and submits a proven call and waits for the node's verdict on it. A submission the
+ * node refuses is re-balanced and retried, so a wallet that has not caught up with its last
+ * transaction cannot fail the call by itself.
  *
  * @param context - The vault context whose wallet pays for the call.
  * @param proven - The call `proveAhead` returned.
  * @returns The finalization status, or the node's refusal when it never entered a block.
  */
 export async function submitProven(context: VaultContext, proven: ProvenCall): Promise<string> {
-  const balanced = await context.providers.walletProvider.balanceTx(proven);
-  let txId: string;
-  try {
-    txId = await context.providers.midnightProvider.submitTx(balanced);
-  } catch (error) {
-    return `refused: ${String(error).split("\n")[0] ?? ""}`;
+  let refusal = "";
+  for (let attempt = 0; attempt < SUBMIT_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, SUBMIT_RETRY_MS));
+    const balanced = await context.providers.walletProvider.balanceTx(proven);
+    let txId: string;
+    try {
+      txId = await context.providers.midnightProvider.submitTx(balanced);
+    } catch (error) {
+      refusal = `refused: ${String(error).split("\n")[0] ?? ""}`;
+      continue;
+    }
+    const data = await context.providers.publicDataProvider.watchForTxData(txId);
+    return data.status;
   }
-  const data = await context.providers.publicDataProvider.watchForTxData(txId);
-  return data.status;
+  return refusal;
 }
