@@ -365,7 +365,7 @@ export circuit approveStata(): [] {
     fee: 0 as Uint<24>,
     amountA: 0 as Uint<128>,
     amountB: 0 as Uint<128>,
-    commitment: key,
+    commitment: pad(32, ""),
   });
   unflushed.increment(1);
 }
@@ -386,7 +386,7 @@ export circuit approveRouter(
     fee: 0 as Uint<24>,
     amountA: 0 as Uint<128>,
     amountB: 0 as Uint<128>,
-    commitment: key,
+    commitment: pad(32, ""),
   });
   unflushed.increment(1);
 }
