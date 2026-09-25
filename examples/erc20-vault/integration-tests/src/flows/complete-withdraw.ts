@@ -1,11 +1,8 @@
-// Settle side of the withdraw flow: route the MPC's attested outcome to the
-// circuit its verified output kind selects. An EXECUTED transfer (1-byte
-// result) settles through `completeWithdraw`, which finalizes on success
-// (permissionless cleanup) or refunds the WITHDRAWER on a false return, while
-// a transfer that NEVER EXECUTED (reverted, or its nonce taken by another
-// transaction: attested under a failure kind over an empty output) settles
-// through `refundWithdraw`. Both refund paths demand proof of the identity
-// commitment pinned at withdraw time.
+// Settle side of the withdraw flow: route the MPC's attested outcome on its
+// verified output kind, an executed transfer to `completeWithdraw` and a
+// failed or unviable one to `refundWithdraw`, handing each the event in
+// circuit-input form, the output bytes its signature verified over, and a
+// fresh RANDOM mint nonce so a re-minted coin cannot be linked to the request.
 
 import { OutputKind, type RequestIdHex, requestIdHex } from "@sig-net/midnight";
 import { respondBidirectionalEventToCircuitInput } from "@sig-net/midnight";
@@ -17,21 +14,14 @@ import type { RespondOutcome } from "./respond-output.ts";
 
 /**
  * Settle a resolved withdraw outcome through the circuit its verified kind
- * selects, passing the attested event AND the output bytes it signs. The
- * circuits consume the request the event names:
- *
- * - an executed transfer's 1-byte result goes to `completeWithdraw`, which
- *   re-verifies in-circuit, consumes the pending withdrawal, and branches on
- *   the byte: success finalizes (the surrendered value stays burned, any
- *   caller may settle), a false return re-mints to this wallet, which must
- *   be the withdrawer's.
- * - a failed or unviable transaction's empty output goes to
- *   `refundWithdraw`, which re-verifies in-circuit at width 0, checks the
- *   kind, and re-mints to this wallet, again withdrawer-only.
- *
- * Refunds mint under a fresh RANDOM nonce, so the refunded coin cannot be
- * linked to the request. The coin handling is midnight-js's job: the callTx
- * balances the resulting offer like any other call.
+ * selects: `completeWithdraw` for an executed transfer, `refundWithdraw` for
+ * a failed or unviable one. This caller supplies the event in circuit-input
+ * form, the output bytes its signature verified over, and a random mint
+ * nonce. Every re-mint (a refund, or an executed transfer that returned
+ * false) goes to this wallet, which must therefore be the withdrawer's. An
+ * executed transfer that returned true settles from any wallet. The coin
+ * handling is midnight-js's job: the callTx balances the resulting offer
+ * like any other call.
  *
  * @param context - The flow context.
  * @param outcome - The attested outcome from

@@ -12,6 +12,7 @@ import {
   fetchAttestedRespondOutcome,
   type RespondOutcome,
   type RespondOutputSchemas,
+  RespondPollMemo,
 } from "./respond-output.ts";
 
 export {
@@ -53,16 +54,18 @@ function schemaJson(padded: Uint8Array): string {
  * for `options.requestId` VERIFIES over the independently recomputed output,
  * and return the resolved outcome.
  *
- * The event never carries the serialized output, so each tick obtains it
- * from the context's `respondOutputSource` (recomputed from the observed raw
- * EVM output, or downloaded from the MPC's output cache) and checks the
- * posted events' signatures against it (see `fetchAttestedRespondOutcome`):
- * the event log is unauthenticated, and that check is what makes a returned
+ * The serialized output travels off chain, so each tick obtains it from the
+ * context's `respondOutputSource` (recomputed from the observed raw EVM
+ * output, or downloaded from the MPC's output cache) and checks the posted
+ * events' signatures against it (see `fetchAttestedRespondOutcome`): the
+ * event log is unauthenticated, and that check is what makes a returned
  * record meaningful off-chain. The settle circuits run the same check
  * in-circuit, which is the actual authentication gate. The schemas the
  * recomputation runs are the request record's own, read once here: they are
- * what the MPC ran. This flow owns the poll loop, the timeout, and the
- * reporting: it logs the outcome (the verified output kind and, for an
+ * what the MPC ran, and the reader, the pinned response key and the observed
+ * output are likewise resolved once for the whole poll
+ * ({@link RespondPollMemo}). This flow owns the poll loop, the timeout, and
+ * the reporting: it logs the outcome (the verified output kind and, for an
  * executed transfer, its success flag); acting on it (claiming, refunding)
  * is the caller's job.
  *
@@ -86,9 +89,8 @@ export async function pollRespondBidirectional(
     `poll:              every ${String(options.intervalMs)}ms, up to ${String(options.timeoutMs)}ms`,
   );
 
-  const request = await createResponseReader(context, options.requestsPath).getSignatureRequest(
-    options.requestId,
-  );
+  const memo = new RespondPollMemo(createResponseReader(context, options.requestsPath));
+  const request = await memo.reader.getSignatureRequest(options.requestId);
   const schemas: RespondOutputSchemas = {
     outputDeserializationSchema: schemaJson(request.outputDeserializationSchema),
     respondSerializationSchema: schemaJson(request.respondSerializationSchema),
@@ -110,6 +112,7 @@ export async function pollRespondBidirectional(
         schemas,
         options.requestsPath,
         progress,
+        memo,
       );
       if (outcome !== undefined) {
         if (outcome.event.outputKind === OutputKind.executed) {

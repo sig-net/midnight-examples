@@ -979,7 +979,7 @@ const OUTPUT_FAILURE = new Uint8Array(0);
  * compiled oracles in signet-midnight's own tests), exactly like the MPC.
  * The wire event carries the request id, block height, kind, output width,
  * digest and the stored-form signature (big-endian SEC1, bigR as a full
- * point), never the output, and it is returned flipped to
+ * point), and it is returned flipped to
  * verifyRespondBidirectionalEventV1's circuit-input form, which is what a
  * client hands to the settle circuits: the digest is recomputed by whoever
  * verifies, and the output travels as a separate circuit argument.

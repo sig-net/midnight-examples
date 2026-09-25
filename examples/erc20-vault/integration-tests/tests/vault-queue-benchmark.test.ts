@@ -297,8 +297,7 @@ const drainQueue = async (context: VaultContext): Promise<number> => {
   );
   const numbered = [...state.pendingVaultRequests]
     .filter(([key]) => state.stamps.member(key))
-    .map(([key, entry]) => ({ key, entry, nonce: state.stamps.lookup(key).evmNonce }))
-    .sort((a, b) => (a.nonce < b.nonce ? -1 : 1));
+    .map(([key, entry]) => ({ key, entry }));
   const requestIds: RequestIdHex[] = [];
   for (const { key, entry } of numbered) {
     if (entry.kind !== PendingRequestKind.approveRouter) {
@@ -618,8 +617,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       const flushWallMs = stopFlush();
       const flushProve = lastProve("flush");
       // The flush numbers keys in the ledger map's own order, which is not
-      // the submission order, so the assertion is on the set of nonces, and
-      // the sends below go out in ascending nonce order as a relayer's would.
+      // the submission order, so the assertion is on the set of nonces.
       const nonces: bigint[] = [];
       for (const item of items) nonces.push(await assignedNonce(context, item.key));
       nonces.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));

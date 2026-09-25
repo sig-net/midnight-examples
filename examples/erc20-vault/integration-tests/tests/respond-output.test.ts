@@ -1,8 +1,8 @@
-// Offline unit tests of the attested-outcome resolution under
-// OutputSource.MPCCache: an in-process HTTP server stands in for the MPC's
-// output cache, a locally signed attestation for the MPC's post, and the
-// vault's ledger read is stubbed to the matching response key. No stack, no
-// env gate: these run in every `yarn test`.
+// Offline unit tests of the attested-outcome resolution under both output
+// sources: an in-process HTTP server stands in for the MPC's output cache, a
+// stubbed observation for the EVM node's trace, a locally signed attestation
+// for the MPC's post, and the vault's ledger read is stubbed to the matching
+// response key. No stack, no env gate: these run in every `yarn test`.
 
 import { createServer, type Server } from "node:http";
 
@@ -20,8 +20,10 @@ import * as vaultContract from "@sig-net/midnight-examples-erc20-vault-contract"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_OUTPUT } from "../src/empty-output.ts";
-import { fetchAttestedRespondOutcome } from "../src/flows/respond-output.ts";
+import { fetchAttestedRespondOutcome, RespondPollMemo } from "../src/flows/respond-output.ts";
 import { ERC20_TRANSFER_RESULT_SCHEMA } from "../src/mpc-routing.ts";
+import type { ObservedExecution } from "../src/observed-execution.ts";
+import * as observedModule from "../src/observed-execution.ts";
 import { OutputSource } from "../src/output-source.ts";
 import { PollProgress } from "../src/poll-progress.ts";
 import * as contextModule from "../src/vault-context.ts";
@@ -101,8 +103,10 @@ function contextWithCache(baseUrl: string | undefined): contextModule.VaultConte
   return {
     signetContractAddress: SIGNET_CONTRACT_ADDRESS,
     vaultContractAddress: "ef".repeat(32),
-    // The ledger read is stubbed, so the provider is never consulted.
+    // The ledger read and the execution observation are stubbed, so neither
+    // the provider nor the EVM endpoint is consulted.
     providers: { publicDataProvider: {} } as VaultProviders,
+    evmRpcUrl: "http://127.0.0.1:1",
     respondOutputSource: OutputSource.MPCCache,
     mpcOutputCache:
       baseUrl === undefined
@@ -274,5 +278,128 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
         SCHEMAS,
       ),
     ).rejects.toThrow("mpc-cache needs MPC_OUTPUT_CACHE_URL set");
+  });
+});
+
+// The ERC20 transfer's raw return data as the trace reports it: one ABI word
+// holding `true`, which the vault's schemas pack to TRANSFER_TRUE.
+const TRANSFER_TRUE_RAW = `0x${"00".repeat(31)}01`;
+
+/** An observation of {@link REQUEST_ID}'s execution, as the trace stand-in reports it. */
+function observation(success: boolean, output: string | null): ObservedExecution {
+  return {
+    requestId: REQUEST_ID,
+    success,
+    output,
+    txHash: `0x${"11".repeat(32)}`,
+    blockNumber: BLOCK_HEIGHT,
+  };
+}
+
+describe("fetchAttestedRespondOutcome under OutputSource.EVMNode", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("checks a failure post over the empty output without observing the execution", async () => {
+    const observe = vi.spyOn(observedModule, "observeExecution");
+    const event = attest(OutputKind.failed, EMPTY_OUTPUT);
+    stubChainReads([event]);
+
+    const outcome = await fetchAttestedRespondOutcome(
+      contextWithCache(undefined),
+      REQUEST_ID,
+      OutputSource.EVMNode,
+      SCHEMAS,
+    );
+
+    expect(outcome).toEqual({ event, serializedOutput: EMPTY_OUTPUT, succeeded: false });
+    expect(observe).not.toHaveBeenCalled();
+  });
+
+  it("recomputes an executed post's output from the observed trace", async () => {
+    vi.spyOn(observedModule, "observeExecution").mockResolvedValue(
+      observation(true, TRANSFER_TRUE_RAW),
+    );
+    const event = attest(OutputKind.executed, TRANSFER_TRUE);
+    stubChainReads([event]);
+
+    const outcome = await fetchAttestedRespondOutcome(
+      contextWithCache(undefined),
+      REQUEST_ID,
+      OutputSource.EVMNode,
+      SCHEMAS,
+    );
+
+    expect(outcome).toEqual({ event, serializedOutput: TRANSFER_TRUE, succeeded: true });
+  });
+
+  it("still verifies a failure post while the executed post's observation fails", async () => {
+    const observe = vi
+      .spyOn(observedModule, "observeExecution")
+      .mockRejectedValue(new Error("trace timed out"));
+    const failure = attest(OutputKind.failed, EMPTY_OUTPUT);
+    stubChainReads([attest(OutputKind.executed, TRANSFER_TRUE), failure]);
+
+    const outcome = await fetchAttestedRespondOutcome(
+      contextWithCache(undefined),
+      REQUEST_ID,
+      OutputSource.EVMNode,
+      SCHEMAS,
+    );
+
+    expect(outcome).toEqual({ event: failure, serializedOutput: EMPTY_OUTPUT, succeeded: false });
+    expect(observe).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an executed post when the observation reports a revert", async () => {
+    vi.spyOn(observedModule, "observeExecution").mockResolvedValue(observation(false, null));
+    stubChainReads([attest(OutputKind.executed, TRANSFER_TRUE)]);
+    const progress = new PollProgress("test", 1000);
+
+    const outcome = await fetchAttestedRespondOutcome(
+      contextWithCache(undefined),
+      REQUEST_ID,
+      OutputSource.EVMNode,
+      SCHEMAS,
+      undefined,
+      progress,
+    );
+
+    expect(outcome).toBeUndefined();
+    expect(progress.summary()).toContain(
+      "no signature verifies against the vault response key and the evm-node output",
+    );
+  });
+
+  it("observes the execution and reads the response key once across a memoised poll", async () => {
+    const observe = vi
+      .spyOn(observedModule, "observeExecution")
+      .mockResolvedValue(observation(true, TRANSFER_TRUE_RAW));
+    const event = attest(OutputKind.executed, TRANSFER_TRUE);
+    stubChainReads([event]);
+    const context = contextWithCache(undefined);
+    const memo = new RespondPollMemo(contextModule.createResponseReader(context, undefined));
+
+    for (let tick = 0; tick < 3; tick += 1) {
+      expect(
+        await fetchAttestedRespondOutcome(
+          context,
+          REQUEST_ID,
+          OutputSource.EVMNode,
+          SCHEMAS,
+          undefined,
+          undefined,
+          memo,
+        ),
+      ).toEqual({ event, serializedOutput: TRANSFER_TRUE, succeeded: true });
+    }
+
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(vaultContract.readVaultLedger).toHaveBeenCalledTimes(1);
   });
 });
