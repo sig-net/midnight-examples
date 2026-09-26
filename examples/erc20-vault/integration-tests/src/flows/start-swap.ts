@@ -16,6 +16,7 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -25,6 +26,7 @@ import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import { EXACT_OUTPUT_SINGLE_SELECTOR, SWAP_MPC_ROUTING } from "../evm-swap.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
+import { flushUntilNumbered, newQueueKey } from "./vault-queue.ts";
 
 /** Options for {@link startSwap}. */
 export interface StartSwapOptions {
@@ -32,14 +34,13 @@ export interface StartSwapOptions {
   readonly fee: bigint;
   readonly amountOut: bigint;
   readonly amountInMaximum: bigint;
-  readonly evmNonce: bigint;
 }
 
 /**
  * Record the swap request (exactOutputSingle) and return its id. tokenIn = context.erc20Address.
  *
  * @param context - The flow context.
- * @param options - The swap parameters (tokenOut, fee, amountOut, amountInMaximum, evmNonce).
+ * @param options - The swap parameters (tokenOut, fee, amountOut, amountInMaximum).
  * @returns The recorded swap request id.
  */
 export async function startSwap(
@@ -64,6 +65,20 @@ export async function startSwap(
     color: hexToBytes(vaultTokenType(context.erc20Address, context.vaultContractAddress)),
     value: options.amountInMaximum,
   };
+  const key = newQueueKey();
+  const queued = await context.vault.callTx.startSwap(
+    {
+      tokenIn,
+      tokenOut,
+      fee: options.fee,
+      amountOut: options.amountOut,
+      amountInMaximum: options.amountInMaximum,
+    },
+    coin,
+    key,
+  );
+  console.log(`swap queued in tx ${queued.public.txId}`);
+  const evmNonce = await flushUntilNumbered(context, key);
 
   // The record the contract composes: vault path/sender, router `to`, contract-fixed gas,
   // exactOutputSingle((tokenIn, tokenOut, fee, recipient=vault, amountOut, amountInMaximum, 0)).
@@ -83,7 +98,7 @@ export async function startSwap(
   );
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...SWAP_MPC_ROUTING,
@@ -91,7 +106,7 @@ export async function startSwap(
     txParams: {
       to: before.uniswapRouter,
       chainId: before.evmChainId,
-      nonce: options.evmNonce,
+      nonce: evmNonce,
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -125,19 +140,8 @@ export async function startSwap(
     expectedRecord.txParams.maxPriorityFeePerGas,
   );
 
-  const result = await context.vault.callTx.startSwap(
-    options.evmNonce,
-    SIGNET_DEFAULT_KEY_VERSION,
-    {
-      tokenIn,
-      tokenOut,
-      fee: options.fee,
-      amountOut: options.amountOut,
-      amountInMaximum: options.amountInMaximum,
-    },
-    coin,
-  );
-  console.log(`swap finalized in tx ${result.public.txId}`);
+  const result = await context.vault.callTx.sendSwap(key);
+  console.log(`swap sent in tx ${result.public.txId}`);
 
   const after = await readVaultLedger(
     context.providers.publicDataProvider,

@@ -9,7 +9,7 @@ import {
   type ContractWriteMethod,
   requireEnv,
 } from "@sig-net/midnight-examples-test-harness";
-import { Contract, JsonRpcProvider, Wallet } from "ethers";
+import { Contract, JsonRpcProvider, toQuantity, Wallet } from "ethers";
 
 import { logTokenAmount } from "./evm-logging.ts";
 
@@ -28,8 +28,8 @@ const ERC20_TRANSFER_ABI = [
  *
  * This exists to force a DETERMINISTIC withdraw failure: with the vault's
  * ERC20 balance at zero, the next MPC-signed `transfer` from it must mine
- * and revert. The drain also consumes one vault-account nonce, so fetch the
- * withdraw request's `evmNonce` only AFTER this resolves.
+ * and revert. The drain's own transaction consumes a vault-account nonce the
+ * contract's counter never sees, so the nonce is put back with `anvil_setNonce`.
  *
  * @param env - The setup-populated env accumulator (`MPC_ROOT_KEY`,
  *   `EVM_RPC_URL`, `ERC20_ADDRESS`, `MIDNIGHT_VAULT_CONTRACT_ADDRESS`,
@@ -89,11 +89,19 @@ export async function drainVaultErc20(
       balance,
       `drain from ${wallet.address} to ${to}`,
     );
+    const nonceBefore = await provider.getTransactionCount(wallet.address);
     const transfer = erc20.getFunction<ContractWriteMethod>("transfer");
     const tx = await transfer(to, balance);
     console.log(`drain tx:  ${tx.hash} — waiting for 1 confirmation…`);
     await tx.wait(1);
-    console.log(`drained:   ${tx.hash}`);
+    await provider.send("anvil_setNonce", [wallet.address, toQuantity(nonceBefore)]);
+    const nonceAfter = await provider.getTransactionCount(wallet.address);
+    if (nonceAfter !== nonceBefore) {
+      throw new Error(
+        `the drain moved the vault account's nonce to ${String(nonceAfter)} and anvil_setNonce did not restore ${String(nonceBefore)}`,
+      );
+    }
+    console.log(`drained:   ${tx.hash} (vault account nonce kept at ${String(nonceBefore)})`);
     return balance;
   } finally {
     provider.destroy();

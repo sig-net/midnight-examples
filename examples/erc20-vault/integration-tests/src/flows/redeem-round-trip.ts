@@ -5,7 +5,7 @@ import {
   readVaultLedger,
   VAULT_REDEEM_REQUESTS_PATH,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
+import { logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { VaultSession } from "../vault-session.ts";
@@ -68,8 +68,7 @@ export async function runRedeemRoundTrip(
     requestId = opts.reuseRequestId;
     logSkip("redeem", `resuming redeem round trip from existing request ${requestId}`);
   } else {
-    const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-    requestId = await startRedeem(context, { shares: opts.shares, evmNonce });
+    requestId = await startRedeem(context, { shares: opts.shares });
   }
   if (!/^[0-9a-f]{64}$/.test(requestId)) {
     throw new Error(`redeem request id is not 64-char lowercase hex: "${requestId}"`);

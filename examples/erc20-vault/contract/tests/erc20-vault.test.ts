@@ -11,7 +11,7 @@ import {
 } from "@midnight-ntwrk/compact-runtime";
 // This tree's wasm ContractState class: see signetStateProvider for why the
 // portal-linked signet module's state must round-trip through it.
-import { ContractState } from "@midnightntwrk/onchain-runtime-v4";
+import { ContractState, CostModel, QueryContext } from "@midnightntwrk/onchain-runtime-v4";
 import {
   asciiPadded,
   assembleCalldata,
@@ -60,10 +60,17 @@ const ERC20_TRANSFER_SELECTOR = new Uint8Array([0xa9, 0x05, 0x9c, 0xbb]);
 import * as SignetSigner from "@sig-net/midnight-contract/managed/contract/index.js";
 
 import {
+  assignedNonce,
   Contract,
   createVaultPrivateState,
+  type DeployedVaultContract,
+  FLUSH_WIDTH,
+  flushPending,
+  flushUntilNumbered,
   ledger,
+  padKeys,
   pureCircuits,
+  unnumberedKeys,
   VAULT_DEPOSIT_REQUESTS_PATH,
   VAULT_NONCE_PATH,
   VAULT_REQUESTS_PATH,
@@ -116,6 +123,7 @@ const OTHER_COMMITMENT = pureCircuits.userCommitment(OTHER_SECRET_KEY);
 // depends on the contract's own address, so it cannot be a constructor arg).
 const MPC_RESPONSE_SECRET = bytes(32, 0x42);
 const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
+const MPC_KEY_VERSION = 1n;
 
 // The signet contract (callee) the vault seals + cross-contract-calls. A valid
 // sample contract address so the runtime's address checks pass.
@@ -194,7 +202,6 @@ interface DepositCallArgs {
   gasLimit: bigint;
   maxFeePerGas: bigint;
   maxPriorityFeePerGas: bigint;
-  keyVersion: bigint;
   deposit: { erc20Address: Uint8Array; amount: bigint };
 }
 
@@ -208,7 +215,6 @@ const VALID_DEPOSIT: DepositCallArgs = {
   gasLimit: 100000n,
   maxFeePerGas: 30000000000n,
   maxPriorityFeePerGas: 2000000000n,
-  keyVersion: 1n,
   deposit: { erc20Address: ERC20, amount: AMOUNT },
 };
 
@@ -262,6 +268,37 @@ const strangerContext = async (
  * Deploy + initialise(VAULT_EVM, CHAIN_ID, MPC_RESPONSE_KEY) as
  * the deployer: the ready-to-use vault, with the MPC response key stored.
  */
+
+// A deterministic queue key per surrendered coin, in place of the random key a
+// client draws: the tests only need each request under its own key.
+const keyForCoin = (coin: { nonce: Uint8Array }): Uint8Array => coin.nonce;
+
+const flushOne = async (
+  contract: Contract<VaultPrivateState>,
+  ctx: CircuitContext<VaultPrivateState>,
+  key: Uint8Array,
+): Promise<CircuitContext<VaultPrivateState>> =>
+  (await contract.circuits.flush(ctx, padKeys([key]))).context;
+
+const approveStata = async (
+  contract: Contract<VaultPrivateState>,
+  ctx: CircuitContext<VaultPrivateState>,
+): Promise<CircuitResults<VaultPrivateState, []>> => {
+  const key = pureCircuits.approveStataBinder();
+  const queued = (await contract.circuits.approveStata(ctx)).context;
+  return contract.circuits.sendApproveStata(await flushOne(contract, queued, key), key);
+};
+
+const approveRouter = async (
+  contract: Contract<VaultPrivateState>,
+  ctx: CircuitContext<VaultPrivateState>,
+  erc20: Uint8Array,
+): Promise<CircuitResults<VaultPrivateState, []>> => {
+  const key = pureCircuits.approveRouterBinder(erc20);
+  const queued = (await contract.circuits.approveRouter(ctx, erc20)).context;
+  return contract.circuits.sendApproveRouter(await flushOne(contract, queued, key), key);
+};
+
 const deployInitialised = async () => {
   const { contract, ctx } = await deployContract();
   const next = (
@@ -273,6 +310,7 @@ const deployInitialised = async () => {
       STATA_TOKEN,
       CHAIN_ID,
       MPC_RESPONSE_KEY,
+      MPC_KEY_VERSION,
     )
   ).context;
   return { contract, ctx: next };
@@ -290,7 +328,6 @@ const deposit = (
     args.gasLimit,
     args.maxFeePerGas,
     args.maxPriorityFeePerGas,
-    args.keyVersion,
     args.deposit,
   );
 
@@ -380,8 +417,25 @@ describe("initialise", () => {
         STATA_TOKEN,
         CHAIN_ID,
         MPC_RESPONSE_KEY,
+        MPC_KEY_VERSION,
       ),
     ).rejects.toThrow(/Not the deployer/);
+  });
+
+  it("rejects key version 0", async () => {
+    const { contract, ctx } = await deployContract();
+    await expect(
+      contract.circuits.initialise(
+        ctx,
+        VAULT_EVM,
+        ROUTER,
+        STATA_UNDERLYING,
+        STATA_TOKEN,
+        CHAIN_ID,
+        MPC_RESPONSE_KEY,
+        0n,
+      ),
+    ).rejects.toThrow(/keyVersion must be >= 1/);
   });
 
   it("is one-shot", async () => {
@@ -395,6 +449,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         CHAIN_ID,
         MPC_RESPONSE_KEY,
+        MPC_KEY_VERSION,
       ),
     ).rejects.toThrow(/Already initialised/);
   });
@@ -410,6 +465,7 @@ describe("initialise", () => {
         STATA_TOKEN,
         0n,
         MPC_RESPONSE_KEY,
+        MPC_KEY_VERSION,
       ),
     ).rejects.toThrow(/Chain ID must be positive/);
   });
@@ -491,7 +547,7 @@ describe("deposit round-trip", () => {
     expect(record.sender).toEqual({ bytes: VAULT_ADDRESS_BYTES });
     expect(record.path).toEqual(DEPLOYER_COMMITMENT);
     expect(record.caip2Id).toEqual(EXPECTED_ROUTING.caip2Id);
-    expect(record.keyVersion).toBe(VALID_DEPOSIT.keyVersion);
+    expect(record.keyVersion).toBe(MPC_KEY_VERSION);
     expect(record.algo).toBe(EXPECTED_ROUTING.algo);
     expect(record.dest).toBe(EXPECTED_ROUTING.dest);
     expect(record.params).toEqual(EXPECTED_ROUTING.params);
@@ -562,11 +618,6 @@ const DEPOSIT_REJECTION_CASES: DepositRejectionCase[] = [
     name: "a zero gas limit",
     args: { ...VALID_DEPOSIT, gasLimit: 0n },
     throws: /Gas limit must be positive/,
-  },
-  {
-    name: "the legacy key version 0",
-    args: { ...VALID_DEPOSIT, keyVersion: 0n },
-    throws: /keyVersion must be >= 1/,
   },
 ];
 
@@ -645,7 +696,6 @@ const vaultCoin = (value: bigint, color: Uint8Array = VAULT_TOKEN_COLOR) => ({
  */
 interface WithdrawCallArgs {
   evmNonce: bigint;
-  keyVersion: bigint;
   withdraw: { erc20Address: Uint8Array; amount: bigint; destEvmAddress: Uint8Array };
   coin: ReturnType<typeof vaultCoin>;
 }
@@ -656,17 +706,21 @@ interface WithdrawCallArgs {
  */
 const VALID_WITHDRAW: WithdrawCallArgs = {
   evmNonce: 0n,
-  keyVersion: 1n,
   withdraw: { erc20Address: ERC20, amount: AMOUNT, destEvmAddress: DEST_EVM },
   coin: vaultCoin(AMOUNT),
 };
 
 /** Call withdraw with its flat args spread in circuit order. */
-const withdraw = (
+const withdraw = async (
   contract: Contract<VaultPrivateState>,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startWithdraw"]>[0],
   args: WithdrawCallArgs,
-) => contract.circuits.startWithdraw(ctx, args.evmNonce, args.keyVersion, args.withdraw, args.coin);
+) => {
+  const key = keyForCoin(args.coin);
+  const queued = (await contract.circuits.startWithdraw(ctx, args.withdraw, args.coin, key))
+    .context;
+  return contract.circuits.sendWithdraw(await flushOne(contract, queued, key), key);
+};
 
 // ---- Withdraw tests ----
 
@@ -722,7 +776,7 @@ describe("withdraw round-trip", () => {
 
     // Contract-fixed routing, same constants as deposits.
     expect(record.caip2Id).toEqual(EXPECTED_ROUTING.caip2Id);
-    expect(record.keyVersion).toBe(VALID_WITHDRAW.keyVersion);
+    expect(record.keyVersion).toBe(MPC_KEY_VERSION);
     expect(record.algo).toBe(EXPECTED_ROUTING.algo);
     expect(record.dest).toBe(EXPECTED_ROUTING.dest);
     expect(record.params).toEqual(EXPECTED_ROUTING.params);
@@ -750,11 +804,12 @@ describe("withdraw round-trip", () => {
     // the typed token + amount settle circuits read back; nonce bumped.
     expect(ledger(state).withdrawSettleViews.member(requestIdBytes(idHex))).toBe(true);
     expect(ledger(state).withdrawSettleViews.lookup(requestIdBytes(idHex))).toEqual({
-      commitment: pureCircuits.refundCommitment(SECRET_KEY, requestIdBytes(idHex)),
+      commitment: pureCircuits.refundCommitment(SECRET_KEY, VALID_WITHDRAW.coin.nonce),
+      key: VALID_WITHDRAW.coin.nonce,
       erc20: ERC20,
       amount: AMOUNT,
     });
-    expect(ledger(state).signetRequestNonce).toBe(1n);
+    expect(ledger(state).signetRequestNonce).toBe(0n);
 
     // The burn, observable in the zswap local state: the coin is received (a
     // contract-owned output) and spent as the call's input, and the burn
@@ -860,11 +915,6 @@ const WITHDRAW_REJECTION_CASES: WithdrawRejectionCase[] = [
       coin: vaultCoin(UINT64_MAX + 1n),
     },
     throws: /Amount exceeds Uint<64> max/,
-  },
-  {
-    name: "the legacy key version 0",
-    args: { ...VALID_WITHDRAW, keyVersion: 0n },
-    throws: /keyVersion must be >= 1/,
   },
   {
     name: "a coin that is not the vault token for this ERC20",
@@ -1479,7 +1529,6 @@ const SWAP_AMOUNT_IN_SPENT = 990_000n; // attested input actually spent (<= the 
 
 interface SwapCallArgs {
   evmNonce: bigint;
-  keyVersion: bigint;
   swap: {
     tokenIn: Uint8Array;
     tokenOut: Uint8Array;
@@ -1492,7 +1541,6 @@ interface SwapCallArgs {
 
 const VALID_SWAP: SwapCallArgs = {
   evmNonce: 0n,
-  keyVersion: 1n,
   swap: {
     tokenIn: ERC20,
     tokenOut: ERC20_OUT,
@@ -1503,11 +1551,15 @@ const VALID_SWAP: SwapCallArgs = {
   coin: vaultCoin(SWAP_AMOUNT_IN_MAX),
 };
 
-const swap = (
+const swap = async (
   contract: Contract<VaultPrivateState>,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startSwap"]>[0],
   args: SwapCallArgs,
-) => contract.circuits.startSwap(ctx, args.evmNonce, args.keyVersion, args.swap, args.coin);
+) => {
+  const key = keyForCoin(args.coin);
+  const queued = (await contract.circuits.startSwap(ctx, args.swap, args.coin, key)).context;
+  return contract.circuits.sendSwap(await flushOne(contract, queued, key), key);
+};
 
 // A successful swap's attested output: the amountIn spent as the MPC serializes it — a
 // Midnight-native little-endian uint64 (8 bytes), the twin of serializeRespondOutput.
@@ -1526,7 +1578,7 @@ const OUTPUT_SWAP = swapOutput(SWAP_AMOUNT_IN_SPENT);
 describe("approveRouter", () => {
   it("records an approve(router, ~unlimited) on signBidirectionalEventMap from the vault path, no coin", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n);
+    const { context: next } = await approveRouter(contract, ctx, ERC20);
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1547,17 +1599,10 @@ describe("approveRouter", () => {
 
   it("is permissionless (a stranger may ready a token) and needs initialise", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).rejects.toThrow(
-      /Not initialised/,
-    );
+    await expect(approveRouter(contract, ctx, ERC20)).rejects.toThrow(/Not initialised/);
     const ready = await deployInitialised();
     await expect(
-      ready.contract.circuits.approveRouter(
-        await strangerContext("approveRouter", ready.ctx),
-        ERC20,
-        0n,
-        1n,
-      ),
+      approveRouter(ready.contract, await strangerContext("approveRouter", ready.ctx), ERC20),
     ).resolves.toBeDefined();
   });
 });
@@ -1810,24 +1855,32 @@ const SUPPLY_SHARES = 360_679n; // attested stataUSDC shares minted
 const REDEEM_SHARES = AMOUNT; // stataUSDC surrendered
 const REDEEM_ASSETS = 2_780_944n; // attested USDC assets minted (principal + interest)
 
-const supply = (
+const supply = async (
   contract: Contract<VaultPrivateState>,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startSupply"]>[0],
   amount: bigint,
   coin: ReturnType<typeof vaultCoin>,
-) => contract.circuits.startSupply(ctx, 0n, 1n, amount, coin);
+) => {
+  const key = keyForCoin(coin);
+  const queued = (await contract.circuits.startSupply(ctx, { amount }, coin, key)).context;
+  return contract.circuits.sendSupply(await flushOne(contract, queued, key), key);
+};
 
-const redeem = (
+const redeem = async (
   contract: Contract<VaultPrivateState>,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startRedeem"]>[0],
   shares: bigint,
   coin: ReturnType<typeof vaultCoin>,
-) => contract.circuits.startRedeem(ctx, 0n, 1n, shares, coin);
+) => {
+  const key = keyForCoin(coin);
+  const queued = (await contract.circuits.startRedeem(ctx, { shares }, coin, key)).context;
+  return contract.circuits.sendRedeem(await flushOne(contract, queued, key), key);
+};
 
 describe("approveStata", () => {
   it("records approve(stataToken, MAX) on signBidirectionalEventMap from the vault path, to = the underlying", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await contract.circuits.approveStata(ctx, 0n, 1n);
+    const { context: next } = await approveStata(contract, ctx);
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -2179,7 +2232,7 @@ interface PendingRequest {
  */
 const approveRouterRequested = async (): Promise<PendingRequest> => {
   const { contract, ctx } = await deployInitialised();
-  const next = (await contract.circuits.approveRouter(ctx, ERC20, 0n, 1n)).context;
+  const next = (await approveRouter(contract, ctx, ERC20)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
   );
@@ -2363,6 +2416,191 @@ describe("cross-kind settle isolation", () => {
   );
 });
 
+interface VaultCall {
+  contractAddress: string;
+  publicTranscript: unknown;
+  initialQueryContext: { block: unknown; state: unknown };
+  finalQueryContext: { effects: unknown };
+}
+const vaultCallOf = (run: { context: CircuitContext<VaultPrivateState> }): VaultCall => {
+  const trace = run.context.callProofDataTrace as unknown as VaultCall[];
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const call = trace[i];
+    if (call?.contractAddress === VAULT_ADDRESS) return call;
+  }
+  throw new Error("no vault call in the proof-data trace");
+};
+const gasOf = (run: { context: CircuitContext<VaultPrivateState> }): Record<string, unknown> => {
+  const gas = (run.context.gasCosts as Record<string, Record<string, unknown> | undefined>)[
+    VAULT_ADDRESS
+  ];
+  if (!gas) throw new Error("no vault gas cost on the run");
+  return gas;
+};
+
+const stateOf = (ctx: CircuitContext<VaultPrivateState>): unknown =>
+  ctx.callContext.currentQueryContext.state;
+
+const withHeadroom = (gas: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(gas).map(([k, v]) => [k, typeof v === "bigint" ? v * 8n : v]));
+
+const replay = (
+  state: unknown,
+  run: { context: CircuitContext<VaultPrivateState> },
+  headroom = false,
+): string => {
+  const call = vaultCallOf(run);
+  const qc = new QueryContext(state as never, VAULT_ADDRESS);
+  (qc as unknown as { block: unknown }).block = call.initialQueryContext.block;
+  const gas = gasOf(run);
+  const transcript = {
+    gas: headroom ? withHeadroom(gas) : gas,
+    effects: call.finalQueryContext.effects,
+    program: call.publicTranscript,
+  };
+  try {
+    qc.runTranscript(transcript as never, CostModel.initialCostModel());
+    return "applied";
+  } catch (e) {
+    return "REJECTED: " + String((e as { message?: string }).message ?? e).slice(0, 160);
+  }
+};
+
+describe("throughput: requests never pin shared state, only the flush does", () => {
+  it("CONTROL: a deposit applies against the state it was built on", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const builtOn = stateOf(ctx);
+    const run = await deposit(contract, ctx, VALID_DEPOSIT);
+    expect(replay(builtOn, run)).toBe("applied");
+  });
+
+  it("two concurrent vault requests from different callers both apply", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const alice = await contract.circuits.approveRouter(ctx, ERC20);
+    const stateAfterAlice = stateOf(alice.context);
+    const bobCtx = await strangerContext("approveRouter", ctx);
+    const bob = await contract.circuits.approveRouter(bobCtx, ERC20_OUT);
+    expect(replay(stateAfterAlice, bob, true)).toBe("applied");
+  });
+
+  it("a flush that skips a waiting request is refused", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const first = { ...VALID_WITHDRAW.coin, nonce: bytes(32, 0x51) };
+    const second = { ...VALID_WITHDRAW.coin, nonce: bytes(32, 0x52) };
+    const request = VALID_WITHDRAW.withdraw;
+    const one = (await contract.circuits.startWithdraw(ctx, request, first, keyForCoin(first)))
+      .context;
+    const two = (await contract.circuits.startWithdraw(one, request, second, keyForCoin(second)))
+      .context;
+    await expect(contract.circuits.flush(two, padKeys([keyForCoin(first)]))).rejects.toThrow(
+      /Flush must number every waiting request/,
+    );
+    const both = (
+      await contract.circuits.flush(two, padKeys([keyForCoin(first), keyForCoin(second)]))
+    ).context;
+    expect(ledger(stateOf(both) as never).unflushed).toBe(0n);
+  });
+
+  const queueWithdraws = async (count: number, firstNonceByte: number) => {
+    const { contract, ctx } = await deployInitialised();
+    const request = VALID_WITHDRAW.withdraw;
+    let current = ctx;
+    const keys: Uint8Array[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const coin = { ...VALID_WITHDRAW.coin, nonce: bytes(32, firstNonceByte + i) };
+      keys.push(keyForCoin(coin));
+      current = (await contract.circuits.startWithdraw(current, request, coin, keyForCoin(coin)))
+        .context;
+    }
+    return { contract, current, keys, request };
+  };
+
+  it("a full batch may leave the twenty-first request waiting", async () => {
+    const { contract, current, keys } = await queueWithdraws(21, 0x60);
+    const flushed = (await contract.circuits.flush(current, padKeys(keys.slice(0, 20)))).context;
+    expect(ledger(stateOf(flushed) as never).unflushed).toBe(1n);
+  }, 60_000);
+
+  it("a request landing first invalidates a partial flush, never a full batch", async () => {
+    const partial = await queueWithdraws(3, 0x70);
+    const partialFlush = await partial.contract.circuits.flush(
+      partial.current,
+      padKeys(partial.keys),
+    );
+    const late = { ...VALID_WITHDRAW.coin, nonce: bytes(32, 0x7f) };
+    const partialAfterLate = (
+      await partial.contract.circuits.startWithdraw(
+        partial.current,
+        partial.request,
+        late,
+        keyForCoin(late),
+      )
+    ).context;
+    expect(replay(stateOf(partialAfterLate), partialFlush, true)).toMatch(/^REJECTED/);
+
+    const full = await queueWithdraws(21, 0x80);
+    const fullFlush = await full.contract.circuits.flush(
+      full.current,
+      padKeys(full.keys.slice(0, 20)),
+    );
+    const fullAfterLate = (
+      await full.contract.circuits.startWithdraw(full.current, full.request, late, keyForCoin(late))
+    ).context;
+    expect(replay(stateOf(fullAfterLate), fullFlush, true)).toBe("applied");
+  }, 60_000);
+
+  it("two concurrent flushes conflict on the nonce counter, the second re-proves", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const aliceKey = pureCircuits.approveRouterBinder(ERC20);
+    const bobKey = pureCircuits.approveRouterBinder(ERC20_OUT);
+    const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
+    const queuedBoth = (
+      await contract.circuits.approveRouter(
+        await strangerContext("approveRouter", queuedAlice),
+        ERC20_OUT,
+      )
+    ).context;
+    const aliceFlush = await contract.circuits.flush(queuedBoth, padKeys([aliceKey, bobKey]));
+    const bobFlush = await contract.circuits.flush(queuedBoth, padKeys([bobKey, aliceKey]));
+    expect(replay(stateOf(aliceFlush.context), bobFlush, true)).toMatch(
+      /mismatch between expected .* read/,
+    );
+  });
+
+  it("two concurrent sends of different keys both apply after one flush", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const aliceKey = pureCircuits.approveRouterBinder(ERC20);
+    const bobKey = pureCircuits.approveRouterBinder(ERC20_OUT);
+    const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
+    const queuedBoth = (
+      await contract.circuits.approveRouter(
+        await strangerContext("approveRouter", queuedAlice),
+        ERC20_OUT,
+      )
+    ).context;
+    const flushed = (await contract.circuits.flush(queuedBoth, padKeys([aliceKey, bobKey])))
+      .context;
+    const aliceSend = await contract.circuits.sendApproveRouter(flushed, aliceKey);
+    const bobSend = await contract.circuits.sendApproveRouter(flushed, bobKey);
+    expect(replay(stateOf(aliceSend.context), bobSend, true)).toBe("applied");
+  });
+
+  it("ANTI-REPLAY GUARD: a caller's identical repeat gets a fresh id", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const idsOf = (c: CircuitContext<VaultPrivateState>): string[] => [
+      ...toSignBidirectionalEventIndex(
+        ledger(c.callContext.currentQueryContext.state).depositEventMap,
+      ).keys(),
+    ];
+    const afterFirst = (await deposit(contract, ctx, VALID_DEPOSIT)).context;
+    const before = idsOf(afterFirst);
+    const afterSecond = (await deposit(contract, afterFirst, VALID_DEPOSIT)).context;
+    const fresh = idsOf(afterSecond).filter((k) => !before.includes(k));
+    expect(fresh.length).toBe(1);
+    expect(before).not.toContain(fresh[0]);
+  });
+});
+
 const DEFAULT_MAX_FEE_PER_GAS = 150_000_000_000n;
 const DEFAULT_MAX_PRIORITY_FEE_PER_GAS = 1_000_000_000n;
 const DEFAULT_WITHDRAW_GAS_LIMIT = 100_000n;
@@ -2414,6 +2652,26 @@ const setGasParams = (
     args.supplyGasLimit,
     args.redeemGasLimit,
   );
+
+/** The one request in the map with no calldata: the admin's empty self-transfer. */
+const replacementRecord = (map: Parameters<typeof toSignBidirectionalEventIndex>[0]) => {
+  const replacements = [...toSignBidirectionalEventIndex(map).values()].filter(
+    (record) => !record.txParams.calldata.is_some,
+  );
+  expect(replacements).toHaveLength(1);
+  return first(replacements, "the admin replacement request");
+};
+
+const replacementEnvelope = (
+  map: Parameters<typeof toSignBidirectionalEventIndex>[0],
+): { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; gasLimit: bigint } => {
+  const { txParams } = replacementRecord(map);
+  return {
+    maxFeePerGas: txParams.maxFeePerGas,
+    maxPriorityFeePerGas: txParams.maxPriorityFeePerGas,
+    gasLimit: txParams.gasLimit,
+  };
+};
 
 const envelopeOf = (
   map: Parameters<typeof toSignBidirectionalEventIndex>[0],
@@ -2554,7 +2812,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+    const next = (await approveRouter(contract, configured, ERC20)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -2569,7 +2827,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await contract.circuits.approveStata(configured, 0n, 1n)).context;
+    const next = (await approveStata(contract, configured)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -2636,7 +2894,7 @@ describe("gas parameters reach the constructed transaction", () => {
 
     const afterWithdraw = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
     const afterSwap = (await swap(contract, configured, VALID_SWAP)).context;
-    const afterApprove = (await contract.circuits.approveRouter(configured, ERC20, 0n, 1n)).context;
+    const afterApprove = (await approveRouter(contract, configured, ERC20)).context;
     const afterSupply = (
       await supply(
         contract,
@@ -2680,12 +2938,72 @@ describe("gas parameters reach the constructed transaction", () => {
 
 const STUCK_NONCE = 7n;
 
+/** Queues, flushes AND sends `count` approves, so their nonces are issued and no longer held. */
+const withSentNonces = async (
+  contract: Contract<VaultPrivateState>,
+  ctx: CircuitContext<VaultPrivateState>,
+  count: number,
+): Promise<CircuitContext<VaultPrivateState>> => {
+  let next = await withIssuedNonces(contract, ctx, count);
+  for (let i = 0; i < count; i++) {
+    next = (
+      await contract.circuits.sendApproveRouter(
+        next,
+        pureCircuits.approveRouterBinder(bytes(20, 0xb0 + i)),
+      )
+    ).context;
+  }
+  return next;
+};
+
+const withIssuedNonces = async (
+  contract: Contract<VaultPrivateState>,
+  ctx: CircuitContext<VaultPrivateState>,
+  count: number,
+): Promise<CircuitContext<VaultPrivateState>> => {
+  let next = ctx;
+  const keys: Uint8Array[] = [];
+  for (let i = 0; i < count; i++) {
+    const erc20 = bytes(20, 0xb0 + i);
+    keys.push(pureCircuits.approveRouterBinder(erc20));
+    next = (await contract.circuits.approveRouter(next, erc20)).context;
+  }
+  return (await contract.circuits.flush(next, padKeys(keys))).context;
+};
+
 describe("adminReplaceEvmNonce", () => {
+  it("refuses a nonce a flushed but unsent request still holds", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const issued = await withIssuedNonces(contract, ctx, 8);
+    await expect(contract.circuits.adminReplaceEvmNonce(issued, STUCK_NONCE)).rejects.toThrow(
+      /Nonce held by an unsent request/,
+    );
+  });
+
+  it("allows the replacement once that request is sent", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const sent = await withSentNonces(contract, ctx, 8);
+    expect(ledger(stateOf(sent) as never).nonceOwners.member(STUCK_NONCE)).toBe(false);
+    const next = (await contract.circuits.adminReplaceEvmNonce(sent, STUCK_NONCE)).context;
+    expect(
+      toSignBidirectionalEventIndex(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ).size,
+    ).toBe(9);
+  });
+
+  it("rejects a nonce the contract has not issued yet", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE)).rejects.toThrow(
+      /Nonce not issued yet/,
+    );
+  });
+
   it("is deployer-gated, with initialise's own gate", async () => {
     const { contract, ctx } = await deployInitialised();
     const stranger = await strangerContext("adminReplaceEvmNonce", ctx);
 
-    await expect(contract.circuits.adminReplaceEvmNonce(stranger, STUCK_NONCE, 1n)).rejects.toThrow(
+    await expect(contract.circuits.adminReplaceEvmNonce(stranger, STUCK_NONCE)).rejects.toThrow(
       /Not the deployer/,
     );
   });
@@ -2694,9 +3012,7 @@ describe("adminReplaceEvmNonce", () => {
     const { contract, ctx } = await deployInitialised();
     const stranger = await strangerContext("adminReplaceEvmNonce", ctx);
 
-    await expect(
-      contract.circuits.adminReplaceEvmNonce(stranger, STUCK_NONCE, 1n),
-    ).rejects.toThrow();
+    await expect(contract.circuits.adminReplaceEvmNonce(stranger, STUCK_NONCE)).rejects.toThrow();
 
     expect(
       toSignBidirectionalEventIndex(
@@ -2707,14 +3023,12 @@ describe("adminReplaceEvmNonce", () => {
 
   it("builds an empty 21000-gas self-transfer at the nonce the caller named", async () => {
     const { contract, ctx } = await deployInitialised();
+    const sent = await withSentNonces(contract, ctx, 8);
+    const next = (await contract.circuits.adminReplaceEvmNonce(sent, STUCK_NONCE)).context;
 
-    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
-
-    const index = toSignBidirectionalEventIndex(
+    const record = replacementRecord(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
     );
-    expect(index.size).toBe(1);
-    const record = first(index.values(), "recorded replacement request");
     const { txParams } = record;
 
     expect({
@@ -2740,11 +3054,13 @@ describe("adminReplaceEvmNonce", () => {
 
   it("takes its fee values from the ledger, defaulting to initialise's", async () => {
     const { contract, ctx } = await deployInitialised();
-
-    const next = (await contract.circuits.adminReplaceEvmNonce(ctx, STUCK_NONCE, 1n)).context;
+    const sent = await withSentNonces(contract, ctx, 8);
+    const next = (await contract.circuits.adminReplaceEvmNonce(sent, STUCK_NONCE)).context;
 
     expect(
-      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+      replacementEnvelope(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ),
     ).toEqual({
       maxFeePerGas: DEFAULT_MAX_FEE_PER_GAS,
       maxPriorityFeePerGas: DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
@@ -2755,16 +3071,143 @@ describe("adminReplaceEvmNonce", () => {
   it("reflects a prior setGasParams, which is why the admin raises the fees FIRST", async () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
-
-    const next = (await contract.circuits.adminReplaceEvmNonce(configured, STUCK_NONCE, 1n))
-      .context;
+    const sent = await withSentNonces(contract, configured, 8);
+    const next = (await contract.circuits.adminReplaceEvmNonce(sent, STUCK_NONCE)).context;
 
     expect(
-      envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
+      replacementEnvelope(
+        ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
+      ),
     ).toEqual({
       maxFeePerGas: NEW_MAX_FEE_PER_GAS,
       maxPriorityFeePerGas: NEW_MAX_PRIORITY_FEE_PER_GAS,
       gasLimit: 21_000n,
     });
   });
+});
+
+describe("queue helpers", () => {
+  it("padKeys fills the flush width with zero keys and rejects a wider batch", () => {
+    const padded = padKeys([new Uint8Array(32).fill(7)]);
+    expect(padded).toHaveLength(FLUSH_WIDTH);
+    expect(padded[0]).toEqual(new Uint8Array(32).fill(7));
+    expect(padded[FLUSH_WIDTH - 1]).toEqual(new Uint8Array(32));
+    expect(() => padKeys(Array<Uint8Array>(FLUSH_WIDTH + 1).fill(new Uint8Array(32)))).toThrow(
+      /at most 20 keys/,
+    );
+  });
+
+  it("an approve is queued under its public binder, whoever calls it", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const queued = (await contract.circuits.approveRouter(ctx, ERC20)).context;
+    const state = ledger(stateOf(queued) as never);
+    expect(state.pendingVaultRequests.member(pureCircuits.approveRouterBinder(ERC20))).toBe(true);
+    await expect(
+      contract.circuits.approveRouter(await strangerContext("approveRouter", queued), ERC20),
+    ).rejects.toThrow(/Request already queued/);
+  });
+
+  it("unnumberedKeys lists queued keys until a flush numbers them, in ledger order", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const aliceKey = pureCircuits.approveRouterBinder(ERC20);
+    const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
+    const bobCtx = await strangerContext("approveRouter", queuedAlice);
+    const bobKey = pureCircuits.approveRouterBinder(ERC20_OUT);
+    const queuedBoth = (await contract.circuits.approveRouter(bobCtx, ERC20_OUT)).context;
+
+    const before = ledger(stateOf(queuedBoth) as never);
+    const pending = unnumberedKeys(before);
+    expect(pending).toHaveLength(2);
+    expect(() => assignedNonce(before, aliceKey)).toThrow(/flush first/);
+
+    const flushed = (await contract.circuits.flush(queuedBoth, padKeys(pending))).context;
+    const after = ledger(stateOf(flushed) as never);
+    expect(unnumberedKeys(after)).toHaveLength(0);
+    expect(new Set([assignedNonce(after, aliceKey), assignedNonce(after, bobKey)])).toEqual(
+      new Set([0n, 1n]),
+    );
+  });
+
+  const stubVault = async (queued: CircuitContext<VaultPrivateState>, failFirst = false) => {
+    const { contract } = await deployInitialised();
+    let current = queued;
+    let flushes = 0;
+    const provider = {
+      queryContractState: () => Promise.resolve({ data: stateOf(current) }),
+    };
+    const vault = {
+      callTx: {
+        flush: async (keys: Uint8Array[]) => {
+          flushes += 1;
+          if (failFirst && flushes === 1) throw new Error("mismatch between expected read");
+          current = (await contract.circuits.flush(current, keys)).context;
+          return { public: { txId: `flush-${String(flushes)}` } };
+        },
+      },
+    };
+    return {
+      vault: vault as unknown as DeployedVaultContract,
+      provider: provider as never,
+      state: () => ledger(stateOf(current) as never),
+      flushes: () => flushes,
+    };
+  };
+
+  const queueMany = async (count: number) => {
+    const { contract, ctx } = await deployInitialised();
+    let current = ctx;
+    const keys: Uint8Array[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const coin = { ...VALID_WITHDRAW.coin, nonce: new Uint8Array(32).fill(i + 1) };
+      keys.push(keyForCoin(coin));
+      current = (
+        await contract.circuits.startWithdraw(
+          current,
+          VALID_WITHDRAW.withdraw,
+          coin,
+          keyForCoin(coin),
+        )
+      ).context;
+    }
+    return { current, keys };
+  };
+
+  it("flushPending numbers the first 20 unnumbered keys and leaves the rest", async () => {
+    const { current, keys } = await queueMany(21);
+    const stub = await stubVault(current);
+    expect(await flushPending(stub.vault, stub.provider, VAULT_ADDRESS)).toBe(20);
+    expect(unnumberedKeys(stub.state())).toHaveLength(1);
+    expect(await flushPending(stub.vault, stub.provider, VAULT_ADDRESS)).toBe(1);
+    expect(unnumberedKeys(stub.state())).toHaveLength(0);
+    const nonces = keys
+      .map((key) => assignedNonce(stub.state(), key))
+      .sort((a, b) => (a < b ? -1 : 1));
+    expect(nonces).toEqual(keys.map((_, i) => BigInt(i)));
+    expect(await flushPending(stub.vault, stub.provider, VAULT_ADDRESS)).toBe(0);
+  }, 120_000);
+
+  it("flushUntilNumbered retries a lost flush and returns the key's nonce", async () => {
+    const { current, keys } = await queueMany(2);
+    const stub = await stubVault(current, true);
+    const key = keys[1];
+    if (!key) throw new Error("no key");
+    const nonce = await flushUntilNumbered(stub.vault, stub.provider, VAULT_ADDRESS, key);
+    expect(stub.flushes()).toBe(2);
+    expect(nonce).toBe(assignedNonce(stub.state(), key));
+    expect(new Set(keys.map((k) => assignedNonce(stub.state(), k)))).toEqual(new Set([0n, 1n]));
+    expect(await flushUntilNumbered(stub.vault, stub.provider, VAULT_ADDRESS, key)).toBe(nonce);
+    expect(stub.flushes()).toBe(2);
+  }, 60_000);
+
+  it("flushUntilNumbered gives up after its attempts when every flush is lost", async () => {
+    const { current, keys } = await queueMany(1);
+    const stub = await stubVault(current);
+    const lost = () => Promise.reject(new Error("mismatch between expected read"));
+    stub.vault.callTx.flush = lost;
+    const key = keys[0];
+    if (!key) throw new Error("no key");
+    await expect(
+      flushUntilNumbered(stub.vault, stub.provider, VAULT_ADDRESS, key, 2),
+    ).rejects.toThrow(/flush first/);
+  }, 60_000);
 });

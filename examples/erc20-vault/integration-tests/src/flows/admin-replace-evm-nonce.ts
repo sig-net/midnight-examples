@@ -1,8 +1,4 @@
-import {
-  type RequestIdHex,
-  SIGNET_DEFAULT_KEY_VERSION,
-  toSignBidirectionalEventIndex,
-} from "@sig-net/midnight";
+import { type RequestIdHex, toSignBidirectionalEventIndex } from "@sig-net/midnight";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import type { VaultContext } from "../vault-context.ts";
@@ -42,10 +38,7 @@ export async function adminReplaceEvmNonce(
   }
   const idsBefore = new Set(toSignBidirectionalEventIndex(before.signBidirectionalEventMap).keys());
 
-  const result = await context.vault.callTx.adminReplaceEvmNonce(
-    evmNonce,
-    SIGNET_DEFAULT_KEY_VERSION,
-  );
+  const result = await context.vault.callTx.adminReplaceEvmNonce(evmNonce);
   console.log(`adminReplaceEvmNonce(${String(evmNonce)}) finalized in tx ${result.public.txId}`);
 
   const after = await readVaultLedger(

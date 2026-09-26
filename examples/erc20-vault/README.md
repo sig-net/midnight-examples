@@ -571,7 +571,7 @@ an unattended/backgrounded run.
 
 ## Deploying
 
-The contract has 17 circuits and their verifier keys do not fit in one block, so
+The contract has 26 circuits and their verifier keys do not fit in one block, so
 a deploy is two phases:
 
 1. The base transaction registers the whole ledger state and ONE small circuit.
@@ -661,7 +661,7 @@ failed after that point, the PR says to run it by hand before merging).
 
 ## The e2e suite
 
-Twelve e2e specs run serially in a pinned order (see
+Fourteen e2e specs run serially in a pinned order (see
 `integration-tests/vitest.config.ts`). `happy-day-e2e` runs first because it
 initialises the vault and cycles the funds that the later flows build on.
 Each spec is rerun-tolerant against kept contract addresses and prints resume
@@ -680,6 +680,8 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `supply-refund-e2e` | 2 | A supply whose wrapper deposit reverts on-chain (drained vault balance) ends in an in-circuit REFUND of the surrendered USDC | `SUPPLY_REFUND_DEPOSIT_REQUEST_ID`, `SUPPLY_REFUND_SUPPLY_REQUEST_ID` |
 | `swap-refund-e2e` | 2 | A swap whose `amountInMaximum` is below the real cost reverts on-chain and the settle re-mints the surrendered tokenIn | `SWAP_REFUND_DEPOSIT_REQUEST_ID`, `SWAP_REFUND_SWAP_REQUEST_ID` |
 | `redeem-refund-e2e` | 2 | A redeem whose wrapper burn reverts on-chain (drained vault stataUSDC balance) ends in an in-circuit REFUND of the surrendered shares | `REDEEM_REFUND_DEPOSIT_REQUEST_ID`, `REDEEM_REFUND_SUPPLY_REQUEST_ID`, `REDEEM_REFUND_REDEEM_REQUEST_ID` |
+| `vault-queue-e2e` | 5 | One flush numbers every queued request and their sends mine in nonce order, a stranger flushes and sends a request the owner queued, a higher nonce signed first still mines after the lower one, two flushes in one block leave exactly one winner, and a flush proven before another request lands is refused unless it numbered every waiting request | none |
+| `vault-queue-benchmark` | 4 | Reporting benchmark of the queue: flush proof cost with 0 and 1 live keys, a burst of 20 queued requests from one wallet numbered by one flush and sent, two colliding flushes of which exactly one wins, and 20 wallets that pre-prove and submit together so their requests share a block | none |
 | `admin-replace-nonce-e2e` | 1 | A signed-but-unbroadcast vault transaction strands the account's nonce, and `adminReplaceEvmNonce` replaces it with an empty self-transfer so the transaction queued behind it mines | none |
 
 100 tests total across these specs. The offline `benchmark-tooling` spec (6
@@ -786,7 +788,7 @@ prefix. The tag carries the example name, the npm version does not:
 
 ## A note on package size
 
-The vault has 17 circuits carrying 1.4 GB of prover keys, against kilobytes
+The vault has 26 circuits carrying 1.3 GB of prover keys, against kilobytes
 for the verifier keys that go on-chain. Those prover keys are published
 nowhere: the package packs to well under a megabyte, and the workflow logs the
 packed and unpacked size before it publishes anything.
@@ -818,7 +820,7 @@ It compiles the shipped `src/erc20-vault.compact` with the pinned compiler
 manifest, and writes:
 
 ```
-public/keys/<circuit>.prover, <circuit>.verifier    the vault's 17 circuits
+public/keys/<circuit>.prover, <circuit>.verifier    the vault's 26 circuits
 public/zkir/<circuit>.bzkir
 public/compiler/contract-manifest.json, contract-info.json
 public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract

@@ -5,7 +5,7 @@ import {
   readVaultLedger,
   VAULT_SUPPLY_REQUESTS_PATH,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getTransactionNonce, logSkip } from "@sig-net/midnight-examples-test-harness";
+import { logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { VaultSession } from "../vault-session.ts";
@@ -72,8 +72,7 @@ export async function runSupplyRoundTrip(
     requestId = opts.reuseRequestId;
     logSkip("supply", `resuming supply round trip from existing request ${requestId}`);
   } else {
-    const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-    requestId = await startSupply(context, { amount: opts.amount, evmNonce });
+    requestId = await startSupply(context, { amount: opts.amount });
   }
   if (!/^[0-9a-f]{64}$/.test(requestId)) {
     throw new Error(`supply request id is not 64-char lowercase hex: "${requestId}"`);

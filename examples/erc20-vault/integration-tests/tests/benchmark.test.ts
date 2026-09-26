@@ -302,16 +302,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "time approveRouter: record the router-allowance request on the vault ledger",
       async () => {
         const context = await session.vaultContext();
-        // The approve tx is sent FROM the vault's derived account; its next
-        // nonce comes from the chain, fetched outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
         recorder.setLeg(BenchmarkLeg.ApproveRouter);
         const stop = startTimer();
-        approveRequestId = await approveRouter(context, evmNonce);
+        approveRequestId = await approveRouter(context);
         const ms = stop();
         recorder.clearLeg();
         timings.approve.approveRouter = ms;
@@ -550,13 +543,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
 
         const context = await session.vaultContext();
-        // The withdraw tx sender is the VAULT's derived EVM account; the
-        // destination is the user's derived account, so the funds cycle. The
-        // nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
         const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
 
         recorder.setLeg(BenchmarkLeg.WithdrawStart);
@@ -564,7 +550,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress,
-          evmNonce,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -750,13 +735,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(swapAmountInMaximum).toBeDefined();
 
         const context = await session.vaultContext();
-        // The swap tx is sent FROM the vault's derived account (it holds the
-        // pooled funds); the nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
         recorder.setLeg(BenchmarkLeg.SwapStart);
         const stop = startTimer();
         swapRequestId = await startSwap(context, {
@@ -764,7 +742,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           fee: SWAP_FEE,
           amountOut: SWAP_AMOUNT_OUT,
           amountInMaximum: swapAmountInMaximum,
-          evmNonce,
         });
         const ms = stop();
         recorder.clearLeg();
@@ -942,17 +919,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "time approveStata: record the wrapper-allowance request on the vault ledger",
       async () => {
         const context = await session.vaultContext();
-        // The approve tx is sent FROM the vault's derived account. Like
-        // approveRouter it is repeatable (a repeat re-sets the same
-        // allowance), so it always runs and always records a prove.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
         recorder.setLeg(BenchmarkLeg.ApproveStata);
         const stop = startTimer();
-        approveStataRequestId = await approveStata(context, evmNonce);
+        approveStataRequestId = await approveStata(context);
         const ms = stop();
         recorder.clearLeg();
         timings.approveStata.approveStata = ms;
@@ -1022,16 +991,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
 
         const context = await session.vaultContext();
-        // The deposit tx is sent FROM the vault's derived account (it holds
-        // the pooled underlying), and the nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
         recorder.setLeg(BenchmarkLeg.SupplyStart);
         const stop = startTimer();
-        supplyRequestId = await startSupply(context, { amount: SUPPLY_AMOUNT, evmNonce });
+        supplyRequestId = await startSupply(context, { amount: SUPPLY_AMOUNT });
         const ms = stop();
         recorder.clearLeg();
         timings.supply.startSupply = ms;
@@ -1205,16 +1167,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(shares, "no stataUSDC shares to redeem (run the supply sequence)").toBeGreaterThan(
           0n,
         );
-        // The redeem tx is sent FROM the vault's derived account, and the
-        // nonce fetch stays outside the timed span.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
         recorder.setLeg(BenchmarkLeg.RedeemStart);
         const stop = startTimer();
-        redeemRequestId = await startRedeem(context, { shares, evmNonce });
+        redeemRequestId = await startRedeem(context, { shares });
         const ms = stop();
         recorder.clearLeg();
         timings.redeem.startRedeem = ms;
@@ -1427,18 +1382,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
 
         const context = await session.vaultContext();
-        // Nonce fetched AFTER the drain mined (the drain consumed one).
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
         recorder.setLeg(BenchmarkLeg.RefundStartWithdraw);
         const stop = startTimer();
         refundWithdrawRequestId = await startWithdraw(context, {
           amount: REFUND_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-          evmNonce,
         });
         const ms = stop();
         recorder.clearLeg();

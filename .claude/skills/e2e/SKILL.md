@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-twelve-spec suite (106 tests: eleven e2e specs carrying 100, plus the offline
+fifteen-spec suite (111 tests: fourteen e2e specs carrying 105, plus the offline
 `benchmark-tooling` spec carrying 6). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest
@@ -114,8 +114,8 @@ vault with every circuit).
   **6**, `benchmark` **43**, `false-claimer` **6**, `bearer-transfer` **11**,
   `swap-e2e` **1**, `supply-redeem-e2e` **1**, `supply-refund-e2e` **1**,
   `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**,
-  `admin-replace-nonce-e2e` **1**, then the unpinned offline
-  `benchmark-tooling` **6** last. 102 total. The setup
+  `vault-queue-e2e` **5**, `vault-queue-benchmark` **4**, `admin-replace-nonce-e2e` **1**,
+  then the unpinned offline `benchmark-tooling` **6** last. 111 total. The setup
   pipeline verifies Uniswap and the stataUSDC wrapper are deployed on the fork,
   so a fork missing either fails the run at setup rather than mid-spec.
 - **Wallets are role wallets funded from ROOT at setup.** The setup's

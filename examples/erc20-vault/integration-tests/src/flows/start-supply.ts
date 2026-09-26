@@ -17,6 +17,7 @@ import {
 } from "@sig-net/midnight";
 import {
   AAVE_USDC,
+  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -26,11 +27,11 @@ import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import { STATA_DEPOSIT_SELECTOR, SUPPLY_MPC_ROUTING } from "../evm-stata.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
+import { flushUntilNumbered, newQueueKey } from "./vault-queue.ts";
 
 /** Options for {@link startSupply}. */
 export interface StartSupplyOptions {
   readonly amount: bigint;
-  readonly evmNonce: bigint;
 }
 
 /**
@@ -38,7 +39,7 @@ export interface StartSupplyOptions {
  * coin is the underlying (USDC) vault token of exactly `amount`.
  *
  * @param context - The flow context.
- * @param options - The supply parameters (amount, evmNonce).
+ * @param options - The supply parameters (amount).
  * @returns The recorded supply request id.
  */
 export async function startSupply(
@@ -59,6 +60,10 @@ export async function startSupply(
     color: hexToBytes(vaultTokenType(AAVE_USDC, context.vaultContractAddress)),
     value: options.amount,
   };
+  const key = newQueueKey();
+  const queued = await context.vault.callTx.startSupply({ amount: options.amount }, coin, key);
+  console.log(`supply queued in tx ${queued.public.txId}`);
+  const evmNonce = await flushUntilNumbered(context, key);
 
   // The record the contract composes: vault path/sender, stataToken `to`, contract-fixed gas,
   // deposit(amount, receiver=vault).
@@ -71,7 +76,7 @@ export async function startSupply(
   );
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...SUPPLY_MPC_ROUTING,
@@ -79,7 +84,7 @@ export async function startSupply(
     txParams: {
       to: before.stataToken,
       chainId: before.evmChainId,
-      nonce: options.evmNonce,
+      nonce: evmNonce,
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -105,13 +110,8 @@ export async function startSupply(
     expectedRecord.txParams.maxPriorityFeePerGas,
   );
 
-  const result = await context.vault.callTx.startSupply(
-    options.evmNonce,
-    SIGNET_DEFAULT_KEY_VERSION,
-    options.amount,
-    coin,
-  );
-  console.log(`supply finalized in tx ${result.public.txId}`);
+  const result = await context.vault.callTx.sendSupply(key);
+  console.log(`supply sent in tx ${result.public.txId}`);
 
   const after = await readVaultLedger(
     context.providers.publicDataProvider,

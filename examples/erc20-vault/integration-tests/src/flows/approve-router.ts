@@ -20,15 +20,12 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
   UNISWAP_SWAP_ROUTER_02,
   vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
-  type ContractReadMethod,
-  getTransactionNonce,
-  logSkip,
-} from "@sig-net/midnight-examples-test-harness";
+import { type ContractReadMethod, logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { logEvmFeeCap } from "../evm-logging.ts";
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-swap.ts";
@@ -38,33 +35,56 @@ import type { VaultContext } from "../vault-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
+import { assignedNonce, flushUntilNumbered } from "./vault-queue.ts";
 
 /**
- * Record the approveRouter request and return its id.
+ * Queues an approve(router) request for an ERC20 and returns its queue key.
  *
- * @param context - The flow context.
- * @param evmNonce - The vault EVM account nonce for the approve transaction.
- * @returns The recorded request id.
+ * @param context - The vault context.
+ * @param erc20Address - The ERC20 to approve, the context's by default.
+ * @returns The queue key the flush and send take.
+ * @throws {Error} When the vault is not initialised.
  */
-export async function approveRouter(
+export async function queueApproveRouter(
   context: VaultContext,
-  evmNonce: bigint,
-): Promise<RequestIdHex> {
-  const erc20 = evmAddressBytes(context.erc20Address);
+  erc20Address: string = context.erc20Address,
+): Promise<Uint8Array> {
+  const erc20 = evmAddressBytes(erc20Address);
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
   if (!before.initialised)
     throw new Error("vault is not initialised, run the initialise flow first");
+  const key = pureCircuits.approveRouterBinder(erc20);
+  const queued = await context.vault.callTx.approveRouter(erc20);
+  console.log(`approveRouter queued in tx ${queued.public.txId}`);
+  return key;
+}
 
+/**
+ * Sends a flushed approve(router) request to the singleton and returns its request id.
+ *
+ * @param context - The vault context.
+ * @param key - The queue key of the flushed request.
+ * @param erc20Address - The ERC20 the request approves, the context's by default.
+ * @returns The request id recorded on the vault ledger.
+ * @throws {Error} When the recomputed request id is not on the ledger.
+ */
+export async function sendApproveRouter(
+  context: VaultContext,
+  key: Uint8Array,
+  erc20Address: string = context.erc20Address,
+): Promise<RequestIdHex> {
+  const erc20 = evmAddressBytes(erc20Address);
+  const before = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
   const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "approve");
-
-  // approve(router, MAX) on the ERC20, signed with the vault account (path "vault"), same
-  // 2-word map + bool schema as a transfer.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: asciiPadded("vault", PATH_BYTES),
     ...VAULT_MPC_ROUTING,
@@ -72,7 +92,7 @@ export async function approveRouter(
     txParams: {
       to: erc20,
       chainId: before.evmChainId,
-      nonce: evmNonce,
+      nonce: await assignedNonce(context, key),
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -100,13 +120,8 @@ export async function approveRouter(
     expectedRecord.txParams.maxFeePerGas,
     expectedRecord.txParams.maxPriorityFeePerGas,
   );
-  const result = await context.vault.callTx.approveRouter(
-    erc20,
-    evmNonce,
-    SIGNET_DEFAULT_KEY_VERSION,
-  );
-  console.log(`approveRouter finalized in tx ${result.public.txId}`);
-
+  const result = await context.vault.callTx.sendApproveRouter(key);
+  console.log(`approveRouter sent in tx ${result.public.txId}`);
   const after = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
@@ -118,9 +133,23 @@ export async function approveRouter(
 }
 
 /**
- * Ensure the vault account has approved the router for `context.erc20Address`: read the
- * live allowance, and if it is zero run the approve leg (request -> sign -> broadcast; no
- * settle). Idempotent and global — a nonzero allowance short-circuits.
+ * Queues, flushes and sends an approve(router) request.
+ *
+ * @param context - The vault context.
+ * @param erc20Address - The ERC20 to approve, the context's by default.
+ * @returns The request id recorded on the vault ledger.
+ */
+export async function approveRouter(
+  context: VaultContext,
+  erc20Address: string = context.erc20Address,
+): Promise<RequestIdHex> {
+  const key = await queueApproveRouter(context, erc20Address);
+  await flushUntilNumbered(context, key);
+  return sendApproveRouter(context, key, erc20Address);
+}
+
+/**
+ * Approves the Uniswap router from the vault account unless an allowance already exists.
  *
  * @param session - The vault session.
  */
@@ -144,8 +173,7 @@ export async function ensureRouterApproved(session: VaultSession): Promise<void>
     return;
   }
 
-  const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await approveRouter(context, evmNonce);
+  const requestId = await approveRouter(context);
   // approve is signed by the VAULT's account, then broadcast; no attestation/settle.
   const signed = await pollSignatureResponse(context, {
     requestId,

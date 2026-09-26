@@ -169,7 +169,6 @@ export async function startDeposit(
     gasLimit,
     maxFeePerGas,
     maxPriorityFeePerGas,
-    keyVersion,
     {
       erc20Address: erc20,
       amount: options.amount,

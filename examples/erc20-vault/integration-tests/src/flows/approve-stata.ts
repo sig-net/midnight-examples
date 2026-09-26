@@ -21,15 +21,12 @@ import {
 import {
   AAVE_USDC,
   evmAddressBytes,
+  pureCircuits,
   readVaultLedger,
   STATA_USDC,
   vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
-  type ContractReadMethod,
-  getTransactionNonce,
-  logSkip,
-} from "@sig-net/midnight-examples-test-harness";
+import { type ContractReadMethod, logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { logEvmFeeCap } from "../evm-logging.ts";
 import { APPROVE_SELECTOR, MAX_APPROVE } from "../evm-stata.ts";
@@ -39,29 +36,51 @@ import type { VaultContext } from "../vault-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
+import { assignedNonce, flushUntilNumbered } from "./vault-queue.ts";
 
 /**
- * Record the approveStata request and return its id.
+ * Queues an approve(stataToken) request on the underlying and returns its queue key.
  *
- * @param context - The flow context.
- * @param evmNonce - The vault EVM account nonce for the approve transaction.
- * @returns The recorded request id.
+ * @param context - The vault context.
+ * @returns The queue key the flush and send take.
+ * @throws {Error} When the vault is not initialised.
  */
-export async function approveStata(context: VaultContext, evmNonce: bigint): Promise<RequestIdHex> {
+export async function queueApproveStata(context: VaultContext): Promise<Uint8Array> {
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
   if (!before.initialised)
     throw new Error("vault is not initialised, run the initialise flow first");
+  const key = pureCircuits.approveStataBinder();
+  const queued = await context.vault.callTx.approveStata();
+  console.log(`approveStata queued in tx ${queued.public.txId}`);
+  return key;
+}
 
+/**
+ * Sends a flushed approve(stataToken) request to the singleton and returns its request id.
+ *
+ * @param context - The vault context.
+ * @param key - The queue key of the flushed request.
+ * @returns The request id recorded on the vault ledger.
+ * @throws {Error} When the recomputed request id is not on the ledger.
+ */
+export async function sendApproveStata(
+  context: VaultContext,
+  key: Uint8Array,
+): Promise<RequestIdHex> {
+  const before = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
   const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "approve");
 
   // approve(stataToken, MAX) on the underlying USDC, signed with the vault account (path
   // "vault"), the same 2-word map + bool schema as a transfer.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: before.signetRequestNonce,
+    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: asciiPadded("vault", PATH_BYTES),
     ...VAULT_MPC_ROUTING,
@@ -69,7 +88,7 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
     txParams: {
       to: evmAddressBytes(AAVE_USDC),
       chainId: before.evmChainId,
-      nonce: evmNonce,
+      nonce: await assignedNonce(context, key),
       gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
@@ -94,23 +113,32 @@ export async function approveStata(context: VaultContext, evmNonce: bigint): Pro
     expectedRecord.txParams.maxFeePerGas,
     expectedRecord.txParams.maxPriorityFeePerGas,
   );
-  const result = await context.vault.callTx.approveStata(evmNonce, SIGNET_DEFAULT_KEY_VERSION);
-  console.log(`approveStata finalized in tx ${result.public.txId}`);
-
+  const result = await context.vault.callTx.sendApproveStata(key);
+  console.log(`approveStata sent in tx ${result.public.txId}`);
   const after = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
   if (!toSignBidirectionalEventIndex(after.signBidirectionalEventMap).has(expectedIdHex)) {
-    throw new Error(`recomputed approveStata request id ${expectedIdHex} not found on the ledger`);
+    throw new Error(`recomputed approve request id ${expectedIdHex} not found on the ledger`);
   }
   return expectedIdHex;
 }
 
 /**
- * Ensure the vault account has approved the stataToken to pull the underlying: read the live
- * allowance, and if it is zero run the approve leg (request -> sign -> broadcast; no settle).
- * Idempotent and global.
+ * Queues, flushes and sends an approve(stataToken) request.
+ *
+ * @param context - The vault context.
+ * @returns The request id recorded on the vault ledger.
+ */
+export async function approveStata(context: VaultContext): Promise<RequestIdHex> {
+  const key = await queueApproveStata(context);
+  await flushUntilNumbered(context, key);
+  return sendApproveStata(context, key);
+}
+
+/**
+ * Approves the stataToken wrapper from the vault account unless an allowance already exists.
  *
  * @param session - The vault session.
  */
@@ -131,8 +159,7 @@ export async function ensureStataApproved(session: VaultSession): Promise<void> 
     return;
   }
 
-  const evmNonce = await getTransactionNonce(context.evmRpcUrl, context.evmVaultAddress);
-  const requestId = await approveStata(context, evmNonce);
+  const requestId = await approveStata(context);
   const signed = await pollSignatureResponse(context, {
     requestId,
     intervalMs: 1000,
