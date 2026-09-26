@@ -3,7 +3,6 @@ import {
   assertRootFunded,
   deriveWalletAddresses,
   formatDust,
-  fundChildFromRoot,
   generateHexSeed,
   GENESIS_MINT_WALLET_SEED,
   getFaucetUrl,
@@ -18,7 +17,7 @@ import {
 import { requireEnv } from "./e2e-env.ts";
 import { appendRepoDotEnv } from "./env-file.ts";
 import { banner, logSkip } from "./output.ts";
-import { explainDustSpendRejection } from "./steps.ts";
+import { fundWalletsFromRoot, type WalletFundingRecipient } from "./wallet-funding.ts";
 
 /**
  * One wallet role: its display label, the env var holding its seed, and the
@@ -188,51 +187,44 @@ export async function ensureWalletsFunded(
     return;
   }
 
-  let root: AccountFunding | undefined;
-  let share = 0n;
-  for (const child of transfers) {
-    const funding: AccountFunding = await readAccountFunding(
-      wallets,
-      requireEnv(env, child.envVar),
-      child.label,
-    );
-    if (funding.night > 0n || funding.dust > 0n) {
-      logFundingBalance(child.label, funding);
-      console.log(`${child.label}: balance changed, NIGHT transfer skipped`);
-      continue;
-    }
-    if (root === undefined) {
-      root = await preflightRoot(
+  async function* fundingPlan(): AsyncGenerator<WalletFundingRecipient> {
+    let root: AccountFunding | undefined;
+    let share = 0n;
+    for (const child of transfers) {
+      const funding: AccountFunding = await readAccountFunding(
         wallets,
-        requireEnv(env, ROOT.envVar),
-        getFaucetUrl(env, wallets.config.networkId),
-      );
-      share = fundingShare(root.night, transfers);
-      const total: bigint = transfers.reduce(
-        (sum: bigint, role: RoleWallet): bigint => sum + perChildAmount(env, share, role),
-        0n,
-      );
-      if (total > root.night)
-        throw new Error(
-          `NIGHT transfers require ${String(total)} base units, root holds ${String(root.night)}`,
-        );
-      console.log(
-        `root funding plan: transfers ${String(total)} NIGHT base units, reserve ${String(root.night - total)} NIGHT base units`,
-      );
-    }
-    const amount: bigint = perChildAmount(env, share, child);
-    console.log(`${child.label}: transferring ${String(amount)} NIGHT base units from root`);
-    const funded: AccountFunding = await explainDustSpendRejection(`fund ${child.label}`, () =>
-      fundChildFromRoot(
-        wallets,
-        requireEnv(env, ROOT.envVar),
         requireEnv(env, child.envVar),
         child.label,
-        amount,
-      ),
-    );
-    logFundingBalance(child.label, funded);
+      );
+      if (funding.night > 0n || funding.dust > 0n) {
+        logFundingBalance(child.label, funding);
+        console.log(`${child.label}: balance changed, NIGHT transfer skipped`);
+        continue;
+      }
+      if (root === undefined) {
+        root = await preflightRoot(
+          wallets,
+          requireEnv(env, ROOT.envVar),
+          getFaucetUrl(env, wallets.config.networkId),
+        );
+        share = fundingShare(root.night, transfers);
+        const total: bigint = transfers.reduce(
+          (sum: bigint, role: RoleWallet): bigint => sum + perChildAmount(env, share, role),
+          0n,
+        );
+        if (total > root.night)
+          throw new Error(
+            `NIGHT transfers require ${String(total)} base units, root holds ${String(root.night)}`,
+          );
+        console.log(
+          `root funding plan: transfers ${String(total)} NIGHT base units, reserve ${String(root.night - total)} NIGHT base units`,
+        );
+      }
+      const amount: bigint = perChildAmount(env, share, child);
+      yield { seed: requireEnv(env, child.envVar), label: child.label, amount };
+    }
   }
+  await fundWalletsFromRoot(wallets, requireEnv(env, ROOT.envVar), fundingPlan());
 }
 
 /**
