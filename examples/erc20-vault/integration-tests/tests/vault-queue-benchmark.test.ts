@@ -1,24 +1,9 @@
 import { createHash } from "node:crypto";
 
-import {
-  createCallTxOptions,
-  createUnprovenCallTx,
-  submitCallTxAsync,
-} from "@midnight-ntwrk/midnight-js/contracts";
-import { getNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
-import { encodeContractKeyLocation, hashVerifierKey } from "@midnight-ntwrk/midnight-js/types";
-import {
-  communicationCommitmentRandomness,
-  ContractCallPrototype,
-  ContractState,
-  Intent,
-  Transaction as LedgerTransaction,
-} from "@midnight-ntwrk/midnight-js-protocol/ledger";
-import { MidnightBech32m, UnshieldedAddress } from "@midnightntwrk/wallet-sdk-address-format";
+import { createCallTxOptions, submitCallTxAsync } from "@midnight-ntwrk/midnight-js/contracts";
 import { type RequestIdHex, toSignBidirectionalEventIndex } from "@sig-net/midnight";
 import {
-  deriveWalletAddresses,
-  ensureFeeReady,
+  fundChildFromRoot,
   getMidnightNodeConfig,
   readAccountFunding,
   WalletRegistry,
@@ -34,11 +19,7 @@ import {
   resolveInitialiseConfig,
   vaultCompiledContract,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
-import {
-  type ProofServerObservation,
-  ProofServerPhase,
-  submitTransferTransaction,
-} from "@sig-net/midnight-examples-lib";
+import { type ProofServerObservation, ProofServerPhase } from "@sig-net/midnight-examples-lib";
 import { banner } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { JsonRpcProvider, type Transaction } from "ethers";
@@ -49,6 +30,7 @@ import { queueApproveRouter, sendApproveRouter } from "../src/flows/approve-rout
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
+import { proveAhead, type ProvenCall } from "../src/flows/prove-ahead.ts";
 import {
   assignedNonce,
   FLUSH_WIDTH,
@@ -63,7 +45,7 @@ const MINUTE = 60_000;
 const env = injectE2eEnv();
 const BEARER_SEED = env.BEARER_SEED ?? "";
 const PARALLEL_WALLET_NIGHT = 700_000_000_000n;
-const GAS_BUDGET_MULTIPLIER = BigInt(env.QUEUE_BENCH_GAS_MULTIPLIER ?? "2");
+const BYTE_BUDGET_MULTIPLIER = BigInt(env.QUEUE_BENCH_BYTE_MULTIPLIER ?? "2");
 const parallelSeed = (i: number): string =>
   createHash("sha256")
     .update(`vault-queue-benchmark-wallet-${String(i)}`)
@@ -323,46 +305,14 @@ const fundParallelWallets = async (seeds: readonly string[]): Promise<number> =>
   const config = getMidnightNodeConfig(env);
   const registry = new WalletRegistry(config);
   try {
-    const unfunded: number[] = [];
+    let funded = 0;
     for (const [i, seed] of seeds.entries()) {
-      const funding = await readAccountFunding(registry, seed, `bench wallet ${String(i)}`);
-      if (funding.night === 0n && funding.dust === 0n) unfunded.push(i);
+      const label = `bench wallet ${String(i)}`;
+      const funding = await readAccountFunding(registry, seed, label);
+      await fundChildFromRoot(registry, funderSeed, seed, label, PARALLEL_WALLET_NIGHT);
+      if (funding.night === 0n && funding.dust === 0n) funded += 1;
     }
-    if (unfunded.length === 0) return 0;
-    const funder = await registry.wallet(funderSeed, "bench funder");
-    const funderState = await funder.facade.waitForSyncedState();
-    const nightTokenType = Object.keys(funderState.unshielded.balances)[0];
-    if (!nightTokenType) throw new Error("the funder holds no NIGHT");
-    const outputs = unfunded.map((i) => ({
-      type: nightTokenType,
-      receiverAddress: MidnightBech32m.parse(
-        deriveWalletAddresses(seeds[i] ?? "", config).unshielded,
-      ).decode(UnshieldedAddress, config.networkId),
-      amount: PARALLEL_WALLET_NIGHT,
-    }));
-    const txId = await submitTransferTransaction(
-      funder.facade,
-      funder.keys,
-      [{ type: "unshielded", outputs }],
-      config.networkId,
-    );
-    console.log(`funded ${String(unfunded.length)} bench wallet(s) in one transfer ${txId}`);
-    await Promise.all(
-      unfunded.map(async (i) => {
-        const child = await registry.wallet(seeds[i] ?? "", `bench wallet ${String(i)}`);
-        let state = await child.facade.waitForSyncedState();
-        for (
-          let attempt = 0;
-          attempt < 40 && state.unshielded.availableCoins.length === 0;
-          attempt += 1
-        ) {
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-          state = await child.facade.waitForSyncedState();
-        }
-        await ensureFeeReady(child.facade, child.keys, state, config.networkId, undefined, 1n);
-      }),
-    );
-    return unfunded.length;
+    return funded;
   } finally {
     await registry.close();
   }
@@ -389,76 +339,8 @@ const parallelContexts = async (seeds: readonly string[]): Promise<VaultContext[
   return contexts;
 };
 
-type ProvenCall = Awaited<ReturnType<VaultContext["providers"]["proofProvider"]["proveTx"]>>;
-type Transcripts = Awaited<
-  ReturnType<typeof createUnprovenCallTx>
->["public"]["partitionedTranscript"];
-type Transcript = NonNullable<Transcripts[0]>;
-
-const padGas = (transcript: Transcript | undefined): Transcript | undefined =>
-  transcript && {
-    ...transcript,
-    gas: {
-      readTime: transcript.gas.readTime * GAS_BUDGET_MULTIPLIER,
-      computeTime: transcript.gas.computeTime * GAS_BUDGET_MULTIPLIER,
-      bytesWritten: transcript.gas.bytesWritten * GAS_BUDGET_MULTIPLIER,
-      bytesDeleted: transcript.gas.bytesDeleted * GAS_BUDGET_MULTIPLIER,
-    },
-  };
-
-const provePadded = async (
-  context: VaultContext,
-  circuitId: "approveRouter",
-  args: readonly [Uint8Array],
-): Promise<ProvenCall> => {
-  const options = createCallTxOptions(
-    vaultCompiledContract,
-    circuitId,
-    context.vaultContractAddress,
-    VAULT_PRIVATE_STATE_ID,
-    undefined,
-    args as never,
-  );
-  const call = await createUnprovenCallTx(context.providers, {
-    ...options,
-    privateStateId: VAULT_PRIVATE_STATE_ID,
-  });
-  const raw = await context.providers.publicDataProvider.queryContractState(
-    context.vaultContractAddress,
-  );
-  if (!raw) throw new Error("vault contract state not found");
-  const state = raw instanceof ContractState ? raw : ContractState.deserialize(raw.serialize());
-  const operation = state.operation(circuitId);
-  if (!operation?.verifierKey) throw new Error(`${circuitId} has no verifier key on chain`);
-  const [guaranteed, fallible] = call.public.partitionedTranscript;
-  const prototype = new ContractCallPrototype(
-    context.vaultContractAddress,
-    circuitId,
-    operation,
-    padGas(guaranteed),
-    padGas(fallible),
-    call.private.privateTranscriptOutputs,
-    call.private.input,
-    call.private.output,
-    communicationCommitmentRandomness(),
-    encodeContractKeyLocation({
-      contractAddress: context.vaultContractAddress,
-      circuitId,
-      verifierKeyHash: hashVerifierKey(operation.verifierKey),
-    }),
-  );
-  const intent = Intent.new(new Date(Date.now() + 60 * MINUTE)).addCall(prototype);
-  const unproven = LedgerTransaction.fromPartsRandomized(
-    getNetworkId(),
-    undefined,
-    undefined,
-    intent,
-  );
-  return context.providers.proofProvider.proveTx(unproven);
-};
-
 const proveApproveRouter = (context: VaultContext, item: QueuedApprove): Promise<ProvenCall> =>
-  provePadded(context, "approveRouter", [item.bytes]);
+  proveAhead(context, "approveRouter", [item.bytes], BYTE_BUDGET_MULTIPLIER);
 
 interface ParallelResult extends BurstResult {
   readonly proveMs: number;
@@ -743,7 +625,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
     20 * MINUTE,
   );
   it(
-    `${String(PARALLEL_WALLETS)} wallets pre-prove with a padded gas budget and submit together: their requests share a block, one flush numbers them all, every send lands`,
+    `${String(PARALLEL_WALLETS)} wallets pre-prove with a padded byte budget and submit together: their requests share a block, one flush numbers them all, every send lands`,
     async () => {
       const owner = await session.vaultContext();
       await initialise(owner, await resolveInitialiseConfig(env, owner.vaultContractAddress));
@@ -754,7 +636,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       const stopContexts = startTimer();
       const contexts = await parallelContexts(PARALLEL_SEEDS);
       const contextsMs = stopContexts();
-      const items = contexts.map((context) => approveOf(context.erc20Address));
+      const items = contexts.map(() => randomApprove());
       const ledgerBefore = await readVaultLedger(
         owner.providers.publicDataProvider,
         owner.vaultContractAddress,
@@ -829,7 +711,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
         totalMs,
       };
       banner([
-        `queue benchmark: ${String(PARALLEL_WALLETS)} wallets, pre-proven with gas budget x${String(GAS_BUDGET_MULTIPLIER)}, submitted together`,
+        `queue benchmark: ${String(PARALLEL_WALLETS)} wallets, pre-proven with byte budget x${String(BYTE_BUDGET_MULTIPLIER)}, submitted together`,
         `  setup   funded ${String(funded)} wallet(s) in ${(fundMs / 1000).toFixed(1)}s, opened ${String(PARALLEL_WALLETS)} wallets in ${(contextsMs / 1000).toFixed(1)}s (not counted below)`,
         `  queue   ${String(items.length)} txs  ${String(queue.blocks)} block(s), max ${String(queue.maxPerBlock)} per block  prove ${(queue.proveMs / 1000).toFixed(1)}s  balance ${(queue.balanceMs / 1000).toFixed(1)}s  submit ${(queue.submitMs / 1000).toFixed(1)}s  finalized ${(queue.wallMs / 1000).toFixed(1)}s`,
         `  flush   1 tx   prove ${(flushProve.ms / 1000).toFixed(2)}s  finalized ${(flushWallMs / 1000).toFixed(1)}s  nonces ${String(base)}..${String(base + BigInt(items.length - 1))}`,
