@@ -27,11 +27,13 @@ const SUBMIT_RETRY_MS = 10_000;
 const padGas = (
   transcript: Transcript | undefined,
   byteCostMultiplier: bigint,
+  computeTimePercentage: bigint,
 ): Transcript | undefined =>
   transcript && {
     ...transcript,
     gas: {
       ...transcript.gas,
+      computeTime: (transcript.gas.computeTime * computeTimePercentage + 99n) / 100n,
       bytesWritten: transcript.gas.bytesWritten * byteCostMultiplier,
       bytesDeleted: transcript.gas.bytesDeleted * byteCostMultiplier,
     },
@@ -39,13 +41,14 @@ const padGas = (
 
 /**
  * Proves a vault call against the current ledger and returns it unsubmitted, so a later ledger
- * change can be landed before it is submitted. Byte costs allow for map growth. Time costs
- * stay as measured to satisfy the ledger's transaction-size limit.
+ * change can be landed before it is submitted. Byte and compute costs allow for map growth.
+ * Compute headroom is opt-in because declared time contributes to the transaction-size limit.
  *
  * @param context - The vault context whose wallet and proof server prove the call.
  * @param circuitId - The vault circuit to call.
  * @param args - The circuit arguments.
  * @param byteCostMultiplier - Headroom for written and deleted bytes, doubled by default.
+ * @param computeTimePercentage - Compute budget as a percentage of the measured allowance, 100 by default.
  * @returns The proven, unbalanced transaction.
  * @throws {Error} When the vault state or the circuit's verifier key is not on chain.
  */
@@ -54,6 +57,7 @@ export async function proveAhead(
   circuitId: "flush" | "approveRouter",
   args: readonly unknown[],
   byteCostMultiplier = 2n,
+  computeTimePercentage = 100n,
 ): Promise<ProvenCall> {
   const options = createCallTxOptions(
     vaultCompiledContract,
@@ -79,8 +83,8 @@ export async function proveAhead(
     context.vaultContractAddress,
     circuitId,
     operation,
-    padGas(guaranteed, byteCostMultiplier),
-    padGas(fallible, byteCostMultiplier),
+    padGas(guaranteed, byteCostMultiplier, computeTimePercentage),
+    padGas(fallible, byteCostMultiplier, computeTimePercentage),
     call.private.privateTranscriptOutputs,
     call.private.input,
     call.private.output,

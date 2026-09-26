@@ -2,12 +2,7 @@ import { createHash } from "node:crypto";
 
 import { createCallTxOptions, submitCallTxAsync } from "@midnight-ntwrk/midnight-js/contracts";
 import { type RequestIdHex, toSignBidirectionalEventIndex } from "@sig-net/midnight";
-import {
-  fundChildFromRoot,
-  getMidnightNodeConfig,
-  readAccountFunding,
-  WalletRegistry,
-} from "@sig-net/midnight-contract-deploy";
+import { getMidnightNodeConfig, WalletRegistry } from "@sig-net/midnight-contract-deploy";
 import {
   evmAddressBytes,
   PendingRequestKind,
@@ -20,7 +15,7 @@ import {
   vaultCompiledContract,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { type ProofServerObservation, ProofServerPhase } from "@sig-net/midnight-examples-lib";
-import { banner } from "@sig-net/midnight-examples-test-harness";
+import { banner, fundWalletsFromRoot } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { JsonRpcProvider, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
@@ -46,6 +41,7 @@ const env = injectE2eEnv();
 const BEARER_SEED = env.BEARER_SEED ?? "";
 const PARALLEL_WALLET_NIGHT = 700_000_000_000n;
 const BYTE_BUDGET_MULTIPLIER = BigInt(env.QUEUE_BENCH_BYTE_MULTIPLIER ?? "2");
+const COMPUTE_BUDGET_PERCENTAGE = 110n;
 const parallelSeed = (i: number): string =>
   createHash("sha256")
     .update(`vault-queue-benchmark-wallet-${String(i)}`)
@@ -305,13 +301,19 @@ const fundParallelWallets = async (seeds: readonly string[]): Promise<number> =>
   const config = getMidnightNodeConfig(env);
   const registry = new WalletRegistry(config);
   try {
-    let funded = 0;
-    for (const [i, seed] of seeds.entries()) {
-      const label = `bench wallet ${String(i)}`;
-      const funding = await readAccountFunding(registry, seed, label);
-      await fundChildFromRoot(registry, funderSeed, seed, label, PARALLEL_WALLET_NIGHT);
-      if (funding.night === 0n && funding.dust === 0n) funded += 1;
-    }
+    const startedAt: number = Date.now();
+    const funded: number = await fundWalletsFromRoot(
+      registry,
+      funderSeed,
+      seeds.map((seed, i) => ({
+        seed,
+        label: `bench wallet ${String(i)}`,
+        amount: PARALLEL_WALLET_NIGHT,
+      })),
+    );
+    console.log(
+      `benchmark wallet funding: ${String(funded)} transfers, ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
+    );
     return funded;
   } finally {
     await registry.close();
@@ -340,7 +342,13 @@ const parallelContexts = async (seeds: readonly string[]): Promise<VaultContext[
 };
 
 const proveApproveRouter = (context: VaultContext, item: QueuedApprove): Promise<ProvenCall> =>
-  proveAhead(context, "approveRouter", [item.bytes], BYTE_BUDGET_MULTIPLIER);
+  proveAhead(
+    context,
+    "approveRouter",
+    [item.bytes],
+    BYTE_BUDGET_MULTIPLIER,
+    COMPUTE_BUDGET_PERCENTAGE,
+  );
 
 interface ParallelResult extends BurstResult {
   readonly proveMs: number;
@@ -625,7 +633,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
     20 * MINUTE,
   );
   it(
-    `${String(PARALLEL_WALLETS)} wallets pre-prove with a padded byte budget and submit together: their requests share a block, one flush numbers them all, every send lands`,
+    `${String(PARALLEL_WALLETS)} wallets pre-prove with padded byte and compute budgets and submit together: their requests share a block, one flush numbers them all, every send lands`,
     async () => {
       const owner = await session.vaultContext();
       await initialise(owner, await resolveInitialiseConfig(env, owner.vaultContractAddress));
@@ -711,7 +719,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
         totalMs,
       };
       banner([
-        `queue benchmark: ${String(PARALLEL_WALLETS)} wallets, pre-proven with byte budget x${String(BYTE_BUDGET_MULTIPLIER)}, submitted together`,
+        `queue benchmark: ${String(PARALLEL_WALLETS)} wallets, pre-proven with byte budget x${String(BYTE_BUDGET_MULTIPLIER)} and ${String(COMPUTE_BUDGET_PERCENTAGE)}% compute budget, submitted together`,
         `  setup   funded ${String(funded)} wallet(s) in ${(fundMs / 1000).toFixed(1)}s, opened ${String(PARALLEL_WALLETS)} wallets in ${(contextsMs / 1000).toFixed(1)}s (not counted below)`,
         `  queue   ${String(items.length)} txs  ${String(queue.blocks)} block(s), max ${String(queue.maxPerBlock)} per block  prove ${(queue.proveMs / 1000).toFixed(1)}s  balance ${(queue.balanceMs / 1000).toFixed(1)}s  submit ${(queue.submitMs / 1000).toFixed(1)}s  finalized ${(queue.wallMs / 1000).toFixed(1)}s`,
         `  flush   1 tx   prove ${(flushProve.ms / 1000).toFixed(2)}s  finalized ${(flushWallMs / 1000).toFixed(1)}s  nonces ${String(base)}..${String(base + BigInt(items.length - 1))}`,
