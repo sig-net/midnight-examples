@@ -61,6 +61,7 @@ export async function settleWithdraw(
       requestIdBytes(requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
+      outcome.blockHeight,
       mintNonce,
     );
     console.log(`refundWithdraw settled in tx ${result.public.txId}`);
@@ -76,6 +77,7 @@ export async function settleWithdraw(
     requestIdBytes(requestId),
     respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
+    outcome.blockHeight,
     mintNonce,
   );
   console.log(`completeWithdraw settled in tx ${result.public.txId}`);

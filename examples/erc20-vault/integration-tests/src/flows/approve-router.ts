@@ -35,7 +35,7 @@ import type { VaultContext } from "../vault-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
-import { assignedNonce, flushUntilNumbered } from "./vault-queue.ts";
+import { assignedNonce, flushUntilStamped } from "./vault-queue.ts";
 
 /**
  * Queues an approve(router) request for an ERC20 and returns its queue key.
@@ -84,7 +84,6 @@ export async function sendApproveRouter(
   const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "approve");
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: asciiPadded("vault", PATH_BYTES),
     ...VAULT_MPC_ROUTING,
@@ -144,7 +143,7 @@ export async function approveRouter(
   erc20Address: string = context.erc20Address,
 ): Promise<RequestIdHex> {
   const key = await queueApproveRouter(context, erc20Address);
-  await flushUntilNumbered(context, key);
+  await flushUntilStamped(context, key);
   return sendApproveRouter(context, key, erc20Address);
 }
 

@@ -245,7 +245,6 @@ sealed ledger signetSigner: SignetSigner;
 export ledger mpcResponseKey: Secp256k1Point;
 
 // The vault's own state.
-export ledger signetRequestNonce: Counter;  // keeps identical requests' ids distinct
 export ledger initialised: Counter;         // one-shot initialise marker
 export ledger vaultEvmAddress: Bytes<20>;   // the vault's derived EVM account
 export ledger evmChainId: Uint<64>;         // EIP-155 chain id of the pinned Ethereum network

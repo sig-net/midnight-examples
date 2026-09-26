@@ -19,7 +19,6 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
-  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -30,7 +29,7 @@ import { ERC20_TRANSFER_SELECTOR } from "../evm-transfer.ts";
 import { VAULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
-import { flushUntilNumbered, newQueueKey } from "./vault-queue.ts";
+import { flushUntilStamped, newQueueKey } from "./vault-queue.ts";
 
 /** Options for {@link startWithdraw}. */
 export interface StartWithdrawOptions {
@@ -96,7 +95,6 @@ export async function startWithdraw(
   }
 
   const { gasLimit, maxFeePerGas, maxPriorityFeePerGas } = vaultGasEnvelope(before, "withdraw");
-  const requestNonce = pureCircuits.vaultSignedRequestNonce();
 
   // The surrendered coin: the vault token for THIS erc20, of exactly
   // `amount`, under a fresh random nonce.
@@ -118,7 +116,7 @@ export async function startWithdraw(
     key,
   );
   console.log(`withdraw queued in tx ${queued.public.txId}`);
-  const evmNonce = await flushUntilNumbered(context, key);
+  const evmNonce = (await flushUntilStamped(context, key)).evmNonce;
 
   // The record the contract will store, reconstructed byte for byte: the
   // event's own sender (the vault contract, kernel.self() in-circuit), the
@@ -128,7 +126,6 @@ export async function startWithdraw(
   // vault's own 32-byte derivation path, and the contract-fixed routing.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce,
     keyVersion,
     path: VAULT_PATH_BYTES,
     ...VAULT_MPC_ROUTING,

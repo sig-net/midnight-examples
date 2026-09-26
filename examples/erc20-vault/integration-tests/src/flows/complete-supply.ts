@@ -28,6 +28,7 @@ import { createResponseReader, type VaultContext } from "../vault-context.ts";
 export interface SupplyOutcome {
   readonly event: RespondBidirectionalEvent;
   readonly serializedOutput: Uint8Array;
+  readonly blockHeight: bigint;
   readonly shares: bigint;
   readonly matchedFailureOutput: boolean;
 }
@@ -35,6 +36,7 @@ export interface SupplyOutcome {
 /** One output a posted attestation may commit to, and the shares settling on it yields. */
 interface SupplyCandidate {
   readonly serializedOutput: Uint8Array;
+  readonly blockHeight: bigint;
   readonly shares: bigint;
   readonly isFailureOutput: boolean;
 }
@@ -82,6 +84,7 @@ async function fetchSupplyCandidates(
       const decoded = deserializeEvmOutput(SUPPLY_OUTPUT_SCHEMA, observed.output);
       candidates.push({
         serializedOutput: serializeRespondOutput(SUPPLY_RESPOND_SCHEMA, decoded),
+        blockHeight: observed.blockNumber,
         shares: (decoded as { shares: bigint }).shares,
         isFailureOutput: false,
       });
@@ -89,7 +92,12 @@ async function fetchSupplyCandidates(
       progress.failure("decode", `execution output decode failed: ${String(error)}`);
     }
   }
-  candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, shares: 0n, isFailureOutput: true });
+  candidates.push({
+    serializedOutput: MPC_FAILURE_OUTPUT,
+    blockHeight: observed.blockNumber,
+    shares: 0n,
+    isFailureOutput: true,
+  });
   return candidates;
 }
 
@@ -114,6 +122,7 @@ function matchSupplyOutcome(
     const event = events.find((posted) =>
       verifyRespondBidirectionalSignature(
         requestIdBytes(requestId),
+        candidate.blockHeight,
         candidate.serializedOutput,
         posted,
         mpcResponseKey,
@@ -123,6 +132,7 @@ function matchSupplyOutcome(
       return {
         event,
         serializedOutput: candidate.serializedOutput,
+        blockHeight: candidate.blockHeight,
         shares: candidate.shares,
         matchedFailureOutput: candidate.isFailureOutput,
       };
@@ -220,6 +230,7 @@ export async function settleSupply(
       requestIdBytes(requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
+      outcome.blockHeight,
       mintNonce,
     );
     console.log(`refund settled in tx ${r.public.txId}`);
@@ -229,6 +240,7 @@ export async function settleSupply(
     requestIdBytes(requestId),
     respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
+    outcome.blockHeight,
     mintNonce,
   );
   console.log(`completeSupply settled in tx ${r.public.txId}`);

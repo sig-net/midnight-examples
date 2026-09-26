@@ -36,7 +36,7 @@ import type { VaultContext } from "../vault-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
-import { assignedNonce, flushUntilNumbered } from "./vault-queue.ts";
+import { assignedNonce, flushUntilStamped } from "./vault-queue.ts";
 
 /**
  * Queues an approve(stataToken) request on the underlying and returns its queue key.
@@ -80,7 +80,6 @@ export async function sendApproveStata(
   // "vault"), the same 2-word map + bool schema as a transfer.
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: asciiPadded("vault", PATH_BYTES),
     ...VAULT_MPC_ROUTING,
@@ -133,7 +132,7 @@ export async function sendApproveStata(
  */
 export async function approveStata(context: VaultContext): Promise<RequestIdHex> {
   const key = await queueApproveStata(context);
-  await flushUntilNumbered(context, key);
+  await flushUntilStamped(context, key);
   return sendApproveStata(context, key);
 }
 

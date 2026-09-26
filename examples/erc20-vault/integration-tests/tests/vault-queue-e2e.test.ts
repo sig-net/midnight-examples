@@ -17,9 +17,9 @@ import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { proveAhead, submitProven } from "../src/flows/prove-ahead.ts";
 import {
   flushPending,
-  flushUntilNumbered,
+  flushUntilStamped,
   proveFlush,
-  unnumberedKeys,
+  unstampedKeys,
 } from "../src/flows/vault-queue.ts";
 import type { VaultContext } from "../src/vault-context.ts";
 import { createVaultSession } from "../src/vault-session.ts";
@@ -88,7 +88,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
       ];
       const numbered = [];
       for (const entry of queued) {
-        numbered.push({ ...entry, nonce: await flushUntilNumbered(context, entry.key) });
+        numbered.push({ ...entry, nonce: (await flushUntilStamped(context, entry.key)).evmNonce });
       }
       expect(new Set(numbered.map((entry) => entry.nonce))).toEqual(
         new Set([base, base + 1n, base + 2n]),
@@ -111,7 +111,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
       const context = await session.vaultContext();
       const stranger = await strangerSession.vaultContext();
       const key = await queueApproveRouter(context);
-      await flushUntilNumbered(stranger, key);
+      await flushUntilStamped(stranger, key);
       const signed = await signatureOf(context, await sendApproveRouter(stranger, key));
       expect((await broadcastEvm(context, { transaction: signed })).status).toBe(1);
     },
@@ -125,8 +125,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
       const chainBefore = await vaultChainNonce(context);
       const router = await queueApproveRouter(context);
       const stata = await queueApproveStata(context);
-      const routerNonce = await flushUntilNumbered(context, router);
-      const stataNonce = await flushUntilNumbered(context, stata);
+      const routerNonce = (await flushUntilStamped(context, router)).evmNonce;
+      const stataNonce = (await flushUntilStamped(context, stata)).evmNonce;
       const routerIsHigher = routerNonce > stataNonce;
       const higher = routerIsHigher
         ? { nonce: routerNonce, send: () => sendApproveRouter(context, router) }
@@ -155,7 +155,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
       const stranger = await strangerSession.vaultContext();
       const router = await queueApproveRouter(context);
       const stata = await queueApproveStata(context);
-      const pending = (await unnumberedKeys(context)).length;
+      const pending = (await unstampedKeys(context)).length;
       const before = (
         await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)
       ).vaultEvmNonce;
@@ -172,11 +172,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
 
       const stamped = [
         {
-          nonce: await flushUntilNumbered(context, router),
+          nonce: (await flushUntilStamped(context, router)).evmNonce,
           send: () => sendApproveRouter(context, router),
         },
         {
-          nonce: await flushUntilNumbered(context, stata),
+          nonce: (await flushUntilStamped(context, stata)).evmNonce,
           send: () => sendApproveStata(context, stata),
         },
       ].sort((a, b) => (a.nonce < b.nonce ? -1 : 1));
@@ -195,7 +195,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
       const context = await session.vaultContext();
       const stranger = await strangerSession.vaultContext();
       const router = await queueApproveRouter(context);
-      const waiting = await unnumberedKeys(context);
+      const waiting = await unstampedKeys(context);
       expect(waiting).toContainEqual(router);
 
       const staleFlush = await proveFlush(context, waiting);
@@ -208,10 +208,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
       const staleStatus = await submitProven(context, staleFlush);
       console.log(`stale flush: ${staleStatus}`);
       expect(staleStatus).not.toBe("SucceedEntirely");
-      expect(await unnumberedKeys(context)).toHaveLength(waiting.length + 2);
+      expect(await unstampedKeys(context)).toHaveLength(waiting.length + 2);
 
-      await flushUntilNumbered(stranger, stata);
-      expect(await unnumberedKeys(context)).toHaveLength(0);
+      await flushUntilStamped(stranger, stata);
+      expect(await unstampedKeys(context)).toHaveLength(0);
       expect(
         (await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress))
           .unflushed,
@@ -219,15 +219,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
 
       const stamped = [
         {
-          nonce: await flushUntilNumbered(context, router),
+          nonce: (await flushUntilStamped(context, router)).evmNonce,
           send: () => sendApproveRouter(context, router),
         },
         {
-          nonce: await flushUntilNumbered(context, late),
+          nonce: (await flushUntilStamped(context, late)).evmNonce,
           send: () => sendApproveRouter(context, late, AAVE_USDC),
         },
         {
-          nonce: await flushUntilNumbered(context, stata),
+          nonce: (await flushUntilStamped(context, stata)).evmNonce,
           send: () => sendApproveStata(stranger, stata),
         },
       ].sort((a, b) => (a.nonce < b.nonce ? -1 : 1));

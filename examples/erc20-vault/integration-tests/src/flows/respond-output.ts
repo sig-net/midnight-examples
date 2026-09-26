@@ -1,26 +1,28 @@
 // Respond-output resolution: the client half of the signature-only
 // attestation protocol. The MPC's RespondBidirectionalEvent carries only the
-// ECDSA signature over the attestation digest (binding requestId and
-// serializedOutput), never the digest and never the output itself, so the
-// client obtains the output bytes independently and checks the signature
-// against them. Every call builds the candidate outputs the chosen
-// OutputSource yields and tries the posted events against each:
+// ECDSA signature over the attestation digest (binding requestId, the
+// destination block height and serializedOutput), never the digest and never
+// the output itself, so the client obtains the height and the output bytes
+// independently and checks the signature against them. Every call builds the
+// candidate outputs the chosen OutputSource yields and tries the posted
+// events against each:
 //
 //   OutputSource.EVMNode  -> success candidate: the mined transaction's raw
 //                            traced output (see ../observed-execution.ts),
 //                            decoded per the request's output deserialisation
 //                            schema and re-packed per its respond
-//                            serialisation schema. Only computable when the
-//                            observation reports an executed transaction
-//                            with output bytes.
+//                            serialisation schema, at the block the receipt
+//                            names. Only computable when the observation
+//                            reports an executed transaction with output
+//                            bytes.
 //                            failure candidate: the protocol's fixed 5-byte
-//                            failure output (MPC_FAILURE_OUTPUT),
-//                            schema-independent by design, always a
+//                            failure output (MPC_FAILURE_OUTPUT) at that same
+//                            block, schema-independent by design, always a
 //                            candidate.
 //   OutputSource.MPCCache -> the one object the MPC cached for the request
 //                            before it posted (the SDK's MpcOutputCacheReader):
-//                            the attested bytes verbatim, success and failure
-//                            output alike.
+//                            the block height and the attested bytes
+//                            verbatim, success and failure output alike.
 //
 // Candidate selection is by SIGNATURE VERIFICATION alone, against the
 // response key the vault pinned at initialise: neither the observation's own
@@ -36,6 +38,7 @@
 // authentication gate, so a forged post merely wastes a proof here, it
 // cannot mint.
 import {
+  type AttestedOutput,
   boolAbiWord,
   deserializeEvmOutput,
   isMpcFailureOutput,
@@ -62,6 +65,8 @@ export interface RespondOutcome {
   readonly event: RespondBidirectionalEvent;
   /** The output bytes the signature covers (a circuit argument). */
   readonly serializedOutput: Uint8Array;
+  /** The destination block height the signature covers (a circuit argument). */
+  readonly blockHeight: bigint;
   /**
    * True only when a SUCCESS candidate matched AND it is the packing of a
    * true transfer result under the request's schemas. The vault's ERC20
@@ -90,8 +95,7 @@ export interface RespondOutputSchemas {
 }
 
 /** One output a posted attestation may commit to. */
-interface OutputCandidate {
-  readonly serializedOutput: Uint8Array;
+interface OutputCandidate extends AttestedOutput {
   /** Whether the candidate is the protocol's fixed failure output. */
   readonly isFailureOutput: boolean;
 }
@@ -178,6 +182,7 @@ async function evmNodeCandidates(
       const decoded = deserializeEvmOutput(schemas.outputDeserializationSchema, observed.output);
       candidates.push({
         serializedOutput: serializeRespondOutput(schemas.respondSerializationSchema, decoded),
+        blockHeight: observed.blockNumber,
         isFailureOutput: false,
       });
     } catch (error) {
@@ -189,7 +194,11 @@ async function evmNodeCandidates(
       );
     }
   }
-  candidates.push({ serializedOutput: MPC_FAILURE_OUTPUT, isFailureOutput: true });
+  candidates.push({
+    serializedOutput: MPC_FAILURE_OUTPUT,
+    blockHeight: observed.blockNumber,
+    isFailureOutput: true,
+  });
   return candidates;
 }
 
@@ -210,9 +219,9 @@ async function mpcCacheCandidates(
   requestId: RequestIdHex,
   progress: PollProgress | undefined,
 ): Promise<OutputCandidate[] | undefined> {
-  let cached: Uint8Array | undefined;
+  let cached: AttestedOutput | undefined;
   try {
-    cached = await cache.fetchSerializedOutput(requestId);
+    cached = await cache.fetchAttestedOutput(requestId);
   } catch (error) {
     reportTickFailure(
       progress,
@@ -231,7 +240,7 @@ async function mpcCacheCandidates(
     );
     return undefined;
   }
-  return [{ serializedOutput: cached, isFailureOutput: isMpcFailureOutput(cached) }];
+  return [{ ...cached, isFailureOutput: isMpcFailureOutput(cached.serializedOutput) }];
 }
 
 /**
@@ -373,6 +382,7 @@ export async function fetchAttestedRespondOutcome(
     const event = events.find((posted) =>
       verifyRespondBidirectionalSignature(
         requestIdBytes(requestId),
+        candidate.blockHeight,
         candidate.serializedOutput,
         posted,
         mpcResponseKey,
@@ -382,6 +392,7 @@ export async function fetchAttestedRespondOutcome(
       return {
         event,
         serializedOutput: candidate.serializedOutput,
+        blockHeight: candidate.blockHeight,
         succeeded:
           !candidate.isFailureOutput &&
           bytesEqual(candidate.serializedOutput, packedTransferSuccess(schemas)),

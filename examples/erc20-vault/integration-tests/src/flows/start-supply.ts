@@ -17,7 +17,6 @@ import {
 } from "@sig-net/midnight";
 import {
   AAVE_USDC,
-  pureCircuits,
   readVaultLedger,
   VAULT_PATH_BYTES,
   vaultGasEnvelope,
@@ -27,7 +26,7 @@ import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import { STATA_DEPOSIT_SELECTOR, SUPPLY_MPC_ROUTING } from "../evm-stata.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTokenType } from "../vault-token.ts";
-import { flushUntilNumbered, newQueueKey } from "./vault-queue.ts";
+import { flushUntilStamped, newQueueKey } from "./vault-queue.ts";
 
 /** Options for {@link startSupply}. */
 export interface StartSupplyOptions {
@@ -63,7 +62,7 @@ export async function startSupply(
   const key = newQueueKey();
   const queued = await context.vault.callTx.startSupply({ amount: options.amount }, coin, key);
   console.log(`supply queued in tx ${queued.public.txId}`);
-  const evmNonce = await flushUntilNumbered(context, key);
+  const evmNonce = (await flushUntilStamped(context, key)).evmNonce;
 
   // The record the contract composes: vault path/sender, stataToken `to`, contract-fixed gas,
   // deposit(amount, receiver=vault).
@@ -76,7 +75,6 @@ export async function startSupply(
   );
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    requestNonce: pureCircuits.vaultSignedRequestNonce(),
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...SUPPLY_MPC_ROUTING,

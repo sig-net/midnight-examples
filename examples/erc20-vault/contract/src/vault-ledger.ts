@@ -71,8 +71,8 @@ function printRequestMap(
 ): void {
   const index = toSignBidirectionalEventIndex(map);
   console.log(`pending ${kinds} signature requests: ${String(index.size)}`);
-  for (const [requestIdHex, request] of index) {
-    console.log(`- ${requestIdHex} (requestNonce ${String(request.requestNonce)})`);
+  for (const requestIdHex of index.keys()) {
+    console.log(`- ${requestIdHex}`);
   }
 }
 

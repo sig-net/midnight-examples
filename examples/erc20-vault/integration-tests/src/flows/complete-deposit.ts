@@ -109,6 +109,7 @@ export async function settleDeposit(
               requestIdBytes(requestId),
               respondBidirectionalEventToCircuitInput(outcome.event),
               outcome.serializedOutput,
+              outcome.blockHeight,
               mintNonce,
               mintRecipient,
             );
@@ -123,6 +124,7 @@ export async function settleDeposit(
           requestIdBytes(requestId),
           respondBidirectionalEventToCircuitInput(outcome.event),
           outcome.serializedOutput,
+          outcome.blockHeight,
           mintNonce,
           mintRecipient,
         );

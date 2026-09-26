@@ -1,10 +1,13 @@
 import {
   assignedNonce as assignedNonceOf,
+  FLUSH_WIDTH,
   flushPending as flushPendingOn,
-  flushUntilNumbered as flushUntilNumberedOn,
+  flushUntilStamped as flushUntilStampedOn,
   padKeys,
   readVaultLedger,
-  unnumberedKeys as unnumberedKeysOf,
+  seenRequestIds,
+  type Stamp,
+  unstampedKeys as unstampedKeysOf,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import type { VaultContext } from "../vault-context.ts";
@@ -13,22 +16,23 @@ import { proveAhead, type ProvenCall } from "./prove-ahead.ts";
 export { FLUSH_WIDTH, newQueueKey, padKeys } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 /**
- * Queued keys on the ledger that have no EVM nonce yet.
+ * Queued keys on the ledger the flush has not stamped yet.
  *
  * @param context - The vault context.
- * @returns The keys a flush can still number.
+ * @returns The keys a flush can still stamp.
  */
-export async function unnumberedKeys(context: VaultContext): Promise<Uint8Array[]> {
-  return unnumberedKeysOf(
+export async function unstampedKeys(context: VaultContext): Promise<Uint8Array[]> {
+  return unstampedKeysOf(
     await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress),
   );
 }
 
 /**
- * Numbers the first FLUSH_WIDTH unnumbered queued keys, whoever queued them.
+ * Folds settled heights into the last seen height, then stamps the first FLUSH_WIDTH
+ * unstamped queued keys, whoever queued them.
  *
  * @param context - The vault context.
- * @returns How many keys the flush carried.
+ * @returns How many keys the flush stamped.
  */
 export async function flushPending(context: VaultContext): Promise<number> {
   const carried = await flushPendingOn(
@@ -41,14 +45,14 @@ export async function flushPending(context: VaultContext): Promise<number> {
 }
 
 /**
- * Flushes until the given queued key has an EVM nonce.
+ * Flushes until the given queued key carries a stamp.
  *
  * @param context - The vault context.
- * @param key - The queued key that needs a nonce.
- * @returns The assigned nonce.
+ * @param key - The queued key that needs a stamp.
+ * @returns The stamp.
  */
-export function flushUntilNumbered(context: VaultContext, key: Uint8Array): Promise<bigint> {
-  return flushUntilNumberedOn(
+export function flushUntilStamped(context: VaultContext, key: Uint8Array): Promise<Stamp> {
+  return flushUntilStampedOn(
     context.vault,
     context.providers.publicDataProvider,
     context.vaultContractAddress,
@@ -74,12 +78,17 @@ export async function assignedNonce(context: VaultContext, key: Uint8Array): Pro
  * Proves a flush of the given keys against the ledger as it is now and returns it unsubmitted.
  *
  * @param context - The vault context.
- * @param keys - The queued keys the flush numbers.
+ * @param keys - The queued keys the flush stamps.
  * @returns The proven flush, to submit with `submitProven`.
  */
-export function proveFlush(
+export async function proveFlush(
   context: VaultContext,
   keys: readonly Uint8Array[],
 ): Promise<ProvenCall> {
-  return proveAhead(context, "flush", [padKeys(keys)]);
+  const state = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+  const seen = seenRequestIds(state).slice(0, FLUSH_WIDTH);
+  return proveAhead(context, "flush", [padKeys(keys), padKeys(seen)]);
 }

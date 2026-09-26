@@ -25,9 +25,6 @@ sealed ledger signetSigner: SignetSigner;
 // Verifies every attestation (the Signet singleton emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
-// Nonce to keep otherwise identical requests hashing to distinct request ids.
-export ledger signetRequestNonce: Counter;
-
 export ledger vaultMaxFeePerGas: Uint<128>;
 export ledger vaultMaxPriorityFeePerGas: Uint<128>;
 
@@ -55,7 +52,10 @@ export ledger mpcKeyVersion: Uint<8>;
 // Identity commitment of the deployer. Only they may call initialise().
 sealed ledger deployer: Bytes<32>;
 
-export enum PendingRequestKind { withdraw, swap, supply, redeem, approveRouter, approveStata }
+export ledger lastSeenEvmHeight: Uint<64>;
+export ledger seenEvmHeights: Map<RequestId, Uint<64>>;
+
+export enum PendingRequestKind { withdraw, swap, supply, redeem, approveRouter, approveStata, deposit }
 struct PendingVaultRequest {
   kind: PendingRequestKind;
   addressA: Bytes<20>;
@@ -64,10 +64,19 @@ struct PendingVaultRequest {
   amountA: Uint<128>;
   amountB: Uint<128>;
   commitment: Bytes<32>;
+  requester: Bytes<32>;
+  evmNonce: Uint<64>;
+  gasLimit: Uint<64>;
+  maxFeePerGas: Uint<128>;
+  maxPriorityFeePerGas: Uint<128>;
+}
+export struct Stamp {
+  evmNonce: Uint<64>;
+  knownHeight: Uint<64>;
 }
 export ledger vaultEvmNonce: Counter;
 export ledger pendingVaultRequests: Map<Bytes<32>, PendingVaultRequest>;
-export ledger assignedNonces: Map<Bytes<32>, Uint<64>>;
+export ledger stamps: Map<Bytes<32>, Stamp>;
 export ledger nonceOwners: Map<Uint<64>, Bytes<32>>;
 
 // Deposit requests (2-word ERC20 transfer, 34-byte schemas).
@@ -83,6 +92,7 @@ struct DepositSettleView {
   commitment: Bytes<32>;
   erc20: Bytes<20>;
   amount: Uint<64>;
+  knownHeight: Uint<64>;
 }
 export ledger depositSettleViews: Map<RequestId, DepositSettleView>;
 
@@ -96,6 +106,7 @@ struct WithdrawSettleView {
   key: Bytes<32>;
   erc20: Bytes<20>;
   amount: Uint<64>;
+  knownHeight: Uint<64>;
 }
 export ledger withdrawSettleViews: Map<RequestId, WithdrawSettleView>;
 
@@ -118,6 +129,7 @@ struct SwapSettleView {
   tokenOut: Bytes<20>;
   amountOut: Uint<64>;
   amountInMaximum: Uint<64>;
+  knownHeight: Uint<64>;
 }
 export ledger swapSettleViews: Map<RequestId, SwapSettleView>;
 
@@ -136,6 +148,7 @@ struct SupplySettleView {
   commitment: Bytes<32>;
   key: Bytes<32>;
   amount: Uint<64>;
+  knownHeight: Uint<64>;
 }
 export ledger supplySettleViews: Map<RequestId, SupplySettleView>;
 
@@ -150,6 +163,7 @@ struct RedeemSettleView {
   commitment: Bytes<32>;
   key: Bytes<32>;
   shares: Uint<64>;
+  knownHeight: Uint<64>;
 }
 export ledger redeemSettleViews: Map<RequestId, RedeemSettleView>;
 
@@ -207,12 +221,14 @@ export pure circuit refundCommitment(sk: Bytes<32>, binder: Bytes<32>): Bytes<32
 circuit assertAttestedFailureOutput(
   disclosedRequestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
-  serializedOutput: Bytes<5>
+  serializedOutput: Bytes<5>,
+  blockHeight: Uint<64>
 ): [] {
   assert(initialised >= 1, "Not initialised");
   assert(
     verifyRespondBidirectionalEvent<5>(
       disclosedRequestId,
+      blockHeight,
       serializedOutput,
       disclose(respondBidirectionalEvent),
       mpcResponseKey
@@ -221,6 +237,11 @@ circuit assertAttestedFailureOutput(
   );
   const failureOutput = Bytes [0xde, 0xad, 0xbe, 0xef, 0x01];
   assert(serializedOutput == failureOutput, "Not the MPC failure output");
+}
+
+circuit settleHeight(disclosedRequestId: RequestId, knownHeight: Uint<64>, blockHeight: Uint<64>): [] {
+  assert(blockHeight > knownHeight, "Stale attestation");
+  seenEvmHeights.insert(disclosedRequestId, disclose(blockHeight));
 }
 
 // Pins WHO may configure. Everything needing the contract's own address waits for
@@ -244,7 +265,8 @@ export circuit initialise(
   stataTokenAddr: Bytes<20>,
   chainId: Uint<64>,
   responseKey: Secp256k1Point,
-  responseKeyVersion: Uint<8>
+  responseKeyVersion: Uint<8>,
+  evmHeight: Uint<64>
 ): [] {
   assert(initialised == 0, "Already initialised");
   assert(responseKeyVersion >= 1, "keyVersion must be >= 1");
@@ -261,6 +283,7 @@ export circuit initialise(
   evmChainId = disclose(chainId);
   mpcResponseKey = disclose(responseKey);
   mpcKeyVersion = disclose(responseKeyVersion);
+  lastSeenEvmHeight = disclose(evmHeight);
 
   vaultMaxFeePerGas = 150000000000 as Uint<128>;
   vaultMaxPriorityFeePerGas = 1000000000 as Uint<128>;
@@ -329,7 +352,7 @@ export circuit adminReplaceEvmNonce(
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -366,6 +389,11 @@ export circuit approveStata(): [] {
     amountA: 0 as Uint<128>,
     amountB: 0 as Uint<128>,
     commitment: pad(32, ""),
+    requester: pad(32, ""),
+    evmNonce: 0 as Uint<64>,
+    gasLimit: 0 as Uint<64>,
+    maxFeePerGas: 0 as Uint<128>,
+    maxPriorityFeePerGas: 0 as Uint<128>,
   });
   unflushed.increment(1);
 }
@@ -387,6 +415,11 @@ export circuit approveRouter(
     amountA: 0 as Uint<128>,
     amountB: 0 as Uint<128>,
     commitment: pad(32, ""),
+    requester: pad(32, ""),
+    evmNonce: 0 as Uint<64>,
+    gasLimit: 0 as Uint<64>,
+    maxFeePerGas: 0 as Uint<128>,
+    maxPriorityFeePerGas: 0 as Uint<128>,
   });
   unflushed.increment(1);
 }
@@ -398,8 +431,13 @@ struct DepositRequest {
   amount: Uint<128>;       // token amount to move into the vault
 }
 
-// Records transfer(vaultEvmAddress, amount) on the ERC20, signed by the MPC with the
-// CALLER's derived account (the path is the caller's commitment, recomputed in-circuit).
+export pure circuit depositBinder(evmNonce: Uint<64>): Bytes<32> {
+  return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([pad(32, "vault:deposit"), evmNonce as Field as Bytes<32>]));
+}
+
+// Queues transfer(vaultEvmAddress, amount) on the ERC20 under the caller's key; sendDeposit
+// records it, signed by the MPC with the CALLER's derived account (the path is the caller's
+// commitment, stored at queue time).
 export circuit startDeposit(
   evmNonce: Uint<64>,
   gasLimit: Uint<64>,
@@ -413,66 +451,71 @@ export circuit startDeposit(
   // completeDeposit mints via a Uint<64> API, so reject unclaimable amounts.
   assert(depositRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
   assert(gasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  const key = disclose(refundCommitment(callerSecretKey(), depositBinder(evmNonce)));
+  assert(!pendingVaultRequests.member(key), "Request already queued");
+  pendingVaultRequests.insert(key, disclose(PendingVaultRequest {
+    kind: PendingRequestKind.deposit,
+    addressA: depositRequest.erc20Address,
+    addressB: vaultEvmAddress,
+    fee: 0 as Uint<24>,
+    amountA: depositRequest.amount,
+    amountB: 0 as Uint<128>,
+    commitment: key,
+    requester: userCommitment(callerSecretKey()),
+    evmNonce: evmNonce,
+    gasLimit: gasLimit,
+    maxFeePerGas: maxFeePerGas,
+    maxPriorityFeePerGas: maxPriorityFeePerGas,
+  }));
+  unflushed.increment(1);
+}
 
-  const caller = disclose(userCommitment(callerSecretKey()));
-
+export circuit sendDeposit(key: Bytes<32>): [] {
+  assert(initialised >= 1, "Not initialised");
+  const disclosedKey = disclose(key);
+  const pending = takePending(disclosedKey, PendingRequestKind.deposit);
+  const stamp = takeStamp(disclosedKey, PendingRequestKind.deposit);
   // The pinned recipient stops a client having the MPC sign a transfer to themselves.
   const calldata = EvmCalldata<2> {
     selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
     noWords: 2 as Uint<16>,
     words: [
-      evmAddressAbiWord(vaultEvmAddress),
-      numericAbiWord(depositRequest.amount),
+      evmAddressAbiWord(pending.addressB),
+      numericAbiWord(pending.amountA),
     ]
   };
-
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
-    maxPriorityFeePerGas: maxPriorityFeePerGas,
-    maxFeePerGas: maxFeePerGas,
-    gasLimit: gasLimit,
-    to: depositRequest.erc20Address,
+    nonce: pending.evmNonce,
+    maxPriorityFeePerGas: pending.maxPriorityFeePerGas,
+    maxFeePerGas: pending.maxFeePerGas,
+    gasLimit: pending.gasLimit,
+    to: pending.addressA,
     value: 0 as Uint<128>,
     calldata: some<EvmCalldata<2>>(calldata),
     accessListEntryCount: 0,
     accessList: []
   };
-
   const schema = vaultResponseSchema();
-  const requestNonce = signetRequestNonce as Uint<64>;
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(),
-    requestNonce,
-    mpcKeyVersion,
-    caller,
-    MPCSignatureAlgorithm.ecdsa,
-    MPCDestination.unused,
-    pad(64, ""),
-    TxParamType.evmType2,
-    txParams,
-    ethereumCaip2Id(),
-    schema,
-    schema
+    kernel.self(), mpcKeyVersion, pending.requester,
+    MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
+    TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
-  const requestId = disclose(calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request));
-
+  const requestId = calculateRequestId<EvmType2TxParams<2, 0, 0>, 34, 34>(request);
   assert(!depositEventMap.member(requestId), "Request already exists");
-  signetRequestNonce.increment(1);
-  depositEventMap.insert(requestId, disclose(request));
+  depositEventMap.insert(requestId, request);
   depositSettleViews.insert(requestId, DepositSettleView {
-    commitment: caller,
-    erc20: disclose(depositRequest.erc20Address),
-    amount: disclose(depositRequest.amount as Uint<64>),
+    commitment: pending.requester,
+    erc20: pending.addressA,
+    amount: pending.amountA as Uint<64>,
+    knownHeight: stamp.knownHeight,
   });
-
   // Notify the MPC (depositEventMap's compiled ledger path, [1,3]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(),
-      2 as Uint<8>,
-      [1, 3, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [1, 3, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -484,6 +527,7 @@ export circuit completeDeposit(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<1>,
+  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
   recipient: Maybe<Either<ZswapCoinPublicKey, ContractAddress>>,
 ): [] {
@@ -499,6 +543,7 @@ export circuit completeDeposit(
   assert(
     verifyRespondBidirectionalEvent<1>(
       disclosedRequestId,
+      blockHeight,
       serializedOutput,
       disclose(respondBidirectionalEvent),
       mpcResponseKey
@@ -512,6 +557,7 @@ export circuit completeDeposit(
   const view = depositSettleViews.lookup(disclosedRequestId);
   assert(userCommitment(callerSecretKey()) == view.commitment, "Not the depositor");
   depositSettleViews.remove(disclosedRequestId);
+  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
 
   const claimRecipient = disclose(recipient).is_some
     ? disclose(recipient).value
@@ -562,6 +608,11 @@ export circuit startWithdraw(
     amountA: withdrawRequest.amount,
     amountB: 0 as Uint<128>,
     commitment: refundCommitment(callerSecretKey(), key),
+    requester: pad(32, ""),
+    evmNonce: 0 as Uint<64>,
+    gasLimit: 0 as Uint<64>,
+    maxFeePerGas: 0 as Uint<128>,
+    maxPriorityFeePerGas: 0 as Uint<128>,
   }));
   unflushed.increment(1);
 }
@@ -573,6 +624,7 @@ export circuit completeWithdraw(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<1>,
+  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
@@ -582,6 +634,7 @@ export circuit completeWithdraw(
   assert(
     verifyRespondBidirectionalEvent<1>(
       disclosedRequestId,
+      blockHeight,
       serializedOutput,
       disclose(respondBidirectionalEvent),
       mpcResponseKey
@@ -594,6 +647,7 @@ export circuit completeWithdraw(
   const view = withdrawSettleViews.lookup(disclosedRequestId);
   signBidirectionalEventMap.remove(disclosedRequestId);
 
+  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
   const succeeded = disclose(deserialize<VaultResponse, 1>(serializedOutput).success);
   const domainSep = vaultTokenDomainSeparator(view.erc20);
 
@@ -615,13 +669,15 @@ export circuit refundWithdraw(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<5>,
+  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
-  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput);
+  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput, blockHeight);
 
   assert(withdrawSettleViews.member(disclosedRequestId), "Withdrawal not found");
   const view = withdrawSettleViews.lookup(disclosedRequestId);
+  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
   assert(
     refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the withdrawer"
@@ -685,6 +741,11 @@ export circuit startSwap(
     amountA: swapRequest.amountOut,
     amountB: swapRequest.amountInMaximum,
     commitment: refundCommitment(callerSecretKey(), key),
+    requester: pad(32, ""),
+    evmNonce: 0 as Uint<64>,
+    gasLimit: 0 as Uint<64>,
+    maxFeePerGas: 0 as Uint<128>,
+    maxPriorityFeePerGas: 0 as Uint<128>,
   }));
   unflushed.increment(1);
 }
@@ -701,6 +762,7 @@ export circuit completeSwap(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
+  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
   changeNonce: Bytes<32>,
 ): [] {
@@ -714,6 +776,7 @@ export circuit completeSwap(
   assert(
     verifyRespondBidirectionalEvent<8>(
       disclosedRequestId,
+      blockHeight,
       serializedOutput,
       disclose(respondBidirectionalEvent),
       mpcResponseKey
@@ -736,6 +799,7 @@ export circuit completeSwap(
   mintShieldedToken(vaultTokenDomainSeparator(view.tokenOut), view.amountOut, disclose(mintNonce), recipient);
 
   // change <= amountInMaximum, so it fits Uint<64>. An exact spend mints a 0-value coin.
+  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
   const amountIn = disclose(deserialize<ExactOutputSingleReturnValue, 8>(serializedOutput).amountIn);
   const change = view.amountInMaximum - amountIn;
   mintShieldedToken(vaultTokenDomainSeparator(view.tokenIn), change as Uint<64>, disclose(changeNonce), recipient);
@@ -746,13 +810,15 @@ export circuit refundSwap(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<5>,
+  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
-  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput);
+  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput, blockHeight);
 
   assert(swapSettleViews.member(disclosedRequestId), "Swap not found");
   const view = swapSettleViews.lookup(disclosedRequestId);
+  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
   assert(
     refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the swapper"
@@ -802,6 +868,11 @@ export circuit startSupply(
     amountA: supplyRequest.amount,
     amountB: 0 as Uint<128>,
     commitment: refundCommitment(callerSecretKey(), key),
+    requester: pad(32, ""),
+    evmNonce: 0 as Uint<64>,
+    gasLimit: 0 as Uint<64>,
+    maxFeePerGas: 0 as Uint<128>,
+    maxPriorityFeePerGas: 0 as Uint<128>,
   }));
   unflushed.increment(1);
 }
@@ -817,26 +888,28 @@ export circuit completeSupply(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
+  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
   assert(initialised >= 1, "Not initialised");
   assert(
     verifyRespondBidirectionalEvent<8>(
-      disclosedRequestId, serializedOutput, disclose(respondBidirectionalEvent), mpcResponseKey
+      disclosedRequestId, blockHeight, serializedOutput, disclose(respondBidirectionalEvent), mpcResponseKey
     ),
     "Invalid attestation signature"
   );
 
   assert(supplyEventMap.member(disclosedRequestId), "Supply not found");
   supplyEventMap.remove(disclosedRequestId);
+  const view = supplySettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), supplySettleViews.lookup(disclosedRequestId).key)
-      == supplySettleViews.lookup(disclosedRequestId).commitment,
+    refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the supplier"
   );
   supplySettleViews.remove(disclosedRequestId);
 
+  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
   const shares = disclose(deserialize<DepositReturnValue, 8>(serializedOutput).shares);
   const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
   mintShieldedToken(vaultTokenDomainSeparator(stataToken), shares, disclose(mintNonce), recipient);
@@ -847,13 +920,15 @@ export circuit refundSupply(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<5>,
+  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
-  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput);
+  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput, blockHeight);
 
   assert(supplySettleViews.member(disclosedRequestId), "Supply not found");
   const view = supplySettleViews.lookup(disclosedRequestId);
+  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
   assert(
     refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the supplier"
@@ -903,6 +978,11 @@ export circuit startRedeem(
     amountA: redeemRequest.shares,
     amountB: 0 as Uint<128>,
     commitment: refundCommitment(callerSecretKey(), key),
+    requester: pad(32, ""),
+    evmNonce: 0 as Uint<64>,
+    gasLimit: 0 as Uint<64>,
+    maxFeePerGas: 0 as Uint<128>,
+    maxPriorityFeePerGas: 0 as Uint<128>,
   }));
   unflushed.increment(1);
 }
@@ -918,26 +998,28 @@ export circuit completeRedeem(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<8>,
+  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
   assert(initialised >= 1, "Not initialised");
   assert(
     verifyRespondBidirectionalEvent<8>(
-      disclosedRequestId, serializedOutput, disclose(respondBidirectionalEvent), mpcResponseKey
+      disclosedRequestId, blockHeight, serializedOutput, disclose(respondBidirectionalEvent), mpcResponseKey
     ),
     "Invalid attestation signature"
   );
 
   assert(redeemEventMap.member(disclosedRequestId), "Redeem not found");
   redeemEventMap.remove(disclosedRequestId);
+  const view = redeemSettleViews.lookup(disclosedRequestId);
   assert(
-    refundCommitment(callerSecretKey(), redeemSettleViews.lookup(disclosedRequestId).key)
-      == redeemSettleViews.lookup(disclosedRequestId).commitment,
+    refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the redeemer"
   );
   redeemSettleViews.remove(disclosedRequestId);
 
+  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
   const assets = disclose(deserialize<RedeemReturnValue, 8>(serializedOutput).assets);
   const recipient = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
   mintShieldedToken(vaultTokenDomainSeparator(stataUnderlying), assets, disclose(mintNonce), recipient);
@@ -948,13 +1030,15 @@ export circuit refundRedeem(
   requestId: RequestId,
   respondBidirectionalEvent: RespondBidirectionalEvent,
   serializedOutput: Bytes<5>,
+  blockHeight: Uint<64>,
   mintNonce: Bytes<32>,
 ): [] {
   const disclosedRequestId = disclose(requestId);
-  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput);
+  assertAttestedFailureOutput(disclosedRequestId, respondBidirectionalEvent, serializedOutput, blockHeight);
 
   assert(redeemSettleViews.member(disclosedRequestId), "Redeem not found");
   const view = redeemSettleViews.lookup(disclosedRequestId);
+  settleHeight(disclosedRequestId, view.knownHeight, blockHeight);
   assert(
     refundCommitment(callerSecretKey(), view.key) == view.commitment,
     "Not the redeemer"
@@ -966,33 +1050,42 @@ export circuit refundRedeem(
   mintShieldedToken(vaultTokenDomainSeparator(stataToken), view.shares, disclose(mintNonce), recipient);
 }
 
-export pure circuit vaultSignedRequestNonce(): Uint<64> {
-  return 0;
+
+export circuit flush(keys: Vector<20, Bytes<32>>, seen: Vector<20, RequestId>): [] {
+  assert(initialised >= 1, "Not initialised");
+  for (const slot of 0..20) {
+    const requestId = disclose(seen[slot]);
+    if (seenEvmHeights.member(requestId)) {
+      if (seenEvmHeights.lookup(requestId) > lastSeenEvmHeight) {
+        lastSeenEvmHeight = seenEvmHeights.lookup(requestId);
+      }
+      seenEvmHeights.remove(requestId);
+    }
+  }
+  const stamped = fold(
+    (count: Uint<8>, key: Bytes<32>): Uint<8> => (count + stampIfUnstamped(disclose(key))) as Uint<8>,
+    0 as Uint<8>,
+    keys
+  );
+  assert(stamped == 20 || unflushed.lessThan((stamped + 1) as Uint<64>), "Flush must stamp every waiting request");
+  unflushed.decrement(stamped as Uint<16>);
 }
 
-circuit numberIfUnnumbered(key: Bytes<32>): Uint<8> {
-  if (pendingVaultRequests.member(key) && !assignedNonces.member(key)) {
-    assignedNonces.insert(key, vaultEvmNonce as Uint<64>);
-    nonceOwners.insert(vaultEvmNonce as Uint<64>, key);
-    vaultEvmNonce.increment(1);
+circuit stampIfUnstamped(key: Bytes<32>): Uint<8> {
+  if (pendingVaultRequests.member(key) && !stamps.member(key)) {
+    if (pendingVaultRequests.lookup(key).kind == PendingRequestKind.deposit) {
+      stamps.insert(key, Stamp { evmNonce: 0 as Uint<64>, knownHeight: lastSeenEvmHeight });
+    } else {
+      stamps.insert(key, Stamp { evmNonce: vaultEvmNonce as Uint<64>, knownHeight: lastSeenEvmHeight });
+      nonceOwners.insert(vaultEvmNonce as Uint<64>, key);
+      vaultEvmNonce.increment(1);
+    }
     return 1;
   } else {
     return 0;
   }
 }
 
-// A flush numbers a full batch or every request still waiting: a flush that leaves
-// a waiting request unnumbered while it had room is refused.
-export circuit flush(keys: Vector<20, Bytes<32>>): [] {
-  assert(initialised >= 1, "Not initialised");
-  const numbered = fold(
-    (count: Uint<8>, key: Bytes<32>): Uint<8> => (count + numberIfUnnumbered(disclose(key))) as Uint<8>,
-    0 as Uint<8>,
-    keys
-  );
-  assert(numbered == 20 || unflushed.lessThan((numbered + 1) as Uint<64>), "Flush must number every waiting request");
-  unflushed.decrement(numbered as Uint<16>);
-}
 
 circuit takePending(key: Bytes<32>, kind: PendingRequestKind): PendingVaultRequest {
   assert(pendingVaultRequests.member(key), "Request not queued");
@@ -1002,12 +1095,14 @@ circuit takePending(key: Bytes<32>, kind: PendingRequestKind): PendingVaultReque
   return pending;
 }
 
-circuit takeNonce(key: Bytes<32>): Uint<64> {
-  assert(assignedNonces.member(key), "Nonce not assigned");
-  const evmNonce = assignedNonces.lookup(key);
-  assignedNonces.remove(key);
-  nonceOwners.remove(evmNonce);
-  return evmNonce;
+circuit takeStamp(key: Bytes<32>, kind: PendingRequestKind): Stamp {
+  assert(stamps.member(key), "Not flushed");
+  const stamp = stamps.lookup(key);
+  stamps.remove(key);
+  if (kind != PendingRequestKind.deposit) {
+    nonceOwners.remove(stamp.evmNonce);
+  }
+  return stamp;
 }
 
 circuit notifyRequests(requestId: RequestId): [] {
@@ -1022,7 +1117,7 @@ circuit notifyRequests(requestId: RequestId): [] {
 circuit sendApprove(key: Bytes<32>, kind: PendingRequestKind): [] {
   assert(initialised >= 1, "Not initialised");
   const pending = takePending(key, kind);
-  const evmNonce = takeNonce(key);
+  const stamp = takeStamp(key, kind);
   const calldata = EvmCalldata<2> {
     selector: Bytes [0x09, 0x5e, 0xa7, 0xb3],
     noWords: 2 as Uint<16>,
@@ -1033,7 +1128,7 @@ circuit sendApprove(key: Bytes<32>, kind: PendingRequestKind): [] {
   };
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: stamp.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.approve,
@@ -1045,7 +1140,7 @@ circuit sendApprove(key: Bytes<32>, kind: PendingRequestKind): [] {
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -1067,7 +1162,7 @@ export circuit sendWithdraw(key: Bytes<32>): [] {
   assert(initialised >= 1, "Not initialised");
   const disclosedKey = disclose(key);
   const pending = takePending(disclosedKey, PendingRequestKind.withdraw);
-  const evmNonce = takeNonce(disclosedKey);
+  const stamp = takeStamp(disclosedKey, PendingRequestKind.withdraw);
   const calldata = EvmCalldata<2> {
     selector: Bytes [0xa9, 0x05, 0x9c, 0xbb],
     noWords: 2 as Uint<16>,
@@ -1078,7 +1173,7 @@ export circuit sendWithdraw(key: Bytes<32>): [] {
   };
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: stamp.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.withdraw,
@@ -1090,7 +1185,7 @@ export circuit sendWithdraw(key: Bytes<32>): [] {
   };
   const schema = vaultResponseSchema();
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 34, 34>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), schema, schema
   );
@@ -1102,6 +1197,7 @@ export circuit sendWithdraw(key: Bytes<32>): [] {
     key: disclosedKey,
     erc20: pending.addressA,
     amount: pending.amountA as Uint<64>,
+    knownHeight: stamp.knownHeight,
   });
   notifyRequests(requestId);
 }
@@ -1110,7 +1206,7 @@ export circuit sendSwap(key: Bytes<32>): [] {
   assert(initialised >= 1, "Not initialised");
   const disclosedKey = disclose(key);
   const pending = takePending(disclosedKey, PendingRequestKind.swap);
-  const evmNonce = takeNonce(disclosedKey);
+  const stamp = takeStamp(disclosedKey, PendingRequestKind.swap);
   const calldata = EvmCalldata<7> {
     selector: Bytes [0x50, 0x23, 0xb4, 0xdf],
     noWords: 7 as Uint<16>,
@@ -1126,7 +1222,7 @@ export circuit sendSwap(key: Bytes<32>): [] {
   };
   const txParams = EvmType2TxParams<7, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: stamp.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.swap,
@@ -1137,7 +1233,7 @@ export circuit sendSwap(key: Bytes<32>): [] {
     accessList: []
   };
   const request = constructSignBidirectionalEvent<EvmType2TxParams<7, 0, 0>, 38, 37>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), swapOutputSchema(), swapRespondSchema()
   );
@@ -1151,6 +1247,7 @@ export circuit sendSwap(key: Bytes<32>): [] {
     tokenOut: pending.addressB,
     amountOut: pending.amountA as Uint<64>,
     amountInMaximum: pending.amountB as Uint<64>,
+    knownHeight: stamp.knownHeight,
   });
   signetSigner.signBidirectional(
     requestId,
@@ -1164,7 +1261,7 @@ export circuit sendSupply(key: Bytes<32>): [] {
   assert(initialised >= 1, "Not initialised");
   const disclosedKey = disclose(key);
   const pending = takePending(disclosedKey, PendingRequestKind.supply);
-  const evmNonce = takeNonce(disclosedKey);
+  const stamp = takeStamp(disclosedKey, PendingRequestKind.supply);
   const calldata = EvmCalldata<2> {
     selector: Bytes [0x6e, 0x55, 0x3f, 0x65],
     noWords: 2 as Uint<16>,
@@ -1175,7 +1272,7 @@ export circuit sendSupply(key: Bytes<32>): [] {
   };
   const txParams = EvmType2TxParams<2, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: stamp.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.supply,
@@ -1186,7 +1283,7 @@ export circuit sendSupply(key: Bytes<32>): [] {
     accessList: []
   };
   const request = constructSignBidirectionalEvent<EvmType2TxParams<2, 0, 0>, 36, 35>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), supplyOutputSchema(), supplyRespondSchema()
   );
@@ -1197,6 +1294,7 @@ export circuit sendSupply(key: Bytes<32>): [] {
     commitment: pending.commitment,
     key: disclosedKey,
     amount: pending.amountA as Uint<64>,
+    knownHeight: stamp.knownHeight,
   });
   signetSigner.signBidirectional(
     requestId,
@@ -1210,7 +1308,7 @@ export circuit sendRedeem(key: Bytes<32>): [] {
   assert(initialised >= 1, "Not initialised");
   const disclosedKey = disclose(key);
   const pending = takePending(disclosedKey, PendingRequestKind.redeem);
-  const evmNonce = takeNonce(disclosedKey);
+  const stamp = takeStamp(disclosedKey, PendingRequestKind.redeem);
   const calldata = EvmCalldata<3> {
     selector: Bytes [0xba, 0x08, 0x76, 0x52],
     noWords: 3 as Uint<16>,
@@ -1222,7 +1320,7 @@ export circuit sendRedeem(key: Bytes<32>): [] {
   };
   const txParams = EvmType2TxParams<3, 0, 0> {
     chainId: evmChainId,
-    nonce: evmNonce,
+    nonce: stamp.evmNonce,
     maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     maxFeePerGas: vaultMaxFeePerGas,
     gasLimit: vaultGasLimits.redeem,
@@ -1233,7 +1331,7 @@ export circuit sendRedeem(key: Bytes<32>): [] {
     accessList: []
   };
   const request = constructSignBidirectionalEvent<EvmType2TxParams<3, 0, 0>, 36, 35>(
-    kernel.self(), vaultSignedRequestNonce(), mpcKeyVersion, pad(32, "vault"),
+    kernel.self(), mpcKeyVersion, pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, MPCDestination.unused, pad(64, ""),
     TxParamType.evmType2, txParams, ethereumCaip2Id(), redeemOutputSchema(), redeemRespondSchema()
   );
@@ -1244,6 +1342,7 @@ export circuit sendRedeem(key: Bytes<32>): [] {
     commitment: pending.commitment,
     key: disclosedKey,
     shares: pending.amountA as Uint<64>,
+    knownHeight: stamp.knownHeight,
   });
   signetSigner.signBidirectional(
     requestId,

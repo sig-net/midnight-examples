@@ -353,6 +353,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(
         verifyRespondBidirectionalSignature(
           requestIdBytes(depositTransactionSignatureRequestId),
+          outcome.blockHeight,
           outcome.serializedOutput,
           outcome.event,
           mpcResponseKey,
@@ -363,11 +364,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       banner([
         `Found deposit RespondBidirectionalEvent (signature-verified) on the signet contract: ` +
           `success '${String(outcome.succeeded)}' ` +
-          `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${String(outcome.serializedOutput.length)} byte(s))`,
+          `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${String(outcome.serializedOutput.length)} byte(s), block ${String(outcome.blockHeight)})`,
         "",
         `Recomputed digest: 0x${bytesToHex(
           calculateSignetAttestationDigest(
             requestIdBytes(depositTransactionSignatureRequestId),
+            outcome.blockHeight,
             outcome.serializedOutput,
           ),
         )}`,
