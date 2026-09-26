@@ -9,6 +9,13 @@ import {
   rawTokenType,
   sampleContractAddress,
 } from "@midnight-ntwrk/compact-runtime";
+import { CallTxFailedError } from "@midnight-ntwrk/midnight-js/contracts";
+import {
+  FailEntirely,
+  FailFallible,
+  type FinalizedTxData,
+  Transaction,
+} from "@midnight-ntwrk/midnight-js/types";
 // This tree's wasm ContractState class: see signetStateProvider for why the
 // portal-linked signet module's state must round-trip through it.
 import { ContractState, CostModel, QueryContext } from "@midnightntwrk/onchain-runtime-v4";
@@ -41,7 +48,7 @@ import {
   TxParamType,
 } from "@sig-net/midnight";
 import { attestRespondBidirectional, secp256k1PublicKeyOf } from "@sig-net/midnight/testing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // The ERC20 transfer(address,uint256) selector: the TS mirror of the literal
 // `Bytes [0xa9, 0x05, 0x9c, 0xbb]` hardcoded in erc20-vault.compact.
@@ -3319,6 +3326,62 @@ describe("queue helpers", () => {
     expect(await flushPending(stub.vault, stub.provider, VAULT_ADDRESS)).toBe(0);
     expect(seenRequestIds(stub.state())).toHaveLength(0);
     expect(stub.state().lastSeenEvmHeight).toBe(settledAt);
+  });
+
+  it.each([
+    { status: FailFallible, retries: true },
+    { status: FailEntirely, retries: false },
+  ])("flushUntilStamped handles $status with retries=$retries", async ({ status, retries }) => {
+    const { current, keys } = await queueMany(1);
+    const stub = await stubVault(current);
+    const finalised: FinalizedTxData = {
+      tx: Transaction.fromParts("undeployed").mockProve(),
+      status,
+      txId: "00".repeat(32),
+      identifiers: [],
+      txHash: "00".repeat(32),
+      blockHash: "00".repeat(32),
+      blockHeight: 1,
+      blockTimestamp: 0,
+      blockAuthor: null,
+      indexerId: 1,
+      protocolVersion: 9,
+      fees: { paidFees: "1", estimatedFees: "1" },
+      segmentStatusMap: undefined,
+      unshielded: { created: [], spent: [] },
+    };
+    const failure = new CallTxFailedError(finalised, "flush");
+    const flush = vi.spyOn(stub.vault.callTx, "flush").mockRejectedValueOnce(failure);
+    const key = keys[0];
+    if (!key) throw new Error("no key");
+    const result = flushUntilStamped(stub.vault, stub.provider, VAULT_ADDRESS, key);
+    const rejection = await result.then(
+      () => undefined,
+      (error: unknown) => {
+        if (!(error instanceof Error)) throw error;
+        return error;
+      },
+    );
+    expect(rejection).toBe(retries ? undefined : failure);
+    expect(flush).toHaveBeenCalledTimes(retries ? 2 : 1);
+    expect(stub.state().stamps.member(key)).toBe(retries);
+  });
+
+  it.each([
+    ["node rejection", new Error("Invalid Transaction: Custom error: 170")],
+    ["submission failure", new Error("Transaction submission error")],
+    ["proof failure", new Error("InvalidDustSpendProof")],
+    ["connection failure", new Error("fetch failed")],
+  ])("flushUntilStamped preserves a %s without retrying", async (_label, failure) => {
+    const { current, keys } = await queueMany(1);
+    const stub = await stubVault(current);
+    const flush = vi.spyOn(stub.vault.callTx, "flush").mockRejectedValue(failure);
+    const key = keys[0];
+    if (!key) throw new Error("no key");
+    await expect(flushUntilStamped(stub.vault, stub.provider, VAULT_ADDRESS, key)).rejects.toBe(
+      failure,
+    );
+    expect(flush).toHaveBeenCalledTimes(1);
   });
 
   it("flushUntilStamped gives up after its attempts when every flush is lost", async () => {
