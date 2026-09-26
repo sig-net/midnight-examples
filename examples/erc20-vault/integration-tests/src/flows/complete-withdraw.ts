@@ -1,16 +1,11 @@
-// Settle side of the withdraw flow: route the MPC's attested outcome to the
-// circuit its width selects. An EXECUTED transfer (1-byte result) settles
-// through `completeWithdraw`, which finalizes on success (permissionless
-// cleanup) or refunds the WITHDRAWER on a false return, while a NEVER-EXECUTED
-// transfer (reverted or replaced, attested as the fixed 5-byte MPC failure
-// output) settles through `refundWithdraw`. Both refund paths demand proof of
-// the identity commitment pinned at withdraw time.
+// Settle side of the withdraw flow: route the MPC's attested outcome on its
+// verified output kind, an executed transfer to `completeWithdraw` and a
+// failed or unviable one to `refundWithdraw`, handing each the event in
+// circuit-input form, the output bytes its signature verified over, and a
+// fresh RANDOM mint nonce so a re-minted coin cannot be linked to the request.
 
-import {
-  requestIdBytes,
-  type RequestIdHex,
-  respondBidirectionalEventToCircuitInput,
-} from "@sig-net/midnight";
+import { OutputKind, type RequestIdHex, requestIdHex } from "@sig-net/midnight";
+import { respondBidirectionalEventToCircuitInput } from "@sig-net/midnight";
 
 import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { VaultContext } from "../vault-context.ts";
@@ -18,24 +13,17 @@ import { pollRespondBidirectional } from "./poll-respond-bidirectional.ts";
 import type { RespondOutcome } from "./respond-output.ts";
 
 /**
- * Settle a resolved withdraw outcome through the circuit its width selects,
- * passing the attested event AND the recomputed output bytes:
- *
- * - an executed transfer's 1-byte result goes to `completeWithdraw`, which
- *   re-verifies in-circuit, consumes the pending withdrawal, and branches on
- *   the byte: success finalizes (the surrendered value stays burned, any
- *   caller may settle), a false return re-mints to this wallet, which must
- *   be the withdrawer's.
- * - the fixed 5-byte MPC failure output (reverted or replaced transaction)
- *   goes to `refundWithdraw`, which re-verifies in-circuit, checks the
- *   sentinel bytes, and re-mints to this wallet, again withdrawer-only.
- *
- * Refunds mint under a fresh RANDOM nonce, so the refunded coin cannot be
- * linked to the request. The coin handling is midnight-js's job: the callTx
- * balances the resulting offer like any other call.
+ * Settle a resolved withdraw outcome through the circuit its verified kind
+ * selects: `completeWithdraw` for an executed transfer, `refundWithdraw` for
+ * a failed or unviable one. This caller supplies the event in circuit-input
+ * form, the output bytes its signature verified over, and a random mint
+ * nonce. Every re-mint (a refund, or an executed transfer that returned
+ * false) goes to this wallet, which must therefore be the withdrawer's. An
+ * executed transfer that returned true settles from any wallet. The coin
+ * handling is midnight-js's job: the callTx balances the resulting offer
+ * like any other call.
  *
  * @param context - The flow context.
- * @param requestId - The withdraw request id being settled.
  * @param outcome - The attested outcome from
  *   {@link file://./poll-respond-bidirectional.ts pollRespondBidirectional}.
  * @throws {Error} If the withdrawal was already settled (no pending marker on
@@ -43,11 +31,10 @@ import type { RespondOutcome } from "./respond-output.ts";
  */
 export async function settleWithdraw(
   context: VaultContext,
-  requestId: RequestIdHex,
   outcome: RespondOutcome,
 ): Promise<void> {
   console.log(`vault contract:  ${context.vaultContractAddress}`);
-  console.log(`request id:      ${requestId}`);
+  console.log(`request id:      ${requestIdHex(outcome.event.requestId)}`);
 
   // A fresh random mint nonce per settle: on the refund paths the circuit
   // threads it into the shielded re-mint verbatim, so randomness HERE is what
@@ -55,13 +42,13 @@ export async function settleWithdraw(
   // success branch mints nothing and ignores it.
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
 
-  if (outcome.matchedFailureOutput) {
-    console.log("EVM transfer never executed: refunding to this wallet (the withdrawer)");
+  if (outcome.event.outputKind !== OutputKind.executed) {
+    console.log(
+      `EVM transfer never executed (${OutputKind[outcome.event.outputKind]}): refunding to this wallet (the withdrawer)`,
+    );
     const result = await context.vault.callTx.refundWithdraw(
-      requestIdBytes(requestId),
       respondBidirectionalEventToCircuitInput(outcome.event),
       outcome.serializedOutput,
-      outcome.blockHeight,
       mintNonce,
     );
     console.log(`refundWithdraw settled in tx ${result.public.txId}`);
@@ -74,10 +61,8 @@ export async function settleWithdraw(
       : "EVM transfer returned false: settling with a refund to this wallet (the withdrawer)",
   );
   const result = await context.vault.callTx.completeWithdraw(
-    requestIdBytes(requestId),
     respondBidirectionalEventToCircuitInput(outcome.event),
     outcome.serializedOutput,
-    outcome.blockHeight,
     mintNonce,
   );
   console.log(`completeWithdraw settled in tx ${result.public.txId}`);
@@ -108,5 +93,5 @@ export async function completeWithdraw(
     intervalMs: 1000,
     timeoutMs: POLL_TIMEOUT_MS,
   });
-  await settleWithdraw(context, options.requestId, outcome);
+  await settleWithdraw(context, outcome);
 }

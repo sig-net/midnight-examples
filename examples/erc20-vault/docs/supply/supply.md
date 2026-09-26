@@ -123,7 +123,7 @@ As illustrated, the flow comprises 6 steps:
     signature back through the singleton's `respond(...)`.
   - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L66)
     polls the singleton's emitted signature events through the SDK's
-    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-response-reader.ts),
+    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.4/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
     recovers to the expected signer. The supply-specific argument is the
     requests path: the reader is pointed at `VAULT_SUPPLY_REQUESTS_PATH`, not
@@ -147,29 +147,30 @@ As illustrated, the flow comprises 6 steps:
 - **5.** poll for the MPC's attestation
   - The MPC watches the EVM chain for the transaction's execution and posts an
     attestation of its output through the singleton's
-    `respondBidirectional(...)`. The event carries only the request id it
-    answers and the MPC's ECDSA signature over the attestation digest of that id
-    and the output bytes, so the client recomputes the output bytes
+    `respondBidirectional(...)`. The event carries the request id it answers,
+    the finalised EVM block height, the MPC's verdict (`outputKind`), the
+    output's byte width, the attestation digest and the MPC's ECDSA signature
+    over it, never the output bytes, so the client recomputes those
     independently and checks the signature against them, exactly as a
     [deposit](../deposit/deposit.md) does.
-  - [`fetchSupplyCandidates`](../../integration-tests/src/flows/complete-supply.ts)
-    builds TWO candidates once, when the first post appears, and holds them for
-    the rest of the poll. **The success candidate** is
-    computable only when the transaction executed: the raw execution output,
-    decoded per the request's `outputDeserializationSchema` (the
-    `uint256 shares` the wrapper returned) and re-packed per its
-    `respondSerializationSchema` (the same shares as a `uint64`), which is the
-    8-byte output the settle circuit deserialises natively. **The failure
-    candidate** is always available: the protocol's fixed 5-byte
-    [`MPC_FAILURE_OUTPUT`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/constants.ts)
-    (`0xdeadbeef01`), which the MPC attests for a transaction that never
-    executed at all, reverted on chain or was replaced on the same nonce.
+  - [`fetchExecutedSupplyOutput`](../../integration-tests/src/flows/complete-supply.ts)
+    recomputes, once the first post declaring **`executed`** appears, the bytes
+    such a post is checked over: the raw execution output, decoded per the
+    request's `outputDeserializationSchema` (the `uint256 shares` the wrapper
+    returned) and re-packed per its `respondSerializationSchema` (the same
+    shares as a `uint64`), which is the 8-byte output the settle circuit
+    deserialises natively, held for the rest of the poll. A post declaring
+    **`failed`** (reverted on chain) or **`unviable`** (another transaction
+    took its nonce) is checked over the EMPTY output the protocol attests for a
+    transaction that never executed, which needs no trace at all.
   - Selection is by signature verification alone, against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), the response
     key the vault pinned at initialise and reads back from its own ledger. A
-    decode failure on the fetched output drops the success candidate instead of
-    crashing the poll, which leaves the failure candidate to match.
-  - Which candidate verifies is also what routes step 6. Everything fetched here
+    post's declared kind is routing data: the kind is inside the signed
+    digest, so a post cannot present a failure as a success. A decode failure
+    on the fetched output drops the executed candidate instead of crashing the
+    poll, which leaves failure posts able to match.
+  - The verified kind is also what routes step 6. Everything fetched here
     stays UNTRUSTED: the verified bytes go into the settle circuit as an
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
@@ -184,8 +185,10 @@ As illustrated, the flow comprises 6 steps:
   - An executed deposit settles through
     [`completeSupply`](../../contract/src/erc20-vault.compact), whose
     `Bytes<8>` output argument is the wrapper's packed `uint64` shares.
-    `verifyRespondBidirectionalEvent<8>` re-verifies the MPC's signature over it
-    against `mpcResponseKey` before anything else happens.
+    `verifyRespondBidirectionalEventV1<8>` re-verifies the MPC's signature over it
+    and the event's request id, block height and kind against `mpcResponseKey`
+    before anything else happens, the verified kind must be `executed`, and the
+    request consumed is the one the event names.
   - Membership of `supplyEventMap` is the double-settle protection and the proof
     that this request is a pending supply. Each flow keeps its own request map,
     so a deposit, withdrawal or swap request can never be settled here.
@@ -208,16 +211,17 @@ As illustrated, the flow comprises 6 steps:
 - **6.** refundSupply(...) re-mints when the supply never executed
   - A wrapper deposit that never ran on the EVM chain settles through
     [`refundSupply`](../../contract/src/erc20-vault.compact) instead, and the
-    attested output's WIDTH is what routes the call: the fixed 5-byte failure
-    output cannot type-fit `completeSupply`'s `Bytes<8>`, and an executed result
-    cannot type-fit `refundSupply`'s `Bytes<5>`.
-  - The same authentication gate runs at the failure width
-    (`verifyRespondBidirectionalEvent<5>`), followed by an exact-bytes check:
-    only `0xdeadbeef01` refunds, and any other attested 5-byte output is not a
-    failure.
+    verified `outputKind` is what routes the call, with the attested output's
+    WIDTH keeping the two apart by type as well: a failure's empty output
+    cannot type-fit `completeSupply`'s `Bytes<8>`, and an executed result
+    cannot type-fit `refundSupply`'s `Bytes<0>`.
+  - The same authentication gate runs at width 0
+    (`verifyRespondBidirectionalEventV1<0>`), followed by a kind check: only a
+    verified `failed` or `unviable` kind refunds, and an `executed` attestation
+    is not a failure whatever its width.
   - Each request kind has its own refund circuit (`refundWithdraw`,
     `refundSwap`, `refundSupply`, `refundRedeem`) sharing one signature and one
-    failure check, and `refundSupply` reads ONLY the supply settle-view map: a
+    kind check, and `refundSupply` reads ONLY the supply settle-view map: a
     request id of another kind, or one already settled, fails with a clean
     "not found".
   - For a supply that map is `supplySettleViews`. The commitment and the
@@ -296,7 +300,7 @@ sequenceDiagram
     alt the wrapper deposit executed (8-byte packed shares)
         Note over User,Vault: Step 6: completeSupply(...) mints shielded(stataToken) for the attested shares
         User->>Vault: completeSupply(...)
-    else the wrapper deposit never executed (5-byte failure output)
+    else the wrapper deposit never executed (failed or unviable, empty output)
         Note over User,Vault: Step 6: refundSupply(...) re-mints when the supply never executed
         User->>Vault: refundSupply(...)
     end

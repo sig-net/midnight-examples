@@ -1,4 +1,5 @@
-import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
+import { CallTxFailedError } from "@midnight-ntwrk/midnight-js/contracts";
+import { FailFallible, type PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 
 import type { DeployedVaultContract } from "./contract-surface.ts";
 import { pureCircuits, type Stamp } from "./managed/erc20-vault/contract/index.js";
@@ -151,7 +152,7 @@ export async function flushPending(
  * @param key - The queued key that needs a stamp.
  * @param attempts - How many flushes to try.
  * @returns The stamp.
- * @throws {Error} When the key is still unstamped after the attempts.
+ * @throws {Error} On a non-conflict failure, or when the key remains unstamped after the attempts.
  */
 export async function flushUntilStamped(
   vault: DeployedVaultContract,
@@ -166,6 +167,11 @@ export async function flushUntilStamped(
     try {
       await flushPending(vault, publicDataProvider, vaultContractAddress);
     } catch (error) {
+      const staleRead: boolean =
+        error instanceof Error && error.message.includes("mismatch between expected read");
+      const failedFallible: boolean =
+        error instanceof CallTxFailedError && error.finalizedTxData.status === FailFallible;
+      if (!staleRead && !failedFallible) throw error;
       console.log(
         `flush attempt ${String(attempt + 1)} lost: ${String(error).split("\n")[0] ?? ""}`,
       );

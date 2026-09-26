@@ -146,7 +146,7 @@ export async function runDepositRoundTrip(
   if (!ledger.depositEventMap.member(requestIdBytes(requestId))) {
     logSkip("completeDeposit", `request ${requestId} already claimed (not in the deposit map)`);
   } else {
-    await settleDeposit(context, requestId, outcome, opts.claimRecipient);
+    await settleDeposit(context, outcome, opts.claimRecipient);
     claimed = true;
   }
 

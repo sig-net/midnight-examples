@@ -49,7 +49,7 @@ export function deriveVaultEvmAddress(
 }
 
 // THIS contract's signet ledger layout (declaration order in
-// erc20-vault.compact): each request kind owns a SignBidirectionalEventMap. A
+// erc20-vault.compact): each request kind owns a SignBidirectionalEventMapV1. A
 // client contract is free to place its event maps at any field: every raw
 // reader takes the resolved ledger-tree path explicitly, and the path must
 // match the `requestsPath` the contract packs into its notifications. The

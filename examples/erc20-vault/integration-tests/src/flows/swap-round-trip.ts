@@ -1,6 +1,6 @@
 // The full swap journey as one arrange-stage helper: approve, quote, startSwap, MPC
 // signature, broadcast, completeSwap.
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
   readVaultLedger,
   VAULT_SWAP_REQUESTS_PATH,
@@ -145,10 +145,10 @@ export async function runSwapRoundTrip(
       requestId,
       amountOut: opts.amountOut,
       amountIn: outcome.amountIn,
-      refunded: outcome.matchedFailureOutput,
+      refunded: outcome.event.outputKind !== OutputKind.executed,
       settled: false,
     };
   }
-  const { amountIn, refunded } = await settleSwap(context, requestId, outcome);
+  const { amountIn, refunded } = await settleSwap(context, outcome);
   return { requestId, amountOut: opts.amountOut, amountIn, refunded, settled: true };
 }

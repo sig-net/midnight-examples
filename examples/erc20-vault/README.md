@@ -23,7 +23,7 @@ every circuit below links to the page for its own flow.
 | [`initialise`](#setup-step-4-pin-the-derived-addresses-and-the-response-key) | Deployment setup rather than an MPC flow: the deployer-gated one-shot that pins the vault's derived EVM address, the EVM chain, the Uniswap router, the Aave stataToken pair and the MPC response key. |
 | [`startDeposit`](docs/deposit/deposit.md) → [`completeDeposit`](docs/deposit/deposit.md) | **The reference flow, documented in full in the [deposit walkthrough](docs/deposit/deposit.md).** Request → sign → broadcast → attest → verify-and-mint. |
 | [`startWithdraw`](docs/withdraw/withdraw.md) / [`completeWithdraw`](docs/withdraw/withdraw.md) | The same flow in the other direction, plus the coin-spend-as-authorisation pattern and a settle circuit that branches on the EVM result. |
-| [`refundWithdraw`](docs/withdraw/withdraw.md) / [`refundSwap`](docs/swap/swap.md) / [`refundSupply`](docs/supply/supply.md) / [`refundRedeem`](docs/redeem/redeem.md) | Settling a request whose transaction never executed, routed by the 5-byte failure-output width. One refund circuit per request kind, each reading only its own kind's pending marker. The width routing is sound as every vault respond schema packs to 1 or 8 bytes, never 5: see [Handling Failure](https://github.com/sig-net/midnight-integration/blob/main/README.md#handling-failure). |
+| [`refundWithdraw`](docs/withdraw/withdraw.md) / [`refundSwap`](docs/swap/swap.md) / [`refundSupply`](docs/supply/supply.md) / [`refundRedeem`](docs/redeem/redeem.md) | Settling a request whose transaction never executed, routed by the attestation's verified output kind (`failed` or `unviable`) over its empty output. One refund circuit per request kind, each reading only its own kind's pending marker and verifying at width 0: see [Handling Failure](https://github.com/sig-net/midnight-integration/blob/main/README.md#handling-failure). |
 | [`approveRouter`](docs/swap/swap.md) | A sign-only request, with no settle circuit at all. |
 | [`startSwap`](docs/swap/swap.md) / [`completeSwap`](docs/swap/swap.md) | A second request map at its own ledger field and calldata width, reusing the same optimistic burn-then-mint shape. `exactOutputSingle`: mint the exact `amountOut` of `tokenOut` plus the unspent `tokenIn` as change. |
 | [`approveStata`](docs/supply/supply.md) | A second sign-only approval, mirroring `approveRouter`: a one-time `approve(stataToken, MAX)` on the underlying so the ERC-4626 wrapper can pull it during supply. |
@@ -236,7 +236,7 @@ singleton reference, the response key) plus its own state:
 // ledger-tree path is what the request circuits pack into their
 // notifications, and the MPC follows that path to locate the map, so every
 // field's position is load-bearing once deployed.
-export ledger signBidirectionalEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
+export ledger signBidirectionalEventMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // The Signet singleton the request circuits notify, pinned at deploy.
 sealed ledger signetSigner: SignetSigner;
@@ -251,7 +251,7 @@ export ledger evmChainId: Uint<64>;         // EIP-155 chain id of the pinned Et
 sealed ledger deployer: Bytes<32>;          // only they may initialise
 // Deposits get their own map: kind isolation is structural, so completeDeposit
 // never sees an approve or withdraw request at all.
-export ledger depositEventMap: SignBidirectionalEventMap<EvmType2TxParams<2, 0, 0>, 34, 34>;
+export ledger depositEventMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 34>;
 export ledger depositSettleViews: Map<RequestId, DepositSettleView>;   // pending deposits: depositor commitment + typed token/amount
 export ledger withdrawSettleViews: Map<RequestId, WithdrawSettleView>; // pending withdrawals: gate commitment + typed token/amount
 // ... then the swap, supply and redeem state: the pinned EVM addresses, one
@@ -329,7 +329,7 @@ export circuit initialise(
 
 The chain id is the only per-network value a request carries: it binds each
 signed transaction to one Ethereum network (mainnet, Sepolia or a local anvil),
-and it must name the network the MPC watches. Every request's `caip2Id` is the
+and it must name the network the MPC watches. Every request's `executionDest` is the
 SDK's fixed `ethereumCaip2Id()`, whichever Ethereum network that is.
 
 The gate prevents front-running: nobody else can initialise the vault to
@@ -374,8 +374,12 @@ the deposit round trip, from funding the deposit account through
 Everything runs from the repo root against the local docker stack (Midnight
 node, indexer, proof server, anvil forking Sepolia, fakenet MPC responder).
 The anvil service forks Sepolia so the real Uniswap V3 deployment and real
-USDC are present, so `SEPOLIA_FORK_RPC_URL` (any Sepolia RPC) MUST be in
-`.env` before the stack comes up. The fakenet responder's compose service
+USDC are present, so `SEPOLIA_FORK_RPC_URL` MUST be in `.env` before the
+stack comes up. Use an archive-capable RPC (one serving state at old blocks,
+such as `https://sepolia.gateway.tenderly.co`): the fakenet locates the block
+that consumed a replaced nonce by bisecting the account nonce over chain
+history, and a pruned RPC fails that read, so the admin-replace-nonce spec
+never sees its unviable attestation. The fakenet responder's compose service
 sits behind the `fakenet` profile, so a plain `docker compose up -d` does not
 start it: the test setup starts it itself mid-run once the hand-off values are
 in `.env`. Beyond `SEPOLIA_FORK_RPC_URL` the setup pipeline fills `.env`
@@ -385,7 +389,7 @@ contracts.
 ```sh
 corepack enable
 yarn install
-cp .env.example .env                # then set SEPOLIA_FORK_RPC_URL to any Sepolia RPC
+cp .env.example .env                # then set SEPOLIA_FORK_RPC_URL to an archive Sepolia RPC
 compact update 0.33.0-rc.2          # Exact version required.
 yarn compile:erc20-vault:zk         # ~10 min zk key generation, background it
 docker compose up -d                # node, indexer, proof server, anvil forking

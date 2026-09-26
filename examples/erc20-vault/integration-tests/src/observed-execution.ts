@@ -1,7 +1,7 @@
 // What the EVM did with an MPC-signed transaction, as a client obtains it on
-// its own: the MPC's attestation carries only a signature over (requestId,
-// serializedOutput), never the output, so the client recovers the raw
-// execution output independently and checks the signature against it. The
+// its own: the output the MPC's attestation signs over travels off chain, so
+// the client recovers the raw execution output independently and checks the
+// signature against it. The
 // mined transaction is rebuilt from chain data alone (the request record plus
 // a posted signature, exactly as the broadcast did), then its top call
 // frame's return data is read with `debug_traceTransaction`, the RPC method

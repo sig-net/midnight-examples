@@ -1,6 +1,6 @@
 // Swap REFUND round trip: deposit tokenIn, then submit a swap whose amountInMaximum is set
 // below the real cost so exactOutputSingle reverts on-chain ("Too much requested"). The MPC
-// attests the failure output and completeSwap routes to refund, re-minting the surrendered
+// attests the swap as failed and completeSwap routes to refund, re-minting the surrendered
 // amountInMaximum of tokenIn. The swap-side twin of deposit-withdrawal-failure-refund. It runs
 // against the Sepolia fork the setup pipeline verifies, where the Uniswap router is deployed.
 //

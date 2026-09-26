@@ -15,9 +15,11 @@
 import {
   abiWordToUint128,
   bytesToHex,
+  OutputKind,
   parseSecp256k1PublicKey,
   requestIdBytes,
   type RequestIdHex,
+  requestIdHex,
   stripHexPrefix,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
@@ -330,10 +332,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
-      // The attestation carries only the MPC's signature: the poll traces the
-      // sweep's mined transaction for its raw output, re-packs it per the
-      // schema and verifies the posted events' signatures over it against the
-      // response key the vault pinned.
+      // The output the attestation signs over travels off chain: the poll
+      // traces the sweep's mined transaction for its raw output, re-packs it
+      // per the schema and verifies the posted events' signatures over it
+      // against the response key the vault pinned.
       const context = await session.vaultContext();
       depositSweepTransactionRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: depositTransactionSignatureRequestId,
@@ -352,32 +354,37 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
       expect(
         verifyRespondBidirectionalSignature(
-          requestIdBytes(depositTransactionSignatureRequestId),
-          outcome.blockHeight,
           outcome.serializedOutput,
           outcome.event,
           mpcResponseKey,
         ),
         "the attestation must verify over the recomputed output",
       ).toBe(true);
+      expect(
+        requestIdHex(outcome.event.requestId),
+        "the verified event must name the deposit request",
+      ).toBe(depositTransactionSignatureRequestId);
+      const digest = calculateSignetAttestationDigest(
+        requestIdBytes(depositTransactionSignatureRequestId),
+        outcome.event.blockHeight,
+        outcome.event.outputKind,
+        outcome.serializedOutput,
+      );
+      expect(outcome.event.digest, "the posted digest must be the one recomputed here").toEqual(
+        digest,
+      );
 
       banner([
         `Found deposit RespondBidirectionalEvent (signature-verified) on the signet contract: ` +
           `success '${String(outcome.succeeded)}' ` +
-          `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${String(outcome.serializedOutput.length)} byte(s), block ${String(outcome.blockHeight)})`,
+          `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${String(outcome.serializedOutput.length)} byte(s), ` +
+          `kind ${OutputKind[outcome.event.outputKind]}, block ${String(outcome.event.blockHeight)})`,
         "",
-        `Recomputed digest: 0x${bytesToHex(
-          calculateSignetAttestationDigest(
-            requestIdBytes(depositTransactionSignatureRequestId),
-            outcome.blockHeight,
-            outcome.serializedOutput,
-          ),
-        )}`,
+        `Recomputed digest: 0x${bytesToHex(digest)}`,
         "",
-        "Neither the output nor its digest went on-chain: the raw bytes came",
-        "from a debug_traceTransaction of the mined sweep transaction,",
-        "were re-packed here, and the posted",
-        "signature verified over them.",
+        "The output stayed off chain: the raw bytes came from a",
+        "debug_traceTransaction of the mined sweep transaction, were",
+        "re-packed here, and the posted signature verified over them.",
       ]);
     },
     POLL_TIMEOUT_MS + 5 * MINUTE,
@@ -420,11 +427,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         return;
       }
 
-      await settleDeposit(
-        context,
-        depositTransactionSignatureRequestId,
-        depositSweepTransactionRespondBidirectional,
-      );
+      await settleDeposit(context, depositSweepTransactionRespondBidirectional);
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       expect(
@@ -655,7 +658,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       });
 
       // Happy-day flow: the broadcast step saw the transfer mine, so the MPC
-      // must attest success (the 1-byte 0x01 result), not its failure output.
+      // must attest success (the 1-byte 0x01 result), not a failure kind.
       expect(
         withdrawRespondBidirectional.succeeded,
         "the MPC must attest the withdraw transfer as succeeded",
@@ -704,11 +707,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       }
       expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-      await settleWithdraw(
-        context,
-        withdrawTransactionSignatureRequestId,
-        withdrawRespondBidirectional,
-      );
+      await settleWithdraw(context, withdrawRespondBidirectional);
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       const after = await readLedger();

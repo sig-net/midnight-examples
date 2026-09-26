@@ -1,6 +1,6 @@
 // The full redeem journey as one arrange-stage helper: startRedeem, MPC signature, broadcast,
 // completeRedeem. No approve is needed: the vault redeems its OWN shares (owner = vault).
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
   readVaultLedger,
   VAULT_REDEEM_REQUESTS_PATH,
@@ -96,10 +96,10 @@ export async function runRedeemRoundTrip(
     return {
       requestId,
       assets: outcome.assets,
-      refunded: outcome.matchedFailureOutput,
+      refunded: outcome.event.outputKind !== OutputKind.executed,
       settled: false,
     };
   }
-  const { assets, refunded } = await settleRedeem(context, requestId, outcome);
+  const { assets, refunded } = await settleRedeem(context, outcome);
   return { requestId, assets, refunded, settled: true };
 }

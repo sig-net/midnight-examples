@@ -1,14 +1,15 @@
 // The failure-refund e2e flow: a withdraw whose EVM transfer FAILS must end
-// with the MPC attesting its fixed failure output and the settle routing to
-// `refundWithdraw`, which re-mints the escrowed shielded vault tokens to the
-// caller and consumes the request + its pending-withdrawal marker.
+// with the MPC attesting it as failed over an empty output and the settle
+// routing to `refundWithdraw`, which re-mints the escrowed shielded vault
+// tokens to the caller and consumes the request + its pending-withdrawal
+// marker.
 //
 // Failure-injection strategy (deliberate, deterministic): make the withdraw
 // transfer MINE and REVERT by draining the vault's EVM ERC20 balance first.
 // The responder (fakenet compose service) attests an EVM outcome only from a
 // mined receipt (success or revert) or a consumed nonce — it never times out
 // a forever-pending tx — and a mined `status 0` receipt is exactly what its
-// failure attestation (the 0xdeadbeef error sentinel) is for. The drain
+// `failed` attestation is for. The drain
 // signs with the vault account's fakenet-derived key (test-support only, see
 // src/fakenet-vault-account.ts) and sends the balance back to
 // EVM_USER_ADDRESS, so the suite's EVM funds keep cycling. Amounts are
@@ -24,7 +25,7 @@
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/) — in-process, never a subprocess.
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   banner,
@@ -281,8 +282,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Doomed transfer ${signedTxHash(signedWithdrawTransaction)} mined and reverted, as arranged.`,
           "",
           "The responder should observe the status-0 receipt and post its",
-          "failure attestation (the digest of the fixed 5-byte 0xdeadbeef01",
-          "failure output) on its next poll.",
+          "failed attestation (an empty output under OutputKind.failed) on",
+          "its next poll.",
         ]);
       },
       3 * MINUTE,
@@ -296,9 +297,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       async () => {
         expect(withdrawRequestId).toBeDefined();
 
-        // The event carries only the signature, so the poll traces the mined
-        // transaction and matches: a reverted receipt yields no output, so the
-        // ONLY matchable candidate is the protocol's fixed failure output.
+        // The event carries the MPC's verdict beside the signature, and a
+        // post declaring a failure is checked over the empty output the
+        // protocol attests: no trace is needed to match it.
         const context = await session.vaultContext();
         withdrawAttestation = await pollRespondBidirectional(context, {
           requestId: withdrawRequestId,
@@ -306,22 +307,24 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           timeoutMs: POLL_TIMEOUT_MS,
         });
 
-        // The observable contract of the failure leg: the attested output must
-        // be the MPC's failure output (0xdeadbeef sentinel), never a success.
+        // The observable contract of the failure leg: the verified kind must
+        // be `failed` over an empty output, never an execution.
         expect(
           withdrawAttestation.succeeded,
           "the MPC must attest the reverted transfer as failed",
         ).toBe(false);
         expect(
-          withdrawAttestation.matchedFailureOutput,
-          "a mined revert must be attested as the fixed MPC failure output",
-        ).toBe(true);
+          withdrawAttestation.event.outputKind,
+          "a mined revert must be attested under OutputKind.failed",
+        ).toBe(OutputKind.failed);
+        expect(withdrawAttestation.serializedOutput, "a failure's output is empty").toHaveLength(0);
 
         banner([
           `Found failure attestation for doomed withdraw ${withdrawRequestId}:`,
           "",
-          `  succeeded:           false`,
-          `  MPC failure output:  true (signature-verified)`,
+          `  succeeded:    false`,
+          `  output kind:  ${OutputKind[withdrawAttestation.event.outputKind]} (signature-verified)`,
+          `  block height: ${String(withdrawAttestation.event.blockHeight)}`,
         ]);
       },
       POLL_TIMEOUT_MS + 5 * MINUTE,
@@ -332,10 +335,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       async () => {
         // Final leg: the request is on the vault ledger and the MPC's FAILURE
         // attestation is posted (previous steps). The settle flow routes the
-        // fixed 5-byte failure output to refundWithdraw, which
-        // re-verifies the attestation in-circuit (digest equality + ECDSA
-        // against the stored MPC response key), checks the sentinel bytes, and
-        // re-mints the surrendered shielded value to the withdrawer (this
+        // verified failure kind to refundWithdraw, which re-verifies the
+        // attestation in-circuit at width 0 (digest equality + ECDSA against
+        // the stored MPC response key), checks the kind, and re-mints the
+        // surrendered shielded value to the withdrawer (this
         // session's wallet, which proves the pinned refund commitment) instead
         // of leaving it burned. The request + its pending-withdrawal marker
         // are consumed (double-settle protection). The refunded shielded
@@ -364,7 +367,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         }
         expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
+        await settleWithdraw(context, withdrawAttestation);
 
         const after = await readLedger();
         expect(

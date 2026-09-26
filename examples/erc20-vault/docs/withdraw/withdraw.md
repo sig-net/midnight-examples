@@ -51,7 +51,7 @@ As illustrated, the flow comprises 5 steps:
   - The circuit builds contract-enforced calldata for
     `transfer(destEvmAddress, amount)` on the ERC20 named in the
     [`WithdrawRequest`](../../contract/src/erc20-vault.compact),
-    constructs the **SignBidirectionalEvent** around it, stores that record in
+    constructs the **SignBidirectionalEventV1** around it, stores that record in
     [`signBidirectionalEventMap`](../../contract/src/erc20-vault.compact)
     under the **RequestId** (the record's own hash), and calls the Sig Network
     singleton's `signBidirectional(...)` so the MPC picks the request up.
@@ -86,7 +86,7 @@ As illustrated, the flow comprises 5 steps:
     through the singleton's `respond(...)`.
   - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts#L66)
     polls the singleton's emitted signature events through the SDK's
-    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/signet-request-response-reader.ts),
+    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.4/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
     recovers to the expected signer.
   - For a withdrawal the expected signer is the vault's own account,
@@ -107,32 +107,33 @@ As illustrated, the flow comprises 5 steps:
 - **4.** poll for the MPC's attestation
   - The MPC watches the EVM chain for the transaction's execution and posts an
     attestation of its output through the singleton's
-    `respondBidirectional(...)`. The event carries only the request id it
-    answers and the MPC's ECDSA signature over the attestation digest of that
-    id and the output bytes, so the client recomputes the output bytes
+    `respondBidirectional(...)`. The event carries the request id it answers,
+    the finalised EVM block height, the MPC's verdict (`outputKind`), the
+    output's byte width, the attestation digest and the MPC's ECDSA signature
+    over it, never the output bytes, so the client recomputes those
     independently and checks the signature against them, exactly as a
     [deposit](../deposit/deposit.md) does.
-  - [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts#L334)
-    recomputes TWO candidate outputs on every tick under
-    `RESPOND_OUTPUT_SOURCE=evm-node`. **The success candidate** is
-    computable only when the transaction executed: the raw execution output,
-    decoded per the request's `outputDeserializationSchema` and re-packed per
-    its `respondSerializationSchema` (both read off the request's ledger
-    record), which for a transfer turns the 32-byte ABI `bool` word into one
-    byte (`0x01` the transfer went through, `0x00` the ERC20 returned false). **The failure candidate** is always available: the
-    protocol's fixed 5-byte
-    [`MPC_FAILURE_OUTPUT`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/constants.ts)
-    (`0xdeadbeef01`), which the MPC attests for a transaction that never
-    executed at all, reverted on chain or replaced on the same nonce. Under
-    `RESPOND_OUTPUT_SOURCE=mpc-cache` the one candidate is the object the MPC
-    uploaded to its output cache before posting
-    ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/main/packages/signet-midnight/src/mpc-output-cache.ts)),
-    success or failure output alike.
+  - [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts)
+    checks each post over the bytes its declared `outputKind` selects. Under
+    `RESPOND_OUTPUT_SOURCE=evm-node` a post declaring **`executed`** is checked
+    over the raw execution output, decoded per the request's
+    `outputDeserializationSchema` and re-packed per its
+    `respondSerializationSchema` (both read off the request's ledger record),
+    which for a transfer turns the 32-byte ABI `bool` word into one byte
+    (`0x01` the transfer went through, `0x00` the ERC20 returned false). A post
+    declaring **`failed`** (reverted on chain) or **`unviable`** (another
+    transaction took its nonce) is checked over the EMPTY output the protocol
+    attests for a transaction that never executed, which needs no trace at
+    all. Under `RESPOND_OUTPUT_SOURCE=mpc-cache` every post is checked over the
+    object the MPC uploaded to its output cache before posting
+    ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.4/packages/signet-midnight/src/mpc-output-cache.ts)), the attested bytes verbatim, empty for a failure.
   - Selection is by signature verification alone, against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), the response
     key the vault pinned at initialise and reads back from its own ledger. The
-    fetched output's own success flag is unauthenticated and decides nothing.
-  - Which candidate verifies is also what routes step 5. Everything fetched here
+    fetched output's own success flag is unauthenticated and decides nothing,
+    and a post's declared kind is routing data: the kind is inside the signed
+    digest, so a post cannot present a failure as a success.
+  - The verified kind is also what routes step 5. Everything fetched here
     stays UNTRUSTED: the verified bytes go into the settle circuit as an
     argument, where the same signature is re-verified in-circuit, and that
     in-circuit check is the authentication gate.
@@ -142,8 +143,10 @@ As illustrated, the flow comprises 5 steps:
   - An executed transfer settles through
     [`completeWithdraw`](../../contract/src/erc20-vault.compact), whose
     `Bytes<1>` output argument is the transfer's packed bool.
-    `verifyRespondBidirectionalEvent<1>` re-verifies the MPC's signature over it
-    against `mpcResponseKey` before anything else happens.
+    `verifyRespondBidirectionalEventV1<1>` re-verifies the MPC's signature over it
+    and the event's request id, block height and kind against `mpcResponseKey`
+    before anything else happens, the verified kind must be `executed`, and the
+    request consumed is the one the event names.
   - Membership of `withdrawSettleViews` is the double-settle protection and the
     proof that this request is a pending withdrawal. Deposits never insert that
     marker, so a deposit request cannot be settled here, and its own settle
@@ -163,16 +166,17 @@ As illustrated, the flow comprises 5 steps:
 - **5.** refundWithdraw(...) re-mints when the transfer never executed
   - A transfer that never ran on the EVM chain settles through
     [`refundWithdraw`](../../contract/src/erc20-vault.compact) instead, and the
-    attested output's WIDTH is what routes the call: the fixed 5-byte failure
-    output cannot type-fit `completeWithdraw`'s `Bytes<1>`, and an executed
-    result cannot type-fit `refundWithdraw`'s `Bytes<5>`.
-  - The same authentication gate runs at the failure width
-    (`verifyRespondBidirectionalEvent<5>`), followed by an exact-bytes check:
-    only `0xdeadbeef01` refunds, and any other attested 5-byte output is not a
-    failure.
+    verified `outputKind` is what routes the call, with the attested output's
+    WIDTH keeping the two apart by type as well: a failure's empty output
+    cannot type-fit `completeWithdraw`'s `Bytes<1>`, and an executed result
+    cannot type-fit `refundWithdraw`'s `Bytes<0>`.
+  - The same authentication gate runs at width 0
+    (`verifyRespondBidirectionalEventV1<0>`), followed by a kind check: only a
+    verified `failed` or `unviable` kind refunds, and an `executed` attestation
+    is not a failure whatever its width.
   - Each request kind has its own refund circuit (`refundWithdraw`,
     `refundSwap`, `refundSupply`, `refundRedeem`) sharing one signature and one
-    failure check, and `refundWithdraw` reads ONLY the withdraw settle-view map: a
+    kind check, and `refundWithdraw` reads ONLY the withdraw settle-view map: a
     request id of another kind, or one already settled, fails with a clean
     "not found".
   - For a withdrawal that map is `withdrawSettleViews`, and the commitment,
@@ -237,7 +241,7 @@ sequenceDiagram
     alt the transfer executed (1-byte packed bool)
         Note over User,Vault: Step 5: completeWithdraw(...) settles on the attested output
         User->>Vault: completeWithdraw(...)
-    else the transfer never executed (5-byte failure output)
+    else the transfer never executed (failed or unviable, empty output)
         Note over User,Vault: Step 5: refundWithdraw(...) re-mints when the transfer never executed
         User->>Vault: refundWithdraw(...)
     end
