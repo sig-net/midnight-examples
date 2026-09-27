@@ -14,7 +14,7 @@ Top to bottom:
 1. `# <Flow>` title and a short intro paragraph saying what the flow moves and
    in which direction.
 2. Pointers to the protocol and integration material (the repo README's sign
-   bidirectional flow section and integration guide).
+   bidirectional protocol flow section and integration guide).
 3. The embedded diagram: `![<Flow> flow](<flow>.drawio.png)`.
 4. The step list (next section).
 5. Any shared-setup notes the steps reference, kept short, links over code.
@@ -48,7 +48,30 @@ one top-level bullet with indented detail bullets:
 
 The golden specimen of this shape is the five-step list under the diagram in
 the Sig Network Midnight Integration repository README's "Sign Bidirectional
-Flow" section: match it down to the formatting of the points.
+Protocol Flow" section: match it down to the formatting of the points.
+
+## The request phase
+
+A vault flow describes queue, flush and send as distinct actions inside its
+request phase. State which concrete circuit performs each action, which actor
+calls it, and where the transaction boundaries lie. Link to the corresponding
+contract definitions and executable flow. Describe when pending work is stored,
+when it is stamped, and when the signature request is recorded and notified.
+Calling `startX(...)` must not imply that the request is already available to
+sign, and calling `sendX(...)` must not be confused with the relayer broadcasting
+the signed foreign transaction.
+
+The request phase may use one canonical headline with detail bullets for these
+actions, or several canonical steps when that makes the sequence clearer. If
+split, keep the request phase colour for all of them. Match every headline with
+its Mermaid `Note over` string and every ordinal with the flow diagram's circles.
+Settlement branches still share one ordinal. The actor map's grouped operation
+labels do not define page steps or replace concrete circuit names on flow pages.
+
+Use the flow's actual request path and its source-defined nonce and height
+handling. Deposit, vault-funded operations and approvals must each describe
+the calls they make. Link shared configuration and maintenance explanations to
+the example README.
 
 ## Code snippets
 

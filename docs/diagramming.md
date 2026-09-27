@@ -45,18 +45,18 @@ shapes unfilled.
 
 ## Visual weight is semantics
 
-Three visual channels carry meaning, and each is reserved for exactly that meaning:
+Four visual channels carry meaning, and each is reserved for exactly that meaning:
 
 - **Dotted outlines mark connectable nodes.** Ledger state, circuits and behaviour
   responsibilities render in dotted-border boxes, and edges anchor only to nodes
   (outlined boxes, icons, hexagons, actor boxes, lanes). Borderless text is
   annotation: it rides an edge and never takes an arrow.
-- **Bold marks the greppable name.** In prose (edge labels, notes), the verbatim
-  names that grep in source (events, circuits, keys, ledger fields) are bold, plus
-  exactly two structural classes: an edge label's acting-party prefix and a note's
-  colon-led keywords. Nothing else is bold, verbs included: bold text is the
-  visible anchor tying the diagram to the code, and the two structural classes are
-  the scaffolding around it.
+- **Bold marks source names and their grouped shorthand.** Verbatim event,
+  circuit, key and ledger names are bold. Actor-map operation rows may bold the
+  grouped circuit-family expression defined in [Labels](#labels), whose expanded
+  names must grep. Two structural classes also use bold: an edge label's
+  acting-party prefix and a note's colon-led keywords. Other text, including
+  verbs, stays at normal weight.
 - **Arrow flow marks sequence.** When one lane performs an ordered sequence within a
   step, the sequence is drawn as edges threading through its boxes in the step's
   colour, entering the first box and leaving the last toward its destination. Boxes
@@ -76,6 +76,17 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   place, a label takes it from the leftmost source that has it: circuit, event and
   ledger-field spellings come from the contract source, step phrasing comes from the
   README, and a diagram invents wording only where neither has any.
+- **Grouped actor-map labels summarise operations.** The vault actor map uses one
+  circuit-family row per operation, such as `start/send/completeDeposit(...)`.
+  Expand that shorthand to `startDeposit`, `sendDeposit` and `completeDeposit`
+  when checking against the source. Include the operation's settlement and
+  refund variants where they exist, for example
+  `start/send/complete/refundWithdraw(...)`. The grouped expression summarises
+  that operation, not a callable circuit or the full administration and shared
+  maintenance surface.
+  Only actor-map operation rows receive this exception to verbatim labels. Flow
+  diagrams name the concrete circuits they use, including refunds and approvals.
+  The example README carries the complete circuit inventory.
 - **Every bit of text directly associated with an edge IS an edge label.** Whether it
   rides the edge or would sit beside it, arrow-associated text is authored as a label
   riding that edge and follows the edge-label golden rules below, the strict format
@@ -143,6 +154,8 @@ One verb, one meaning, everywhere an edge label or note describes an action:
 | Interacts with | User | drives a dApp's UI, no chain involved yet |
 | Funds | User's own wallet | moves value on the foreign chain before any contract is involved (the fund phase) |
 | Starts | dApp/relayer, User | kicks the flow off by calling the entry circuit |
+| Queues | a circuit | records pending work before constructing a signature request |
+| Flushes | dApp/relayer, User | calls `flush(...)` to stamp queued work for subsequent send calls |
 | Calls | a circuit | one circuit invoking another |
 | Constructs | a circuit | builds and stores a request on the ledger |
 | Reads | MPC | pulls stored state off the ledger |
@@ -155,7 +168,11 @@ One verb, one meaning, everywhere an edge label or note describes an action:
 | Submits | dApp/relayer, User | hands data into a circuit call to settle or complete |
 
 Sending a signed transaction to a CHAIN is always Broadcasts, and handing data into a
-CIRCUIT call is always Submits. When no row fits an action, the table extends: a new
+CIRCUIT call is always Submits, except the specific entry and flush actions named
+Starts and Flushes. A `sendX(...)` call constructs and publishes the signature
+request within the request phase. It does not broadcast the signed foreign
+transaction. Queue, flush and send share the request colour, even when shown
+as separate steps. When no row fits an action, the table extends: a new
 verb lands as one row here (verb, who says it, exact meaning), in the same change as
 its first label, keeping one verb one meaning.
 
@@ -204,8 +221,8 @@ its first label, keeping one verb one meaning.
   title. Two cautions when
   placing it: centre the icon on its rendered INK, not on its cell box, since an
   embedded PNG usually carries uneven transparent padding (the contract/dApp icon
-  runs about 5 units light on the right, so its cell sits 1 unit right of centre);
-  and `spacingTop` does not move the text one-for-one, so set it by measuring the
+  runs about 5 units light on the right, so its cell sits 1 unit right of centre).
+  Also, `spacingTop` does not move the text one-for-one, so set it by measuring the
   render rather than by arithmetic. The caption-above rule applies to standalone
   icons only.
 - The User actor is the composite group from the palette card: bold caption above,
@@ -233,8 +250,8 @@ its first label, keeping one verb one meaning.
   The code text opens with the compact keyword (`ledger`, `circuit`,
   `pure circuit`, `witness`) in the code style's
   keyword colour, ALWAYS at normal weight: keywords are never bold. Bold is
-  reserved for the greppable name, the thing that greps in the contract
-  source, and a keyword is syntax, not a name. A record or map type is a record block: bold type name with
+  reserved for the source name or its permitted actor-map grouped shorthand.
+  A keyword is syntax, not a name. A record or map type is a record block: bold type name with
   its opening brace, fields indented beneath, closing brace. A scalar field is
   its single line.
 - Contract members stack in vertically separated SECTIONS, in fixed order:
@@ -286,47 +303,52 @@ A diagram is composed in layers, and each layer must stand on its own:
 
 ## Flow diagram membership (NEVER BREAK)
 
-An example's actor map is the ONLY diagram showing the contract's full anatomy
-(every exported circuit, every witness and every exported ledger field) and the full
-cast of actors. Exported PURE
-circuits stay off the diagrams by default (they are helpers, not protocol
-surface): a specific document may reintroduce one deliberately, case by case.
-A flow diagram's contract box
-carries ONLY the members (ledger fields, circuits, witnesses)
-that flow interacts with, so a new member dirties one diagram, not one per
-flow. The same bar holds for actors, in EVERY lane: a flow diagram draws ONLY
-the actors that flow interacts with. A foreign-chain actor the flow never
-touches, a User-cluster member with no edge in the flow, and a derivation
-note whose only consumer is a deleted actor all go, and the full cast
-appears on the actor map alone. Actor-level behaviour notes and their edges
-live on the actor map alone: a flow diagram's step layer tells the same
-story per flow with its labelled step edges. Membership, for members and actors alike, is
-read from
-the contract source and the flow's executable flow files
-(`integration-tests/src/flows/`), never from prose.
+The vault actor map shows the full cast of actors and a summary of the vault's
+contract surface. Its contract box carries every exported ledger field and one
+grouped circuit line for each operation: deposit, withdraw, swap, supply and
+redeem. Use the grouped-label notation in [Labels](#labels). Keep the complete
+circuit inventory, witnesses and administration/configuration detail in the
+example README.
+Exported pure circuits stay off diagrams by default. A particular diagram may
+include one where explaining that flow requires it.
 
-A flow diagram starts as a copy of the actor map with its `<diagram>` tag
-renamed, the non-interacted contract members and actors deleted, and the
-flow's step layer
-appended. Deletion works the same at both scales: a member row or an actor
-(with its edges, and any note that serves only it) simply goes. Every kept
-cell, contract members, actors and the rest of the background
-alike, keeps its id, value and style byte-identical to the actor map's cell of
-the same id: copy, never re-author. Only geometry may adapt, as the contract
-box tightens around the surviving members and the lanes close over the
-deleted actors. ONE value exemption exists: the MPC
-lane's `n-read` note names in its `From:` section the request event map(s)
-actually present in that diagram's contract box, each name bold. With one map
-the name shares the `From:` line (`From: signBidirectionalEventMap`), and
-with more than one the `From:` keyword takes its own line and each name
-follows on its own line.
-The actor map lists every request event map, and a flow's copy lists exactly
-the ones its box carries, so the note always names the true ledger state the
-MPC reads. The rest of that note, and every other kept cell, stays
-byte-identical. The check is cell-level, never a whole-file diff: strip the
-step layer, then each remaining cell's id, value and style must match the
-actor map's, the `n-read` `From:` line checked against the diagram's own map
-rows instead.
+A flow diagram's contract box carries only the concrete circuits, witnesses and
+ledger fields used by that flow. Read membership from the contract source and
+the flow's executable files (`integration-tests/src/flows/`). Expand grouped
+operations into the actual calls, including queue/flush, approval, send,
+completion and refund calls when the flow uses them. A grouped actor-map row
+must not hide those separate calls on a flow diagram.
+
+The same membership test applies to actors in every lane. Remove unused actors,
+their edges and notes whose only consumer is a removed actor. Actor-level
+behaviour notes belong on the actor map, with one explicit exception: a flow
+keeps the MPC lane's `n-read` note to identify the request maps it reads. Keep
+only the note's edges to maps present in that flow. Other actor behaviour is
+carried by the flow's labelled step edges.
+
+Start a flow diagram from the actor map, rename its `<diagram>` tag, trim its
+members and actors, expand the operation rows, then add the flow's step layer.
+For copied cells that still represent the same thing, preserve the actor map's
+ID, value and style byte-for-byte. Geometry may adapt as containers and lanes
+close around the retained content. There are two explicit value/identity rules:
+
+- An expanded concrete circuit row has its own ID and its verbatim source name.
+  Copy the grouped row's visual style and circuit icon, not its grouped value.
+  Additional member kinds, such as witnesses, use the palette's corresponding
+  member style and icon. Copied unchanged ledger and actor cells still retain
+  their original IDs, values and styles.
+- The `n-read` note's `From:` section names exactly the request event maps in
+  that flow's contract box, each name bold. With one map, put it on the same
+  line as `From:`. With several, put `From:` on its own line and each map on a
+  separate line. The actor map lists every request event map. The rest of the
+  note's value and its style remain identical.
+
+Verify reuse at cell level. Compare unchanged cells against the actor map,
+check expanded member names against source and their styles against the copy
+source, and check `n-read` against the flow's own map rows. The step layer and
+new concrete member IDs are not expected to match the actor map. Record the
+intentionally expanded rows so review can distinguish them from accidental
+changes to copied content.
 
 **Trimming reclaims the space it frees.** Deleting members shrinks the
 containers, deleting actors shrinks the lanes that held them, and every lane
@@ -442,11 +464,11 @@ until they can. Shrinking anything below rule compliance is never the fix: follo
 rules no matter what, make things bigger until they hold, and the diagram comes out
 with enough space and clarity on its own.
 
-An overrun the binding rules force is accepted as it stands: the actor map's
-full-anatomy mandate (every circuit, witness and ledger field on one diagram) pushes
-the erc20-vault actor map to 1825 x 1648, and that size is sanctioned. An overrun
-nothing forces is slack, and slack has three exits: tighten the layout, split the
-content into more diagrams, or move sequencing to a mermaid diagram in the README.
+An overrun forced by the binding rules is acceptable, but no particular actor-map
+dimensions are sanctioned in advance. Measure the updated content bounds and
+inspect the render at README column width. Unused space calls for a tighter
+layout. If the content remains too dense, split the explanation into diagrams
+with clear scopes or put sequencing in a Mermaid diagram in the README.
 
 ## Iconography
 

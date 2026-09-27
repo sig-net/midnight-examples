@@ -7,7 +7,8 @@ node-modules`), split between shared machinery and the examples integrators copy
   providers, tx build & submit). Kept ruthlessly small.
 - **`packages/test-harness`** — test-only machinery (stack bring-up/teardown,
   mpc-keys setup, wallet funding, env/session handling, subprocess helpers).
-  Test-only deps live here and never touch an example's manifests.
+  Shared test-stack dependencies live here. Members that import a test runner
+  or compiler directly declare it in their own `devDependencies`.
 - **`examples/*/*`** — one directory per example, each holding up to three
   workspace packages: `contract` (required), then `deploy` and
   `integration-tests` as warranted. Each package holds exactly one kind of
@@ -36,12 +37,12 @@ generated `src/managed/` output.
 
 # Examples-repo identity rules
 
-These three rules are what make this repo work as an *examples* repo. They override
+These five rules are what make this repo work as an *examples* repo. They override
 any instinct carried in from product-repo conventions.
 
 - **Examples depend on `@sig-net/midnight` / `@sig-net/midnight-contract` ONLY via
   npm published versions in committed manifests.** An example's `package.json`
-  names the SDK as a normal npm semver range — never a `workspace:`, `link:`,
+  names the SDK as an exact published npm version — never a `workspace:`, `link:`,
   `portal:`, or `file:` reference back to the protocol repo, and never a
   `resolutions` override pointing at a local checkout. Using `yarn link` (or a
   temporary `portal:`) against a local protocol checkout **is fine — encouraged —
@@ -63,8 +64,9 @@ any instinct carried in from product-repo conventions.
   example — readability of the example outranks DRY here. Keep `packages/lib`
   ruthlessly small: every import from it is plumbing an integrator copying an
   example can't see, and it ideally shrinks toward zero as pieces graduate into
-  the SDK. Test-only deps (vitest, hardhat, viem) live in
-  `packages/test-harness` and never appear in an example's manifests.
+  the SDK. Shared test-stack machinery belongs in `packages/test-harness`. Test
+  runners and tooling imported directly by a member belong in that member's
+  `devDependencies`, keeping them out of the example's runtime dependencies.
 - **No workspace package is published by default.** Every member is named
   `@sig-net/midnight-examples-*` and starts `"private": true`. That is the SAME
   npm scope the published SDK uses (`@sig-net/midnight`,
@@ -102,9 +104,11 @@ any instinct carried in from product-repo conventions.
   exactly `X.Y.Z`. Bump it in the commit that precedes the tag.
 
 Corollary: an example's `contract` package depends on the Signature Network SDK +
-compact tooling and **nothing else** — its dependency list is itself documentation
-of the minimal integration surface. Test/tooling deps go in that example's
-`integration-tests` package or in `packages/test-harness`.
+compact tooling and **nothing else** in its runtime `dependencies`: that list
+documents the minimal integration surface. Its own test and publishing tools
+belong in `devDependencies`. Shared stack machinery belongs in
+`packages/test-harness`, and example-specific live-stack tests belong in the
+example's `integration-tests` package.
 
 # NEVER BREAK rules
 
@@ -124,7 +128,11 @@ exception for that specific case.
   examples repo this is doubly true: dead code in an example teaches integrators
   the wrong integration.
 - **ALWAYS install dependencies at FIXED versions; the committed `yarn.lock` is
-  the source of truth.** CI installs with `yarn install --immutable`, and an
+  the source of truth.** Existing manifest caret ranges (including TypeScript 7,
+  Vitest and ethers) conflict with this exact-version policy. Do not silently
+  bless those ranges or repin them during documentation work. Report the
+  discrepancy for an explicit dependency-policy decision, then reconcile
+  manifests and lockfile together. CI installs with `yarn install --immutable`, and an
   upgrade is a deliberate, reviewed change to `package.json` plus `yarn.lock`,
   never a side effect of installing. To add a dependency, first resolve the
   intended version (`yarn npm info <pkg> --fields dist-tags,version,deprecated`),
@@ -193,7 +201,7 @@ exception for that specific case.
   If you believe a rule genuinely cannot hold, STOP and ask rather than adding
   an `"off"`.
 - **Two TypeScripts, on purpose: members build on 7, ESLint reads types through
-  a root-only 6.0.3.** Every member pins `typescript@^7.0.2`, the native Go
+  a root-only 6.0.3.** Every member declares `typescript@^7.0.2`, the native Go
   compiler `yarn build` runs. TypeScript 7 ships no public compiler API (it is
   scheduled for 7.1), so typescript-eslint declares
   `peerDependencies.typescript: ">=4.8.4 <6.1.0"` and cannot parse `.ts` at all
@@ -361,23 +369,28 @@ apply to all of them:
   binding** for every draw.io diagram in this repo: the committed `.drawio` +
   `.drawio.png` pair, the palette, the label styles, the shapes, the icon bank. Copy
   styled cells from `docs/diagram-palette.drawio` rather than authoring styles by hand.
-- **Diagram labels are verbatim from source**: circuit names with parentheses
-  (`startDeposit(...)`), event and ledger field names exactly as exported. A label is correct
-  iff it greps in the source. When a term exists in several sources, truth priority is
-  code > README > diagram: take it from the leftmost source that has it. One exemption: the generic protocol diagram
-  (`docs/sign-bidirectional-flow.*`) depicts a hypothetical integrating contract, so its
-  placeholder circuits (`startCrossChain(...)`, `completeCrossChain(...)`) grep nowhere
-  by design. Every real name in it (events, singleton circuits, ledger fields) still
-  must grep.
-- **An example's actor map is the ONLY diagram carrying the contract's full
-  anatomy** (every exported circuit, every witness, every exported ledger field,
-  exported pure circuits omitted by default). A flow diagram's
-  contract box shows only the members (ledger fields, circuits, witnesses)
-  that flow interacts with, membership read from the
-  contract source and the flow's
-  `integration-tests/src/flows/` files. Kept cells are the actor map's own,
-  value and style byte-identical, only geometry free to adapt: the full rule is
-  the "Flow diagram membership" section of [docs/diagramming.md](docs/diagramming.md).
+- **Diagram labels use source names**, with two explicit exceptions. Concrete
+  circuit names carry parentheses (`startDeposit(...)`), and event and ledger
+  names match exports. The actor map may group an operation's circuit family
+  as `start/send/completeDeposit(...)`, with each expanded name checked against
+  the source. Include applicable settlement/refund variants, for example
+  `start/send/complete/refundWithdraw(...)`. This is a visual summary, not a
+  callable circuit. The generic
+  protocol diagram (`docs/sign-bidirectional-flow.*`) may use hypothetical
+  integrating-contract circuits (`startCrossChain(...)`, `completeCrossChain(...)`).
+  Every real name still must grep. Truth priority is code > README > diagram.
+- **The vault actor map shows exported state and grouped operations.** Its vault
+  contract box contains every exported ledger field and one grouped circuit line
+  for each of deposit, withdraw, swap, supply and redeem. It is not an exhaustive
+  circuit or witness inventory. The example README owns the complete circuit
+  inventory and administration/configuration descriptions. A flow diagram expands
+  the concrete circuits, witnesses and ledger fields used by that flow, including
+  shared queue/flush and approval machinery when used. Membership comes from the
+  contract source and `integration-tests/src/flows/`, not from the grouped label.
+  Reuse actor-map styles, icons and unchanged cells. Expanded circuit rows use
+  their own IDs and source names, so their values need not match a grouped row.
+  The full copy and membership rules are in
+  [docs/diagramming.md](docs/diagramming.md#flow-diagram-membership-never-break).
 - **NEVER:** hand-export from the draw.io UI, screenshot, pass ad hoc scale or border
   overrides (resolution changes are edits to [drawio.config.json](drawio.config.json),
   re-rendering every pair in the same change), commit a PNG not rendered from the

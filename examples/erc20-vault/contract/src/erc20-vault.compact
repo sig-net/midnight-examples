@@ -40,6 +40,8 @@ export ledger vaultGasLimits: VaultGasLimits;
 // Becomes 1 once initialise() has run.
 export ledger initialised: Counter;
 
+// Counts queued keys awaiting their first stamp. Sending consumes an already
+// stamped entry, so only queueing and flush change this counter.
 export ledger unflushed: Counter;
 
 // The vault's own EVM address (derivation path "vault"), the enforced deposit recipient.
@@ -52,31 +54,61 @@ export ledger mpcKeyVersion: Uint<8>;
 // Identity commitment of the deployer. Only they may call initialise().
 sealed ledger deployer: Bytes<32>;
 
+// Starts at the deployer-supplied evmHeight. Flush raises this watermark using
+// only the settled request IDs its caller supplies, then snapshots it into stamps.
 export ledger lastSeenEvmHeight: Uint<64>;
+// Accepted settlement heights waiting for a caller to include their IDs in flush.
+// Entries omitted from that call remain here while new requests can be stamped.
 export ledger seenEvmHeights: Map<RequestId, Uint<64>>;
 
 export enum PendingRequestKind { withdraw, swap, supply, redeem, approveRouter, approveStata, deposit }
+// Queue payload shared by seven request kinds. Address/amount slots mean:
+//   deposit:       token, vault recipient / transfer amount, zero
+//   withdraw:      token, recipient       / transfer amount, zero
+//   swap:          tokenIn, tokenOut      / amountOut, amountInMaximum
+//   supply:        underlying, wrapper    / assets, zero
+//   redeem:        wrapper, underlying    / shares, zero
+//   approveRouter: token, router          / zero, zero
+//   approveStata:  underlying, wrapper    / zero, zero
+// Supply/redeem sends use ledger stataToken and vaultEvmAddress directly.
 struct PendingVaultRequest {
   kind: PendingRequestKind;
   addressA: Bytes<20>;
   addressB: Bytes<20>;
+  // Uniswap pool fee for swap, zero for the other kinds.
   fee: Uint<24>;
   amountA: Uint<128>;
   amountB: Uint<128>;
+  // Withdraw/swap/supply/redeem bind the caller secret to the queue key for
+  // settlement. Deposit stores its queue key here. Approvals store zero.
   commitment: Bytes<32>;
+  // Deposit's user commitment supplies both the MPC derivation path and the
+  // settlement gate. Other kinds store zero and use the vault's MPC path.
   requester: Bytes<32>;
+  // Deposit fixes its caller-account nonce and gas at queue time. Other kinds
+  // store zero here, taking their nonce from Stamp and gas from the send-time ledger.
   evmNonce: Uint<64>;
   gasLimit: Uint<64>;
   maxFeePerGas: Uint<128>;
   maxPriorityFeePerGas: Uint<128>;
 }
 export struct Stamp {
+  // Reserved vault nonce for non-deposits. Deposits carry zero in this slot.
   evmNonce: Uint<64>;
+  // Watermark captured by flush. Asset sends copy it unchanged into their settle view.
+  // Later watermark advances leave this request's settlement threshold unchanged.
   knownHeight: Uint<64>;
 }
+// Next vault nonce to reserve. Deposits use the caller-account nonce in their payload.
 export ledger vaultEvmNonce: Counter;
+// Queue keys exist until send consumes them. Withdraw/swap/supply/redeem keys are
+// caller-supplied, deposit keys bind the caller secret to depositBinder(evmNonce),
+// and approval keys are the public approval binders. Request IDs are derived at send.
 export ledger pendingVaultRequests: Map<Bytes<32>, PendingVaultRequest>;
+// One stamp per flushed key, retained until send consumes it with the payload.
 export ledger stamps: Map<Bytes<32>, Stamp>;
+// Reserves each stamped, unsent vault nonce for its queue key. This blocks admin
+// replacement until send removes the reservation, before EVM execution/settlement.
 export ledger nonceOwners: Map<Uint<64>, Bytes<32>>;
 
 // Deposit requests (2-word ERC20 transfer, 34-byte schemas).
@@ -239,6 +271,10 @@ circuit assertAttestedFailure(
   );
 }
 
+// Applies the request's flush-time threshold to an already authenticated response,
+// for execution and failure alike. An out-of-order response can pass its own
+// threshold even when the shared watermark is higher. The accepted height waits
+// in seenEvmHeights until a caller includes its request ID in flush.
 circuit settleHeight(
   disclosedRequestId: RequestId,
   knownHeight: Uint<64>,
@@ -1052,6 +1088,15 @@ export circuit refundRedeem(
 }
 
 
+// Permissionless processing of at most 20 queue keys and 20 settled request IDs.
+// The caller chooses both vectors and the key order, which assigns vault nonces.
+// Only supplied settled IDs contribute to the watermark before stamping. Existing
+// stamps retain their threshold, including stamps made before another settlement.
+// A full batch stamps 20 distinct waiting keys and may leave more waiting. A
+// smaller batch must stamp every waiting key, so an intervening enqueue can make
+// its proof stale.
+// Missing or already-stamped keys contribute zero. Padding uses the same membership
+// checks as other entries: a zero key can name real work.
 export circuit flush(keys: Vector<20, Bytes<32>>, seen: Vector<20, RequestId>): [] {
   assert(initialised >= 1, "Not initialised");
   for (const slot of 0..20) {
@@ -1088,6 +1133,9 @@ circuit stampIfUnstamped(key: Bytes<32>): Uint<8> {
 }
 
 
+// Pair with takeStamp for the same key and kind in one transaction. Both records
+// must be consumed together so sending cannot leave a stamp or nonce reservation.
+// Asset sends retain this payload's requester commitment whoever submits them.
 circuit takePending(key: Bytes<32>, kind: PendingRequestKind): PendingVaultRequest {
   assert(pendingVaultRequests.member(key), "Request not queued");
   const pending = pendingVaultRequests.lookup(key);
