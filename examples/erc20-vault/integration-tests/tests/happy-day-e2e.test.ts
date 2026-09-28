@@ -230,19 +230,19 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const decoded = await pollSignetNotification({
         env,
         callerAddress: vaultAddress,
-        requestsPath: [1, 3],
+        requestsPath: [2, 2],
         requestId: depositTransactionSignatureRequestId,
         description: `for request ${depositTransactionSignatureRequestId}`,
       });
 
       // callerAddress points at the vault (the contract whose authenticated
       // ledger holds the request); the event map's resolved ledger-tree path
-      // is [1, 3] (chunked past 15 fields). The notification is a doorbell declaring WHICH request (the
+      // is [2, 2] (chunked past 15 fields). The notification is a doorbell declaring WHICH request (the
       // disclosed id) and WHERE to look, and the MPC reads the declared
       // request from the vault's own authenticated ledger.
       expect(decoded.version).toBe(1);
       expect(decoded.callerAddress).toBe(stripHexPrefix(vaultAddress).toLowerCase());
-      expect(decoded.requestsPath).toEqual([1, 3]);
+      expect(decoded.requestsPath).toEqual([2, 2]);
 
       banner([
         "Golden SignBidirectionalEventNotification decoded from the live indexer:",

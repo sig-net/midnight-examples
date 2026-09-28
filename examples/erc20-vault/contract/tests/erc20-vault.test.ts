@@ -164,12 +164,25 @@ const VAULT_EVM = bytes(20, 0xee);
 // The pinned Uniswap SwapRouter02 (initialise arg + swap `to`).
 const ROUTER = bytes(20, 0x11);
 const ERC20 = bytes(20, 0xaa);
+const ERC20_OUT = bytes(20, 0xbb);
 const ROUTER_KEY = bytes(32, 0xc1);
 const ROUTER_OUT_KEY = bytes(32, 0xc2);
 const STATA_KEY = bytes(32, 0xc3);
 // The pinned Aave USDC pair (initialise args): the underlying and its stataUSDC wrapper.
 const STATA_UNDERLYING = bytes(20, 0xdd); // supply burns this colour, redeem mints it
 const STATA_TOKEN = bytes(20, 0xcc); // supply/redeem `to`; supply mints this colour
+const UNLISTED_TOKEN = bytes(20, 0xee);
+const ZERO_TOKEN = new Uint8Array(20);
+const ALLOWED_TOKENS = [
+  ERC20,
+  ERC20_OUT,
+  STATA_UNDERLYING,
+  STATA_TOKEN,
+  ZERO_TOKEN,
+  ZERO_TOKEN,
+  ZERO_TOKEN,
+  ZERO_TOKEN,
+];
 const ZERO_ADDRESS = new Uint8Array(20);
 const AMOUNT = 1_000_000n;
 const UINT64_MAX = 18446744073709551615n;
@@ -341,6 +354,7 @@ const deployInitialised = async () => {
       MPC_RESPONSE_KEY,
       MPC_KEY_VERSION,
       EVM_START_HEIGHT,
+      ALLOWED_TOKENS,
     )
   ).context;
   return { contract, ctx: next };
@@ -490,6 +504,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        ALLOWED_TOKENS,
       ),
     ).rejects.toThrow(/Not the deployer/);
   });
@@ -507,6 +522,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         0n,
         EVM_START_HEIGHT,
+        ALLOWED_TOKENS,
       ),
     ).rejects.toThrow(/keyVersion must be >= 1/);
   });
@@ -524,6 +540,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        ALLOWED_TOKENS,
       ),
     ).rejects.toThrow(/Already initialised/);
   });
@@ -541,8 +558,45 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        ALLOWED_TOKENS,
       ),
     ).rejects.toThrow(/Chain ID must be positive/);
+  });
+
+  it.each([
+    [
+      "a list without the stata underlying",
+      [ERC20, ERC20_OUT, STATA_TOKEN, ZERO_TOKEN, ZERO_TOKEN, ZERO_TOKEN, ZERO_TOKEN, ZERO_TOKEN],
+    ],
+    [
+      "an all-zero list",
+      [
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+      ],
+    ],
+  ] as const)("refuses %s", async (_label, allowedTokens) => {
+    const { contract, ctx } = await deployContract();
+    await expect(
+      contract.circuits.initialise(
+        ctx,
+        VAULT_EVM,
+        ROUTER,
+        STATA_UNDERLYING,
+        STATA_TOKEN,
+        CHAIN_ID,
+        MPC_RESPONSE_KEY,
+        MPC_KEY_VERSION,
+        EVM_START_HEIGHT,
+        [...allowedTokens],
+      ),
+    ).rejects.toThrow(/stataUnderlying not allowed/);
   });
 
   it("stores the vault EVM address, the chain id and the MPC response key", async () => {
@@ -590,7 +644,7 @@ describe("deposit round-trip", () => {
     expect(decodeSignBidirectionalNotification(notificationPost.event)).toEqual({
       version: 1,
       callerAddress: bytesToHex(VAULT_ADDRESS_BYTES),
-      requestsPath: [1, 3],
+      requestsPath: [2, 2],
     });
 
     // The contract-composed envelope: the deposit's token on the
@@ -913,7 +967,7 @@ describe("withdraw round-trip", () => {
     // keyed entries, so coins of different colors surrendered back-to-back
     // must both record.
     const { contract, ctx } = await deployInitialised();
-    const otherErc20 = bytes(20, 0xab);
+    const otherErc20 = ERC20_OUT;
     const otherColor = hexToBytes(
       rawTokenType(pureCircuits.vaultTokenDomainSeparator(otherErc20), VAULT_ADDRESS),
     );
@@ -1655,7 +1709,6 @@ const SWAP_OUTPUT_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint256"}]',
 const SWAP_RESPOND_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint64"}]', 37);
 
 // A second ERC20 (tokenOut) with its own vault-token color.
-const ERC20_OUT = bytes(20, 0xbb);
 const VAULT_TOKEN_COLOR_OUT = hexToBytes(
   rawTokenType(pureCircuits.vaultTokenDomainSeparator(ERC20_OUT), VAULT_ADDRESS),
 );
@@ -3224,7 +3277,7 @@ const withIssuedNonces = async (
   for (let i = 0; i < count; i++) {
     const key = bytes(32, 0xb0 + i);
     keys.push(key);
-    next = (await contract.circuits.approveRouter(next, bytes(20, 0xb0 + i), key)).context;
+    next = (await contract.circuits.approveRouter(next, ERC20, key)).context;
   }
   return (await contract.circuits.flush(next, padKeys(keys), padKeys([]))).context;
 };
@@ -3735,5 +3788,66 @@ describe("attested block heights", () => {
     const record = first(index.values(), "deposit request");
     expect(record.path).toEqual(DEPLOYER_COMMITMENT);
     expect(record.txParams.nonce).toBe(VALID_DEPOSIT.evmNonce);
+  });
+});
+
+describe("allowed tokens", () => {
+  it.each([
+    [
+      "startDeposit",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        queueDeposit(contract, ctx, {
+          ...VALID_DEPOSIT,
+          deposit: { ...VALID_DEPOSIT.deposit, erc20Address: UNLISTED_TOKEN },
+        }),
+    ],
+    [
+      "startWithdraw",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.startWithdraw(
+          ctx,
+          { ...VALID_WITHDRAW.withdraw, erc20Address: UNLISTED_TOKEN },
+          VALID_WITHDRAW.coin,
+          keyForCoin(VALID_WITHDRAW.coin),
+        ),
+    ],
+    [
+      "startSwap tokenIn",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.startSwap(
+          ctx,
+          { ...VALID_SWAP.swap, tokenIn: UNLISTED_TOKEN },
+          VALID_SWAP.coin,
+          keyForCoin(VALID_SWAP.coin),
+        ),
+    ],
+    [
+      "startSwap tokenOut",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.startSwap(
+          ctx,
+          { ...VALID_SWAP.swap, tokenOut: UNLISTED_TOKEN },
+          VALID_SWAP.coin,
+          keyForCoin(VALID_SWAP.coin),
+        ),
+    ],
+    [
+      "approveRouter",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.approveRouter(ctx, UNLISTED_TOKEN, ROUTER_KEY),
+    ],
+  ])("%s refuses a token that is not allowed", async (_circuit, call) => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(call(contract, ctx)).rejects.toThrow(/Token not allowed/);
+  });
+
+  it("initialise records every non-zero entry of the list", async () => {
+    const { ctx } = await deployInitialised();
+    const state = ledger(stateOf(ctx) as never);
+    for (const token of [ERC20, ERC20_OUT, STATA_UNDERLYING, STATA_TOKEN]) {
+      expect(state.allowedTokens.member(token)).toBe(true);
+    }
+    expect(state.allowedTokens.member(UNLISTED_TOKEN)).toBe(false);
+    expect(state.allowedTokens.member(ZERO_TOKEN)).toBe(false);
   });
 });

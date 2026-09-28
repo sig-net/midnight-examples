@@ -25,6 +25,7 @@ import { quoteExactOutputSingle } from "../src/evm-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
+import { SEPOLIA_EURC } from "../src/fork-funding.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
@@ -32,12 +33,11 @@ import { vaultTokenType } from "../src/vault-token.ts";
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
-const EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
 const FEE = 500n;
 // exactOutput refund: request AMOUNT_OUT but cap the spend BELOW its real cost, so the router
 // reverts ("Too much requested") and the swap must refund. The cost is arbitrary on the fork's
 // thin pool, so derive the cap from a LIVE quote (half the quoted input) rather than hardcode.
-const AMOUNT_OUT = 3_000_000n; // 3 EURC exact receive
+const AMOUNT_OUT = 3_000_000n; // 3 SEPOLIA_EURC exact receive
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e", () => {
   installFlowHooks();
@@ -65,7 +65,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
       const { amountIn: quotedIn } = await quoteExactOutputSingle(
         context.evmRpcUrl,
         context.erc20Address,
-        EURC,
+        SEPOLIA_EURC,
         FEE,
         AMOUNT_OUT,
       );
@@ -122,7 +122,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
       const { amountIn: quotedIn } = await quoteExactOutputSingle(
         context.evmRpcUrl,
         context.erc20Address,
-        EURC,
+        SEPOLIA_EURC,
         FEE,
         AMOUNT_OUT,
       );
@@ -151,7 +151,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e
 
       // amountInMaximum (the cap) below the real cost -> exactOutputSingle reverts -> the settle re-mints tokenIn.
       const result = await runSwapRoundTrip(session, {
-        tokenOut: EURC,
+        tokenOut: SEPOLIA_EURC,
         fee: FEE,
         amountOut: AMOUNT_OUT,
         amountInMaximum: cap,

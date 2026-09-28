@@ -25,6 +25,7 @@ import {
   STATA_USDC,
   UNISWAP_SWAP_ROUTER_02,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { deployVault, resumeVaultDeploy } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
   appendRepoDotEnv,
@@ -51,7 +52,7 @@ import type { TestProject } from "vitest/node";
 
 import { stataAvailable } from "./evm-stata.ts";
 import { uniswapAvailable } from "./evm-swap.ts";
-import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
+import { dealForkEvmAccounts, SEPOLIA_EURC, SEPOLIA_USDC } from "./fork-funding.ts";
 import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
@@ -66,6 +67,7 @@ import { resolveUserIdentity } from "./vault-identity.ts";
 export const VAULT_PIPELINE_KEYS = [
   "EVM_CHAIN_ID",
   "ERC20_ADDRESS",
+  "ALLOWED_TOKENS",
   "MPC_ROOT_KEY",
   "MPC_SECP256K1_PUBKEY",
   "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
@@ -349,6 +351,15 @@ function ensureErc20Address(env: NodeJS.ProcessEnv): void {
   );
 }
 
+function ensureAllowedTokens(env: NodeJS.ProcessEnv): void {
+  if (env.ALLOWED_TOKENS) {
+    logSkip("default ALLOWED_TOKENS", `ALLOWED_TOKENS is set (${env.ALLOWED_TOKENS})`);
+    return;
+  }
+  env.ALLOWED_TOKENS = [requireEnv(env, "ERC20_ADDRESS"), AAVE_USDC, SEPOLIA_EURC].join(",");
+  console.log(`defaulted ALLOWED_TOKENS=${env.ALLOWED_TOKENS}`);
+}
+
 /**
  * Verify the EVM protocols the vault's circuits call are deployed at `EVM_RPC_URL`: the Uniswap
  * SwapRouter02 behind the swap flows, and the stataUSDC wrapper behind the supply/redeem flows.
@@ -394,6 +405,7 @@ const STEPS: readonly SetupStep[] = [
   ["setup: default RESPOND_OUTPUT_SOURCE to the EVM node's trace", ensureRespondOutputSource],
   ["setup: verify EVM_RPC_URL serves debug_traceTransaction", verifyTraceRpc],
   ["setup: default ERC20_ADDRESS to real Sepolia USDC", ensureErc20Address],
+  ["setup: default ALLOWED_TOKENS to the tokens the suites move", ensureAllowedTokens],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
   [
     "setup: check/derive MPC_SECP256K1_PUBKEY public key",

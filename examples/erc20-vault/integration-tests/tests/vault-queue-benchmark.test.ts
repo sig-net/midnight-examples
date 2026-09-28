@@ -121,8 +121,7 @@ const approveOf = (erc20: string): QueuedApprove => {
   return { erc20, bytes, key: newQueueKey() };
 };
 
-const randomApprove = (): QueuedApprove =>
-  approveOf(`0x${Buffer.from(crypto.getRandomValues(new Uint8Array(20))).toString("hex")}`);
+const approveOfContext = (context: VaultContext): QueuedApprove => approveOf(context.erc20Address);
 
 const submitApproveRouter = async (context: VaultContext, item: QueuedApprove): Promise<string> => {
   const submitted = await submitCallTxAsync(
@@ -439,7 +438,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       const emptyWallMs = stopEmpty();
       const emptyProve = lastProve("flush");
 
-      const drawn = randomApprove();
+      const drawn = approveOfContext(context);
       const stopQueue = startTimer();
       const item = { ...drawn, key: await queueApproveRouter(context, drawn.erc20) };
       const queueWallMs = stopQueue();
@@ -489,7 +488,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       );
       const base = ledgerBefore.vaultEvmNonce;
       const chainBefore = await vaultChainNonce(context);
-      const items = Array.from({ length: FLUSH_WIDTH }, () => randomApprove());
+      const items = Array.from({ length: FLUSH_WIDTH }, () => approveOfContext(context));
       const stopTotal = startTimer();
 
       const queue = await runBurst(
@@ -569,7 +568,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       const stranger = await strangerSession.vaultContext();
       await drainQueue(context);
       const items: QueuedApprove[] = [];
-      for (const drawn of [randomApprove(), randomApprove()]) {
+      for (const drawn of [approveOfContext(context), approveOfContext(context)]) {
         items.push({ ...drawn, key: await queueApproveRouter(context, drawn.erc20) });
       }
       const keys = items.map((item) => item.key);
@@ -643,7 +642,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       const stopContexts = startTimer();
       const contexts = await parallelContexts(PARALLEL_SEEDS);
       const contextsMs = stopContexts();
-      const items = contexts.map(() => randomApprove());
+      const items = contexts.map(approveOfContext);
       const ledgerBefore = await readVaultLedger(
         owner.providers.publicDataProvider,
         owner.vaultContractAddress,

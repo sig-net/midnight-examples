@@ -39,10 +39,10 @@ const compiledFieldIndex = (name: string): readonly number[] => {
 describe("exported ledger paths match the compiled contract-info.json", () => {
   it.each([
     ["signBidirectionalEventMap", VAULT_REQUESTS_PATH, [0, 0]],
-    ["depositEventMap", VAULT_DEPOSIT_REQUESTS_PATH, [1, 3]],
-    ["swapEventMap", VAULT_SWAP_REQUESTS_PATH, [1, 7]],
-    ["supplyEventMap", VAULT_SUPPLY_REQUESTS_PATH, [1, 11]],
-    ["redeemEventMap", VAULT_REDEEM_REQUESTS_PATH, [1, 13]],
+    ["depositEventMap", VAULT_DEPOSIT_REQUESTS_PATH, [2, 2]],
+    ["swapEventMap", VAULT_SWAP_REQUESTS_PATH, [2, 6]],
+    ["supplyEventMap", VAULT_SUPPLY_REQUESTS_PATH, [2, 11]],
+    ["redeemEventMap", VAULT_REDEEM_REQUESTS_PATH, [2, 13]],
     // The literal column is deliberate: the notification vectors in
     // erc20-vault.compact are hand-written, so a re-chunk that moves a path
     // must fail here even when the exported constant was updated with it.
@@ -52,62 +52,62 @@ describe("exported ledger paths match the compiled contract-info.json", () => {
   });
 });
 
-describe("the admin-updateable gas parameters sit in chunk 0", () => {
+describe("the admin-updateable gas parameters sit in chunk 1", () => {
   it.each([
-    ["vaultMaxFeePerGas", [0, 3]],
-    ["vaultMaxPriorityFeePerGas", [0, 4]],
-    ["vaultGasLimits", [0, 5]],
+    ["vaultMaxFeePerGas", [1, 2]],
+    ["vaultMaxPriorityFeePerGas", [1, 3]],
+    ["vaultGasLimits", [1, 4]],
   ] as const)("%s", (fieldName, compiledPath) => {
     expect(compiledFieldIndex(fieldName)).toEqual(compiledPath);
   });
 });
 
-describe("the state tree stays TWO chunks deep", () => {
-  it("holds at most 30 fields, the two chunks' worth", () => {
-    expect(contractInfo.ledger.length).toBeLessThanOrEqual(30);
+describe("the state tree stays THREE chunks deep", () => {
+  it("holds at most 45 fields, the three chunks' worth", () => {
+    expect(contractInfo.ledger.length).toBeLessThanOrEqual(45);
   });
 
-  it("uses exactly two chunks, at depth 2", () => {
+  it("uses exactly three chunks, at depth 2", () => {
     const chunks = new Set(contractInfo.ledger.map((field) => field.index[0]));
     const depths = new Set(contractInfo.ledger.map((field) => field.index.length));
 
-    expect([...chunks].sort()).toEqual([0, 1]);
+    expect([...chunks].sort()).toEqual([0, 1, 2]);
     expect([...depths]).toEqual([2]);
   });
 });
 
-describe("the chunk-1 block holds the event maps at their pinned offsets", () => {
+describe("the chunk-2 block holds the event maps at their pinned offsets", () => {
   it("holds the same 15 fields at the same offsets", () => {
-    const chunkOne = contractInfo.ledger
-      .filter((field) => field.index[0] === 1)
+    const chunkTwo = contractInfo.ledger
+      .filter((field) => field.index[0] === 2)
       .map((field) => [field.name, [...field.index]] as const);
 
-    expect(chunkOne).toEqual([
-      ["pendingVaultRequests", [1, 0]],
-      ["stamps", [1, 1]],
-      ["nonceOwners", [1, 2]],
-      ["depositEventMap", [1, 3]],
-      ["depositSettleViews", [1, 4]],
-      ["withdrawSettleViews", [1, 5]],
-      ["uniswapRouter", [1, 6]],
-      ["swapEventMap", [1, 7]],
-      ["swapSettleViews", [1, 8]],
-      ["stataUnderlying", [1, 9]],
-      ["stataToken", [1, 10]],
-      ["supplyEventMap", [1, 11]],
-      ["supplySettleViews", [1, 12]],
-      ["redeemEventMap", [1, 13]],
-      ["redeemSettleViews", [1, 14]],
+    expect(chunkTwo).toEqual([
+      ["stamps", [2, 0]],
+      ["nonceOwners", [2, 1]],
+      ["depositEventMap", [2, 2]],
+      ["depositSettleViews", [2, 3]],
+      ["withdrawSettleViews", [2, 4]],
+      ["uniswapRouter", [2, 5]],
+      ["swapEventMap", [2, 6]],
+      ["swapSettleViews", [2, 7]],
+      ["stataUnderlying", [2, 8]],
+      ["stataToken", [2, 9]],
+      ["allowedTokens", [2, 10]],
+      ["supplyEventMap", [2, 11]],
+      ["supplySettleViews", [2, 12]],
+      ["redeemEventMap", [2, 13]],
+      ["redeemSettleViews", [2, 14]],
     ]);
   });
 
   it("is exactly the last 15 declared fields, so nothing may be appended", () => {
     const names = contractInfo.ledger.map((field) => field.name);
-    const chunkOneNames = contractInfo.ledger
-      .filter((field) => field.index[0] === 1)
+    const chunkTwoNames = contractInfo.ledger
+      .filter((field) => field.index[0] === 2)
       .map((field) => field.name);
 
-    expect(chunkOneNames).toHaveLength(15);
-    expect(names.slice(-15)).toEqual(chunkOneNames);
+    expect(chunkTwoNames).toHaveLength(15);
+    expect(names.slice(-15)).toEqual(chunkTwoNames);
   });
 });

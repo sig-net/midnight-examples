@@ -3,8 +3,10 @@
 // a previous vault may be lying around in the environment. Offline: every case
 // pins EVM_CHAIN_ID or omits EVM_RPC_URL, so no chain is consulted.
 
+import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { describe, expect, it } from "vitest";
 
+import { resolveEvmTargets } from "../src/evm-targets.ts";
 import {
   assertInitialiseInputsPresent,
   assertNoVaultBoundPresets,
@@ -178,5 +180,31 @@ describe("assertNoVaultBoundPresets", () => {
       assertNoVaultBoundPresets(env);
     };
     for (const name of named) expect(check).toThrow(name);
+  });
+});
+
+describe("resolveEvmTargets allowed tokens", () => {
+  const USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
+  const EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
+
+  it("defaults to the stata underlying plus ERC20_ADDRESS", () => {
+    expect(resolveEvmTargets({}).allowedTokens).toEqual([AAVE_USDC]);
+    expect(resolveEvmTargets({ ERC20_ADDRESS: USDC }).allowedTokens).toEqual([AAVE_USDC, USDC]);
+  });
+
+  it("reads ALLOWED_TOKENS, keeps the stata underlying first and drops repeats", () => {
+    const targets = resolveEvmTargets({
+      ALLOWED_TOKENS: ` ${USDC}, ${EURC.slice(2)},${AAVE_USDC.toLowerCase()} `,
+      ERC20_ADDRESS: EURC,
+    });
+    expect(targets.allowedTokens).toEqual([AAVE_USDC, USDC, EURC]);
+  });
+
+  it("refuses more than eight tokens", () => {
+    const tokens = Array.from({ length: 8 }, (_, i) => `0x${String(i + 1).padStart(40, "0")}`);
+    expect(() => resolveEvmTargets({ ALLOWED_TOKENS: tokens.join(",") })).toThrow(/at most 8/);
+    expect(
+      resolveEvmTargets({ ALLOWED_TOKENS: tokens.slice(1).join(",") }).allowedTokens,
+    ).toHaveLength(8);
   });
 });
