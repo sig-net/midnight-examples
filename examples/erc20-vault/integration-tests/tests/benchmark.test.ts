@@ -7,7 +7,7 @@
 //                    deploy); the circuit is one-shot per contract, so a
 //                    vault initialised by an earlier flow file logs a skip.
 //   approve        : approveRouter request + MPC signature + broadcast.
-//                    Permissionless and repeatable, so it always runs.
+//                    Deployer-only and repeatable, so it always runs.
 //   deposit        : full round trip ending in completeDeposit.
 //   withdraw       : full round trip ending in completeWithdraw.
 //   swap           : arrange deposit (untimed), then the swap round trip
@@ -291,7 +291,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     // ── Approve leg: approveRouter request → MPC signature → broadcast ─────
-    // Sign-only (no settle circuit); permissionless and repeatable, so it
+    // Sign-only (no settle circuit); deployer-only and repeatable, so it
     // always runs and always records an approveRouter prove. A repeat approve
     // just re-sets the same allowance.
 

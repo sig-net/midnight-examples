@@ -372,8 +372,8 @@ export circuit adminReplaceEvmNonce(
   );
 }
 
-// One-time MPC-signed approve(stataToken, unlimitedAllowance()) on the underlying
-// USDC, so the wrapper can pull it during a supply. Signed with the VAULT account.
+// One-time, deployer-gated MPC-signed approve(stataToken, unlimitedAllowance()) on the
+// underlying USDC, so the wrapper can pull it during a supply. Signed with the VAULT account.
 export pure circuit approveStataBinder(): Bytes<32> {
   return pad(32, "vault:approve:stata");
 }
@@ -384,6 +384,7 @@ export pure circuit approveRouterBinder(erc20Address: Bytes<20>): Bytes<32> {
 
 export circuit approveStata(): [] {
   assert(initialised >= 1, "Not initialised");
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
   const key = approveStataBinder();
   assert(!pendingVaultRequests.member(key), "Request already queued");
   pendingVaultRequests.insert(key, PendingVaultRequest {
@@ -403,12 +404,13 @@ export circuit approveStata(): [] {
   unflushed.increment(1);
 }
 
-// Permissionless per-token router allowance, signed with the VAULT account. Spender
-// and amount are contract-fixed, so the caller chooses ONLY the token.
+// Deployer-gated per-token router allowance, signed with the VAULT account. Spender
+// and amount are contract-fixed, so the deployer chooses ONLY the token.
 export circuit approveRouter(
   erc20Address: Bytes<20>
 ): [] {
   assert(initialised >= 1, "Not initialised");
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
   assert(erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
   const key = disclose(approveRouterBinder(erc20Address));
   assert(!pendingVaultRequests.member(key), "Request already queued");

@@ -270,6 +270,27 @@ const strangerContext = async (
   );
 
 /**
+ * Re-enter a threaded contract state as the DEPLOYER: same public state, a
+ * fresh private state holding the deployer's {@link SECRET_KEY}.
+ */
+const deployerContext = async (
+  circuitId: string,
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startDeposit"]>[0],
+) =>
+  createCircuitContext(
+    circuitId,
+    VAULT_ADDRESS,
+    CPK,
+    ctx.callContext.currentQueryContext.state,
+    createVaultPrivateState(SECRET_KEY),
+    await signetStateProvider(),
+    undefined,
+    undefined,
+    undefined,
+    BLOCK_HASH,
+  );
+
+/**
  * Deploy + initialise(VAULT_EVM, CHAIN_ID, MPC_RESPONSE_KEY) as
  * the deployer: the ready-to-use vault, with the MPC response key stored.
  */
@@ -1710,13 +1731,9 @@ describe("approveRouter", () => {
     expect(calldata.value.words[1]).toEqual(numericAbiWord(MAX_APPROVE));
   });
 
-  it("is permissionless (a stranger may ready a token) and needs initialise", async () => {
+  it("needs initialise", async () => {
     const { contract, ctx } = await deployContract();
     await expect(approveRouter(contract, ctx, ERC20)).rejects.toThrow(/Not initialised/);
-    const ready = await deployInitialised();
-    await expect(
-      approveRouter(ready.contract, await strangerContext("approveRouter", ready.ctx), ERC20),
-    ).resolves.toBeDefined();
   });
 });
 
@@ -1999,6 +2016,33 @@ describe("approveStata", () => {
     expect(calldata.value.selector).toEqual(APPROVE_SELECTOR);
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(STATA_TOKEN));
     expect(calldata.value.words[1]).toEqual(numericAbiWord(MAX_APPROVE));
+  });
+});
+
+describe("approve gate", () => {
+  interface ApproveGateCase {
+    readonly circuit: "approveRouter" | "approveStata";
+    readonly call: (
+      contract: Contract<VaultPrivateState>,
+      ctx: CircuitContext<VaultPrivateState>,
+    ) => Promise<CircuitResults<VaultPrivateState, []>>;
+  }
+  const CASES: readonly ApproveGateCase[] = [
+    {
+      circuit: "approveRouter",
+      call: (contract, ctx) => contract.circuits.approveRouter(ctx, ERC20),
+    },
+    {
+      circuit: "approveStata",
+      call: (contract, ctx) => contract.circuits.approveStata(ctx),
+    },
+  ];
+
+  it.each(CASES)("$circuit refuses a stranger", async ({ circuit, call }) => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(call(contract, await strangerContext(circuit, ctx))).rejects.toThrow(
+      /Not the deployer/,
+    );
   });
 });
 
@@ -2596,11 +2640,11 @@ describe("throughput: requests never pin shared state, only the flush does", () 
     expect(replay(stateAfterAlice, bob, true)).toBe("applied");
   });
 
-  it("two concurrent vault requests from different callers both apply", async () => {
+  it("two concurrent vault requests of different tokens both apply", async () => {
     const { contract, ctx } = await deployInitialised();
     const alice = await contract.circuits.approveRouter(ctx, ERC20);
     const stateAfterAlice = stateOf(alice.context);
-    const bobCtx = await strangerContext("approveRouter", ctx);
+    const bobCtx = await deployerContext("approveRouter", ctx);
     const bob = await contract.circuits.approveRouter(bobCtx, ERC20_OUT);
     expect(replay(stateAfterAlice, bob, true)).toBe("applied");
   });
@@ -2686,7 +2730,7 @@ describe("throughput: requests never pin shared state, only the flush does", () 
     const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
     const queuedBoth = (
       await contract.circuits.approveRouter(
-        await strangerContext("approveRouter", queuedAlice),
+        await deployerContext("approveRouter", queuedAlice),
         ERC20_OUT,
       )
     ).context;
@@ -2712,7 +2756,7 @@ describe("throughput: requests never pin shared state, only the flush does", () 
     const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
     const queuedBoth = (
       await contract.circuits.approveRouter(
-        await strangerContext("approveRouter", queuedAlice),
+        await deployerContext("approveRouter", queuedAlice),
         ERC20_OUT,
       )
     ).context;
@@ -3229,13 +3273,13 @@ describe("queue helpers", () => {
     );
   });
 
-  it("an approve is queued under its public binder, whoever calls it", async () => {
+  it("an approve is queued under its public binder, once", async () => {
     const { contract, ctx } = await deployInitialised();
     const queued = (await contract.circuits.approveRouter(ctx, ERC20)).context;
     const state = ledger(stateOf(queued) as never);
     expect(state.pendingVaultRequests.member(pureCircuits.approveRouterBinder(ERC20))).toBe(true);
     await expect(
-      contract.circuits.approveRouter(await strangerContext("approveRouter", queued), ERC20),
+      contract.circuits.approveRouter(await deployerContext("approveRouter", queued), ERC20),
     ).rejects.toThrow(/Request already queued/);
   });
 
@@ -3243,7 +3287,7 @@ describe("queue helpers", () => {
     const { contract, ctx } = await deployInitialised();
     const aliceKey = pureCircuits.approveRouterBinder(ERC20);
     const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
-    const bobCtx = await strangerContext("approveRouter", queuedAlice);
+    const bobCtx = await deployerContext("approveRouter", queuedAlice);
     const bobKey = pureCircuits.approveRouterBinder(ERC20_OUT);
     const queuedBoth = (await contract.circuits.approveRouter(bobCtx, ERC20_OUT)).context;
 
