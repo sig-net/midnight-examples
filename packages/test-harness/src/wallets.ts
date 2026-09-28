@@ -1,16 +1,20 @@
 import {
   type AccountFunding,
   assertRootFunded,
+  deriveAddresses,
   deriveWalletAddresses,
+  ensureFeeReady,
   formatDust,
-  fundChildFromRoot,
   generateHexSeed,
   GENESIS_MINT_WALLET_SEED,
   getFaucetUrl,
   getMidnightNodeConfig,
   isLocalStandaloneNetwork,
   readAccountFunding,
+  type TransactionIdentifier,
+  transferNight,
   type WalletAddresses,
+  type WalletFacade,
   type WalletRegistry,
   WalletUnfundedError,
 } from "@sig-net/midnight-contract-deploy";
@@ -155,8 +159,124 @@ export function perChildAmount(env: NodeJS.ProcessEnv, share: bigint, child: Rol
   return share * child.shares;
 }
 
+/** How long a child's transferred NIGHT may take to appear in its synced view. */
+const CHILD_NIGHT_TIMEOUT_MS = 120_000;
+/** Poll interval while waiting for a child's transferred NIGHT to appear. */
+const CHILD_NIGHT_POLL_INTERVAL_MS = 3_000;
+/** How long root's submitted transactions may take to clear its pending set. */
+const ROOT_SETTLE_TIMEOUT_MS = 60_000;
+/** Poll interval while waiting for root's pending set to clear. */
+const ROOT_SETTLE_POLL_INTERVAL_MS = 1_000;
+
 /**
- * Inspect child balances before opening the funding root. Transaction submission checks the actual fee requirement.
+ * Wait until root's synced state carries no pending submitted transaction.
+ * `submitTransaction` resolves at on-chain finalization, but the wallet's
+ * coin selection only regains a transaction's change outputs once its sync
+ * handler has consumed it (which is also what clears the pending entry), so
+ * back-to-back root transfers must let one settle before the next builds —
+ * without it, a root running on a single UTXO would find nothing left to
+ * spend.
+ *
+ * @param facade - Root's started wallet facade.
+ * @throws {Error} If a submitted transaction stays pending past
+ *   {@link ROOT_SETTLE_TIMEOUT_MS}.
+ */
+async function awaitRootSettled(facade: WalletFacade): Promise<void> {
+  const deadline = Date.now() + ROOT_SETTLE_TIMEOUT_MS;
+  for (;;) {
+    const state = await facade.waitForSyncedState();
+    if (state.pending.all.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `root wallet still carries ${String(state.pending.all.length)} pending transaction(s) after ${String(ROOT_SETTLE_TIMEOUT_MS / 1000)}s`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, ROOT_SETTLE_POLL_INTERVAL_MS));
+  }
+}
+
+/**
+ * Submit one child's NIGHT transfer from root WITHOUT waiting for the child
+ * to observe it: root's facade reserves each transfer's inputs at submit, so
+ * the root-side transfers stay serial — each waiting for the previous one to
+ * settle on root ({@link awaitRootSettled}) — while every child's
+ * confirmation ({@link confirmChildFeeReady}) runs in parallel alongside
+ * later transfers.
+ *
+ * @param wallets - The registry holding both wallets.
+ * @param env - The suite's env accumulator, read for the seeds.
+ * @param child - The child to fund.
+ * @param amount - NIGHT to transfer, in base units.
+ * @returns The submitted transaction's identifier.
+ * @throws {Error} If root holds no unshielded NIGHT, a previous transfer never settles, or balancing/proving/submission fails.
+ */
+async function transferToChild(
+  wallets: WalletRegistry,
+  env: NodeJS.ProcessEnv,
+  child: RoleWallet,
+  amount: bigint,
+): Promise<TransactionIdentifier> {
+  const networkId = wallets.config.networkId;
+  const root = await wallets.wallet(requireEnv(env, ROOT.envVar), ROOT.label);
+  await awaitRootSettled(root.facade);
+  const childWallet = await wallets.wallet(requireEnv(env, child.envVar), child.label);
+  const state = await root.facade.waitForSyncedState();
+  return transferNight(
+    root.facade,
+    root.keys,
+    state,
+    deriveAddresses(childWallet.keys, networkId).unshielded,
+    networkId,
+    amount,
+  );
+}
+
+/**
+ * Confirm one child's funding on the child's side only: poll until its synced
+ * view shows the transferred NIGHT, then register that NIGHT for dust
+ * generation and wait for spendable DUST. Nothing here touches root, so all
+ * children confirm in parallel while later transfers are still submitting.
+ *
+ * @param wallets - The registry holding the child wallet.
+ * @param env - The suite's env accumulator, read for the seed.
+ * @param child - The child whose transfer {@link transferToChild} submitted.
+ * @throws {Error} If the transferred NIGHT never lands, or the registration or DUST wait fails.
+ */
+async function confirmChildFeeReady(
+  wallets: WalletRegistry,
+  env: NodeJS.ProcessEnv,
+  child: RoleWallet,
+): Promise<void> {
+  const deadline = Date.now() + CHILD_NIGHT_TIMEOUT_MS;
+  for (;;) {
+    const funding: AccountFunding = await readAccountFunding(
+      wallets,
+      requireEnv(env, child.envVar),
+      child.label,
+    );
+    if (funding.night > 0n) {
+      const wallet = await wallets.wallet(requireEnv(env, child.envVar), child.label);
+      const state = await wallet.facade.waitForSyncedState();
+      const dust: bigint = await explainDustSpendRejection(`fund ${child.label}`, () =>
+        ensureFeeReady(wallet.facade, wallet.keys, state, wallets.config.networkId),
+      );
+      logFundingBalance(child.label, { ...funding, dust });
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `child wallet ${funding.addresses.unshielded} shows no NIGHT after funding from root`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, CHILD_NIGHT_POLL_INTERVAL_MS));
+  }
+}
+
+/**
+ * Inspect child balances before opening the funding root. Transaction
+ * submission checks the actual fee requirement. The root-side transfers
+ * submit serially (one wallet spends them all), and each child's observation
+ * and DUST registration confirms in parallel.
  *
  * @param env - The resolved wallet seeds and optional transfer amount.
  * @param wallets - The registry that keeps each wallet synchronised.
@@ -190,6 +310,7 @@ export async function ensureWalletsFunded(
 
   let root: AccountFunding | undefined;
   let share = 0n;
+  const confirmations: Promise<void>[] = [];
   for (const child of transfers) {
     const funding: AccountFunding = await readAccountFunding(
       wallets,
@@ -222,17 +343,12 @@ export async function ensureWalletsFunded(
     }
     const amount: bigint = perChildAmount(env, share, child);
     console.log(`${child.label}: transferring ${String(amount)} NIGHT base units from root`);
-    const funded: AccountFunding = await explainDustSpendRejection(`fund ${child.label}`, () =>
-      fundChildFromRoot(
-        wallets,
-        requireEnv(env, ROOT.envVar),
-        requireEnv(env, child.envVar),
-        child.label,
-        amount,
-      ),
+    await explainDustSpendRejection(`fund ${child.label}`, () =>
+      transferToChild(wallets, env, child, amount),
     );
-    logFundingBalance(child.label, funded);
+    confirmations.push(confirmChildFeeReady(wallets, env, child));
   }
+  await Promise.all(confirmations);
 }
 
 /**
