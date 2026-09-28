@@ -1088,13 +1088,11 @@ export circuit flush(keys: Vector<20, Bytes<32>>, seen: Vector<20, RequestId>): 
   assert(initialised >= 1, "Not initialised");
   for (const slot of 0..20) {
     const requestId = disclose(seen[slot]);
-    if (requestId != default<RequestId>) {
-      if (seenEvmHeights.member(requestId)) {
-        if (seenEvmHeights.lookup(requestId) > lastSeenEvmHeight) {
-          lastSeenEvmHeight = seenEvmHeights.lookup(requestId);
-        }
-        seenEvmHeights.remove(requestId);
+    if (seenEvmHeights.member(requestId)) {
+      if (seenEvmHeights.lookup(requestId) > lastSeenEvmHeight) {
+        lastSeenEvmHeight = seenEvmHeights.lookup(requestId);
       }
+      seenEvmHeights.remove(requestId);
     }
   }
   const stamped = fold(
@@ -1107,9 +1105,7 @@ export circuit flush(keys: Vector<20, Bytes<32>>, seen: Vector<20, RequestId>): 
 }
 
 circuit stampIfUnstamped(key: Bytes<32>): Uint<8> {
-  if (key == default<Bytes<32>>) {
-    return 0;
-  } else if (pendingVaultRequests.member(key) && !stamps.member(key)) {
+  if (pendingVaultRequests.member(key) && !stamps.member(key)) {
     if (pendingVaultRequests.lookup(key).kind == PendingRequestKind.deposit) {
       stamps.insert(key, Stamp { evmNonce: 0 as Uint<64>, knownHeight: lastSeenEvmHeight });
     } else {
