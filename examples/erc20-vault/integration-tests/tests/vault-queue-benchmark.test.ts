@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 
 import { createCallTxOptions, submitCallTxAsync } from "@midnight-ntwrk/midnight-js/contracts";
 import { type RequestIdHex, toSignBidirectionalEventIndex } from "@sig-net/midnight";
-import { getMidnightNodeConfig, WalletRegistry } from "@sig-net/midnight-contract-deploy";
+import {
+  fundChildFromRoot,
+  getMidnightNodeConfig,
+  readAccountFunding,
+  WalletRegistry,
+} from "@sig-net/midnight-contract-deploy";
 import {
   evmAddressBytes,
   PendingRequestKind,
@@ -15,7 +20,7 @@ import {
   vaultCompiledContract,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { type ProofServerObservation, ProofServerPhase } from "@sig-net/midnight-examples-lib";
-import { banner, fundWalletsFromRoot } from "@sig-net/midnight-examples-test-harness";
+import { banner } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { JsonRpcProvider, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
@@ -301,19 +306,13 @@ const fundParallelWallets = async (seeds: readonly string[]): Promise<number> =>
   const config = getMidnightNodeConfig(env);
   const registry = new WalletRegistry(config);
   try {
-    const startedAt: number = Date.now();
-    const funded: number = await fundWalletsFromRoot(
-      registry,
-      funderSeed,
-      seeds.map((seed, i) => ({
-        seed,
-        label: `bench wallet ${String(i)}`,
-        amount: PARALLEL_WALLET_NIGHT,
-      })),
-    );
-    console.log(
-      `benchmark wallet funding: ${String(funded)} transfers, ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
-    );
+    let funded = 0;
+    for (const [i, seed] of seeds.entries()) {
+      const label = `bench wallet ${String(i)}`;
+      const funding = await readAccountFunding(registry, seed, label);
+      await fundChildFromRoot(registry, funderSeed, seed, label, PARALLEL_WALLET_NIGHT);
+      if (funding.night === 0n && funding.dust === 0n) funded += 1;
+    }
     return funded;
   } finally {
     await registry.close();
