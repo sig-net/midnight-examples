@@ -210,7 +210,6 @@ jobs:
           TRUST_PREBUILT_ZK_KEYS: "1"
           EXAMPLE_DIR: ${{ inputs.example-dir }}
           GATE_SPEC: ${{ inputs.gate-spec }}
-          VAULT_DUST_PROOF_EXPERIMENT: "1"
         # gate-spec is a space-separated list of spec files: split it into
         # one argument per file.
         run: |
