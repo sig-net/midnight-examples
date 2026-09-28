@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { createCallTxOptions, submitCallTxAsync } from "@midnight-ntwrk/midnight-js/contracts";
-import { type RequestIdHex, toSignBidirectionalEventIndex } from "@sig-net/midnight";
+import { bytesToHex, type RequestIdHex, toSignBidirectionalEventIndex } from "@sig-net/midnight";
 import {
   fundChildFromRoot,
   getMidnightNodeConfig,
@@ -11,7 +11,6 @@ import {
 import {
   evmAddressBytes,
   PendingRequestKind,
-  pureCircuits,
   readVaultLedger,
   VAULT_PRIVATE_STATE_ID,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
@@ -36,9 +35,11 @@ import {
   FLUSH_WIDTH,
   flushPending,
   flushUntilStamped,
+  newQueueKey,
   unstampedKeys,
 } from "../src/flows/vault-queue.ts";
 import type { VaultContext } from "../src/vault-context.ts";
+import { resolveUserIdentity } from "../src/vault-identity.ts";
 import { createVaultSession, type VaultSession } from "../src/vault-session.ts";
 
 const MINUTE = 60_000;
@@ -117,7 +118,7 @@ interface QueuedApprove {
 
 const approveOf = (erc20: string): QueuedApprove => {
   const bytes = evmAddressBytes(erc20);
-  return { erc20, bytes, key: pureCircuits.approveRouterBinder(bytes) };
+  return { erc20, bytes, key: newQueueKey() };
 };
 
 const randomApprove = (): QueuedApprove =>
@@ -132,7 +133,7 @@ const submitApproveRouter = async (context: VaultContext, item: QueuedApprove): 
       context.vaultContractAddress,
       VAULT_PRIVATE_STATE_ID,
       undefined,
-      [item.bytes],
+      [item.bytes, item.key],
     ),
   );
   return submitted.txId;
@@ -321,17 +322,14 @@ const fundParallelWallets = async (seeds: readonly string[]): Promise<number> =>
 
 const parallelContexts = async (seeds: readonly string[]): Promise<VaultContext[]> => {
   const contexts: VaultContext[] = [];
+  const deployerSecretKey: string = bytesToHex(resolveUserIdentity(env).secretKey);
   for (const seed of seeds) {
     if (seed === env.USER_SEED) {
       contexts.push(await session.vaultContext());
       continue;
     }
-    if (seed === BEARER_SEED) {
-      contexts.push(await strangerSession.vaultContext());
-      continue;
-    }
     const walletSession = createVaultSession(
-      { ...env, USER_SEED: seed, VAULT_USER_SECRET_KEY: seed },
+      { ...env, USER_SEED: seed, VAULT_USER_SECRET_KEY: deployerSecretKey },
       observer,
     );
     parallelSessions.push(walletSession);
@@ -344,7 +342,7 @@ const proveApproveRouter = (context: VaultContext, item: QueuedApprove): Promise
   proveAhead(
     context,
     "approveRouter",
-    [item.bytes],
+    [item.bytes, item.key],
     BYTE_BUDGET_MULTIPLIER,
     COMPUTE_BUDGET_PERCENTAGE,
   );
@@ -441,9 +439,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       const emptyWallMs = stopEmpty();
       const emptyProve = lastProve("flush");
 
-      const item = randomApprove();
+      const drawn = randomApprove();
       const stopQueue = startTimer();
-      await queueApproveRouter(context, item.erc20);
+      const item = { ...drawn, key: await queueApproveRouter(context, drawn.erc20) };
       const queueWallMs = stopQueue();
       const queueProve = lastProve("approveRouter");
 
@@ -570,8 +568,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue benchmark
       const context = await session.vaultContext();
       const stranger = await strangerSession.vaultContext();
       await drainQueue(context);
-      const items = [randomApprove(), randomApprove()];
-      for (const item of items) await queueApproveRouter(context, item.erc20);
+      const items: QueuedApprove[] = [];
+      for (const drawn of [randomApprove(), randomApprove()]) {
+        items.push({ ...drawn, key: await queueApproveRouter(context, drawn.erc20) });
+      }
       const keys = items.map((item) => item.key);
       const before = (
         await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)

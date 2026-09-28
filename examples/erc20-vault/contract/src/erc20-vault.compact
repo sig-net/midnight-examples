@@ -374,20 +374,13 @@ export circuit adminReplaceEvmNonce(
 
 // One-time, deployer-gated MPC-signed approve(stataToken, unlimitedAllowance()) on the
 // underlying USDC, so the wrapper can pull it during a supply. Signed with the VAULT account.
-export pure circuit approveStataBinder(): Bytes<32> {
-  return pad(32, "vault:approve:stata");
-}
-
-export pure circuit approveRouterBinder(erc20Address: Bytes<20>): Bytes<32> {
-  return upgradeFromTransient(transientHash<[Bytes<32>, Bytes<20>]>([pad(32, "vault:approve:router"), erc20Address]));
-}
-
-export circuit approveStata(): [] {
+export circuit approveStata(key: Bytes<32>): [] {
   assert(initialised >= 1, "Not initialised");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
-  const key = approveStataBinder();
-  assert(!pendingVaultRequests.member(key), "Request already queued");
-  pendingVaultRequests.insert(key, PendingVaultRequest {
+  const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
+  assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
+  pendingVaultRequests.insert(disclosedKey, PendingVaultRequest {
     kind: PendingRequestKind.approveStata,
     addressA: stataUnderlying,
     addressB: stataToken,
@@ -405,16 +398,18 @@ export circuit approveStata(): [] {
 }
 
 // Deployer-gated per-token router allowance, signed with the VAULT account. Spender
-// and amount are contract-fixed, so the deployer chooses ONLY the token.
+// and amount are contract-fixed, so the deployer chooses ONLY the token and the queue key.
 export circuit approveRouter(
-  erc20Address: Bytes<20>
+  erc20Address: Bytes<20>,
+  key: Bytes<32>
 ): [] {
   assert(initialised >= 1, "Not initialised");
   assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
   assert(erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
-  const key = disclose(approveRouterBinder(erc20Address));
-  assert(!pendingVaultRequests.member(key), "Request already queued");
-  pendingVaultRequests.insert(key, PendingVaultRequest {
+  const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
+  assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
+  pendingVaultRequests.insert(disclosedKey, PendingVaultRequest {
     kind: PendingRequestKind.approveRouter,
     addressA: disclose(erc20Address),
     addressB: uniswapRouter,
