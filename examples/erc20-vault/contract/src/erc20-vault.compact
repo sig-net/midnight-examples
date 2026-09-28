@@ -616,6 +616,7 @@ export circuit startWithdraw(
   assert(coin.color == color, "Coin is not the vault token for this ERC20");
   assert(coin.value == withdrawRequest.amount, "Coin value must equal the withdraw amount");
   const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
   assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
@@ -747,6 +748,7 @@ export circuit startSwap(
   assert(coin.color == color, "Coin is not the vault token for tokenIn");
   assert(coin.value == swapRequest.amountInMaximum, "Coin value must equal amountInMaximum");
   const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
   assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
@@ -872,6 +874,7 @@ export circuit startSupply(
   assert(coin.color == color, "Coin is not the vault token for the underlying");
   assert(coin.value == supplyRequest.amount, "Coin value must equal amount");
   const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
   assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
@@ -982,6 +985,7 @@ export circuit startRedeem(
   assert(coin.color == color, "Coin is not the vault token for the wrapper");
   assert(coin.value == redeemRequest.shares, "Coin value must equal shares");
   const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
   assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
@@ -1070,11 +1074,13 @@ export circuit flush(keys: Vector<20, Bytes<32>>, seen: Vector<20, RequestId>): 
   assert(initialised >= 1, "Not initialised");
   for (const slot of 0..20) {
     const requestId = disclose(seen[slot]);
-    if (seenEvmHeights.member(requestId)) {
-      if (seenEvmHeights.lookup(requestId) > lastSeenEvmHeight) {
-        lastSeenEvmHeight = seenEvmHeights.lookup(requestId);
+    if (requestId != default<RequestId>) {
+      if (seenEvmHeights.member(requestId)) {
+        if (seenEvmHeights.lookup(requestId) > lastSeenEvmHeight) {
+          lastSeenEvmHeight = seenEvmHeights.lookup(requestId);
+        }
+        seenEvmHeights.remove(requestId);
       }
-      seenEvmHeights.remove(requestId);
     }
   }
   const stamped = fold(
@@ -1087,7 +1093,9 @@ export circuit flush(keys: Vector<20, Bytes<32>>, seen: Vector<20, RequestId>): 
 }
 
 circuit stampIfUnstamped(key: Bytes<32>): Uint<8> {
-  if (pendingVaultRequests.member(key) && !stamps.member(key)) {
+  if (key == default<Bytes<32>>) {
+    return 0;
+  } else if (pendingVaultRequests.member(key) && !stamps.member(key)) {
     if (pendingVaultRequests.lookup(key).kind == PendingRequestKind.deposit) {
       stamps.insert(key, Stamp { evmNonce: 0 as Uint<64>, knownHeight: lastSeenEvmHeight });
     } else {

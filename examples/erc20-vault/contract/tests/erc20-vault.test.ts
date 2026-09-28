@@ -2051,6 +2051,67 @@ describe("approve gate", () => {
   });
 });
 
+describe("zero key", () => {
+  const ZERO_KEY = new Uint8Array(32);
+  interface ZeroKeyCase {
+    readonly circuit: string;
+    readonly call: (
+      contract: Contract<VaultPrivateState>,
+      ctx: CircuitContext<VaultPrivateState>,
+    ) => Promise<CircuitResults<VaultPrivateState, []>>;
+  }
+  const CASES: readonly ZeroKeyCase[] = [
+    {
+      circuit: "startWithdraw",
+      call: (contract, ctx) =>
+        contract.circuits.startWithdraw(
+          ctx,
+          VALID_WITHDRAW.withdraw,
+          VALID_WITHDRAW.coin,
+          ZERO_KEY,
+        ),
+    },
+    {
+      circuit: "startSwap",
+      call: (contract, ctx) =>
+        contract.circuits.startSwap(ctx, VALID_SWAP.swap, VALID_SWAP.coin, ZERO_KEY),
+    },
+    {
+      circuit: "startSupply",
+      call: (contract, ctx) =>
+        contract.circuits.startSupply(
+          ctx,
+          { amount: SUPPLY_AMOUNT },
+          vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
+          ZERO_KEY,
+        ),
+    },
+    {
+      circuit: "startRedeem",
+      call: (contract, ctx) =>
+        contract.circuits.startRedeem(
+          ctx,
+          { shares: REDEEM_SHARES },
+          vaultCoin(REDEEM_SHARES, STATA_COLOR),
+          ZERO_KEY,
+        ),
+    },
+    {
+      circuit: "approveRouter",
+      call: (contract, ctx) => contract.circuits.approveRouter(ctx, ERC20, ZERO_KEY),
+    },
+    {
+      circuit: "approveStata",
+      call: (contract, ctx) => contract.circuits.approveStata(ctx, ZERO_KEY),
+    },
+  ];
+
+  it.each(CASES)("$circuit refuses the zero key", async ({ call }) => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(call(contract, ctx)).rejects.toThrow(/Key cannot be zero/);
+  });
+});
+
 describe("supply round-trip", () => {
   it("burns the underlying and stores a vault-path deposit event on the supply map", async () => {
     const { contract, ctx } = await deployInitialised();
@@ -2726,6 +2787,25 @@ describe("throughput: requests never pin shared state, only the flush does", () 
       await full.contract.circuits.startWithdraw(full.current, full.request, late, keyForCoin(late))
     ).context;
     expect(replay(stateOf(fullAfterLate), fullFlush, true)).toBe("applied");
+  }, 60_000);
+
+  it("a zero-key start cannot land first under a padded flush", async () => {
+    const padded = await queueWithdraws(3, 0x90);
+    const paddedFlush = await padded.contract.circuits.flush(
+      padded.current,
+      padKeys(padded.keys),
+      padKeys([]),
+    );
+    const zero = { ...VALID_WITHDRAW.coin, nonce: bytes(32, 0x9f) };
+    await expect(
+      padded.contract.circuits.startWithdraw(
+        padded.current,
+        padded.request,
+        zero,
+        new Uint8Array(32),
+      ),
+    ).rejects.toThrow(/Key cannot be zero/);
+    expect(replay(stateOf(padded.current), paddedFlush, true)).toBe("applied");
   }, 60_000);
 
   it("two concurrent flushes conflict on the nonce counter, the second re-proves", async () => {
