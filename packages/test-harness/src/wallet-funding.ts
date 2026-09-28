@@ -80,7 +80,9 @@ export async function fundWalletsFromRoot(
         const root: RegisteredWallet = await wallets.wallet(rootSeed, "root");
         const rootState: FacadeState = await waitForFacadeState(
           root.facade,
-          (snapshot) => snapshot.pending.all.length === 0,
+          (snapshot) =>
+            snapshot.unshielded.pendingCoins.length === 0 &&
+            snapshot.dust.pendingCoins.length === 0,
           60_000,
         );
         if (failures.length > 0) break;
