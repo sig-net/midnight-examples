@@ -232,7 +232,7 @@ describe("pipelined wallet funding", () => {
     { name: "NIGHT", nightReserved: true, dustReserved: false },
     { name: "DUST", nightReserved: false, dustReserved: true },
   ])(
-    "waits for reserved $name inputs before building the next transfer",
+    "uses available funds after a completed transfer despite retained $name reservations",
     async ({ nightReserved, dustReserved }) => {
       vi.useFakeTimers();
       const { registry, facades, transfer } = arrange();
@@ -254,23 +254,57 @@ describe("pipelined wallet funding", () => {
             : [],
         } as Partial<funding.FacadeState["dust"]> as funding.FacadeState["dust"],
       } as Partial<funding.FacadeState> as funding.FacadeState;
-      vi.spyOn(root, "waitForSyncedState")
-        .mockResolvedValueOnce(state)
-        .mockResolvedValueOnce(reserved)
-        .mockResolvedValue(state);
-      const result: Promise<number> = fundWalletsFromRoot(
-        registry,
-        ROOT_SEED,
-        RECIPIENTS.slice(0, 2),
-      );
-      await vi.advanceTimersByTimeAsync(0);
-      expect(transfer).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(2999);
-      expect(transfer).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(1);
-      await expect(result).resolves.toBe(2);
+      vi.spyOn(root, "waitForSyncedState").mockResolvedValueOnce(state).mockResolvedValue(reserved);
+      const assertion: Promise<void> = (async () => {
+        await expect(
+          fundWalletsFromRoot(registry, ROOT_SEED, RECIPIENTS.slice(0, 2)),
+        ).resolves.toBe(2);
+      })();
+      await Promise.all([assertion, vi.advanceTimersByTimeAsync(60_001)]);
+      expect(transfer).toHaveBeenCalledTimes(2);
     },
   );
+
+  it("waits for the first root transfer to finish before starting the second", async () => {
+    const { registry, transfer } = arrange();
+    const submitted = deferred<string>();
+    const realTransfer = transfer.getMockImplementation();
+    if (!realTransfer) throw new Error("missing fixture transfer");
+    transfer.mockImplementationOnce(async (...args) => {
+      await submitted.promise;
+      return realTransfer(...args);
+    });
+    const result = fundWalletsFromRoot(registry, ROOT_SEED, RECIPIENTS.slice(0, 2));
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(1);
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    expect(transfer).toHaveBeenCalledTimes(1);
+    submitted.resolve("first transfer finalised");
+    await expect(result).resolves.toBe(2);
+    expect(transfer).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits for enough available NIGHT before building the transfer", async () => {
+    vi.useFakeTimers();
+    const { registry, facades, transfer } = arrange();
+    const root = facades.get(ROOT_SEED);
+    if (!root) throw new Error("missing fixture root");
+    const state: funding.FacadeState = await root.waitForSyncedState();
+    const waiting = {
+      dust: state.dust,
+      pending: state.pending,
+      unshielded: { balances: { night: 99n }, pendingCoins: [] } as Partial<
+        funding.FacadeState["unshielded"]
+      > as funding.FacadeState["unshielded"],
+    } as Partial<funding.FacadeState> as funding.FacadeState;
+    vi.spyOn(root, "waitForSyncedState").mockResolvedValueOnce(waiting).mockResolvedValue(state);
+    const result = fundWalletsFromRoot(registry, ROOT_SEED, RECIPIENTS.slice(0, 1));
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(transfer).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toBe(1);
+  });
 
   it("bounds stalled child observation and does not register after timeout", async () => {
     vi.useFakeTimers();
