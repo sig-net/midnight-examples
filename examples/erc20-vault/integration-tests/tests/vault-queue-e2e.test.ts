@@ -1,7 +1,6 @@
 import {
   AAVE_USDC,
   evmAddressBytes,
-  pureCircuits,
   readVaultLedger,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
@@ -18,6 +17,7 @@ import { proveAhead, submitProven } from "../src/flows/prove-ahead.ts";
 import {
   flushPending,
   flushUntilStamped,
+  newQueueKey,
   proveFlush,
   unstampedKeys,
 } from "../src/flows/vault-queue.ts";
@@ -200,9 +200,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault queue e2e", () 
 
       const staleFlush = await proveFlush(context, waiting);
       const usdc = evmAddressBytes(AAVE_USDC);
-      const lateApprove = await proveAhead(context, "approveRouter", [usdc]);
-      const late = pureCircuits.approveRouterBinder(usdc);
-      const stata = await queueApproveStata(stranger);
+      const late = newQueueKey();
+      const lateApprove = await proveAhead(context, "approveRouter", [usdc, late]);
+      const stata = await queueApproveStata(context);
 
       expect(await submitProven(context, lateApprove)).toBe("SucceedEntirely");
       const staleStatus = await submitProven(context, staleFlush);

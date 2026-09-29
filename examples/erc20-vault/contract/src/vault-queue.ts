@@ -25,7 +25,7 @@ export function padKeys(keys: readonly Uint8Array[]): Uint8Array[] {
 }
 
 /**
- * A fresh queue key for a withdraw, swap, supply or redeem: 32 random bytes.
+ * A fresh queue key for an approve, withdraw, swap, supply or redeem: 32 random bytes.
  *
  * @returns The key to queue the request under.
  */

@@ -37,7 +37,6 @@ import {
   type SessionWallet,
 } from "@sig-net/midnight-examples-test-harness";
 
-import { withDustProofExperiment } from "./dust-proof-experiment.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
 import { resolveUserIdentity, type UserIdentity } from "./vault-identity.ts";
 
@@ -129,13 +128,9 @@ export async function createVaultContext(
         })
       : undefined;
   const identity = resolveUserIdentity(env);
-  const baseProviders = buildVaultProviders(wallet.facade, wallet.keys, nodeConfig, proofObserver);
-  const callProviders =
-    env.VAULT_DUST_PROOF_EXPERIMENT === "1"
-      ? withDustProofExperiment(baseProviders, wallet.facade, nodeConfig.nodeUrl)
-      : baseProviders;
+  const providers = buildVaultProviders(wallet.facade, wallet.keys, nodeConfig, proofObserver);
 
-  const vault = await findDeployedContract(callProviders, {
+  const vault = await findDeployedContract(providers, {
     contractAddress: vaultContractAddress,
     compiledContract: vaultCompiledContract,
     privateStateId: VAULT_PRIVATE_STATE_ID,
@@ -154,7 +149,7 @@ export async function createVaultContext(
     evmVaultAddress: requireEnv(env, "EVM_VAULT_ADDRESS"),
     evmUserAddress: requireEnv(env, "EVM_USER_ADDRESS"),
     identity,
-    providers: callProviders,
+    providers,
     vault,
   };
 }

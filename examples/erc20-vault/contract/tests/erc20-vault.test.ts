@@ -164,9 +164,25 @@ const VAULT_EVM = bytes(20, 0xee);
 // The pinned Uniswap SwapRouter02 (initialise arg + swap `to`).
 const ROUTER = bytes(20, 0x11);
 const ERC20 = bytes(20, 0xaa);
+const ERC20_OUT = bytes(20, 0xbb);
+const ROUTER_KEY = bytes(32, 0xc1);
+const ROUTER_OUT_KEY = bytes(32, 0xc2);
+const STATA_KEY = bytes(32, 0xc3);
 // The pinned Aave USDC pair (initialise args): the underlying and its stataUSDC wrapper.
 const STATA_UNDERLYING = bytes(20, 0xdd); // supply burns this colour, redeem mints it
 const STATA_TOKEN = bytes(20, 0xcc); // supply/redeem `to`; supply mints this colour
+const UNLISTED_TOKEN = bytes(20, 0xee);
+const ZERO_TOKEN = new Uint8Array(20);
+const ALLOWED_TOKENS = [
+  ERC20,
+  ERC20_OUT,
+  STATA_UNDERLYING,
+  STATA_TOKEN,
+  ZERO_TOKEN,
+  ZERO_TOKEN,
+  ZERO_TOKEN,
+  ZERO_TOKEN,
+];
 const ZERO_ADDRESS = new Uint8Array(20);
 const AMOUNT = 1_000_000n;
 const UINT64_MAX = 18446744073709551615n;
@@ -270,6 +286,27 @@ const strangerContext = async (
   );
 
 /**
+ * Re-enter a threaded contract state as the DEPLOYER: same public state, a
+ * fresh private state holding the deployer's {@link SECRET_KEY}.
+ */
+const deployerContext = async (
+  circuitId: string,
+  ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startDeposit"]>[0],
+) =>
+  createCircuitContext(
+    circuitId,
+    VAULT_ADDRESS,
+    CPK,
+    ctx.callContext.currentQueryContext.state,
+    createVaultPrivateState(SECRET_KEY),
+    await signetStateProvider(),
+    undefined,
+    undefined,
+    undefined,
+    BLOCK_HASH,
+  );
+
+/**
  * Deploy + initialise(VAULT_EVM, CHAIN_ID, MPC_RESPONSE_KEY) as
  * the deployer: the ready-to-use vault, with the MPC response key stored.
  */
@@ -288,9 +325,9 @@ const flushOne = async (
 const approveStata = async (
   contract: Contract<VaultPrivateState>,
   ctx: CircuitContext<VaultPrivateState>,
+  key: Uint8Array,
 ): Promise<CircuitResults<VaultPrivateState, []>> => {
-  const key = pureCircuits.approveStataBinder();
-  const queued = (await contract.circuits.approveStata(ctx)).context;
+  const queued = (await contract.circuits.approveStata(ctx, key)).context;
   return contract.circuits.sendApproveStata(await flushOne(contract, queued, key), key);
 };
 
@@ -298,9 +335,9 @@ const approveRouter = async (
   contract: Contract<VaultPrivateState>,
   ctx: CircuitContext<VaultPrivateState>,
   erc20: Uint8Array,
+  key: Uint8Array,
 ): Promise<CircuitResults<VaultPrivateState, []>> => {
-  const key = pureCircuits.approveRouterBinder(erc20);
-  const queued = (await contract.circuits.approveRouter(ctx, erc20)).context;
+  const queued = (await contract.circuits.approveRouter(ctx, erc20, key)).context;
   return contract.circuits.sendApproveRouter(await flushOne(contract, queued, key), key);
 };
 
@@ -317,6 +354,7 @@ const deployInitialised = async () => {
       MPC_RESPONSE_KEY,
       MPC_KEY_VERSION,
       EVM_START_HEIGHT,
+      ALLOWED_TOKENS,
     )
   ).context;
   return { contract, ctx: next };
@@ -466,6 +504,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        ALLOWED_TOKENS,
       ),
     ).rejects.toThrow(/Not the deployer/);
   });
@@ -483,6 +522,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         0n,
         EVM_START_HEIGHT,
+        ALLOWED_TOKENS,
       ),
     ).rejects.toThrow(/keyVersion must be >= 1/);
   });
@@ -500,6 +540,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        ALLOWED_TOKENS,
       ),
     ).rejects.toThrow(/Already initialised/);
   });
@@ -517,8 +558,45 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        ALLOWED_TOKENS,
       ),
     ).rejects.toThrow(/Chain ID must be positive/);
+  });
+
+  it.each([
+    [
+      "a list without the stata underlying",
+      [ERC20, ERC20_OUT, STATA_TOKEN, ZERO_TOKEN, ZERO_TOKEN, ZERO_TOKEN, ZERO_TOKEN, ZERO_TOKEN],
+    ],
+    [
+      "an all-zero list",
+      [
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+        ZERO_TOKEN,
+      ],
+    ],
+  ] as const)("refuses %s", async (_label, allowedTokens) => {
+    const { contract, ctx } = await deployContract();
+    await expect(
+      contract.circuits.initialise(
+        ctx,
+        VAULT_EVM,
+        ROUTER,
+        STATA_UNDERLYING,
+        STATA_TOKEN,
+        CHAIN_ID,
+        MPC_RESPONSE_KEY,
+        MPC_KEY_VERSION,
+        EVM_START_HEIGHT,
+        [...allowedTokens],
+      ),
+    ).rejects.toThrow(/stataUnderlying not allowed/);
   });
 
   it("stores the vault EVM address, the chain id and the MPC response key", async () => {
@@ -566,7 +644,7 @@ describe("deposit round-trip", () => {
     expect(decodeSignBidirectionalNotification(notificationPost.event)).toEqual({
       version: 1,
       callerAddress: bytesToHex(VAULT_ADDRESS_BYTES),
-      requestsPath: [1, 3],
+      requestsPath: [2, 2],
     });
 
     // The contract-composed envelope: the deposit's token on the
@@ -889,7 +967,7 @@ describe("withdraw round-trip", () => {
     // keyed entries, so coins of different colors surrendered back-to-back
     // must both record.
     const { contract, ctx } = await deployInitialised();
-    const otherErc20 = bytes(20, 0xab);
+    const otherErc20 = ERC20_OUT;
     const otherColor = hexToBytes(
       rawTokenType(pureCircuits.vaultTokenDomainSeparator(otherErc20), VAULT_ADDRESS),
     );
@@ -1631,7 +1709,6 @@ const SWAP_OUTPUT_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint256"}]',
 const SWAP_RESPOND_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint64"}]', 37);
 
 // A second ERC20 (tokenOut) with its own vault-token color.
-const ERC20_OUT = bytes(20, 0xbb);
 const VAULT_TOKEN_COLOR_OUT = hexToBytes(
   rawTokenType(pureCircuits.vaultTokenDomainSeparator(ERC20_OUT), VAULT_ADDRESS),
 );
@@ -1691,7 +1768,7 @@ const OUTPUT_SWAP = swapOutput(SWAP_AMOUNT_IN_SPENT);
 describe("approveRouter", () => {
   it("records an approve(router, ~unlimited) on signBidirectionalEventMap from the vault path, no coin", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await approveRouter(contract, ctx, ERC20);
+    const { context: next } = await approveRouter(contract, ctx, ERC20, ROUTER_KEY);
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1710,13 +1787,11 @@ describe("approveRouter", () => {
     expect(calldata.value.words[1]).toEqual(numericAbiWord(MAX_APPROVE));
   });
 
-  it("is permissionless (a stranger may ready a token) and needs initialise", async () => {
+  it("needs initialise", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(approveRouter(contract, ctx, ERC20)).rejects.toThrow(/Not initialised/);
-    const ready = await deployInitialised();
-    await expect(
-      approveRouter(ready.contract, await strangerContext("approveRouter", ready.ctx), ERC20),
-    ).resolves.toBeDefined();
+    await expect(approveRouter(contract, ctx, ERC20, ROUTER_KEY)).rejects.toThrow(
+      /Not initialised/,
+    );
   });
 });
 
@@ -1985,7 +2060,7 @@ const redeem = async (
 describe("approveStata", () => {
   it("records approve(stataToken, MAX) on signBidirectionalEventMap from the vault path, to = the underlying", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: next } = await approveStata(contract, ctx);
+    const { context: next } = await approveStata(contract, ctx, STATA_KEY);
 
     const index = toSignBidirectionalEventIndex(
       ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
@@ -1999,6 +2074,94 @@ describe("approveStata", () => {
     expect(calldata.value.selector).toEqual(APPROVE_SELECTOR);
     expect(calldata.value.words[0]).toEqual(evmAddressAbiWord(STATA_TOKEN));
     expect(calldata.value.words[1]).toEqual(numericAbiWord(MAX_APPROVE));
+  });
+});
+
+describe("approve gate", () => {
+  interface ApproveGateCase {
+    readonly circuit: "approveRouter" | "approveStata";
+    readonly call: (
+      contract: Contract<VaultPrivateState>,
+      ctx: CircuitContext<VaultPrivateState>,
+    ) => Promise<CircuitResults<VaultPrivateState, []>>;
+  }
+  const CASES: readonly ApproveGateCase[] = [
+    {
+      circuit: "approveRouter",
+      call: (contract, ctx) => contract.circuits.approveRouter(ctx, ERC20, ROUTER_KEY),
+    },
+    {
+      circuit: "approveStata",
+      call: (contract, ctx) => contract.circuits.approveStata(ctx, STATA_KEY),
+    },
+  ];
+
+  it.each(CASES)("$circuit refuses a stranger", async ({ circuit, call }) => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(call(contract, await strangerContext(circuit, ctx))).rejects.toThrow(
+      /Not the deployer/,
+    );
+  });
+});
+
+describe("zero key", () => {
+  const ZERO_KEY = new Uint8Array(32);
+  interface ZeroKeyCase {
+    readonly circuit: string;
+    readonly call: (
+      contract: Contract<VaultPrivateState>,
+      ctx: CircuitContext<VaultPrivateState>,
+    ) => Promise<CircuitResults<VaultPrivateState, []>>;
+  }
+  const CASES: readonly ZeroKeyCase[] = [
+    {
+      circuit: "startWithdraw",
+      call: (contract, ctx) =>
+        contract.circuits.startWithdraw(
+          ctx,
+          VALID_WITHDRAW.withdraw,
+          VALID_WITHDRAW.coin,
+          ZERO_KEY,
+        ),
+    },
+    {
+      circuit: "startSwap",
+      call: (contract, ctx) =>
+        contract.circuits.startSwap(ctx, VALID_SWAP.swap, VALID_SWAP.coin, ZERO_KEY),
+    },
+    {
+      circuit: "startSupply",
+      call: (contract, ctx) =>
+        contract.circuits.startSupply(
+          ctx,
+          { amount: SUPPLY_AMOUNT },
+          vaultCoin(SUPPLY_AMOUNT, STATA_UNDERLYING_COLOR),
+          ZERO_KEY,
+        ),
+    },
+    {
+      circuit: "startRedeem",
+      call: (contract, ctx) =>
+        contract.circuits.startRedeem(
+          ctx,
+          { shares: REDEEM_SHARES },
+          vaultCoin(REDEEM_SHARES, STATA_COLOR),
+          ZERO_KEY,
+        ),
+    },
+    {
+      circuit: "approveRouter",
+      call: (contract, ctx) => contract.circuits.approveRouter(ctx, ERC20, ZERO_KEY),
+    },
+    {
+      circuit: "approveStata",
+      call: (contract, ctx) => contract.circuits.approveStata(ctx, ZERO_KEY),
+    },
+  ];
+
+  it.each(CASES)("$circuit refuses the zero key", async ({ call }) => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(call(contract, ctx)).rejects.toThrow(/Key cannot be zero/);
   });
 });
 
@@ -2330,7 +2493,7 @@ interface PendingRequest {
  */
 const approveRouterRequested = async (): Promise<PendingRequest> => {
   const { contract, ctx } = await deployInitialised();
-  const next = (await approveRouter(contract, ctx, ERC20)).context;
+  const next = (await approveRouter(contract, ctx, ERC20, ROUTER_KEY)).context;
   const index = toSignBidirectionalEventIndex(
     ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap,
   );
@@ -2596,12 +2759,12 @@ describe("throughput: requests never pin shared state, only the flush does", () 
     expect(replay(stateAfterAlice, bob, true)).toBe("applied");
   });
 
-  it("two concurrent vault requests from different callers both apply", async () => {
+  it("two concurrent vault requests of different tokens both apply", async () => {
     const { contract, ctx } = await deployInitialised();
-    const alice = await contract.circuits.approveRouter(ctx, ERC20);
+    const alice = await contract.circuits.approveRouter(ctx, ERC20, ROUTER_KEY);
     const stateAfterAlice = stateOf(alice.context);
-    const bobCtx = await strangerContext("approveRouter", ctx);
-    const bob = await contract.circuits.approveRouter(bobCtx, ERC20_OUT);
+    const bobCtx = await deployerContext("approveRouter", ctx);
+    const bob = await contract.circuits.approveRouter(bobCtx, ERC20_OUT, ROUTER_OUT_KEY);
     expect(replay(stateAfterAlice, bob, true)).toBe("applied");
   });
 
@@ -2679,15 +2842,35 @@ describe("throughput: requests never pin shared state, only the flush does", () 
     expect(replay(stateOf(fullAfterLate), fullFlush, true)).toBe("applied");
   }, 60_000);
 
+  it("a zero-key start cannot land first under a padded flush", async () => {
+    const padded = await queueWithdraws(3, 0x90);
+    const paddedFlush = await padded.contract.circuits.flush(
+      padded.current,
+      padKeys(padded.keys),
+      padKeys([]),
+    );
+    const zero = { ...VALID_WITHDRAW.coin, nonce: bytes(32, 0x9f) };
+    await expect(
+      padded.contract.circuits.startWithdraw(
+        padded.current,
+        padded.request,
+        zero,
+        new Uint8Array(32),
+      ),
+    ).rejects.toThrow(/Key cannot be zero/);
+    expect(replay(stateOf(padded.current), paddedFlush, true)).toBe("applied");
+  }, 60_000);
+
   it("two concurrent flushes conflict on the nonce counter, the second re-proves", async () => {
     const { contract, ctx } = await deployInitialised();
-    const aliceKey = pureCircuits.approveRouterBinder(ERC20);
-    const bobKey = pureCircuits.approveRouterBinder(ERC20_OUT);
-    const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
+    const aliceKey = ROUTER_KEY;
+    const bobKey = ROUTER_OUT_KEY;
+    const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20, ROUTER_KEY)).context;
     const queuedBoth = (
       await contract.circuits.approveRouter(
-        await strangerContext("approveRouter", queuedAlice),
+        await deployerContext("approveRouter", queuedAlice),
         ERC20_OUT,
+        ROUTER_OUT_KEY,
       )
     ).context;
     const aliceFlush = await contract.circuits.flush(
@@ -2707,13 +2890,14 @@ describe("throughput: requests never pin shared state, only the flush does", () 
 
   it("two concurrent sends of different keys both apply after one flush", async () => {
     const { contract, ctx } = await deployInitialised();
-    const aliceKey = pureCircuits.approveRouterBinder(ERC20);
-    const bobKey = pureCircuits.approveRouterBinder(ERC20_OUT);
-    const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
+    const aliceKey = ROUTER_KEY;
+    const bobKey = ROUTER_OUT_KEY;
+    const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20, ROUTER_KEY)).context;
     const queuedBoth = (
       await contract.circuits.approveRouter(
-        await strangerContext("approveRouter", queuedAlice),
+        await deployerContext("approveRouter", queuedAlice),
         ERC20_OUT,
+        ROUTER_OUT_KEY,
       )
     ).context;
     const flushed = (
@@ -2944,7 +3128,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await approveRouter(contract, configured, ERC20)).context;
+    const next = (await approveRouter(contract, configured, ERC20, ROUTER_KEY)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -2959,7 +3143,7 @@ describe("gas parameters reach the constructed transaction", () => {
     const { contract, ctx } = await deployInitialised();
     const configured = (await setGasParams(contract, ctx, NEW_GAS_PARAMS)).context;
 
-    const next = (await approveStata(contract, configured)).context;
+    const next = (await approveStata(contract, configured, STATA_KEY)).context;
 
     expect(
       envelopeOf(ledger(next.callContext.currentQueryContext.state).signBidirectionalEventMap),
@@ -3026,7 +3210,7 @@ describe("gas parameters reach the constructed transaction", () => {
 
     const afterWithdraw = (await withdraw(contract, configured, VALID_WITHDRAW)).context;
     const afterSwap = (await swap(contract, configured, VALID_SWAP)).context;
-    const afterApprove = (await approveRouter(contract, configured, ERC20)).context;
+    const afterApprove = (await approveRouter(contract, configured, ERC20, ROUTER_KEY)).context;
     const afterSupply = (
       await supply(
         contract,
@@ -3078,12 +3262,7 @@ const withSentNonces = async (
 ): Promise<CircuitContext<VaultPrivateState>> => {
   let next = await withIssuedNonces(contract, ctx, count);
   for (let i = 0; i < count; i++) {
-    next = (
-      await contract.circuits.sendApproveRouter(
-        next,
-        pureCircuits.approveRouterBinder(bytes(20, 0xb0 + i)),
-      )
-    ).context;
+    next = (await contract.circuits.sendApproveRouter(next, bytes(32, 0xb0 + i))).context;
   }
   return next;
 };
@@ -3096,9 +3275,9 @@ const withIssuedNonces = async (
   let next = ctx;
   const keys: Uint8Array[] = [];
   for (let i = 0; i < count; i++) {
-    const erc20 = bytes(20, 0xb0 + i);
-    keys.push(pureCircuits.approveRouterBinder(erc20));
-    next = (await contract.circuits.approveRouter(next, erc20)).context;
+    const key = bytes(32, 0xb0 + i);
+    keys.push(key);
+    next = (await contract.circuits.approveRouter(next, ERC20, key)).context;
   }
   return (await contract.circuits.flush(next, padKeys(keys), padKeys([]))).context;
 };
@@ -3229,23 +3408,28 @@ describe("queue helpers", () => {
     );
   });
 
-  it("an approve is queued under its public binder, whoever calls it", async () => {
+  it("an approve key already queued is refused", async () => {
     const { contract, ctx } = await deployInitialised();
-    const queued = (await contract.circuits.approveRouter(ctx, ERC20)).context;
+    const queued = (await contract.circuits.approveRouter(ctx, ERC20, ROUTER_KEY)).context;
     const state = ledger(stateOf(queued) as never);
-    expect(state.pendingVaultRequests.member(pureCircuits.approveRouterBinder(ERC20))).toBe(true);
+    expect(state.pendingVaultRequests.member(ROUTER_KEY)).toBe(true);
     await expect(
-      contract.circuits.approveRouter(await strangerContext("approveRouter", queued), ERC20),
+      contract.circuits.approveRouter(
+        await deployerContext("approveRouter", queued),
+        ERC20,
+        ROUTER_KEY,
+      ),
     ).rejects.toThrow(/Request already queued/);
   });
 
   it("unstampedKeys lists queued keys until a flush stamps them, in ledger order", async () => {
     const { contract, ctx } = await deployInitialised();
-    const aliceKey = pureCircuits.approveRouterBinder(ERC20);
-    const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20)).context;
-    const bobCtx = await strangerContext("approveRouter", queuedAlice);
-    const bobKey = pureCircuits.approveRouterBinder(ERC20_OUT);
-    const queuedBoth = (await contract.circuits.approveRouter(bobCtx, ERC20_OUT)).context;
+    const aliceKey = ROUTER_KEY;
+    const queuedAlice = (await contract.circuits.approveRouter(ctx, ERC20, ROUTER_KEY)).context;
+    const bobCtx = await deployerContext("approveRouter", queuedAlice);
+    const bobKey = ROUTER_OUT_KEY;
+    const queuedBoth = (await contract.circuits.approveRouter(bobCtx, ERC20_OUT, ROUTER_OUT_KEY))
+      .context;
 
     const before = ledger(stateOf(queuedBoth) as never);
     const pending = unstampedKeys(before);
@@ -3431,8 +3615,9 @@ describe("attested block heights", () => {
   it("a flush stamps every queued key with the last seen height", async () => {
     const { contract, ctx } = await deployInitialised();
     const depositQueued = (await queueDeposit(contract, ctx, VALID_DEPOSIT)).context;
-    const approveKey = pureCircuits.approveRouterBinder(ERC20);
-    const bothQueued = (await contract.circuits.approveRouter(depositQueued, ERC20)).context;
+    const approveKey = ROUTER_KEY;
+    const bothQueued = (await contract.circuits.approveRouter(depositQueued, ERC20, ROUTER_KEY))
+      .context;
     const flushed = (
       await contract.circuits.flush(
         bothQueued,
@@ -3502,8 +3687,8 @@ describe("attested block heights", () => {
     expect(afterSettle.seenEvmHeights.lookup(requestId)).toBe(settledAt);
     expect(afterSettle.lastSeenEvmHeight).toBe(EVM_START_HEIGHT);
 
-    const approveKey = pureCircuits.approveRouterBinder(ERC20);
-    const queued = (await contract.circuits.approveRouter(settled, ERC20)).context;
+    const approveKey = ROUTER_KEY;
+    const queued = (await contract.circuits.approveRouter(settled, ERC20, ROUTER_KEY)).context;
     const flushed = (
       await contract.circuits.flush(queued, padKeys([approveKey]), padKeys([requestId]))
     ).context;
@@ -3603,5 +3788,66 @@ describe("attested block heights", () => {
     const record = first(index.values(), "deposit request");
     expect(record.path).toEqual(DEPLOYER_COMMITMENT);
     expect(record.txParams.nonce).toBe(VALID_DEPOSIT.evmNonce);
+  });
+});
+
+describe("allowed tokens", () => {
+  it.each([
+    [
+      "startDeposit",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        queueDeposit(contract, ctx, {
+          ...VALID_DEPOSIT,
+          deposit: { ...VALID_DEPOSIT.deposit, erc20Address: UNLISTED_TOKEN },
+        }),
+    ],
+    [
+      "startWithdraw",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.startWithdraw(
+          ctx,
+          { ...VALID_WITHDRAW.withdraw, erc20Address: UNLISTED_TOKEN },
+          VALID_WITHDRAW.coin,
+          keyForCoin(VALID_WITHDRAW.coin),
+        ),
+    ],
+    [
+      "startSwap tokenIn",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.startSwap(
+          ctx,
+          { ...VALID_SWAP.swap, tokenIn: UNLISTED_TOKEN },
+          VALID_SWAP.coin,
+          keyForCoin(VALID_SWAP.coin),
+        ),
+    ],
+    [
+      "startSwap tokenOut",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.startSwap(
+          ctx,
+          { ...VALID_SWAP.swap, tokenOut: UNLISTED_TOKEN },
+          VALID_SWAP.coin,
+          keyForCoin(VALID_SWAP.coin),
+        ),
+    ],
+    [
+      "approveRouter",
+      (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.approveRouter(ctx, UNLISTED_TOKEN, ROUTER_KEY),
+    ],
+  ])("%s refuses a token that is not allowed", async (_circuit, call) => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(call(contract, ctx)).rejects.toThrow(/Token not allowed/);
+  });
+
+  it("initialise records every non-zero entry of the list", async () => {
+    const { ctx } = await deployInitialised();
+    const state = ledger(stateOf(ctx) as never);
+    for (const token of [ERC20, ERC20_OUT, STATA_UNDERLYING, STATA_TOKEN]) {
+      expect(state.allowedTokens.member(token)).toBe(true);
+    }
+    expect(state.allowedTokens.member(UNLISTED_TOKEN)).toBe(false);
+    expect(state.allowedTokens.member(ZERO_TOKEN)).toBe(false);
   });
 });

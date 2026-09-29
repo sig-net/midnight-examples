@@ -80,7 +80,7 @@ export ledger stamps: Map<Bytes<32>, Stamp>;
 export ledger nonceOwners: Map<Uint<64>, Bytes<32>>;
 
 // Deposit requests (2-word ERC20 transfer, 34-byte schemas).
-// Compiled path for MPC notification: [1, 3] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [2, 2] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger depositEventMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 34>;
 
 // depositSettleViews:
@@ -114,7 +114,7 @@ export ledger withdrawSettleViews: Map<RequestId, WithdrawSettleView>;
 export ledger uniswapRouter: Bytes<20>;
 
 // Swap requests (exactOutputSingle: 7 words, uint256 result repacked to uint64).
-// Compiled path for MPC notification: [1, 7] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [2, 6] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger swapEventMap: SignBidirectionalEventMapV1<EvmType2TxParams<7, 0, 0>, 38, 37>;
 
 // swapSettleViews:
@@ -136,9 +136,10 @@ export ledger swapSettleViews: Map<RequestId, SwapSettleView>;
 // The pinned Aave USDC pair: underlying ERC20 + its ERC-4626 wrapper (stataUSDC).
 export ledger stataUnderlying: Bytes<20>;
 export ledger stataToken: Bytes<20>;
+export ledger allowedTokens: Map<Bytes<20>, Boolean>;
 
 // Supply requests (stataToken.deposit(assets, receiver): 2 words, uint256 -> uint64).
-// Compiled path for MPC notification: [1, 11] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [2, 11] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger supplyEventMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 36, 35>;
 
 // supplySettleViews:
@@ -153,7 +154,7 @@ struct SupplySettleView {
 export ledger supplySettleViews: Map<RequestId, SupplySettleView>;
 
 // Redeem requests (stataToken.redeem(shares, receiver, owner): 3 words, uint256 -> uint64).
-// Compiled path for MPC notification: [1, 13] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [2, 13] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger redeemEventMap: SignBidirectionalEventMapV1<EvmType2TxParams<3, 0, 0>, 36, 35>;
 
 // redeemSettleViews:
@@ -271,7 +272,8 @@ export circuit initialise(
   chainId: Uint<64>,
   responseKey: Secp256k1Point,
   responseKeyVersion: Uint<8>,
-  evmHeight: Uint<64>
+  evmHeight: Uint<64>,
+  allowedTokenList: Vector<8, Bytes<20>>
 ): [] {
   assert(initialised == 0, "Already initialised");
   assert(responseKeyVersion >= 1, "keyVersion must be >= 1");
@@ -280,6 +282,13 @@ export circuit initialise(
   assert(swapRouter as Field != 0 as Field, "Router cannot be zero");
   assert(stataUnderlyingAddr as Field != 0 as Field, "stataUnderlying cannot be zero");
   assert(stataTokenAddr as Field != 0 as Field, "stataToken cannot be zero");
+  for (const token of allowedTokenList) {
+    const disclosedToken = disclose(token);
+    if (disclosedToken as Field != 0 as Field) {
+      allowedTokens.insert(disclosedToken, true);
+    }
+  }
+  assert(allowedTokens.member(disclose(stataUnderlyingAddr)), "stataUnderlying not allowed");
   initialised.increment(1);
   vaultEvmAddress = disclose(vaultEvm);
   uniswapRouter = disclose(swapRouter);
@@ -372,21 +381,15 @@ export circuit adminReplaceEvmNonce(
   );
 }
 
-// One-time MPC-signed approve(stataToken, unlimitedAllowance()) on the underlying
-// USDC, so the wrapper can pull it during a supply. Signed with the VAULT account.
-export pure circuit approveStataBinder(): Bytes<32> {
-  return pad(32, "vault:approve:stata");
-}
-
-export pure circuit approveRouterBinder(erc20Address: Bytes<20>): Bytes<32> {
-  return upgradeFromTransient(transientHash<[Bytes<32>, Bytes<20>]>([pad(32, "vault:approve:router"), erc20Address]));
-}
-
-export circuit approveStata(): [] {
+// One-time, deployer-gated MPC-signed approve(stataToken, unlimitedAllowance()) on the
+// underlying USDC, so the wrapper can pull it during a supply. Signed with the VAULT account.
+export circuit approveStata(key: Bytes<32>): [] {
   assert(initialised >= 1, "Not initialised");
-  const key = approveStataBinder();
-  assert(!pendingVaultRequests.member(key), "Request already queued");
-  pendingVaultRequests.insert(key, PendingVaultRequest {
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+  const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
+  assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
+  pendingVaultRequests.insert(disclosedKey, PendingVaultRequest {
     kind: PendingRequestKind.approveStata,
     addressA: stataUnderlying,
     addressB: stataToken,
@@ -403,16 +406,20 @@ export circuit approveStata(): [] {
   unflushed.increment(1);
 }
 
-// Permissionless per-token router allowance, signed with the VAULT account. Spender
-// and amount are contract-fixed, so the caller chooses ONLY the token.
+// Deployer-gated per-token router allowance, signed with the VAULT account. Spender
+// and amount are contract-fixed, so the deployer chooses ONLY the token and the queue key.
 export circuit approveRouter(
-  erc20Address: Bytes<20>
+  erc20Address: Bytes<20>,
+  key: Bytes<32>
 ): [] {
   assert(initialised >= 1, "Not initialised");
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
   assert(erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
-  const key = disclose(approveRouterBinder(erc20Address));
-  assert(!pendingVaultRequests.member(key), "Request already queued");
-  pendingVaultRequests.insert(key, PendingVaultRequest {
+  assert(allowedTokens.member(disclose(erc20Address)), "Token not allowed");
+  const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
+  assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
+  pendingVaultRequests.insert(disclosedKey, PendingVaultRequest {
     kind: PendingRequestKind.approveRouter,
     addressA: disclose(erc20Address),
     addressB: uniswapRouter,
@@ -448,6 +455,7 @@ export circuit startDeposit(
 ): [] {
   assert(initialised >= 1, "Not initialised");
   assert(depositRequest.erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
+  assert(allowedTokens.member(disclose(depositRequest.erc20Address)), "Token not allowed");
   assert(depositRequest.amount > 0 as Uint<128>, "Amount must be positive");
   // completeDeposit mints via a Uint<64> API, so reject unclaimable amounts.
   assert(depositRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
@@ -533,11 +541,11 @@ export circuit sendDeposit(key: Bytes<32>): [] {
     amount: pending.amountA as Uint<64>,
     knownHeight: stamp.knownHeight,
   });
-  // Notify the MPC (depositEventMap's compiled ledger path, [1,3]).
+  // Notify the MPC (depositEventMap's compiled ledger path, [2,2]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [1, 3, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 2, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -610,6 +618,7 @@ export circuit startWithdraw(
 ): [] {
   assert(initialised >= 1, "Not initialised");
   assert(withdrawRequest.erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
+  assert(allowedTokens.member(disclose(withdrawRequest.erc20Address)), "Token not allowed");
   assert(withdrawRequest.amount > 0 as Uint<128>, "Amount must be positive");
   assert(withdrawRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
   const color = tokenType(
@@ -619,6 +628,7 @@ export circuit startWithdraw(
   assert(coin.color == color, "Coin is not the vault token for this ERC20");
   assert(coin.value == withdrawRequest.amount, "Coin value must equal the withdraw amount");
   const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
   assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
@@ -739,6 +749,8 @@ export circuit startSwap(
   assert(initialised >= 1, "Not initialised");
   assert(swapRequest.tokenIn as Field != 0 as Field, "tokenIn cannot be zero");
   assert(swapRequest.tokenOut as Field != 0 as Field, "tokenOut cannot be zero");
+  assert(allowedTokens.member(disclose(swapRequest.tokenIn)), "Token not allowed");
+  assert(allowedTokens.member(disclose(swapRequest.tokenOut)), "Token not allowed");
   assert(swapRequest.amountOut > 0 as Uint<128>, "amountOut must be positive");
   assert(swapRequest.amountInMaximum > 0 as Uint<128>, "amountInMaximum must be positive");
   assert(swapRequest.amountOut <= 18446744073709551615 as Uint<128>, "amountOut exceeds Uint<64> max");
@@ -750,6 +762,7 @@ export circuit startSwap(
   assert(coin.color == color, "Coin is not the vault token for tokenIn");
   assert(coin.value == swapRequest.amountInMaximum, "Coin value must equal amountInMaximum");
   const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
   assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
@@ -875,6 +888,7 @@ export circuit startSupply(
   assert(coin.color == color, "Coin is not the vault token for the underlying");
   assert(coin.value == supplyRequest.amount, "Coin value must equal amount");
   const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
   assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
@@ -985,6 +999,7 @@ export circuit startRedeem(
   assert(coin.color == color, "Coin is not the vault token for the wrapper");
   assert(coin.value == redeemRequest.shares, "Coin value must equal shares");
   const disclosedKey = disclose(key);
+  assert(disclosedKey != default<Bytes<32>>, "Key cannot be zero");
   assert(!pendingVaultRequests.member(disclosedKey), "Request already queued");
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
@@ -1270,7 +1285,7 @@ export circuit sendSwap(key: Bytes<32>): [] {
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [1, 7, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 6, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -1317,7 +1332,7 @@ export circuit sendSupply(key: Bytes<32>): [] {
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [1, 11, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 11, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -1365,7 +1380,7 @@ export circuit sendRedeem(key: Bytes<32>): [] {
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [1, 13, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 13, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }

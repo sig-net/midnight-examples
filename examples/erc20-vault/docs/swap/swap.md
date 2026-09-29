@@ -32,7 +32,7 @@ optimistic burn, the same vault-signed EVM transaction, the same attested
 settle, over a **separate request map at its own ledger field**
 ([`swapEventMap`](../../contract/src/erc20-vault.compact)) sized for the
 seven-word `exactOutputSingle` call. Step 1 sits ahead of the trade proper: a
-one-time allowance per token that any caller may run, and that
+one-time allowance per token that only the deployer may run, and that
 [`runSwapRoundTrip`](../../integration-tests/src/flows/swap-round-trip.ts) runs first
 through [`ensureRouterApproved`](../../integration-tests/src/flows/approve-router.ts).
 The user's wallet drives the Midnight transactions, the Vault dApp/Relayer

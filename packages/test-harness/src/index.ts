@@ -16,5 +16,4 @@ export * from "./setup-pipeline.ts";
 export * from "./signet-notifications.ts";
 export * from "./steps.ts";
 export * from "./waitForGo.ts";
-export * from "./wallet-funding.ts";
 export * from "./wallets.ts";

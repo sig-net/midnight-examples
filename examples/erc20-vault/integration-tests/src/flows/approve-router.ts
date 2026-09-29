@@ -2,7 +2,7 @@
 // the vault's ledger (field 0, a 2-word call like transfer), have the MPC sign it with the
 // VAULT's account, and broadcast it. Sign-only: nothing is minted and there is no settle
 // circuit, so the round trip ends at the broadcast. One-time per token; the allowance is
-// global (one pooled account), so the first caller readies a token for everyone.
+// global (one pooled account), so the deployer readies a token for everyone.
 import {
   asciiPadded,
   calculateRequestId,
@@ -20,7 +20,6 @@ import {
 } from "@sig-net/midnight";
 import {
   evmAddressBytes,
-  pureCircuits,
   readVaultLedger,
   UNISWAP_SWAP_ROUTER_02,
   vaultGasEnvelope,
@@ -35,7 +34,7 @@ import type { VaultContext } from "../vault-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
-import { assignedNonce, flushUntilStamped } from "./vault-queue.ts";
+import { assignedNonce, flushUntilStamped, newQueueKey } from "./vault-queue.ts";
 
 /**
  * Queues an approve(router) request for an ERC20 and returns its queue key.
@@ -56,8 +55,8 @@ export async function queueApproveRouter(
   );
   if (!before.initialised)
     throw new Error("vault is not initialised, run the initialise flow first");
-  const key = pureCircuits.approveRouterBinder(erc20);
-  const queued = await context.vault.callTx.approveRouter(erc20);
+  const key = newQueueKey();
+  const queued = await context.vault.callTx.approveRouter(erc20, key);
   console.log(`approveRouter queued in tx ${queued.public.txId}`);
   return key;
 }

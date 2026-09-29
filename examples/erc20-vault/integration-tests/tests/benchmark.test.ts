@@ -7,7 +7,7 @@
 //                    deploy); the circuit is one-shot per contract, so a
 //                    vault initialised by an earlier flow file logs a skip.
 //   approve        : approveRouter request + MPC signature + broadcast.
-//                    Permissionless and repeatable, so it always runs.
+//                    Deployer-only and repeatable, so it always runs.
 //   deposit        : full round trip ending in completeDeposit.
 //   withdraw       : full round trip ending in completeWithdraw.
 //   swap           : arrange deposit (untimed), then the swap round trip
@@ -113,6 +113,7 @@ import { startRedeem } from "../src/flows/start-redeem.ts";
 import { startSupply } from "../src/flows/start-supply.ts";
 import { startSwap } from "../src/flows/start-swap.ts";
 import { startWithdraw } from "../src/flows/start-withdraw.ts";
+import { SEPOLIA_EURC } from "../src/fork-funding.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
@@ -158,7 +159,6 @@ const SUPPLY_AMOUNT = parseUnits("1", 6);
 // Swap parameters, mirroring tests/swap-e2e.test.ts: receive exactly
 // AMOUNT_OUT of EURC, capping the input at a live quote plus headroom (the
 // fork pool price is arbitrary, so the cap is never hardcoded).
-const SWAP_TOKEN_OUT = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4"; // EURC
 const SWAP_FEE = 500n;
 const SWAP_AMOUNT_OUT = 1_000_000n; // 1 EURC exact receive
 const SWAP_CAP_SLIPPAGE_BPS = 1000n; // 10% over the quote
@@ -291,7 +291,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     );
 
     // ── Approve leg: approveRouter request → MPC signature → broadcast ─────
-    // Sign-only (no settle circuit); permissionless and repeatable, so it
+    // Sign-only (no settle circuit); deployer-only and repeatable, so it
     // always runs and always records an approveRouter prove. A repeat approve
     // just re-sets the same allowance.
 
@@ -708,7 +708,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const { amountInMaximum } = await quoteExactOutputSingle(
           context.evmRpcUrl,
           context.erc20Address,
-          SWAP_TOKEN_OUT,
+          SEPOLIA_EURC,
           SWAP_FEE,
           SWAP_AMOUNT_OUT,
           SWAP_CAP_SLIPPAGE_BPS,
@@ -738,7 +738,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         recorder.setLeg(BenchmarkLeg.SwapStart);
         const stop = startTimer();
         swapRequestId = await startSwap(context, {
-          tokenOut: SWAP_TOKEN_OUT,
+          tokenOut: SEPOLIA_EURC,
           fee: SWAP_FEE,
           amountOut: SWAP_AMOUNT_OUT,
           amountInMaximum: swapAmountInMaximum,

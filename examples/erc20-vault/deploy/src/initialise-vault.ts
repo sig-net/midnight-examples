@@ -37,7 +37,7 @@ import {
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { getEvmBlockNumber, getEvmChainId } from "@sig-net/midnight-examples-lib";
 
-import { resolveEvmTargets, type VaultEvmTargets } from "./evm-targets.ts";
+import { ALLOWED_TOKEN_SLOTS, resolveEvmTargets, type VaultEvmTargets } from "./evm-targets.ts";
 import { vaultCompiledContract } from "./vault-contract-binding.ts";
 import { buildVaultProviders } from "./vault-providers.ts";
 
@@ -59,6 +59,7 @@ export interface VaultInitialiseConfig {
   readonly stataUnderlyingAddress: string;
   /** The ERC-4626 wrapper the supply/redeem circuits mint and burn. */
   readonly stataTokenAddress: string;
+  readonly allowedTokens: readonly string[];
   /** EIP-155 chain id of the Ethereum network the vault's transactions are signed for. */
   readonly evmChainId: bigint;
   /**
@@ -179,6 +180,7 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
   evmAddressBytes(targets.routerAddress);
   evmAddressBytes(targets.stataUnderlyingAddress);
   evmAddressBytes(targets.stataTokenAddress);
+  for (const token of targets.allowedTokens) evmAddressBytes(token);
 
   return { mpcSecp256k1PublicKey, evmChainId, evmStartHeight, targets };
 }
@@ -195,7 +197,7 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
  *   seal, read from the RPC when the id is unset and checked against it when both are set),
  *   `MPC_SECP256K1_PUBKEY` where the SDK publishes no MPC root public key for the
  *   network (see `resolveMpcRootPublicKey`), and the optional `EVM_ROUTER` /
- *   `EVM_STATA_UNDERLYING` / `EVM_STATA_TOKEN` overrides.
+ *   `EVM_STATA_UNDERLYING` / `EVM_STATA_TOKEN` / `ALLOWED_TOKENS` overrides.
  * @param vaultContractAddress - The deployed vault contract's address.
  * @returns The resolved arguments.
  * @throws {Error} If no MPC root public key or chain id resolves, `MPC_SECP256K1_PUBKEY` is
@@ -307,6 +309,7 @@ export async function initialiseVaultContract(
   console.log(`vault EVM address: ${config.vaultEvmAddress}`);
   console.log(`router:            ${config.routerAddress}`);
   console.log(`stata pair:        ${config.stataUnderlyingAddress} -> ${config.stataTokenAddress}`);
+  console.log(`allowed tokens:    ${config.allowedTokens.join(", ")}`);
   console.log(`EVM chain id:      ${String(config.evmChainId)}`);
   console.log(`EVM start height:  ${String(config.evmStartHeight)}`);
   console.log(`MPC response key:  ${config.mpcResponseKey}`);
@@ -321,6 +324,13 @@ export async function initialiseVaultContract(
     parseSecp256k1PublicKey(config.mpcResponseKey),
     config.mpcKeyVersion,
     config.evmStartHeight,
+    [
+      ...config.allowedTokens.map((token) => evmAddressBytes(token)),
+      ...Array.from(
+        { length: ALLOWED_TOKEN_SLOTS - config.allowedTokens.length },
+        () => new Uint8Array(20),
+      ),
+    ],
   );
   console.log(`initialise finalized in tx ${result.public.txId}`);
   return InitialiseVaultOutcome.Initialised;

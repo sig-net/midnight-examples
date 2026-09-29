@@ -21,7 +21,6 @@ import {
 import {
   AAVE_USDC,
   evmAddressBytes,
-  pureCircuits,
   readVaultLedger,
   STATA_USDC,
   vaultGasEnvelope,
@@ -36,7 +35,7 @@ import type { VaultContext } from "../vault-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastEvm } from "./broadcast-evm.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
-import { assignedNonce, flushUntilStamped } from "./vault-queue.ts";
+import { assignedNonce, flushUntilStamped, newQueueKey } from "./vault-queue.ts";
 
 /**
  * Queues an approve(stataToken) request on the underlying and returns its queue key.
@@ -52,8 +51,8 @@ export async function queueApproveStata(context: VaultContext): Promise<Uint8Arr
   );
   if (!before.initialised)
     throw new Error("vault is not initialised, run the initialise flow first");
-  const key = pureCircuits.approveStataBinder();
-  const queued = await context.vault.callTx.approveStata();
+  const key = newQueueKey();
+  const queued = await context.vault.callTx.approveStata(key);
   console.log(`approveStata queued in tx ${queued.public.txId}`);
   return key;
 }

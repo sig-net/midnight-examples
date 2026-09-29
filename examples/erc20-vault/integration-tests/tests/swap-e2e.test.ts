@@ -24,6 +24,7 @@ import { quoteExactOutputSingle } from "../src/evm-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
 import { initialise } from "../src/flows/initialise.ts";
 import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
+import { SEPOLIA_EURC } from "../src/fork-funding.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
@@ -31,13 +32,12 @@ import { vaultTokenType } from "../src/vault-token.ts";
 const env = injectE2eEnv();
 const session = createVaultSession(env);
 
-const EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
 const FEE = 500n;
-// exactOutput: receive EXACTLY AMOUNT_OUT of EURC. The fork's USDC/EURC pool price is arbitrary
+// exactOutput: receive EXACTLY AMOUNT_OUT of SEPOLIA_EURC. The fork's USDC/SEPOLIA_EURC pool price is arbitrary
 // (thin testnet liquidity, not ~1:1), so the input cap is sized from a LIVE quote rather than
 // hardcoded. The deposited coin IS the surrendered coin, so we deposit exactly the quoted
 // amountInMaximum; CAP_SLIPPAGE_BPS is generous headroom so the swap fits and leaves change.
-const AMOUNT_OUT = 1_000_000n; // 1 EURC exact receive
+const AMOUNT_OUT = 1_000_000n; // 1 SEPOLIA_EURC exact receive
 const CAP_SLIPPAGE_BPS = 1000n; // 10% over the quote
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () => {
@@ -65,7 +65,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
       const { amountInMaximum } = await quoteExactOutputSingle(
         context.evmRpcUrl,
         context.erc20Address,
-        EURC,
+        SEPOLIA_EURC,
         FEE,
         AMOUNT_OUT,
         CAP_SLIPPAGE_BPS,
@@ -125,7 +125,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
       const { amountInMaximum } = await quoteExactOutputSingle(
         context.evmRpcUrl,
         context.erc20Address,
-        EURC,
+        SEPOLIA_EURC,
         FEE,
         AMOUNT_OUT,
         CAP_SLIPPAGE_BPS,
@@ -143,7 +143,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
 
       // The caller's own shielded tokenOut balance before the swap: completeSwap mints exactly
       // the requested amountOut, so this must rise by AMOUNT_OUT (the owner can read it).
-      const outColor = vaultTokenType(EURC, context.vaultContractAddress);
+      const outColor = vaultTokenType(SEPOLIA_EURC, context.vaultContractAddress);
       const readOut = async () =>
         (await (await session.wallet()).facade.waitForSyncedState()).shielded.balances[outColor] ??
         0n;
@@ -152,7 +152,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
       // Receive exactly AMOUNT_OUT, capping the spend at the quoted amountInMaximum (the coin we
       // deposited). The settle mints AMOUNT_OUT of tokenOut plus the unspent USDC change.
       const result = await runSwapRoundTrip(session, {
-        tokenOut: EURC,
+        tokenOut: SEPOLIA_EURC,
         fee: FEE,
         amountOut: AMOUNT_OUT,
         amountInMaximum,
@@ -176,7 +176,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
           ? `, ${String(amountInMaximum - result.amountIn)} USDC change`
           : "";
       console.log(
-        `SWAP E2E OK: spent ${String(result.amountIn)} USDC -> ${String(AMOUNT_OUT)} EURC ` +
+        `SWAP E2E OK: spent ${String(result.amountIn)} USDC -> ${String(AMOUNT_OUT)} SEPOLIA_EURC ` +
           `(+${String(AMOUNT_OUT)} tokenOut${change})`,
       );
     },

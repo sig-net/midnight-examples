@@ -1,14 +1,11 @@
-vi.mock("../src/wallet-funding.ts", { spy: true });
-
 vi.mock("@sig-net/midnight-contract-deploy", async (importOriginal) => {
   const actual = await importOriginal<typeof funding>();
   return { ...actual };
 });
 
 import * as funding from "@sig-net/midnight-contract-deploy";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import * as pipeline from "../src/wallet-funding.ts";
 import { ensureWalletsFunded } from "../src/wallets.ts";
 
 const ENV: NodeJS.ProcessEnv = {
@@ -24,16 +21,6 @@ const FUNDED: funding.AccountFunding = {
   dust: 10n,
 };
 
-const planned: pipeline.WalletFundingRecipient[] = [];
-beforeEach(() => {
-  planned.length = 0;
-  vi.spyOn(pipeline, "fundWalletsFromRoot").mockImplementation(
-    async (_wallets, _rootSeed, recipients) => {
-      for await (const recipient of recipients) planned.push(recipient);
-      return planned.length;
-    },
-  );
-});
 afterEach(() => vi.restoreAllMocks());
 
 describe("child funding decisions", () => {
@@ -47,7 +34,7 @@ describe("child funding decisions", () => {
     const root = vi
       .spyOn(funding, "assertRootFunded")
       .mockRejectedValue(new Error("unfunded root"));
-    const transfer = vi.mocked(pipeline.fundWalletsFromRoot);
+    const transfer = vi.spyOn(funding, "fundChildFromRoot").mockResolvedValue(FUNDED);
     const wallets = new funding.WalletRegistry(
       funding.getMidnightNodeConfig({ NETWORK_ID: "stagenet" }),
     );
@@ -66,15 +53,14 @@ describe("child funding decisions", () => {
     const root = vi
       .spyOn(funding, "assertRootFunded")
       .mockResolvedValue({ ...FUNDED, night: 600n });
-    const transfer = vi.mocked(pipeline.fundWalletsFromRoot);
+    const transfer = vi.spyOn(funding, "fundChildFromRoot").mockResolvedValue(FUNDED);
     const wallets = new funding.WalletRegistry(
       funding.getMidnightNodeConfig({ NETWORK_ID: "stagenet" }),
     );
     await ensureWalletsFunded(ENV, wallets);
     expect(read).toHaveBeenCalledTimes(5);
     expect(root).toHaveBeenCalledOnce();
-    expect(transfer).toHaveBeenCalledOnce();
-    expect(planned).toEqual([{ seed: "user", label: "user", amount: 300n }]);
+    expect(transfer).toHaveBeenCalledExactlyOnceWith(wallets, "root", "user", "user", 300n);
   });
 
   it("rechecks a child before opening root", async () => {

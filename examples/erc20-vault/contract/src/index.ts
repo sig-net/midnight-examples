@@ -56,10 +56,11 @@ export function deriveVaultEvmAddress(
 // compiler records each field's path as its "index" in
 // managed/erc20-vault/compiler/contract-info.json.
 
-// The vault has 30 ledger fields, past the 15-field flat limit, so the compiler
+// The vault has 31 ledger fields, past the 15-field flat limit, so the compiler
 // chunks the state tree two levels deep. Every path below is therefore
 // [chunk, offset] (depth 2), and the request circuits pack the same as
-// requestsPathDepth 2. Chunk 0 holds fields 0–14, chunk 1 holds fields 15–29.
+// requestsPathDepth 2. Chunk 0 holds field 0, chunk 1 holds fields 1–15,
+// chunk 2 holds fields 16–30.
 
 /**
  * Resolved ledger-tree path of `signBidirectionalEventMap` (ledger field 0),
@@ -72,20 +73,20 @@ export const VAULT_REQUESTS_PATH: readonly number[] = [0, 0];
  * Resolved ledger-tree path of `depositEventMap` (ledger field 18). Deposits
  * register their notification in this SEPARATE map, so the deposit flow reads
  * MPC responses from this path. Matches the depth 2 + `requestsPath`
- * [1, 3, 0, 0] the `sendDeposit` circuit packs.
+ * [2, 2, 0, 0] the `sendDeposit` circuit packs.
  */
-export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [1, 3];
+export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [2, 2];
 
 /**
  * Resolved ledger-tree path of `swapEventMap` (ledger field 22). Swaps register
  * their notification in this SEPARATE map (sized for a 7-word exactOutputSingle),
  * so the swap flow reads MPC responses from this path. Matches the depth 2 +
- * `requestsPath` [1, 7, 0, 0] the `sendSwap` circuit packs.
+ * `requestsPath` [2, 6, 0, 0] the `sendSwap` circuit packs.
  */
-export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [1, 7];
+export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [2, 6];
 
-/** Resolved ledger-tree path of `supplyEventMap` (ledger field 26). */
-export const VAULT_SUPPLY_REQUESTS_PATH: readonly number[] = [1, 11];
+/** Resolved ledger-tree path of `supplyEventMap` (ledger field 27). */
+export const VAULT_SUPPLY_REQUESTS_PATH: readonly number[] = [2, 11];
 
-/** Resolved ledger-tree path of `redeemEventMap` (ledger field 28). */
-export const VAULT_REDEEM_REQUESTS_PATH: readonly number[] = [1, 13];
+/** Resolved ledger-tree path of `redeemEventMap` (ledger field 29). */
+export const VAULT_REDEEM_REQUESTS_PATH: readonly number[] = [2, 13];
