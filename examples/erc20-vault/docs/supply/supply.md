@@ -79,7 +79,7 @@ As illustrated, the flow comprises 9 steps:
     pinned [`stataToken`](../../contract/src/erc20-vault.compact), so the
     minted shares land in the vault's own account and nowhere else, and a
     client cannot point the pooled funds at a contract of their own.
-  - A wrapper deposit returns a `uint256` share count the MPC repacks as a
+  - A wrapper deposit returns a `uint256` share count the MPC encodes as a
     Borsh `u64`, so the request carries its own schemas
     ([`supplyOutputSchema`](../../contract/src/erc20-vault.compact) and
     [`supplyRespondSchema`](../../contract/src/erc20-vault.compact)), and

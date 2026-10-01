@@ -11,7 +11,7 @@
 //                            checked over the mined transaction's raw traced
 //                            output (see ../observed-execution.ts), decoded
 //                            per the request's output deserialisation schema
-//                            and re-packed per its respond serialisation
+//                            and Borsh-encoded per its respond serialisation
 //                            schema. Only computable when the observation
 //                            reports an executed transaction with output
 //                            bytes. A post declaring a failed or unviable
@@ -64,14 +64,14 @@ export interface RespondOutcome {
    */
   readonly event: RespondBidirectionalEvent;
   /**
-   * The output bytes the signature covers (a circuit argument): the packed
+   * The output bytes the signature covers (a circuit argument): the Borsh-encoded
    * respond output of an executed transaction, empty under a failure kind.
    */
   readonly serializedOutput: Uint8Array;
   /**
    * True only when the verified kind is executed AND the bytes are the
    * packing of a true transfer result under the request's schemas. The
-   * vault's ERC20 transfer schema packs a single bool, so `succeeded: false`
+   * vault's ERC20 transfer schema encodes a single bool, so `succeeded: false`
    * beside an executed kind means the transfer executed and returned false.
    */
   readonly succeeded: boolean;
@@ -84,7 +84,7 @@ export interface RespondOutcome {
 export interface RespondOutputSchemas {
   /** The record's `outputDeserializationSchema`: decodes the raw EVM return data into named values. */
   readonly outputDeserializationSchema: string;
-  /** The record's `respondSerializationSchema`: packs those values into the bytes the MPC attests. */
+  /** The record's `respondSerializationSchema`: encodes those values into the bytes the MPC attests. */
   readonly respondSerializationSchema: string;
 }
 
@@ -160,7 +160,7 @@ const OBSERVATION_TICK_TIMEOUT_MS = 3_000;
 /**
  * The {@link OutputSource.EVMNode} candidates. The executed candidate is the
  * observed execution's raw output decoded per the request's output
- * deserialisation schema and re-packed per its respond serialisation schema
+ * deserialisation schema and Borsh-encoded per its respond serialisation schema
  * (the exact two conversions the MPC ran), built only when a post declares
  * an executed transaction: it needs an executed transaction with output
  * bytes, and a decode failure (for example empty `0x` return data from a
@@ -307,9 +307,9 @@ function candidatesFromSource(
  * against it needs no knowledge of the schema's field name.
  *
  * @param schemas - The request's schemas.
- * @returns The packed respond output of a true transfer result.
+ * @returns The Borsh-encoded response of a true transfer result.
  */
-function packedTransferSuccess(schemas: RespondOutputSchemas): Uint8Array {
+function encodedTransferSuccess(schemas: RespondOutputSchemas): Uint8Array {
   return serializeRespondOutput(
     schemas.respondSerializationSchema,
     deserializeEvmOutput(schemas.outputDeserializationSchema, boolAbiWord(true)),
@@ -423,7 +423,7 @@ export async function fetchAttestedRespondOutcome(
         serializedOutput,
         succeeded:
           event.outputKind === OutputKind.executed &&
-          bytesEqual(serializedOutput, packedTransferSuccess(schemas)),
+          bytesEqual(serializedOutput, encodedTransferSuccess(schemas)),
       };
     }
   }

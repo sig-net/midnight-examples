@@ -13,15 +13,13 @@ import {
 } from "@sig-net/midnight";
 import { pureCircuits as vaultCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import { schemaJson } from "./schema-json.ts";
+
 /** ABI output schema declared by the vault contract. */
-export const ERC20_TRANSFER_OUTPUT_SCHEMA = new TextDecoder().decode(
-  vaultCircuits.vaultOutputSchema(),
-);
+export const ERC20_TRANSFER_OUTPUT_SCHEMA = schemaJson(vaultCircuits.vaultOutputSchema());
 
 /** Native Borsh response schema declared by the vault contract. */
-export const ERC20_TRANSFER_RESPOND_SCHEMA = new TextDecoder().decode(
-  vaultCircuits.vaultRespondSchema(),
-);
+export const ERC20_TRANSFER_RESPOND_SCHEMA = schemaJson(vaultCircuits.vaultRespondSchema());
 
 /**
  * The contract-fixed routing fields of a vault event. Field names match

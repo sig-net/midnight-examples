@@ -281,7 +281,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         // The broadcast step saw the deposit mine, so the MPC must attest an
-        // execution whose 8-byte output packs the wrapper's share count.
+        // execution whose 8-byte output encodes the wrapper's share count.
         expect(
           supplyAttestation.event.outputKind,
           "a mined wrapper deposit must be attested under OutputKind.executed",
@@ -446,7 +446,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         // The broadcast step saw the redeem mine, so the MPC must attest an
-        // execution whose 8-byte output packs the wrapper's asset amount.
+        // execution whose 8-byte output encodes the wrapper's asset amount.
         expect(
           redeemAttestation.event.outputKind,
           "a mined wrapper redeem must be attested under OutputKind.executed",

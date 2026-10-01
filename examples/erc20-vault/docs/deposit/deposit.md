@@ -176,13 +176,13 @@ As illustrated, the flow comprises 10 steps:
     recomputes the attested bytes with the SDK's
     [`executedEvmRespondOutput`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/abi-serde.ts):
     the exact conversions the responder ran, the sweep's 32-byte ABI `bool`
-    word in and its 1-byte packed result out, both schemas read off the
+    word in and its 1-byte Borsh result out, both schemas read off the
     request's own ledger record. Under `mpc-cache` it downloads instead the
     bytes the MPC uploaded to its output cache before posting
     ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/mpc-output-cache.ts)),
     one object per request id under `MPC_OUTPUT_CACHE_URL`.
   - A post's declared `outputKind` picks the bytes it is checked over. A post
-    declaring `executed` is checked over the re-packed output above, and a post
+    declaring `executed` is checked over the Borsh-encoded output above, and a post
     declaring `failed` (the transaction reverted) or `unviable` (another
     transaction took its nonce) is checked over the EMPTY output the protocol
     attests for a transaction that never executed, which needs no trace at
@@ -200,7 +200,7 @@ As illustrated, the flow comprises 10 steps:
     hands the attested event and its output bytes to the queue circuit for the
     output's width:
     [`queueAttestation1`](../../contract/src/erc20-vault.compact) for an
-    executed sweep's 1-byte packed bool, `queueAttestation0` for a failed or
+    executed sweep's 1-byte Borsh-encoded bool, `queueAttestation0` for a failed or
     unviable sweep's empty output. Anyone may submit it.
   - The circuit re-hashes the output, with the request id, block height and
     output kind the event carries, into the attestation digest and verifies the

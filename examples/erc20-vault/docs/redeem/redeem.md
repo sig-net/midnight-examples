@@ -75,7 +75,7 @@ As illustrated, the flow comprises 9 steps:
     `stataToken`: the vault's account is both the receiver of the assets and
     the owner of the burned shares, so the underlying lands in the pool and
     nowhere else.
-  - A wrapper redeem returns a `uint256` asset amount the MPC repacks as a
+  - A wrapper redeem returns a `uint256` asset amount the MPC encodes as a
     Borsh `u64`, so the request carries its own schemas
     ([`redeemOutputSchema`](../../contract/src/erc20-vault.compact) and
     [`redeemRespondSchema`](../../contract/src/erc20-vault.compact)), and

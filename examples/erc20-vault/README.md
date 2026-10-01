@@ -315,7 +315,7 @@ outcomes carry an empty output.
 
 These schemas use the Compact-compatible Borsh subset documented in the
 [serde package](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/midnight-serde-ts/README.md).
-The local stack pins `fakenet:0.32.0` for the Borsh response protocol.
+The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
 

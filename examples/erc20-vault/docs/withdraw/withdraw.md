@@ -120,7 +120,7 @@ As illustrated, the flow comprises 9 steps:
     singleton's `respondBidirectional(...)`, and
     [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts)
     resolves it exactly as a [deposit](../deposit/deposit.md) does: a post
-    declaring **`executed`** is checked over the transfer's packed bool (`0x01`
+    declaring **`executed`** is checked over the transfer's Borsh-encoded bool (`0x01`
     the transfer went through, `0x00` the ERC20 returned false), and a post
     declaring **`failed`** (reverted on chain) or **`unviable`** (another
     transaction took its nonce) over the EMPTY output.

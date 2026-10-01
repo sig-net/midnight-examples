@@ -814,12 +814,21 @@ const IMPOSTER_SECRET = bytes(32, 0x43);
 const MINT_NONCE = bytes(32, 0x2e);
 const VAULT_RESPOND_SCHEMA = pureCircuits.vaultRespondSchema();
 
-// A successful remote execution: the packed bool result at its exact
+// A successful remote execution: the Borsh-encoded bool result at its exact
 // unpadded width, one 0x01 byte (the circuits take it as Bytes<1>).
 const OUTPUT_SUCCESS = serializeRespondOutput(VAULT_RESPOND_SCHEMA, { success: true });
 
 // An EXECUTED transfer that returned false: one 0x00 byte.
 const OUTPUT_FALSE = serializeRespondOutput(VAULT_RESPOND_SCHEMA, { success: false });
+
+describe("Boolean Borsh response bytes", () => {
+  it.each([
+    { success: true, expected: Uint8Array.of(1) },
+    { success: false, expected: Uint8Array.of(0) },
+  ])("encodes success=$success as one byte", ({ success, expected }) => {
+    expect(serializeRespondOutput(VAULT_RESPOND_SCHEMA, { success })).toEqual(expected);
+  });
+});
 
 // A failed or unviable execution attests an empty output (queueAttestation0).
 const OUTPUT_EMPTY = new Uint8Array(0);
@@ -3413,8 +3422,8 @@ const swapRequested = async () => {
 };
 
 /**
- * An executed swap's attested output: the spent amountIn packed by the swap's
- * respond schema, read from the COMPILED circuit, as the MPC packs it.
+ * An executed swap's attested output: the spent amountIn encoded by the swap's
+ * respond schema, read from the COMPILED circuit, as the MPC encodes it.
  */
 const swapOutput = (amountIn: bigint): Uint8Array =>
   serializeRespondOutput(pureCircuits.swapRespondSchema(), { amountIn });
@@ -3525,7 +3534,7 @@ describe("swapAmountIn", () => {
     { name: "one base unit", amountIn: 1n },
     { name: "a typical spend", amountIn: SWAP_AMOUNT_IN_SPENT },
     { name: "the Uint<64> maximum", amountIn: UINT64_MAX },
-  ])("decodes $name as swapRespondSchema() packs it", ({ amountIn }) => {
+  ])("decodes $name as swapRespondSchema() encodes it", ({ amountIn }) => {
     const output = serializeRespondOutput(pureCircuits.swapRespondSchema(), { amountIn });
     expect(output).toEqual(numericAbiWord(amountIn).slice(-8).reverse());
     expect(pureCircuits.swapAmountIn(output)).toBe(amountIn);
@@ -3831,8 +3840,8 @@ const STATA_UNDERLYING_MINT_KEY = bytesToHex(
   pureCircuits.vaultTokenDomainSeparator(STATA_UNDERLYING),
 );
 
-// The shares an executed supply is attested with, packed by the compiled respond
-// schema to its 8-byte width, the way the MPC packs them.
+// The shares an executed supply is attested with, encoded by the compiled respond
+// schema to its 8-byte width, the way the MPC encodes them.
 const SUPPLY_SHARES = 360_679n;
 const OUTPUT_SUPPLY = serializeRespondOutput(pureCircuits.supplyRespondSchema(), {
   shares: SUPPLY_SHARES,
@@ -4314,7 +4323,7 @@ describe("supplyShares", () => {
     { name: "one share", shares: 1n },
     { name: "a typical share count", shares: SUPPLY_SHARES },
     { name: "the Uint<64> maximum", shares: UINT64_MAX },
-  ])("decodes $name as supplyRespondSchema() packs it", ({ shares }) => {
+  ])("decodes $name as supplyRespondSchema() encodes it", ({ shares }) => {
     const output = serializeRespondOutput(pureCircuits.supplyRespondSchema(), { shares });
     expect(output).toEqual(numericAbiWord(shares).slice(-8).reverse());
     expect(pureCircuits.supplyShares(output)).toBe(shares);
@@ -4504,8 +4513,8 @@ const REDEEM_RESPOND_SCHEMA = asciiPadded('{"struct":{"assets":"u64"}}', 27);
 const REDEEM_SHARES = 360_679n;
 
 // The underlying assets an executed redeem is attested with (principal plus accrued
-// interest), packed by the compiled respond schema to its 8-byte width, the way the
-// MPC packs them.
+// interest), encoded by the compiled respond schema to its 8-byte width, the way the
+// MPC encodes them.
 const REDEEM_ASSETS = 2_780_944n;
 const OUTPUT_REDEEM = serializeRespondOutput(pureCircuits.redeemRespondSchema(), {
   assets: REDEEM_ASSETS,
@@ -4920,7 +4929,7 @@ describe("redeemAssets", () => {
     { name: "one base unit", assets: 1n },
     { name: "a typical asset amount", assets: REDEEM_ASSETS },
     { name: "the Uint<64> maximum", assets: UINT64_MAX },
-  ])("decodes $name as redeemRespondSchema() packs it", ({ assets }) => {
+  ])("decodes $name as redeemRespondSchema() encodes it", ({ assets }) => {
     const output = serializeRespondOutput(pureCircuits.redeemRespondSchema(), { assets });
     expect(output).toEqual(numericAbiWord(assets).slice(-8).reverse());
     expect(pureCircuits.redeemAssets(output)).toBe(assets);

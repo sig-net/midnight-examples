@@ -6,6 +6,7 @@
 import { OutputKind, type RequestIdHex } from "@sig-net/midnight";
 
 import { PollProgress } from "../poll-progress.ts";
+import { schemaJson } from "../schema-json.ts";
 import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import {
@@ -34,17 +35,6 @@ export interface PollRespondBidirectionalOptions {
    * VAULT_DEPOSIT_REQUESTS_PATH (the bidirectionalDepositMap).
    */
   readonly requestsPath?: readonly number[];
-}
-
-/**
- * The JSON text of an on-ledger schema field. The contract stores each
- * schema NUL-padded to its declared Compact width (`pad(N, "...")`).
- *
- * @param padded - The schema bytes as the request record carries them.
- * @returns The schema's JSON text, padding removed.
- */
-function schemaJson(padded: Uint8Array): string {
-  return new TextDecoder().decode(padded).replace(/\0+$/u, "");
 }
 
 /**
