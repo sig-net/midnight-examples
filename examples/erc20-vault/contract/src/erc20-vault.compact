@@ -917,9 +917,7 @@ export circuit sendDeposit(outIndex: Bytes<32>): [] {
 // Settles a deposit on either verdict. Executed: checks the output against the
 // attestation, then mints the deposited amount when the transfer returned true. Failed
 // or unviable: nothing was surrendered, so it only closes the request, and
-// serializedOutput is ignored. Depositor-gated, one settle per request. mintNonce must
-// be caller-chosen RANDOM: one derived from the (public) requestId would link the
-// minted coin to the deposit.
+// serializedOutput is ignored. Depositor-gated, one settle per request. mintNonce is caller-chosen and must be random, else no hiding property is guaranteed.
 export circuit completeDeposit(
   requestId: RequestId,
   serializedOutput: Bytes<1>,
@@ -987,7 +985,7 @@ circuit withdrawArgsHash(args: WithdrawArgs): Bytes<32> {
   ]));
 }
 
-// Queues the withdrawal under inIndex, a caller-chosen random index, and burns the
+// Queues the withdrawal under inIndex, a caller-chosen random index (must be fresh, else no unlinkability is guaranteed), and burns the
 // surrendered vault coin: the coin spend is the authorisation. The vault's account
 // signs and pays, so the gas is the vault's own setting at start.
 export circuit startWithdraw(
@@ -1089,9 +1087,7 @@ export circuit sendWithdraw(outIndex: Bytes<32>): [] {
 // attestation. A transfer that returned true moved the tokens, so the burn stands. One
 // that returned false, or a failed or unviable transaction, moved nothing, so the
 // surrendered amount is re-minted to the caller, and on a failure serializedOutput is
-// ignored. Withdrawer-gated, one settle per request. mintNonce must be caller-chosen
-// RANDOM: one derived from the (public) requestId would link the re-minted coin to the
-// withdrawal.
+// ignored. Withdrawer-gated, one settle per request. mintNonce is caller-chosen and must be random, else no hiding property is guaranteed.
 export circuit completeWithdraw(
   requestId: RequestId,
   serializedOutput: Bytes<1>,
@@ -1170,7 +1166,7 @@ circuit swapArgsHash(args: SwapArgs): Bytes<32> {
   ]));
 }
 
-// Queues the swap under inIndex, a caller-chosen random index, and burns the
+// Queues the swap under inIndex, a caller-chosen random index (must be fresh, else no unlinkability is guaranteed), and burns the
 // surrendered amountInMaximum of erc20AddressIn: the coin spend is the authorisation.
 // exactOutput fixes the amount completeSwap mints here, where it is checked to fit a
 // Uint<64> mint, so no swap result can strand the burned coin. The vault's account
@@ -1296,8 +1292,7 @@ export pure circuit swapAmountIn(output: Bytes<8>): Uint<64> {
 // amountInMaximum - amountIn of erc20AddressIn as change, a zero-value coin on an exact
 // spend. Failed or unviable: the swap spent nothing, so the surrendered amountInMaximum
 // is re-minted, and serializedOutput is ignored. Every mint goes to the caller.
-// Swapper-gated, one settle per request. mintNonce and changeNonce must be caller-chosen
-// RANDOM: one derived from the (public) requestId would link a minted coin to the swap.
+// Swapper-gated, one settle per request. mintNonce and changeNonce are caller-chosen and must be random, else no hiding property is guaranteed.
 // A failure mints under mintNonce alone.
 export circuit completeSwap(
   requestId: RequestId,
@@ -1324,7 +1319,8 @@ export circuit completeSwap(
       ) == record.digest,
       "Output does not match the attestation"
     );
-    // Two coins minted under one nonce would link to each other.
+    // changeNonce and mintNonce  must be sampled independently and uniformly at random.  No check can guarantee that. 
+    // The following check only prevents equality,  which would trivially impact the hiding of the committed coins.
     assert(changeNonce != mintNonce, "changeNonce must differ from mintNonce");
     mintShieldedToken(
       vaultTokenDomainSeparator(args.request.erc20AddressOut),
@@ -1390,7 +1386,7 @@ circuit supplyArgsHash(args: SupplyArgs): Bytes<32> {
   ]));
 }
 
-// Queues the supply under inIndex, a caller-chosen random index, and burns the
+// Queues the supply under inIndex, a caller-chosen random index (must be fresh, else no unlinkability is guaranteed), and burns the
 // surrendered stataUnderlying vault coin: the coin spend is the authorisation. The
 // vault's account signs and pays, so the gas is the vault's own setting at start.
 export circuit startSupply(
@@ -1499,8 +1495,7 @@ export pure circuit supplyShares(output: Bytes<8>): Uint<64> {
 // attestation, then mints the attested shares as the stataToken vault coin. Failed or
 // unviable: the wrapper took nothing, so the surrendered stataUnderlying amount is
 // re-minted, and serializedOutput is ignored. Either mint goes to the caller.
-// Supplier-gated, one settle per request. mintNonce must be caller-chosen RANDOM: one
-// derived from the (public) requestId would link the minted coin to the supply.
+// Supplier-gated, one settle per request.  mintNonce is caller-chosen and must be random, else no hiding property is guaranteed.
 export circuit completeSupply(
   requestId: RequestId,
   serializedOutput: Bytes<8>,
@@ -1581,7 +1576,7 @@ circuit redeemArgsHash(args: RedeemArgs): Bytes<32> {
   ]));
 }
 
-// Queues the redeem under inIndex, a caller-chosen random index, and burns the
+// Queues the redeem under inIndex, a caller-chosen random index (must be fresh, else no unlinkability is guaranteed), and burns the
 // surrendered stataToken vault coin: the coin spend is the authorisation. The vault's
 // account signs and pays, so the gas is the vault's own setting at start.
 export circuit startRedeem(
@@ -1692,8 +1687,7 @@ export pure circuit redeemAssets(output: Bytes<8>): Uint<64> {
 // attestation, then mints the attested assets as the stataUnderlying vault coin. Failed
 // or unviable: the wrapper burned nothing, so the surrendered stataToken shares are
 // re-minted, and serializedOutput is ignored. Either mint goes to the caller.
-// Redeemer-gated, one settle per request. mintNonce must be caller-chosen RANDOM: one
-// derived from the (public) requestId would link the minted coin to the redeem.
+// Redeemer-gated, one settle per request. mintNonce is caller-chosen and must be random, else no hiding property is guaranteed
 export circuit completeRedeem(
   requestId: RequestId,
   serializedOutput: Bytes<8>,
