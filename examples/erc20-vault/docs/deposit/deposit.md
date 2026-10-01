@@ -117,12 +117,12 @@ As illustrated, the flow comprises 10 steps:
     stops a client having the MPC sign a transfer to themselves, at the
     depositor's nonce and gas on the pinned `evmChainId`.
   - The assembled **SignBidirectionalEventV1**
-    ([`constructSignBidirectionalEventV1`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-midnight/src/Signet.compact))
+    ([`constructSignBidirectionalEventV1`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/Signet.compact))
     is stored in [`bidirectionalDepositMap`](../../contract/src/erc20-vault.compact)
     under its **request id**, the hash of the fields that name one execution,
     and [`evictionMap`](../../contract/src/erc20-vault.compact) maps that id
     back to the request index. The circuit then calls the singleton's
-    [`signBidirectional`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-contract/src/signet-contract.compact)
+    [`signBidirectional`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-contract/src/signet-contract.compact)
     to notify the MPC, carrying the map's resolved ledger-tree path
     ([`VAULT_DEPOSIT_REQUESTS_PATH`](../../contract/src/index.ts)).
   - The send chooses nothing, so anyone may submit it: a second send of the
@@ -132,19 +132,19 @@ As illustrated, the flow comprises 10 steps:
     comes from the
     [`TRANSFER_RESULT_MPC_ROUTING`](../../integration-tests/src/mpc-routing.ts)
     mirror), hashes it with the library's
-    [`calculateRequestId`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-midnight/src/signet-request-id.ts)
+    [`calculateRequestId`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/signet-request-id.ts)
     TypeScript twin, and asserts the recomputed id appears as an index of the
     deposit map. That id is what every later step looks up by.
 - **5.** poll for the MPC's signature
   - The MPC reads the recorded request from the vault's ledger, signs the sweep
     transaction with the user's derived deposit-account key, and posts the
     signature back through the singleton's
-    [`respond`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-contract/src/signet-contract.compact).
+    [`respond`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-contract/src/signet-contract.compact).
   - The dApp polls the singleton's emitted response events with
     [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts).
     The event log is unauthenticated (anyone may post), so enumeration and
     verification go through the SDK's
-    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-midnight/src/signet-request-response-reader.ts),
+    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/signet-request-response-reader.ts),
     which judges every post by whether its signature recovers to the request's
     expected signer, the user's deposit account, over the requested
     transaction's signing hash. The first valid post wins.
@@ -163,7 +163,7 @@ As illustrated, the flow comprises 10 steps:
 - **7.** poll for the MPC's attestation
   - The MPC watches the EVM chain for the transaction's execution and posts an
     attestation of its output through the singleton's
-    [`respondBidirectional`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-contract/src/signet-contract.compact).
+    [`respondBidirectional`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-contract/src/signet-contract.compact).
     The emitted event carries the request id it answers, the finalised EVM
     block height, the MPC's verdict (`outputKind`: `executed`, `failed` or
     `unviable`), the output's byte width, the attestation digest and the MPC's
@@ -174,12 +174,12 @@ As illustrated, the flow comprises 10 steps:
     observes the mined transaction on `EVM_RPC_URL` (its return data traced
     with `debug_traceTransaction`, the RPC method the MPC itself uses) and
     recomputes the attested bytes with the SDK's
-    [`executedEvmRespondOutput`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-midnight/src/abi-serde.ts):
+    [`executedEvmRespondOutput`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/abi-serde.ts):
     the exact conversions the responder ran, the sweep's 32-byte ABI `bool`
     word in and its 1-byte packed result out, both schemas read off the
     request's own ledger record. Under `mpc-cache` it downloads instead the
     bytes the MPC uploaded to its output cache before posting
-    ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-midnight/src/mpc-output-cache.ts)),
+    ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/mpc-output-cache.ts)),
     one object per request id under `MPC_OUTPUT_CACHE_URL`.
   - A post's declared `outputKind` picks the bytes it is checked over. A post
     declaring `executed` is checked over the re-packed output above, and a post
@@ -206,7 +206,7 @@ As illustrated, the flow comprises 10 steps:
     output kind the event carries, into the attestation digest and verifies the
     MPC's ECDSA signature over it against the initialise-pinned
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact) with
-    [`verifyRespondBidirectionalEventV1`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-midnight/src/Signet.compact).
+    [`verifyRespondBidirectionalEventV1`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/Signet.compact).
     The singleton emits MPC posts unverified, so this is the authentication
     gate, and it needs the full output to prove which block height the MPC
     signed (see
@@ -267,11 +267,11 @@ The off-chain steps (5 to 7) each build a `SignetRequestResponseReader` over
 the vault and singleton pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts). The
 expected signer of the deposit sweep is the user's deposit account, derived with
-[`deriveEvmAddress`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-midnight/src/epsilon-derivation.ts)
+[`deriveEvmAddress`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/epsilon-derivation.ts)
 from the caller's identity commitment rendered as full-width lowercase hex, the
 MPC's rendering of every request's 32 opaque path bytes. The key the queue
 circuits verify against is derived with
-[`deriveMidnightResponseKey`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.6/packages/signet-midnight/src/epsilon-derivation.ts).
+[`deriveMidnightResponseKey`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/signet-midnight/src/epsilon-derivation.ts).
 Those two functions are the concrete work behind the diagram's abstract
 `keyDerivation(...)` notes, and the commitment itself is computed with the
 vault's own compiled `userCommitment` circuit, never a TypeScript

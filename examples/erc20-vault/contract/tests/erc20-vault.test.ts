@@ -182,18 +182,16 @@ const VAULT_TOKEN_COLOR = hexToBytes(
   rawTokenType(pureCircuits.vaultTokenDomainSeparator(ERC20), VAULT_ADDRESS),
 );
 
-// The contract-fixed MPC routing of every vault event (mirrors of the
-// in-circuit constants; the round-trip tests below are the lockstep check for
-// these values, including the escaped JSON schema literal at its EXACT
-// contract-declared 34-byte width, never zero-padded).
-const EXPECTED_SCHEMA = asciiPadded('[{"name":"success","type":"bool"}]', 34);
+// These literals pin the schemas recorded by the compiled send circuits.
+const EXPECTED_OUTPUT_SCHEMA = asciiPadded('[{"name":"success","type":"bool"}]', 34);
+const EXPECTED_RESPOND_SCHEMA = asciiPadded('{"struct":{"success":"bool"}}', 29);
 const EXPECTED_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
   signatureDest: MPCDestination.unused,
   params: new Uint8Array(64),
   executionDest: signetCircuits.ethereumCaip2Id(),
-  outputDeserializationSchema: EXPECTED_SCHEMA,
-  respondSerializationSchema: EXPECTED_SCHEMA,
+  outputDeserializationSchema: EXPECTED_OUTPUT_SCHEMA,
+  respondSerializationSchema: EXPECTED_RESPOND_SCHEMA,
 };
 
 /**
@@ -814,18 +812,14 @@ const IMPOSTER_SECRET = bytes(32, 0x43);
 // unlinkability guarantee). The circuit only threads it through, so a fixed
 // value is fine for these deterministic simulator tests.
 const MINT_NONCE = bytes(32, 0x2e);
-// The vault's respond schema, read from the COMPILED circuit (the contract's
-// own declaration), so the fixtures below run through the same ABI-to-compact
-// pipeline the real client uses: schema -> descriptor -> midnight-serde
-// compactSerialize. Nothing here hand-packs bytes.
-const VAULT_RESPONSE_SCHEMA = pureCircuits.vaultResponseSchema();
+const VAULT_RESPOND_SCHEMA = pureCircuits.vaultRespondSchema();
 
 // A successful remote execution: the packed bool result at its exact
 // unpadded width, one 0x01 byte (the circuits take it as Bytes<1>).
-const OUTPUT_SUCCESS = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: true });
+const OUTPUT_SUCCESS = serializeRespondOutput(VAULT_RESPOND_SCHEMA, { success: true });
 
 // An EXECUTED transfer that returned false: one 0x00 byte.
-const OUTPUT_FALSE = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: false });
+const OUTPUT_FALSE = serializeRespondOutput(VAULT_RESPOND_SCHEMA, { success: false });
 
 // A failed or unviable execution attests an empty output (queueAttestation0).
 const OUTPUT_EMPTY = new Uint8Array(0);
@@ -3014,7 +3008,7 @@ const EXACT_OUTPUT_SINGLE_SELECTOR = new Uint8Array([0x50, 0x23, 0xb4, 0xdf]);
 // The swap's schemas at their EXACT contract-declared widths: the round-trip test
 // below is the lockstep check for these mirrors.
 const EXPECTED_SWAP_OUTPUT_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint256"}]', 38);
-const EXPECTED_SWAP_RESPOND_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint64"}]', 37);
+const EXPECTED_SWAP_RESPOND_SCHEMA = asciiPadded('{"struct":{"amountIn":"u64"}}', 29);
 
 // The vault token colour of ERC20_OUT, the ERC20 a swap buys.
 const VAULT_TOKEN_COLOR_OUT = hexToBytes(
@@ -3533,7 +3527,18 @@ describe("swapAmountIn", () => {
     { name: "the Uint<64> maximum", amountIn: UINT64_MAX },
   ])("decodes $name as swapRespondSchema() packs it", ({ amountIn }) => {
     const output = serializeRespondOutput(pureCircuits.swapRespondSchema(), { amountIn });
+    expect(output).toEqual(numericAbiWord(amountIn).slice(-8).reverse());
     expect(pureCircuits.swapAmountIn(output)).toBe(amountIn);
+  });
+
+  it.each([
+    { name: "negative values", value: -1n },
+    { name: "one above the u64 maximum", value: UINT64_MAX + 1n },
+    { name: "the uint256 maximum", value: (1n << 256n) - 1n },
+  ])("rejects $name before serialisation", ({ value }) => {
+    expect(() =>
+      serializeRespondOutput(pureCircuits.swapRespondSchema(), { amountIn: value }),
+    ).toThrow(RangeError);
   });
 });
 
@@ -3809,7 +3814,7 @@ const STATA_DEPOSIT_SELECTOR = new Uint8Array([0x6e, 0x55, 0x3f, 0x65]);
 // The supply's schemas at their exact contract-declared widths: the round trip below
 // is the lockstep check for the compiled supplyOutputSchema and supplyRespondSchema.
 const SUPPLY_OUTPUT_SCHEMA = asciiPadded('[{"name":"shares","type":"uint256"}]', 36);
-const SUPPLY_RESPOND_SCHEMA = asciiPadded('[{"name":"shares","type":"uint64"}]', 35);
+const SUPPLY_RESPOND_SCHEMA = asciiPadded('{"struct":{"shares":"u64"}}', 27);
 
 // The vault token colours of the pinned Aave pair: a supply surrenders the
 // underlying's, and its shares are minted in the wrapper's.
@@ -4311,7 +4316,18 @@ describe("supplyShares", () => {
     { name: "the Uint<64> maximum", shares: UINT64_MAX },
   ])("decodes $name as supplyRespondSchema() packs it", ({ shares }) => {
     const output = serializeRespondOutput(pureCircuits.supplyRespondSchema(), { shares });
+    expect(output).toEqual(numericAbiWord(shares).slice(-8).reverse());
     expect(pureCircuits.supplyShares(output)).toBe(shares);
+  });
+
+  it.each([
+    { name: "negative values", value: -1n },
+    { name: "one above the u64 maximum", value: UINT64_MAX + 1n },
+    { name: "the uint256 maximum", value: (1n << 256n) - 1n },
+  ])("rejects $name before serialisation", ({ value }) => {
+    expect(() =>
+      serializeRespondOutput(pureCircuits.supplyRespondSchema(), { shares: value }),
+    ).toThrow(RangeError);
   });
 });
 
@@ -4481,7 +4497,7 @@ const STATA_REDEEM_SELECTOR = new Uint8Array([0xba, 0x08, 0x76, 0x52]);
 // The redeem's schemas at their exact contract-declared widths: the round trip below
 // is the lockstep check for the compiled redeemOutputSchema and redeemRespondSchema.
 const REDEEM_OUTPUT_SCHEMA = asciiPadded('[{"name":"assets","type":"uint256"}]', 36);
-const REDEEM_RESPOND_SCHEMA = asciiPadded('[{"name":"assets","type":"uint64"}]', 35);
+const REDEEM_RESPOND_SCHEMA = asciiPadded('{"struct":{"assets":"u64"}}', 27);
 
 // The shares a redeem surrenders, distinct from AMOUNT so the round trip shows the
 // request's own field reaching the calldata.
@@ -4906,7 +4922,18 @@ describe("redeemAssets", () => {
     { name: "the Uint<64> maximum", assets: UINT64_MAX },
   ])("decodes $name as redeemRespondSchema() packs it", ({ assets }) => {
     const output = serializeRespondOutput(pureCircuits.redeemRespondSchema(), { assets });
+    expect(output).toEqual(numericAbiWord(assets).slice(-8).reverse());
     expect(pureCircuits.redeemAssets(output)).toBe(assets);
+  });
+
+  it.each([
+    { name: "negative values", value: -1n },
+    { name: "one above the u64 maximum", value: UINT64_MAX + 1n },
+    { name: "the uint256 maximum", value: (1n << 256n) - 1n },
+  ])("rejects $name before serialisation", ({ value }) => {
+    expect(() =>
+      serializeRespondOutput(pureCircuits.redeemRespondSchema(), { assets: value }),
+    ).toThrow(RangeError);
   });
 });
 

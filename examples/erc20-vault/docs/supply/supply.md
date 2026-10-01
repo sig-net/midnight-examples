@@ -80,7 +80,7 @@ As illustrated, the flow comprises 9 steps:
     minted shares land in the vault's own account and nowhere else, and a
     client cannot point the pooled funds at a contract of their own.
   - A wrapper deposit returns a `uint256` share count the MPC repacks as a
-    `uint64`, so the request carries its own schemas
+    Borsh `u64`, so the request carries its own schemas
     ([`supplyOutputSchema`](../../contract/src/erc20-vault.compact) and
     [`supplyRespondSchema`](../../contract/src/erc20-vault.compact)), and
     their widths are part of the supply map's ledger type.
@@ -106,7 +106,7 @@ As illustrated, the flow comprises 9 steps:
     resolves the MPC's attestation as it does for a
     [deposit](../deposit/deposit.md). A post declaring **`executed`** is
     checked over the wrapper's return decoded per the `uint256` output schema
-    and re-packed per the `uint64` respond schema, the 8 bytes that carry the
+    and encoded per the Borsh `u64` respond schema, the 8 bytes that carry the
     shares minted. The exchange rate is live, so the shares come from the
     attestation and are never computed in advance. A post declaring
     **`failed`** or **`unviable`** is checked over the EMPTY output.

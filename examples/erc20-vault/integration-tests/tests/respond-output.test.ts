@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_OUTPUT } from "../src/empty-output.ts";
 import { fetchAttestedRespondOutcome, RespondPollMemo } from "../src/flows/respond-output.ts";
-import { ERC20_TRANSFER_RESULT_SCHEMA } from "../src/mpc-routing.ts";
+import { ERC20_TRANSFER_OUTPUT_SCHEMA, ERC20_TRANSFER_RESPOND_SCHEMA } from "../src/mpc-routing.ts";
 import type { ObservedExecution } from "../src/observed-execution.ts";
 import * as observedModule from "../src/observed-execution.ts";
 import { OutputSource } from "../src/output-source.ts";
@@ -38,10 +38,9 @@ const EXPECTED_OBJECT_PATH = `/v1/test/${NETWORK_ID}/${SIGNET_CONTRACT_ADDRESS}/
 // post attestations the way the MPC does.
 const MPC_RESPONSE_SECRET = new Uint8Array(32).fill(7);
 const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
-// The vault's transfer schema in both directions, as its request records carry it.
 const SCHEMAS = {
-  outputDeserializationSchema: ERC20_TRANSFER_RESULT_SCHEMA,
-  respondSerializationSchema: ERC20_TRANSFER_RESULT_SCHEMA,
+  outputDeserializationSchema: ERC20_TRANSFER_OUTPUT_SCHEMA,
+  respondSerializationSchema: ERC20_TRANSFER_RESPOND_SCHEMA,
 };
 // This suite plays the MPC, so the attested destination height is whatever
 // it claims: the check is that the height is signed, not that it is real.

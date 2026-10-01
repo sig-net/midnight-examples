@@ -77,12 +77,16 @@ circuit requireInitialised(): [] {
 // Exported pure circuits exist so off-chain code reads these values from the compiled
 // circuit, never a TS re-declaration.
 
-// The ERC20 transfer result schema, used in both directions (output and respond).
-export pure circuit vaultResponseSchema(): Bytes<34> {
+// ERC20 return data is ABI-encoded.
+export pure circuit vaultOutputSchema(): Bytes<34> {
   return "[{\"name\":\"success\",\"type\":\"bool\"}]" as Bytes<34>;
 }
 
-// vaultResponseSchema()'s output decoded: transfer()'s bool, packed by the MPC to 1 byte.
+export pure circuit vaultRespondSchema(): Bytes<29> {
+  return "{\"struct\":{\"success\":\"bool\"}}" as Bytes<29>;
+}
+
+// Field order and widths must match vaultRespondSchema().
 struct VaultResponse {
   success: Boolean;
 }
@@ -483,9 +487,9 @@ export struct ReplaceNonceArgs {
   gas: GasParams;
 }
 
-// Nonce replacement requests (no calldata, 34-byte schemas).
+// Nonce replacement requests (no calldata, 34-byte output and 29-byte respond schemas).
 // Compiled path for MPC notification: [2, 1] (read from managed/erc20-vault/compiler/contract-info.json).
-export ledger bidirectionalReplaceNonceMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 34>;
+export ledger bidirectionalReplaceNonceMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 29>;
 
 // inIndex -> the arguments of the replacement queued under it, from start to complete.
 export ledger replaceNonceArgsMap: Map<Uint<64>, ReplaceNonceArgs>;
@@ -583,13 +587,12 @@ export circuit sendReplaceNonce(outIndex: Bytes<32>): [] {
     accessListEntryCount: 0,
     accessList: []
   };
-  const schema = vaultResponseSchema();
-  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 34, 34>(
+  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 34, 29>(
     mpcKeyVersion, kernel.self(), pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, TxParamType.evmType2, txParams, ethereumCaip2Id(),
-    MPCDestination.unused, pad(64, ""), schema, schema
+    MPCDestination.unused, pad(64, ""), vaultOutputSchema(), vaultRespondSchema()
   );
-  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 34, 34>(request);
+  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 34, 29>(request);
   assert(!bidirectionalReplaceNonceMap.member(requestId), "Request already sent");
   bidirectionalReplaceNonceMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
@@ -643,9 +646,9 @@ export struct ApproveArgs {
   gas: GasParams;
 }
 
-// Approve requests of both spenders (2-word ERC20 approve, 34-byte schemas).
+// Approve requests of both spenders (2-word ERC20 approve, 34-byte output and 29-byte respond schemas).
 // Compiled path for MPC notification: [2, 3] (read from managed/erc20-vault/compiler/contract-info.json).
-export ledger bidirectionalApproveMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 34>;
+export ledger bidirectionalApproveMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 29>;
 
 // inIndex -> the arguments of the approval queued under it, from start to complete.
 export ledger approveArgsMap: Map<Uint<64>, ApproveArgs>;
@@ -747,13 +750,12 @@ export circuit sendApprove(outIndex: Bytes<32>): [] {
     accessListEntryCount: 0,
     accessList: []
   };
-  const schema = vaultResponseSchema();
-  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 34, 34>(
+  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 34, 29>(
     mpcKeyVersion, kernel.self(), pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, TxParamType.evmType2, txParams, ethereumCaip2Id(),
-    MPCDestination.unused, pad(64, ""), schema, schema
+    MPCDestination.unused, pad(64, ""), vaultOutputSchema(), vaultRespondSchema()
   );
-  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 34, 34>(request);
+  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 34, 29>(request);
   assert(!bidirectionalApproveMap.member(requestId), "Request already sent");
   bidirectionalApproveMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
@@ -812,9 +814,9 @@ export struct DepositArgs {
   gas: GasParams;
 }
 
-// Deposit requests (2-word ERC20 transfer, 34-byte schemas).
+// Deposit requests (2-word ERC20 transfer, 34-byte output and 29-byte respond schemas).
 // Compiled path for MPC notification: [2, 5] (read from managed/erc20-vault/compiler/contract-info.json).
-export ledger bidirectionalDepositMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 34>;
+export ledger bidirectionalDepositMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 29>;
 
 // inIndex -> the arguments of the deposit queued under it, from start to complete.
 export ledger depositArgsMap: Map<Uint<64>, DepositArgs>;
@@ -894,13 +896,12 @@ export circuit sendDeposit(outIndex: Bytes<32>): [] {
     accessListEntryCount: 0,
     accessList: []
   };
-  const schema = vaultResponseSchema();
-  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 34, 34>(
+  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 34, 29>(
     mpcKeyVersion, kernel.self(), args.path,
     MPCSignatureAlgorithm.ecdsa, TxParamType.evmType2, txParams, ethereumCaip2Id(),
-    MPCDestination.unused, pad(64, ""), schema, schema
+    MPCDestination.unused, pad(64, ""), vaultOutputSchema(), vaultRespondSchema()
   );
-  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 34, 34>(request);
+  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 34, 29>(request);
   assert(!bidirectionalDepositMap.member(requestId), "Request already sent");
   bidirectionalDepositMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
@@ -973,9 +974,9 @@ export struct WithdrawArgs {
   gas: GasParams;
 }
 
-// Withdraw requests (2-word ERC20 transfer, 34-byte schemas).
+// Withdraw requests (2-word ERC20 transfer, 34-byte output and 29-byte respond schemas).
 // Compiled path for MPC notification: [2, 7] (read from managed/erc20-vault/compiler/contract-info.json).
-export ledger bidirectionalWithdrawMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 34>;
+export ledger bidirectionalWithdrawMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 29>;
 
 // inIndex -> the arguments of the withdrawal queued under it, from start to complete.
 export ledger withdrawArgsMap: Map<Uint<64>, WithdrawArgs>;
@@ -1065,13 +1066,12 @@ export circuit sendWithdraw(outIndex: Bytes<32>): [] {
     accessListEntryCount: 0,
     accessList: []
   };
-  const schema = vaultResponseSchema();
-  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 34, 34>(
+  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 34, 29>(
     mpcKeyVersion, kernel.self(), pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, TxParamType.evmType2, txParams, ethereumCaip2Id(),
-    MPCDestination.unused, pad(64, ""), schema, schema
+    MPCDestination.unused, pad(64, ""), vaultOutputSchema(), vaultRespondSchema()
   );
-  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 34, 34>(request);
+  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 34, 29>(request);
   assert(!bidirectionalWithdrawMap.member(requestId), "Request already sent");
   bidirectionalWithdrawMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
@@ -1147,18 +1147,18 @@ export struct SwapArgs {
 }
 
 // The MPC decodes exactOutputSingle's uint256 return with the output schema, then
-// attests it packed as a uint64 with the respond schema.
+// encodes it as Borsh u64 after checked narrowing.
 export pure circuit swapOutputSchema(): Bytes<38> {
   return "[{\"name\":\"amountIn\",\"type\":\"uint256\"}]" as Bytes<38>;
 }
 
-export pure circuit swapRespondSchema(): Bytes<37> {
-  return "[{\"name\":\"amountIn\",\"type\":\"uint64\"}]" as Bytes<37>;
+export pure circuit swapRespondSchema(): Bytes<29> {
+  return "{\"struct\":{\"amountIn\":\"u64\"}}" as Bytes<29>;
 }
 
-// Swap requests (7-word exactOutputSingle, 38-byte output and 37-byte respond schemas).
+// Swap requests (7-word exactOutputSingle, 38-byte output and 29-byte respond schemas).
 // Compiled path for MPC notification: [2, 9] (read from managed/erc20-vault/compiler/contract-info.json).
-export ledger bidirectionalSwapMap: SignBidirectionalEventMapV1<EvmType2TxParams<7, 0, 0>, 38, 37>;
+export ledger bidirectionalSwapMap: SignBidirectionalEventMapV1<EvmType2TxParams<7, 0, 0>, 38, 29>;
 
 // inIndex -> the arguments of the swap queued under it, from start to complete.
 export ledger swapArgsMap: Map<Uint<64>, SwapArgs>;
@@ -1263,12 +1263,12 @@ export circuit sendSwap(outIndex: Bytes<32>): [] {
     accessListEntryCount: 0,
     accessList: []
   };
-  const request = constructSignBidirectionalEventV1<EvmType2TxParams<7, 0, 0>, 38, 37>(
+  const request = constructSignBidirectionalEventV1<EvmType2TxParams<7, 0, 0>, 38, 29>(
     mpcKeyVersion, kernel.self(), pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, TxParamType.evmType2, txParams, ethereumCaip2Id(),
     MPCDestination.unused, pad(64, ""), swapOutputSchema(), swapRespondSchema()
   );
-  const requestId = calculateEvmType2RequestIdV1<7, 0, 0, 38, 37>(request);
+  const requestId = calculateEvmType2RequestIdV1<7, 0, 0, 38, 29>(request);
   assert(!bidirectionalSwapMap.member(requestId), "Request already sent");
   bidirectionalSwapMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
@@ -1361,9 +1361,9 @@ export pure circuit supplyOutputSchema(): Bytes<36> {
   return "[{\"name\":\"shares\",\"type\":\"uint256\"}]" as Bytes<36>;
 }
 
-// The MPC re-packs the shares as a uint64, the width completeSupply mints.
-export pure circuit supplyRespondSchema(): Bytes<35> {
-  return "[{\"name\":\"shares\",\"type\":\"uint64\"}]" as Bytes<35>;
+// Borsh u64 matches the Uint<64> shares minted by completeSupply.
+export pure circuit supplyRespondSchema(): Bytes<27> {
+  return "{\"struct\":{\"shares\":\"u64\"}}" as Bytes<27>;
 }
 
 export struct SupplyRequest {
@@ -1376,9 +1376,9 @@ export struct SupplyArgs {
   gas: GasParams;
 }
 
-// Supply requests (2-word ERC-4626 deposit, 36-byte output and 35-byte respond schemas).
+// Supply requests (2-word ERC-4626 deposit, 36-byte output and 27-byte respond schemas).
 // Compiled path for MPC notification: [2, 11] (read from managed/erc20-vault/compiler/contract-info.json).
-export ledger bidirectionalSupplyMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 36, 35>;
+export ledger bidirectionalSupplyMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 36, 27>;
 
 // inIndex -> the arguments of the supply queued under it, from start to complete.
 export ledger supplyArgsMap: Map<Uint<64>, SupplyArgs>;
@@ -1467,12 +1467,12 @@ export circuit sendSupply(outIndex: Bytes<32>): [] {
     accessListEntryCount: 0,
     accessList: []
   };
-  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 36, 35>(
+  const request = constructSignBidirectionalEventV1<EvmType2TxParams<2, 0, 0>, 36, 27>(
     mpcKeyVersion, kernel.self(), pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, TxParamType.evmType2, txParams, ethereumCaip2Id(),
     MPCDestination.unused, pad(64, ""), supplyOutputSchema(), supplyRespondSchema()
   );
-  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 36, 35>(request);
+  const requestId = calculateEvmType2RequestIdV1<2, 0, 0, 36, 27>(request);
   assert(!bidirectionalSupplyMap.member(requestId), "Request already sent");
   bidirectionalSupplyMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
@@ -1552,9 +1552,9 @@ export pure circuit redeemOutputSchema(): Bytes<36> {
   return "[{\"name\":\"assets\",\"type\":\"uint256\"}]" as Bytes<36>;
 }
 
-// The MPC re-packs the assets as a uint64, the width completeRedeem mints.
-export pure circuit redeemRespondSchema(): Bytes<35> {
-  return "[{\"name\":\"assets\",\"type\":\"uint64\"}]" as Bytes<35>;
+// Borsh u64 matches the Uint<64> assets minted by completeRedeem.
+export pure circuit redeemRespondSchema(): Bytes<27> {
+  return "{\"struct\":{\"assets\":\"u64\"}}" as Bytes<27>;
 }
 
 export struct RedeemRequest {
@@ -1567,9 +1567,9 @@ export struct RedeemArgs {
   gas: GasParams;
 }
 
-// Redeem requests (3-word ERC-4626 redeem, 36-byte output and 35-byte respond schemas).
+// Redeem requests (3-word ERC-4626 redeem, 36-byte output and 27-byte respond schemas).
 // Compiled path for MPC notification: [2, 13] (read from managed/erc20-vault/compiler/contract-info.json).
-export ledger bidirectionalRedeemMap: SignBidirectionalEventMapV1<EvmType2TxParams<3, 0, 0>, 36, 35>;
+export ledger bidirectionalRedeemMap: SignBidirectionalEventMapV1<EvmType2TxParams<3, 0, 0>, 36, 27>;
 
 // inIndex -> the arguments of the redeem queued under it, from start to complete.
 export ledger redeemArgsMap: Map<Uint<64>, RedeemArgs>;
@@ -1660,12 +1660,12 @@ export circuit sendRedeem(outIndex: Bytes<32>): [] {
     accessListEntryCount: 0,
     accessList: []
   };
-  const request = constructSignBidirectionalEventV1<EvmType2TxParams<3, 0, 0>, 36, 35>(
+  const request = constructSignBidirectionalEventV1<EvmType2TxParams<3, 0, 0>, 36, 27>(
     mpcKeyVersion, kernel.self(), pad(32, "vault"),
     MPCSignatureAlgorithm.ecdsa, TxParamType.evmType2, txParams, ethereumCaip2Id(),
     MPCDestination.unused, pad(64, ""), redeemOutputSchema(), redeemRespondSchema()
   );
-  const requestId = calculateEvmType2RequestIdV1<3, 0, 0, 36, 35>(request);
+  const requestId = calculateEvmType2RequestIdV1<3, 0, 0, 36, 27>(request);
   assert(!bidirectionalRedeemMap.member(requestId), "Request already sent");
   bidirectionalRedeemMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);

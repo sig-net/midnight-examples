@@ -6,7 +6,6 @@
 // same values against the real compiled contract.
 
 import {
-  asciiPadded,
   MPC_PARAMS_BYTES,
   MPCDestination,
   MPCSignatureAlgorithm,
@@ -14,18 +13,15 @@ import {
 } from "@sig-net/midnight";
 import { pureCircuits as vaultCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
 
-/**
- * What the MPC reports back about an ERC20 `transfer` or `approve`, and about a
- * plain transfer: a single bool. Serves as both the output-deserialization and
- * the respond-serialization schema of every vault event except a swap's, a
- * supply's and a redeem's. Stored at its EXACT byte width (schemas are
- * exact-width by protocol convention, never zero-padded: off-chain readers
- * recover the declared width from the stored bytes).
- */
-export const ERC20_TRANSFER_RESULT_SCHEMA = '[{"name":"success","type":"bool"}]';
+/** ABI output schema declared by the vault contract. */
+export const ERC20_TRANSFER_OUTPUT_SCHEMA = new TextDecoder().decode(
+  vaultCircuits.vaultOutputSchema(),
+);
 
-/** The contract-declared byte width of {@link ERC20_TRANSFER_RESULT_SCHEMA} (Compact `Bytes<34>`). */
-export const ERC20_TRANSFER_RESULT_SCHEMA_BYTES = ERC20_TRANSFER_RESULT_SCHEMA.length;
+/** Native Borsh response schema declared by the vault contract. */
+export const ERC20_TRANSFER_RESPOND_SCHEMA = new TextDecoder().decode(
+  vaultCircuits.vaultRespondSchema(),
+);
 
 /**
  * The contract-fixed routing fields of a vault event. Field names match
@@ -51,27 +47,21 @@ export interface VaultMpcRouting {
  * The routing the vault contract bakes into every event it records except a
  * swap's, a supply's and a redeem's: ECDSA, an unused signature destination,
  * no extras, the MPC's Ethereum routing key as the execution destination, and
- * {@link ERC20_TRANSFER_RESULT_SCHEMA} in both directions.
+ * the contract-declared ABI output and Borsh response schemas.
  */
 export const TRANSFER_RESULT_MPC_ROUTING: VaultMpcRouting = {
   algo: MPCSignatureAlgorithm.ecdsa,
   executionDest: pureCircuits.ethereumCaip2Id(),
   signatureDest: MPCDestination.unused,
   params: new Uint8Array(MPC_PARAMS_BYTES),
-  outputDeserializationSchema: asciiPadded(
-    ERC20_TRANSFER_RESULT_SCHEMA,
-    ERC20_TRANSFER_RESULT_SCHEMA_BYTES,
-  ),
-  respondSerializationSchema: asciiPadded(
-    ERC20_TRANSFER_RESULT_SCHEMA,
-    ERC20_TRANSFER_RESULT_SCHEMA_BYTES,
-  ),
+  outputDeserializationSchema: vaultCircuits.vaultOutputSchema(),
+  respondSerializationSchema: vaultCircuits.vaultRespondSchema(),
 };
 
 /**
  * The routing of a swap event: {@link TRANSFER_RESULT_MPC_ROUTING}'s fields with
  * the swap's own schemas, which decode `exactOutputSingle`'s uint256 `amountIn`
- * and pack it as a uint64.
+ * and encode it as Borsh u64.
  */
 export const SWAP_MPC_ROUTING: VaultMpcRouting = {
   ...TRANSFER_RESULT_MPC_ROUTING,
@@ -82,7 +72,7 @@ export const SWAP_MPC_ROUTING: VaultMpcRouting = {
 /**
  * The routing of a supply event: {@link TRANSFER_RESULT_MPC_ROUTING}'s fields
  * with the supply's own schemas, which decode the wrapper `deposit`'s uint256
- * shares and pack them as a uint64.
+ * shares and encode them as Borsh u64.
  */
 export const SUPPLY_MPC_ROUTING: VaultMpcRouting = {
   ...TRANSFER_RESULT_MPC_ROUTING,
@@ -93,7 +83,7 @@ export const SUPPLY_MPC_ROUTING: VaultMpcRouting = {
 /**
  * The routing of a redeem event: {@link TRANSFER_RESULT_MPC_ROUTING}'s fields
  * with the redeem's own schemas, which decode the wrapper `redeem`'s uint256
- * assets and pack them as a uint64.
+ * assets and encode them as Borsh u64.
  */
 export const REDEEM_MPC_ROUTING: VaultMpcRouting = {
   ...TRANSFER_RESULT_MPC_ROUTING,

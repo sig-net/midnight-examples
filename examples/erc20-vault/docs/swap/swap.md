@@ -85,11 +85,11 @@ As illustrated, the flow comprises 9 steps:
     so the bought tokens come back to the pool, and the price bound is 0:
     slippage is enforced on chain by `amountInMaximum` alone, and a trade that
     would cost more reverts, which step 9 settles by re-minting.
-  - A swap needs TWO schemas where a transfer needs one.
+  - Requests carry separate ABI output and Borsh response schemas.
     [`swapOutputSchema`](../../contract/src/erc20-vault.compact) tells the
     MPC how to decode the router's `uint256` return, and
     [`swapRespondSchema`](../../contract/src/erc20-vault.compact) how to
-    repack it as a `uint64` for the attestation, which is what lets step 9
+    encode it as Borsh `u64` for the attestation, which is what lets step 9
     deserialise an 8-byte output.
   - The record goes into `bidirectionalSwapMap` under its request id, signed
     for the vault's own account (path `pad(32, "vault")`) at the assigned
@@ -119,7 +119,7 @@ As illustrated, the flow comprises 9 steps:
     resolves the MPC's attestation as it does for a
     [deposit](../deposit/deposit.md). A post declaring **`executed`** is
     checked over the router's return decoded per the `uint256` output schema
-    and re-packed per the `uint64` respond schema, the 8 bytes that carry the
+    and encoded per the Borsh `u64` respond schema, the 8 bytes that carry the
     `amountIn` the router really spent. A post declaring **`failed`** or
     **`unviable`** is checked over the EMPTY output.
 - **7.** queue the attestation at its output's width

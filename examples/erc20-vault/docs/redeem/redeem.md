@@ -76,7 +76,7 @@ As illustrated, the flow comprises 9 steps:
     the owner of the burned shares, so the underlying lands in the pool and
     nowhere else.
   - A wrapper redeem returns a `uint256` asset amount the MPC repacks as a
-    `uint64`, so the request carries its own schemas
+    Borsh `u64`, so the request carries its own schemas
     ([`redeemOutputSchema`](../../contract/src/erc20-vault.compact) and
     [`redeemRespondSchema`](../../contract/src/erc20-vault.compact)), and
     their widths are part of the redeem map's ledger type.
@@ -101,7 +101,7 @@ As illustrated, the flow comprises 9 steps:
     resolves the MPC's attestation as it does for a
     [deposit](../deposit/deposit.md). A post declaring **`executed`** is
     checked over the wrapper's return decoded per the `uint256` output schema
-    and re-packed per the `uint64` respond schema, the 8 bytes that carry the
+    and encoded per the Borsh `u64` respond schema, the 8 bytes that carry the
     assets paid out, principal plus accrued interest. A post declaring
     **`failed`** or **`unviable`** is checked over the EMPTY output.
 - **7.** queue the attestation at its output's width

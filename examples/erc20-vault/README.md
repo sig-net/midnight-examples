@@ -212,8 +212,8 @@ The contract package's dependency list is the minimal integration surface:
   "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
   "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
   "@midnight-ntwrk/midnight-js-protocol": "5.0.0-beta.6",
-  "@sig-net/midnight": "0.24.0-rc.6",
-  "@sig-net/midnight-contract": "0.24.0-rc.6"
+  "@sig-net/midnight": "0.24.0-rc.8",
+  "@sig-net/midnight-contract": "0.24.0-rc.8"
 }
 ```
 
@@ -280,8 +280,8 @@ export ledger outputAttestationBuffer: Map<RequestId, AttestationRecord>;
 export ledger evictionMap: Map<RequestId, Bytes<32>>;
 
 // ==== Deposit ====
-// Deposit requests (2-word ERC20 transfer, 34-byte schemas).
-export ledger bidirectionalDepositMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 34>;
+// Deposit requests (2-word ERC20 transfer, 34-byte output and 29-byte respond schemas).
+export ledger bidirectionalDepositMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34, 29>;
 
 // inIndex -> the arguments of the deposit queued under it, from start to complete.
 export ledger depositArgsMap: Map<Uint<64>, DepositArgs>;
@@ -294,6 +294,28 @@ constructor(deployerCommitment: Bytes<32>, signetContract: SignetSigner) {
   signetSigner = disclose(signetContract);
 }
 ```
+
+The request carries two distinct schema formats: an ABI field list for decoding
+EVM return data and a native Borsh struct for serialising the attested response.
+The exported schema circuits in [the contract](contract/src/erc20-vault.compact)
+supply the off-chain routing values.
+
+| Actions | Borsh response schema | Response bytes |
+| --- | --- | --- |
+| Deposit, withdraw, approve, replace nonce | `{"struct":{"success":"bool"}}` | 1 |
+| Swap | `{"struct":{"amountIn":"u64"}}` | 8 |
+| Supply | `{"struct":{"shares":"u64"}}` | 8 |
+| Redeem | `{"struct":{"assets":"u64"}}` | 8 |
+
+The numeric responses use little-endian Borsh `u64`, matching the vault's
+`Uint<64>` decoders. The rc.8 SDK rejects negative values and values above
+`2^64 - 1` before serialising them. The simulator tests exercise those bounds
+and decode SDK-produced bytes with the compiled circuits. Failed and unviable
+outcomes carry an empty output.
+
+These schemas use the Compact-compatible Borsh subset documented in the
+[serde package](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.8/packages/midnight-serde-ts/README.md).
+The local stack pins `fakenet:0.32.0` for the Borsh response protocol.
 
 Three vault-specific points:
 

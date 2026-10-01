@@ -363,7 +363,7 @@ the allowance a router approval granted:
    derivation path `"vault"` and the nonce the flush assigned, and records it
    in `bidirectionalSwapMap`.
 3. **Queue the attestation.** The MPC decodes the router's `uint256` return,
-   the input the swap spent, and attests it packed as a `uint64`, so an
+   the input the swap spent, and attests it encoded as Borsh `u64`, so an
    executed swap is queued with `queueAttestation8`.
 4. **Complete.** `completeSwap` settles every verdict. An executed swap mints
    exactly `amountOut` of `erc20AddressOut` and the unspent
@@ -385,7 +385,7 @@ tokenised vault) for shares, drawing on the allowance the stata approval grants:
    `stataToken` with the derivation path `"vault"` and the nonce the flush
    assigned, and records it in `bidirectionalSupplyMap`.
 3. **Queue the attestation.** The MPC decodes the wrapper's uint256 share
-   count and re-packs it as a uint64, so an executed supply is queued with
+   count and encodes it as Borsh `u64`, so an executed supply is queued with
    `queueAttestation8`, and a failed or unviable one with `queueAttestation0`.
 4. **Complete.** `completeSupply` settles every verdict. An executed deposit
    minted shares to the vault account, so it mints the attested share count
@@ -406,7 +406,7 @@ burns, so no approval is involved:
    vaultEvmAddress)` on `stataToken` with the derivation path `"vault"` and the
    nonce the flush assigned, and records it in `bidirectionalRedeemMap`.
 3. **Queue the attestation.** The MPC decodes the wrapper's uint256 asset
-   amount and re-packs it as a uint64, so an executed redeem is queued with
+   amount and encodes it as Borsh `u64`, so an executed redeem is queued with
    `queueAttestation8`, and a failed or unviable one with `queueAttestation0`.
 4. **Complete.** `completeRedeem` settles every verdict. An executed redeem
    paid the vault account the underlying, so it mints the attested asset
