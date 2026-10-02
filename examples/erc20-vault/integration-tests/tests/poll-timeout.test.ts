@@ -10,11 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import * as outcomes from "../src/flows/respond-output.ts";
-import {
-  ERC20_TRANSFER_OUTPUT_SCHEMA,
-  ERC20_TRANSFER_RESPOND_SCHEMA,
-  TRANSFER_RESULT_MPC_ROUTING,
-} from "../src/mpc-routing.ts";
+import { ERC20_TRANSFER_OUTPUT_SCHEMA, TRANSFER_RESULT_MPC_ROUTING } from "../src/mpc-routing.ts";
 import { OutputSource } from "../src/output-source.ts";
 import * as contextModule from "../src/vault-context.ts";
 
@@ -80,7 +76,7 @@ describe("attestation timeout diagnostics", () => {
     respondSerializationSchema: TRANSFER_RESULT_MPC_ROUTING.respondSerializationSchema,
   } as SignBidirectionalEvent;
 
-  it("retains the last execution observation failure and passes the record's schemas", async () => {
+  it("retains the last execution observation failure and passes the record's output schema", async () => {
     vi.useFakeTimers();
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -92,7 +88,7 @@ describe("attestation timeout diagnostics", () => {
     vi.spyOn(contextModule, "createResponseReader").mockReturnValue(reader);
     const fetchOutcome = vi
       .spyOn(outcomes, "fetchAttestedRespondOutcome")
-      .mockImplementation((_context, _request, _source, _schemas, _path, progress) => {
+      .mockImplementation((_context, _request, _source, _outputSchema, _path, progress) => {
         progress?.update("1 attestation post observed");
         progress?.failure("observation", "execution observation failed: RPC timeout");
         return Promise.resolve(undefined);
@@ -107,10 +103,7 @@ describe("attestation timeout diagnostics", () => {
       CONTEXT,
       REQUEST,
       OutputSource.EVMNode,
-      {
-        outputDeserializationSchema: ERC20_TRANSFER_OUTPUT_SCHEMA,
-        respondSerializationSchema: ERC20_TRANSFER_RESPOND_SCHEMA,
-      },
+      ERC20_TRANSFER_OUTPUT_SCHEMA,
       undefined,
       expect.anything(),
       expect.any(outcomes.RespondPollMemo),

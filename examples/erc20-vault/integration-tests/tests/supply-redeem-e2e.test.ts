@@ -281,12 +281,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         // The broadcast step saw the deposit mine, so the MPC must attest an
-        // execution whose 8-byte output encodes the wrapper's share count.
+        // execution whose 32-byte output carries the wrapper's share count whole.
         expect(
           supplyAttestation.event.outputKind,
           "a mined wrapper deposit must be attested under OutputKind.executed",
         ).toBe(OutputKind.executed);
-        expect(supplyAttestation.serializedOutput).toHaveLength(8);
+        expect(supplyAttestation.serializedOutput).toHaveLength(32);
         supplyShares = pureCircuits.supplyShares(supplyAttestation.serializedOutput);
         expect(supplyShares).toBeGreaterThan(0n);
 
@@ -446,12 +446,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         // The broadcast step saw the redeem mine, so the MPC must attest an
-        // execution whose 8-byte output encodes the wrapper's asset amount.
+        // execution whose 32-byte output carries the wrapper's asset amount whole.
         expect(
           redeemAttestation.event.outputKind,
           "a mined wrapper redeem must be attested under OutputKind.executed",
         ).toBe(OutputKind.executed);
-        expect(redeemAttestation.serializedOutput).toHaveLength(8);
+        expect(redeemAttestation.serializedOutput).toHaveLength(32);
         redeemAssets = pureCircuits.redeemAssets(redeemAttestation.serializedOutput);
         expect(redeemAssets).toBeGreaterThan(0n);
 

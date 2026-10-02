@@ -85,12 +85,11 @@ As illustrated, the flow comprises 9 steps:
     so the bought tokens come back to the pool, and the price bound is 0:
     slippage is enforced on chain by `amountInMaximum` alone, and a trade that
     would cost more reverts, which step 9 settles by re-minting.
-  - Requests carry separate ABI output and Borsh response schemas.
-    [`swapOutputSchema`](../../contract/src/erc20-vault.compact) tells the
-    MPC how to decode the router's `uint256` return, and
-    [`swapRespondSchema`](../../contract/src/erc20-vault.compact) how to
-    encode it as Borsh `u64` for the attestation, which is what lets step 9
-    deserialise an 8-byte output.
+  - The request carries the swap's own ABI output schema,
+    [`swapOutputSchema`](../../contract/src/erc20-vault.compact), which tells
+    the MPC how to decode the router's `uint256` return. The MPC attests the
+    decoded value whole, as 32 little-endian bytes, which step 9 narrows
+    in-circuit.
   - The record goes into `bidirectionalSwapMap` under its request id, signed
     for the vault's own account (path `pad(32, "vault")`) at the assigned
     nonce and the gas the start copied, and the singleton's
@@ -119,13 +118,13 @@ As illustrated, the flow comprises 9 steps:
     resolves the MPC's attestation as it does for a
     [deposit](../deposit/deposit.md). A post declaring **`executed`** is
     checked over the router's return decoded per the `uint256` output schema
-    and encoded per the Borsh `u64` respond schema, the 8 bytes that carry the
-    `amountIn` the router really spent. A post declaring **`failed`** or
+    and Borsh-serialised as the MPC does, the 32 little-endian bytes that carry
+    the `amountIn` the router really spent. A post declaring **`failed`** or
     **`unviable`** is checked over the EMPTY output.
 - **7.** queue the attestation at its output's width
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     submits an executed swap to
-    [`queueAttestation8`](../../contract/src/erc20-vault.compact) and a failed
+    [`queueAttestation32`](../../contract/src/erc20-vault.compact) and a failed
     or unviable one to `queueAttestation0`. The circuit verifies the MPC's
     signature over the output against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), finds the open
@@ -136,7 +135,7 @@ As illustrated, the flow comprises 9 steps:
     folds its block height into `globalLastSeen`.
 - **9.** completeSwap(...) mints amountOut of erc20AddressOut plus the unspent erc20AddressIn
   - The swapper calls [`completeSwap`](../../contract/src/erc20-vault.compact)
-    with the request id, the 8-byte serialised output and two mint nonces. The
+    with the request id, the 32-byte serialised output and two mint nonces. The
     circuit requires the flushed attestation, a block height strictly above
     the entry's `lastSeen` and the caller's ownership commitment, which makes
     every mint swapper-only, then removes the request's event, its arguments,
@@ -147,7 +146,7 @@ As illustrated, the flow comprises 9 steps:
     unspent `erc20AddressIn` as change: `amountInMaximum` minus the attested
     `amountIn`, which the pure
     [`swapAmountIn`](../../contract/src/erc20-vault.compact) circuit
-    deserialises from the output. An exact spend mints a zero-value change
+    narrows from the output in-circuit. An exact spend mints a zero-value change
     coin, and the change coin takes its own `changeNonce`, which the circuit
     asserts differs from `mintNonce`, so the two minted coins stay unlinkable.
   - A `failed` or `unviable` verdict means the router pulled nothing, so the
@@ -221,7 +220,7 @@ sequenceDiagram
     MPC->>Singleton: respondBidirectional(...) posts the attestation
     DApp->>Singleton: polls for the attestation
     Note over User,Vault: Step 7: queue the attestation at its output's width
-    User->>Vault: queueAttestation8(...) or queueAttestation0(...)
+    User->>Vault: queueAttestation32(...) or queueAttestation0(...)
     Note over User,Vault: Step 8: flushQueue(...) moves the attestation into the output buffer
     User->>Vault: flushQueue(...)
     Note over User,Vault: Step 9: completeSwap(...) mints amountOut of erc20AddressOut plus the unspent erc20AddressIn

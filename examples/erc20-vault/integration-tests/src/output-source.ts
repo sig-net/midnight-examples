@@ -8,8 +8,8 @@
 export enum OutputSource {
   /**
    * Recompute the bytes from the EVM chain: trace the mined transaction on
-   * `EVM_RPC_URL` (`debug_traceTransaction`) and run the request's two schema
-   * conversions over its raw return data.
+   * `EVM_RPC_URL` (`debug_traceTransaction`), decode its raw return data per
+   * the request's output schema and Borsh-serialise it as the MPC does.
    */
   EVMNode = "evm-node",
   /**

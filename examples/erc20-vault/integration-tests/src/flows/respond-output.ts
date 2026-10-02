@@ -10,13 +10,13 @@
 //   OutputSource.EVMNode  -> a post declaring an executed transaction is
 //                            checked over the mined transaction's raw traced
 //                            output (see ../observed-execution.ts), decoded
-//                            per the request's output deserialisation schema
-//                            and Borsh-encoded per its respond serialisation
-//                            schema. Only computable when the observation
-//                            reports an executed transaction with output
-//                            bytes. A post declaring a failed or unviable
-//                            transaction is checked over the empty output the
-//                            protocol attests, which needs no observation.
+//                            per the request's output schema and
+//                            Borsh-serialised as the MPC does. Only computable
+//                            when the observation reports an executed
+//                            transaction. A post declaring a failed or
+//                            unviable transaction is checked over the empty
+//                            output the protocol attests, which needs no
+//                            observation.
 //   OutputSource.MPCCache -> every post is checked over the one object the
 //                            MPC cached for the request before it posted (the
 //                            SDK's MpcOutputCacheReader): the attested bytes
@@ -35,6 +35,7 @@
 // here, it cannot mint.
 import {
   boolAbiWord,
+  deriveRespondSchema,
   deserializeEvmOutput,
   executedEvmRespondOutput,
   type MpcOutputCacheReader,
@@ -64,28 +65,22 @@ export interface RespondOutcome {
    */
   readonly event: RespondBidirectionalEvent;
   /**
-   * The output bytes the signature covers (a circuit argument): the Borsh-encoded
-   * respond output of an executed transaction, empty under a failure kind.
+   * The output bytes the signature covers (a circuit argument): the MPC's Borsh
+   * serialisation of an executed transaction's decoded output (empty under an
+   * empty output schema), and empty under a failure kind.
    */
   readonly serializedOutput: Uint8Array;
   /**
-   * True only when the verified kind is executed AND the bytes are the
-   * packing of a true transfer result under the request's schemas. The
-   * vault's ERC20 transfer schema encodes a single bool, so `succeeded: false`
-   * beside an executed kind means the transfer executed and returned false.
+   * True only when the verified kind is executed AND the bytes are the ones a
+   * succeeded call attests under the request's output schema (see
+   * {@link executedSuccessOutput}). The vault's ERC20 transfer and approve
+   * schema is a single bool, so `succeeded: false` beside an executed kind
+   * means the call executed and returned false. A nonce replacement's schema
+   * is empty, so its executed attestation always succeeded. A swap's, supply's
+   * or redeem's output is a value with no success flag, so `succeeded` is
+   * false for them and their flows read the attested value.
    */
   readonly succeeded: boolean;
-}
-
-/**
- * The request's two schemas as JSON text, read off its on-ledger record
- * (`SignBidirectionalEvent`): they are what the MPC ran.
- */
-export interface RespondOutputSchemas {
-  /** The record's `outputDeserializationSchema`: decodes the raw EVM return data into named values. */
-  readonly outputDeserializationSchema: string;
-  /** The record's `respondSerializationSchema`: encodes those values into the bytes the MPC attests. */
-  readonly respondSerializationSchema: string;
 }
 
 /** The bytes a source yields this tick, by the kind a post declares. */
@@ -159,18 +154,18 @@ const OBSERVATION_TICK_TIMEOUT_MS = 3_000;
 
 /**
  * The {@link OutputSource.EVMNode} candidates. The executed candidate is the
- * observed execution's raw output decoded per the request's output
- * deserialisation schema and Borsh-encoded per its respond serialisation schema
- * (the exact two conversions the MPC ran), built only when a post declares
- * an executed transaction: it needs an executed transaction with output
- * bytes, and a decode failure (for example empty `0x` return data from a
- * non-bool ERC20) drops it with a warning. The failure candidate is the
- * empty output and needs no observation at all.
+ * observed execution's raw output decoded per the request's output schema and
+ * Borsh-serialised as the MPC does (the exact conversions it ran), built only
+ * when a post declares an executed transaction: it needs an executed
+ * transaction, and a schema the return data disagrees with (for example empty
+ * `0x` return data from a non-bool ERC20 under the bool schema) drops it with
+ * a warning. The failure candidate is the empty output and needs no
+ * observation at all.
  *
  * @param context - The flow context, whose EVM endpoint serves the trace.
  * @param reader - The reader over the request map, which rebuilds the mined transaction.
  * @param requestId - The request whose execution result to recompute.
- * @param schemas - The request's schemas.
+ * @param outputSchema - The request's output schema as JSON text.
  * @param executedDeclared - Whether any post declares an executed transaction.
  * @param progress - The enclosing poll's diagnostics, if any.
  * @returns The candidates, the executed one `undefined` when no post asks
@@ -180,7 +175,7 @@ async function evmNodeCandidates(
   context: VaultContext,
   reader: SignetRequestResponseReader,
   requestId: RequestIdHex,
-  schemas: RespondOutputSchemas,
+  outputSchema: string,
   executedDeclared: boolean,
   progress: PollProgress | undefined,
 ): Promise<OutputCandidates> {
@@ -209,7 +204,7 @@ async function evmNodeCandidates(
   }
   try {
     return {
-      executed: executedEvmRespondOutput(schemas, observed.isContractCall, observed.trace),
+      executed: executedEvmRespondOutput(outputSchema, observed.isContractCall, observed.trace),
       failure: EMPTY_OUTPUT,
     };
   } catch (error) {
@@ -270,7 +265,7 @@ async function mpcCacheCandidates(
  * @param reader - The reader over the request map.
  * @param requestId - The request to resolve.
  * @param outputSource - Where to obtain the attested output from.
- * @param schemas - The request's schemas.
+ * @param outputSchema - The request's output schema as JSON text.
  * @param executedDeclared - Whether any post declares an executed transaction.
  * @param progress - The enclosing poll's diagnostics, if any.
  * @returns The candidates, or `undefined` when the source could not yield
@@ -283,13 +278,20 @@ function candidatesFromSource(
   reader: SignetRequestResponseReader,
   requestId: RequestIdHex,
   outputSource: OutputSource,
-  schemas: RespondOutputSchemas,
+  outputSchema: string,
   executedDeclared: boolean,
   progress: PollProgress | undefined,
 ): Promise<OutputCandidates | undefined> {
   switch (outputSource) {
     case OutputSource.EVMNode:
-      return evmNodeCandidates(context, reader, requestId, schemas, executedDeclared, progress);
+      return evmNodeCandidates(
+        context,
+        reader,
+        requestId,
+        outputSchema,
+        executedDeclared,
+        progress,
+      );
     case OutputSource.MPCCache: {
       if (context.mpcOutputCache === undefined) {
         throw new Error(
@@ -302,18 +304,31 @@ function candidatesFromSource(
 }
 
 /**
- * The bytes a transfer that returned true attests: the EVM's `true` return
- * word run through the request's two schema conversions, so a comparison
- * against it needs no knowledge of the schema's field name.
+ * The bytes a succeeded call attests under `outputSchema`, read off the Borsh
+ * schema the SDK derives from it: a single `bool` field attests the EVM `true`
+ * word run through the MPC's decode and serialise (so the comparison needs no
+ * knowledge of the field's name), and an empty schema attests the empty output.
+ * Any other schema carries a value with no success flag, so no bytes mean
+ * "succeeded".
  *
- * @param schemas - The request's schemas.
- * @returns The Borsh-encoded response of a true transfer result.
+ * @param outputSchema - The request's output schema as JSON text.
+ * @returns The attested bytes of a succeeded call, or `undefined` when the
+ *   schema carries no success flag.
  */
-function encodedTransferSuccess(schemas: RespondOutputSchemas): Uint8Array {
-  return serializeRespondOutput(
-    schemas.respondSerializationSchema,
-    deserializeEvmOutput(schemas.outputDeserializationSchema, boolAbiWord(true)),
-  );
+function executedSuccessOutput(outputSchema: string): Uint8Array | undefined {
+  const derived = deriveRespondSchema(outputSchema);
+  const members =
+    typeof derived === "string" || !("struct" in derived) ? [] : Object.values(derived.struct);
+  if (members.length === 0) {
+    return EMPTY_OUTPUT;
+  }
+  if (members.length === 1 && members[0] === "bool") {
+    return serializeRespondOutput(
+      outputSchema,
+      deserializeEvmOutput(outputSchema, boolAbiWord(true)),
+    );
+  }
+  return undefined;
 }
 
 /**
@@ -335,9 +350,9 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
  * vault pinned at initialise.
  *
  * Under {@link OutputSource.EVMNode} the executed candidate is recomputed
- * from the mined transaction's trace with the request's own schemas
- * ({@link RespondOutputSchemas}) and the failure candidate is the empty
- * output; under {@link OutputSource.MPCCache} every post is checked over the
+ * from the mined transaction's trace with the request's own output schema
+ * and the failure candidate is the empty output; under
+ * {@link OutputSource.MPCCache} every post is checked over the
  * object the MPC cached before it posted. The respond events are
  * unauthenticated (anyone may post), so the signature check is what selects
  * a trustworthy record here, and the queue circuits run the same check
@@ -351,8 +366,8 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
  * @param context - The flow context.
  * @param requestId - The request id to resolve.
  * @param outputSource - Where to obtain the attested serialised output from.
- * @param schemas - The request's schemas, as JSON text read off its on-ledger
- *   record.
+ * @param outputSchema - The request's output schema, as JSON text read off its
+ *   on-ledger record: what the MPC ran.
  * @param requestsPath - The resolved ledger-tree path of the map holding the
  *   request. Defaults to `VAULT_DEPOSIT_REQUESTS_PATH`.
  * @param progress - Optional diagnostics for the enclosing poll.
@@ -369,7 +384,7 @@ export async function fetchAttestedRespondOutcome(
   context: VaultContext,
   requestId: RequestIdHex,
   outputSource: OutputSource,
-  schemas: RespondOutputSchemas,
+  outputSchema: string,
   requestsPath?: readonly number[],
   progress?: PollProgress,
   memo: RespondPollMemo = new RespondPollMemo(createResponseReader(context, requestsPath)),
@@ -398,7 +413,7 @@ export async function fetchAttestedRespondOutcome(
       memo.reader,
       requestId,
       outputSource,
-      schemas,
+      outputSchema,
       events.some((posted) => posted.outputKind === OutputKind.executed),
       progress,
     ));
@@ -411,6 +426,7 @@ export async function fetchAttestedRespondOutcome(
     memo.candidates = candidates;
   }
 
+  const successOutput = executedSuccessOutput(outputSchema);
   for (const event of events) {
     const serializedOutput =
       event.outputKind === OutputKind.executed ? candidates.executed : candidates.failure;
@@ -423,7 +439,8 @@ export async function fetchAttestedRespondOutcome(
         serializedOutput,
         succeeded:
           event.outputKind === OutputKind.executed &&
-          bytesEqual(serializedOutput, encodedTransferSuccess(schemas)),
+          successOutput !== undefined &&
+          bytesEqual(serializedOutput, successOutput),
       };
     }
   }

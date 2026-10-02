@@ -54,7 +54,7 @@ export interface VaultInitialiseConfig {
   /**
    * The MPC response key for THIS vault contract (SEC1 hex): `f(MPC root key,
    * vault contract address, "midnight response key")`. The queue circuits
-   * (`queueAttestation0`, `queueAttestation1`, `queueAttestation8`) accept only
+   * (`queueAttestation0`, `queueAttestation1`, `queueAttestation32`) accept only
    * attestations ECDSA-signed by it.
    */
   readonly mpcResponseKey: string;

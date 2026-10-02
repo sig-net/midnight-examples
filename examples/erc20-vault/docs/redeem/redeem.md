@@ -75,11 +75,10 @@ As illustrated, the flow comprises 9 steps:
     `stataToken`: the vault's account is both the receiver of the assets and
     the owner of the burned shares, so the underlying lands in the pool and
     nowhere else.
-  - A wrapper redeem returns a `uint256` asset amount the MPC encodes as a
-    Borsh `u64`, so the request carries its own schemas
-    ([`redeemOutputSchema`](../../contract/src/erc20-vault.compact) and
-    [`redeemRespondSchema`](../../contract/src/erc20-vault.compact)), and
-    their widths are part of the redeem map's ledger type.
+  - A wrapper redeem returns a `uint256` asset amount, which the MPC attests
+    whole as 32 little-endian bytes, so the request carries its own output
+    schema ([`redeemOutputSchema`](../../contract/src/erc20-vault.compact)),
+    whose width is part of the redeem map's ledger type.
   - The record goes into `bidirectionalRedeemMap` under its request id, signed
     for the vault's own account (path `pad(32, "vault")`) at the assigned
     nonce and the gas the start copied, and the singleton's
@@ -101,13 +100,13 @@ As illustrated, the flow comprises 9 steps:
     resolves the MPC's attestation as it does for a
     [deposit](../deposit/deposit.md). A post declaring **`executed`** is
     checked over the wrapper's return decoded per the `uint256` output schema
-    and encoded per the Borsh `u64` respond schema, the 8 bytes that carry the
-    assets paid out, principal plus accrued interest. A post declaring
+    and Borsh-serialised as the MPC does, the 32 little-endian bytes that carry
+    the assets paid out, principal plus accrued interest. A post declaring
     **`failed`** or **`unviable`** is checked over the EMPTY output.
 - **7.** queue the attestation at its output's width
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     submits an executed redeem to
-    [`queueAttestation8`](../../contract/src/erc20-vault.compact) and a failed
+    [`queueAttestation32`](../../contract/src/erc20-vault.compact) and a failed
     or unviable one to `queueAttestation0`. The circuit verifies the MPC's
     signature over the output against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), finds the open
@@ -119,7 +118,7 @@ As illustrated, the flow comprises 9 steps:
 - **9.** completeRedeem(...) mints the attested assets as stataUnderlying vault coins
   - The redeemer calls
     [`completeRedeem`](../../contract/src/erc20-vault.compact) with the
-    request id, the 8-byte serialised output and a mint nonce. The circuit
+    request id, the 32-byte serialised output and a mint nonce. The circuit
     requires the flushed attestation, a block height strictly above the
     entry's `lastSeen` and the caller's ownership commitment, which makes
     every mint redeemer-only, then removes the request's event, its
@@ -127,7 +126,7 @@ As illustrated, the flow comprises 9 steps:
   - An `executed` verdict requires the output to hash to the record's digest,
     then mints the attested asset amount, which the pure
     [`redeemAssets`](../../contract/src/erc20-vault.compact) circuit
-    deserialises from the output, as the `stataUnderlying` vault coin.
+    narrows from the output in-circuit, as the `stataUnderlying` vault coin.
   - A `failed` or `unviable` verdict means the wrapper burned nothing, so the
     circuit re-mints the surrendered `stataToken` shares, and the output it is
     passed is ignored. Either mint goes to the caller under a caller-chosen
@@ -195,7 +194,7 @@ sequenceDiagram
     MPC->>Singleton: respondBidirectional(...) posts the attestation
     DApp->>Singleton: polls for the attestation
     Note over User,Vault: Step 7: queue the attestation at its output's width
-    User->>Vault: queueAttestation8(...) or queueAttestation0(...)
+    User->>Vault: queueAttestation32(...) or queueAttestation0(...)
     Note over User,Vault: Step 8: flushQueue(...) moves the attestation into the output buffer
     User->>Vault: flushQueue(...)
     Note over User,Vault: Step 9: completeRedeem(...) mints the attested assets as stataUnderlying vault coins

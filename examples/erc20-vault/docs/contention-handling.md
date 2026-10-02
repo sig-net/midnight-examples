@@ -363,8 +363,8 @@ the allowance a router approval granted:
    derivation path `"vault"` and the nonce the flush assigned, and records it
    in `bidirectionalSwapMap`.
 3. **Queue the attestation.** The MPC decodes the router's `uint256` return,
-   the input the swap spent, and attests it encoded as Borsh `u64`, so an
-   executed swap is queued with `queueAttestation8`.
+   the input the swap spent, and attests it whole as 32 little-endian bytes,
+   so an executed swap is queued with `queueAttestation32`.
 4. **Complete.** `completeSwap` settles every verdict. An executed swap mints
    exactly `amountOut` of `erc20AddressOut` and the unspent
    `amountInMaximum - amountIn` of `erc20AddressIn` as change, a zero-value
@@ -385,8 +385,9 @@ tokenised vault) for shares, drawing on the allowance the stata approval grants:
    `stataToken` with the derivation path `"vault"` and the nonce the flush
    assigned, and records it in `bidirectionalSupplyMap`.
 3. **Queue the attestation.** The MPC decodes the wrapper's uint256 share
-   count and encodes it as Borsh `u64`, so an executed supply is queued with
-   `queueAttestation8`, and a failed or unviable one with `queueAttestation0`.
+   count and attests it whole as 32 little-endian bytes, so an executed supply
+   is queued with `queueAttestation32`, and a failed or unviable one with
+   `queueAttestation0`.
 4. **Complete.** `completeSupply` settles every verdict. An executed deposit
    minted shares to the vault account, so it mints the attested share count
    as the `stataToken` vault coin to the supplier. A failed or unviable one
@@ -406,8 +407,9 @@ burns, so no approval is involved:
    vaultEvmAddress)` on `stataToken` with the derivation path `"vault"` and the
    nonce the flush assigned, and records it in `bidirectionalRedeemMap`.
 3. **Queue the attestation.** The MPC decodes the wrapper's uint256 asset
-   amount and encodes it as Borsh `u64`, so an executed redeem is queued with
-   `queueAttestation8`, and a failed or unviable one with `queueAttestation0`.
+   amount and attests it whole as 32 little-endian bytes, so an executed
+   redeem is queued with `queueAttestation32`, and a failed or unviable one
+   with `queueAttestation0`.
 4. **Complete.** `completeRedeem` settles every verdict. An executed redeem
    paid the vault account the underlying, so it mints the attested asset
    amount as the `stataUnderlying` vault coin to the redeemer. A failed or
@@ -433,11 +435,11 @@ section of the contract. It runs the same six steps with these differences:
 2. **Send.** `sendReplaceNonce` builds the transfer of zero to
    `vaultEvmAddress`, with no calldata, under the derivation path `"vault"`,
    and records it in `bidirectionalReplaceNonceMap`.
-3. **Queue the attestation.** The MPC attests an executed plain transfer with
-   the success value it synthesises from the bool schema, one `0x01` byte, so
-   an executed replacement is queued with `queueAttestation1`. A client
-   recomputes that byte from the respond schema with the SDK's
-   `executedEvmRespondOutput`, as the mined transfer returns no data.
+3. **Queue the attestation.** A plain transfer returns no data, so the
+   replacement's output schema is empty and the MPC attests an executed
+   replacement over the EMPTY output, exactly as it attests a failed or
+   unviable one: every verdict on a replacement is queued with
+   `queueAttestation0`.
 4. **Complete.** `completeReplaceNonce` closes the request on every verdict,
    as the replacement surrendered nothing.
 
