@@ -1934,9 +1934,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@sig-net/midnight-contract-deploy@npm:0.24.0-rc.9":
-  version: 0.24.0-rc.9
-  resolution: "@sig-net/midnight-contract-deploy@npm:0.24.0-rc.9"
+"@sig-net/midnight-contract-deploy@npm:0.24.0-rc.10":
+  version: 0.24.0-rc.10
+  resolution: "@sig-net/midnight-contract-deploy@npm:0.24.0-rc.10"
   dependencies:
     "@effect/platform-node": "npm:^0.108.2"
     "@midnight-ntwrk/compact-js": "npm:2.5.5-rc.7"
@@ -1952,20 +1952,20 @@ __metadata:
     "@midnightntwrk/wallet-sdk-shielded": "npm:4.0.0-beta.2"
     "@midnightntwrk/wallet-sdk-unshielded-wallet": "npm:4.0.0-beta.2"
     "@scure/bip39": "npm:^2.2.0"
-    "@sig-net/midnight": "npm:^0.24.0-rc.9"
-    "@sig-net/midnight-contract": "npm:^0.24.0-rc.9"
+    "@sig-net/midnight": "npm:^0.24.0-rc.10"
+    "@sig-net/midnight-contract": "npm:^0.24.0-rc.10"
     effect: "npm:^3.22.2"
-  checksum: 10c0/7ee0f0d77a53d1abb5eeafcdc1cdcfed8939ac4dda4786649fe6e3e2cb6457d3d1a0fa905a017c2469005d2ab0d172fffdffd669d4faf83c590e4904bdc19cfc
+  checksum: 10c0/44f8ba63109fd57fd2bf4063be751439b3a100e731e1974bd6b3a1a4b60bdf9c783b235ef5432b52acb5103fc17fb6ba2492bb2e07ffb56c7d6412732220ea0d
   languageName: node
   linkType: hard
 
-"@sig-net/midnight-contract@npm:0.24.0-rc.9, @sig-net/midnight-contract@npm:^0.24.0-rc.9":
-  version: 0.24.0-rc.9
-  resolution: "@sig-net/midnight-contract@npm:0.24.0-rc.9"
+"@sig-net/midnight-contract@npm:0.24.0-rc.10, @sig-net/midnight-contract@npm:^0.24.0-rc.10":
+  version: 0.24.0-rc.10
+  resolution: "@sig-net/midnight-contract@npm:0.24.0-rc.10"
   dependencies:
     "@midnight-ntwrk/compact-runtime": "npm:0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js": "npm:5.0.0-beta.6"
-  checksum: 10c0/cd3b3fd78705d6bd80b81330f01fe418b1e191ce8fe9df08717f6d9693006c1dd102dbb09d5d68e091bf9497ca3c9acca967aa70124dc73f6058dcf4eb3c059e
+  checksum: 10c0/2ce4936310d7a6e26e611a5e7e7f579d22b5154334bea11176ee3d0e784250c472ac564dd75ba220629d884a071ed01e90500c7048317229afc525a6be0eb09e
   languageName: node
   linkType: hard
 
@@ -1977,8 +1977,8 @@ __metadata:
     "@midnight-ntwrk/midnight-js": "npm:5.0.0-beta.6"
     "@midnight-ntwrk/midnight-js-protocol": "npm:5.0.0-beta.6"
     "@midnightntwrk/onchain-runtime-v4": "npm:4.0.0-rc.3"
-    "@sig-net/midnight": "npm:0.24.0-rc.9"
-    "@sig-net/midnight-contract": "npm:0.24.0-rc.9"
+    "@sig-net/midnight": "npm:0.24.0-rc.10"
+    "@sig-net/midnight-contract": "npm:0.24.0-rc.10"
     "@types/node": "npm:^26.1.1"
     tsx: "npm:^4.23.1"
     typescript: "npm:^7.0.2"
@@ -1998,9 +1998,9 @@ __metadata:
     "@midnight-ntwrk/midnight-js-level-private-state-provider": "npm:5.0.0-beta.6"
     "@midnight-ntwrk/midnight-js-node-zk-config-provider": "npm:5.0.0-beta.6"
     "@midnightntwrk/ledger-v9": "npm:1.0.0-rc.3"
-    "@sig-net/midnight": "npm:0.24.0-rc.9"
-    "@sig-net/midnight-contract": "npm:0.24.0-rc.9"
-    "@sig-net/midnight-contract-deploy": "npm:0.24.0-rc.9"
+    "@sig-net/midnight": "npm:0.24.0-rc.10"
+    "@sig-net/midnight-contract": "npm:0.24.0-rc.10"
+    "@sig-net/midnight-contract-deploy": "npm:0.24.0-rc.10"
     "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*"
     "@sig-net/midnight-examples-lib": "workspace:*"
     "@types/node": "npm:^26.1.1"
@@ -2018,8 +2018,8 @@ __metadata:
     "@midnight-ntwrk/compact-runtime": "npm:0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js": "npm:5.0.0-beta.6"
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "npm:5.0.0-beta.6"
-    "@sig-net/midnight": "npm:0.24.0-rc.9"
-    "@sig-net/midnight-contract-deploy": "npm:0.24.0-rc.9"
+    "@sig-net/midnight": "npm:0.24.0-rc.10"
+    "@sig-net/midnight-contract-deploy": "npm:0.24.0-rc.10"
     "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*"
     "@sig-net/midnight-examples-erc20-vault-deploy": "workspace:*"
     "@sig-net/midnight-examples-lib": "workspace:*"
@@ -2046,7 +2046,7 @@ __metadata:
     "@midnight-ntwrk/platform-js": "npm:^3.0.0"
     "@midnightntwrk/ledger-v9": "npm:1.0.0-rc.3"
     "@midnightntwrk/wallet-sdk-facade": "npm:5.0.0-beta.2"
-    "@sig-net/midnight-contract-deploy": "npm:0.24.0-rc.9"
+    "@sig-net/midnight-contract-deploy": "npm:0.24.0-rc.10"
     "@types/node": "npm:^26.1.1"
     effect: "npm:3.22.2"
     ethers: "npm:^6.17.0"
@@ -2061,8 +2061,8 @@ __metadata:
   resolution: "@sig-net/midnight-examples-test-harness@workspace:packages/test-harness"
   dependencies:
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "npm:5.0.0-beta.6"
-    "@sig-net/midnight": "npm:0.24.0-rc.9"
-    "@sig-net/midnight-contract-deploy": "npm:0.24.0-rc.9"
+    "@sig-net/midnight": "npm:0.24.0-rc.10"
+    "@sig-net/midnight-contract-deploy": "npm:0.24.0-rc.10"
     "@sig-net/midnight-examples-lib": "workspace:*"
     "@types/node": "npm:^26.1.1"
     ethers: "npm:^6.17.0"
@@ -2090,25 +2090,25 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@sig-net/midnight-serde@npm:^0.24.0-rc.9":
-  version: 0.24.0-rc.9
-  resolution: "@sig-net/midnight-serde@npm:0.24.0-rc.9"
+"@sig-net/midnight-serde@npm:^0.24.0-rc.10":
+  version: 0.24.0-rc.10
+  resolution: "@sig-net/midnight-serde@npm:0.24.0-rc.10"
   dependencies:
     borsh: "npm:2.0.0"
-  checksum: 10c0/0dcf4e3cbe8cf765db4495c2cbbeb132f18cede43b8f89a2ca8b7131f29cceb12635c8c2a4b9a9823c5a8f66bb11f7237f7daa744b6ef6388853587228b996ee
+  checksum: 10c0/8037bf94637d398d9c753c3af4cbe4aac7376017c15ee79925593ca5501556b9c6dadcda6de537bf1429be0c77226c4c3a2c2cbe238496c8f98a9a5c342a2308
   languageName: node
   linkType: hard
 
-"@sig-net/midnight@npm:0.24.0-rc.9, @sig-net/midnight@npm:^0.24.0-rc.9":
-  version: 0.24.0-rc.9
-  resolution: "@sig-net/midnight@npm:0.24.0-rc.9"
+"@sig-net/midnight@npm:0.24.0-rc.10, @sig-net/midnight@npm:^0.24.0-rc.10":
+  version: 0.24.0-rc.10
+  resolution: "@sig-net/midnight@npm:0.24.0-rc.10"
   dependencies:
     "@midnight-ntwrk/compact-runtime": "npm:0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js-types": "npm:5.0.0-beta.6"
     "@noble/curves": "npm:^2.2.0"
-    "@sig-net/midnight-serde": "npm:^0.24.0-rc.9"
+    "@sig-net/midnight-serde": "npm:^0.24.0-rc.10"
     ethers: "npm:^6.17.0"
-  checksum: 10c0/9ee0ff3e5054d39a2992490246498df3a4903bfbd54647a2dd82c3d68ce8fe391936325946dbd1a6c08218c33ef1a0a13907d72f9ab4c81cdaee73a35e2b8230
+  checksum: 10c0/ab532313b23b0813e5d9910cd047e1e6c0b39d2ec812730753bfd4cf477c460349511faae3d0de9dbfc65e05b528f59d074c48c58b4eeca69fa0c6b1c618c39a
   languageName: node
   linkType: hard
 
