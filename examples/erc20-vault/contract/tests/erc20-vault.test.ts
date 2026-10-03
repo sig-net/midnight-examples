@@ -165,6 +165,23 @@ const ZERO_ADDRESS = new Uint8Array(20);
 const AMOUNT = 1_000_000n;
 const UINT64_MAX = 18446744073709551615n;
 
+// Attested uint256 values the vault's Uint<64> readers (swapAmountIn, supplyShares,
+// redeemAssets) refuse, each with the abort it ends in: the Uint<64> cast up to the
+// Uint<128> maximum, the SDK's checkedTruncationU128 above it.
+const UINT64_OVERFLOW_CASES = [
+  {
+    name: "one above the Uint<64> maximum",
+    value: UINT64_MAX + 1n,
+    error: /greater than 18446744073709551615/,
+  },
+  {
+    name: "the Uint<128> maximum",
+    value: (1n << 128n) - 1n,
+    error: /greater than 18446744073709551615/,
+  },
+  { name: "the uint256 maximum", value: (1n << 256n) - 1n, error: /Value exceeds Uint<128>/ },
+];
+
 // The EIP-155 chain id initialise() pins (Sepolia's).
 const CHAIN_ID = 11155111n;
 
@@ -182,18 +199,17 @@ const VAULT_TOKEN_COLOR = hexToBytes(
   rawTokenType(pureCircuits.vaultTokenDomainSeparator(ERC20), VAULT_ADDRESS),
 );
 
-// The contract-fixed MPC routing of every vault event (mirrors of the
-// in-circuit constants; the round-trip tests below are the lockstep check for
-// these values, including the escaped JSON schema literal at its EXACT
-// contract-declared 34-byte width, never zero-padded).
-const EXPECTED_SCHEMA = asciiPadded('[{"name":"success","type":"bool"}]', 34);
+// These literals pin the schemas recorded by the compiled send circuits. The respond
+// schema field is reserved: constructSignBidirectionalEventV1 pins it to Bytes<0>.
+const EXPECTED_OUTPUT_SCHEMA = asciiPadded('[{"name":"success","type":"bool"}]', 34);
+const RESERVED_RESPOND_SCHEMA = new Uint8Array(0);
 const EXPECTED_ROUTING = {
   algo: MPCSignatureAlgorithm.ecdsa,
   signatureDest: MPCDestination.unused,
   params: new Uint8Array(64),
   executionDest: signetCircuits.ethereumCaip2Id(),
-  outputDeserializationSchema: EXPECTED_SCHEMA,
-  respondSerializationSchema: EXPECTED_SCHEMA,
+  outputDeserializationSchema: EXPECTED_OUTPUT_SCHEMA,
+  respondSerializationSchema: RESERVED_RESPOND_SCHEMA,
 };
 
 /**
@@ -814,18 +830,23 @@ const IMPOSTER_SECRET = bytes(32, 0x43);
 // unlinkability guarantee). The circuit only threads it through, so a fixed
 // value is fine for these deterministic simulator tests.
 const MINT_NONCE = bytes(32, 0x2e);
-// The vault's respond schema, read from the COMPILED circuit (the contract's
-// own declaration), so the fixtures below run through the same ABI-to-compact
-// pipeline the real client uses: schema -> descriptor -> midnight-serde
-// compactSerialize. Nothing here hand-packs bytes.
-const VAULT_RESPONSE_SCHEMA = pureCircuits.vaultResponseSchema();
+const VAULT_OUTPUT_SCHEMA = pureCircuits.vaultOutputSchema();
 
-// A successful remote execution: the packed bool result at its exact
-// unpadded width, one 0x01 byte (the circuits take it as Bytes<1>).
-const OUTPUT_SUCCESS = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: true });
+// A successful remote execution: the decoded bool as the MPC attests it, Borsh-serialised
+// through the compiled output schema to one 0x01 byte (the circuits take it as Bytes<1>).
+const OUTPUT_SUCCESS = serializeRespondOutput(VAULT_OUTPUT_SCHEMA, { success: true });
 
 // An EXECUTED transfer that returned false: one 0x00 byte.
-const OUTPUT_FALSE = serializeRespondOutput(VAULT_RESPONSE_SCHEMA, { success: false });
+const OUTPUT_FALSE = serializeRespondOutput(VAULT_OUTPUT_SCHEMA, { success: false });
+
+describe("Boolean attested output bytes", () => {
+  it.each([
+    { success: true, expected: Uint8Array.of(1) },
+    { success: false, expected: Uint8Array.of(0) },
+  ])("serialises success=$success as one byte", ({ success, expected }) => {
+    expect(serializeRespondOutput(VAULT_OUTPUT_SCHEMA, { success })).toEqual(expected);
+  });
+});
 
 // A failed or unviable execution attests an empty output (queueAttestation0).
 const OUTPUT_EMPTY = new Uint8Array(0);
@@ -868,14 +889,14 @@ const attest = async (
   return flush(contract, queued, [], [attestation.requestId]);
 };
 
-/** Queue an 8-byte attestation and flush it: the arrange step before a width-8 settle. */
-const attest8 = async (
+/** Queue a 32-byte attestation and flush it: the arrange step before a width-32 settle. */
+const attest32 = async (
   contract: Contract<VaultPrivateState>,
   ctx: CircuitContext<VaultPrivateState>,
   attestation: RespondBidirectionalEvent,
   serializedOutput: Uint8Array,
 ): Promise<CircuitContext<VaultPrivateState>> => {
-  const queued = (await contract.circuits.queueAttestation8(ctx, attestation, serializedOutput))
+  const queued = (await contract.circuits.queueAttestation32(ctx, attestation, serializedOutput))
     .context;
   return flush(contract, queued, [], [attestation.requestId]);
 };
@@ -1620,8 +1641,11 @@ const withdrawRequested = async () => {
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
 
-/** Queue a 0-byte (failure) attestation and flush it: the arrange step before a settle. */
-const attestFailure = async (
+/**
+ * Queue a 0-byte attestation (a failure, or an executed nonce replacement, whose output
+ * schema is empty) and flush it: the arrange step before a settle.
+ */
+const attest0 = async (
   contract: Contract<VaultPrivateState>,
   ctx: CircuitContext<VaultPrivateState>,
   attestation: RespondBidirectionalEvent,
@@ -1720,7 +1744,7 @@ describe("completeWithdraw settle", () => {
       const attested =
         outputKind === OutputKind.executed
           ? await attest(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          : await attest0(contract, ctx, attestation);
 
       const next = (
         await contract.circuits.completeWithdraw(attested, requestId, presentedOutput, MINT_NONCE)
@@ -1751,7 +1775,7 @@ describe("completeWithdraw settle", () => {
       const attested =
         outputKind === OutputKind.executed
           ? await attest(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          : await attest0(contract, ctx, attestation);
 
       await expect(
         contract.circuits.completeWithdraw(
@@ -1802,7 +1826,7 @@ describe("completeWithdraw settle", () => {
 
   it("settles once: a second completeWithdraw for the same request rejects", async () => {
     const { contract, ctx, requestId } = await withdrawRequested();
-    const attested = await attestFailure(
+    const attested = await attest0(
       contract,
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_EMPTY, ATTESTED_HEIGHT),
@@ -2236,7 +2260,7 @@ describe("completeApprove settle", () => {
       const attested =
         outputKind === OutputKind.executed
           ? await attest(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          : await attest0(contract, ctx, attestation);
 
       const next = (await contract.circuits.completeApprove(attested, requestId, presentedOutput))
         .context;
@@ -2265,7 +2289,7 @@ describe("completeApprove settle", () => {
       const attested =
         outputKind === OutputKind.executed
           ? await attest(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          : await attest0(contract, ctx, attestation);
 
       await expect(
         contract.circuits.completeApprove(
@@ -2401,6 +2425,10 @@ const VALID_REPLACE_NONCE: Omit<ReplaceNonceCallArgs, "requestId"> = {
 // intrinsic gas of a plain transfer.
 const REPLACEMENT_GAS = { ...DEFAULT_VAULT_GAS, gasLimit: 21_000n };
 
+// The empty output schema at its contract-declared width: a plain transfer returns
+// nothing, so the MPC attests an executed replacement over the EMPTY output.
+const REPLACE_NONCE_OUTPUT_SCHEMA = asciiPadded("[]", 2);
+
 /** Queue a replacement: startReplaceNonce with its args in circuit order. */
 const queueReplaceNonce = (
   contract: Contract<VaultPrivateState>,
@@ -2478,10 +2506,8 @@ describe("replace nonce round-trip", () => {
     expect(record.signatureDest).toBe(EXPECTED_ROUTING.signatureDest);
     expect(record.params).toEqual(EXPECTED_ROUTING.params);
     expect(record.txParamType).toBe(TxParamType.evmType2);
-    expect(record.outputDeserializationSchema).toEqual(
-      EXPECTED_ROUTING.outputDeserializationSchema,
-    );
-    expect(record.respondSerializationSchema).toEqual(EXPECTED_ROUTING.respondSerializationSchema);
+    expect(record.outputDeserializationSchema).toEqual(REPLACE_NONCE_OUTPUT_SCHEMA);
+    expect(record.respondSerializationSchema).toEqual(RESERVED_RESPOND_SCHEMA);
 
     expect(idHex).toBe(requestIdHex(calculateRequestId(record)));
 
@@ -2755,59 +2781,44 @@ const replaceNonceRequested = async () => {
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
 
-/** Arrange a flushed attestation of the given verdict for the requested replacement. */
+/**
+ * Arrange a flushed attestation of the given verdict for the requested replacement.
+ * Every verdict attests the EMPTY output: the replacement's output schema is empty.
+ */
 interface ReplaceNonceVerdictCase {
   /** Test name, completing the sentence "<name>: closes the request". */
   name: string;
   /** The verdict the MPC attests. */
   outputKind: OutputKind;
-  /** The output the MPC signs (empty under a failure kind). */
-  signedOutput: Uint8Array;
-  /** The output completeReplaceNonce is passed. */
-  presentedOutput: Uint8Array;
 }
 
 const REPLACE_NONCE_VERDICT_CASES: ReplaceNonceVerdictCase[] = [
   {
-    name: "an executed self-transfer, attested with the synthesised success byte",
+    name: "an executed self-transfer, attested over the empty output",
     outputKind: OutputKind.executed,
-    signedOutput: OUTPUT_SUCCESS,
-    presentedOutput: OUTPUT_SUCCESS,
   },
   {
     name: "a reverted self-transfer (failed)",
     outputKind: OutputKind.failed,
-    signedOutput: OUTPUT_EMPTY,
-    presentedOutput: OUTPUT_IGNORED,
   },
   {
     name: "a self-transfer whose nonce another transaction took (unviable)",
     outputKind: OutputKind.unviable,
-    signedOutput: OUTPUT_EMPTY,
-    presentedOutput: OUTPUT_IGNORED,
   },
 ];
 
 describe("completeReplaceNonce settle", () => {
   it.each(REPLACE_NONCE_VERDICT_CASES)(
     "$name: closes the request and mints nothing",
-    async ({ outputKind, signedOutput, presentedOutput }) => {
+    async ({ outputKind }) => {
       const { contract, ctx, requestId } = await replaceNonceRequested();
-      const attestation = respond(
-        MPC_RESPONSE_SECRET,
-        requestId,
-        outputKind,
-        signedOutput,
-        ATTESTED_HEIGHT,
+      const attested = await attest0(
+        contract,
+        ctx,
+        respond(MPC_RESPONSE_SECRET, requestId, outputKind, OUTPUT_EMPTY, ATTESTED_HEIGHT),
       );
-      const attested =
-        outputKind === OutputKind.executed
-          ? await attest(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
 
-      const next = (
-        await contract.circuits.completeReplaceNonce(attested, requestId, presentedOutput)
-      ).context;
+      const next = (await contract.circuits.completeReplaceNonce(attested, requestId)).context;
 
       expect(shieldedMintsOf(next)).toEqual([]);
       const state = ledgerOf(next);
@@ -2823,31 +2834,27 @@ describe("completeReplaceNonce settle", () => {
 
   it.each(REPLACE_NONCE_VERDICT_CASES)(
     "rejects a caller other than the deployer who started it: $name",
-    async ({ outputKind, signedOutput, presentedOutput }) => {
+    async ({ outputKind }) => {
       const { contract, ctx, requestId } = await replaceNonceRequested();
-      const attestation = respond(
-        MPC_RESPONSE_SECRET,
-        requestId,
-        outputKind,
-        signedOutput,
-        ATTESTED_HEIGHT,
+      const attested = await attest0(
+        contract,
+        ctx,
+        respond(MPC_RESPONSE_SECRET, requestId, outputKind, OUTPUT_EMPTY, ATTESTED_HEIGHT),
       );
-      const attested =
-        outputKind === OutputKind.executed
-          ? await attest(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
 
       await expect(
         contract.circuits.completeReplaceNonce(
           await strangerContext("completeReplaceNonce", attested),
           requestId,
-          presentedOutput,
         ),
       ).rejects.toThrow(/Not the requester/);
     },
   );
 
-  it("rejects an output other than the one the execution was attested with", async () => {
+  it("rejects an executed attestation over a non-empty output", async () => {
+    // The MPC never attests a replacement over bytes (its output schema is empty), but
+    // a 1-byte attestation under a valid signature queues through queueAttestation1:
+    // the settle checks the record's digest against the empty output and refuses it.
     const { contract, ctx, requestId } = await replaceNonceRequested();
     const attested = await attest(
       contract,
@@ -2855,53 +2862,49 @@ describe("completeReplaceNonce settle", () => {
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
       OUTPUT_SUCCESS,
     );
-    await expect(
-      contract.circuits.completeReplaceNonce(attested, requestId, OUTPUT_FALSE),
-    ).rejects.toThrow(/Output does not match the attestation/);
+    await expect(contract.circuits.completeReplaceNonce(attested, requestId)).rejects.toThrow(
+      /Output does not match the attestation/,
+    );
   });
 
   it.each([
-    { name: "queueAttestation1", outputKind: OutputKind.executed, output: OUTPUT_SUCCESS },
-    { name: "queueAttestation0", outputKind: OutputKind.unviable, output: OUTPUT_EMPTY },
+    { name: "an executed replacement", outputKind: OutputKind.executed },
+    { name: "an unviable replacement", outputKind: OutputKind.unviable },
   ])(
-    "$name refuses an attestation at or below the replacement's lastSeen",
-    async ({ outputKind, output }) => {
+    "queueAttestation0 refuses $name attested at or below the replacement's lastSeen",
+    async ({ outputKind }) => {
       const { contract, ctx, requestId } = await replaceNonceRequested();
       const attestation = respond(
         MPC_RESPONSE_SECRET,
         requestId,
         outputKind,
-        output,
+        OUTPUT_EMPTY,
         EVM_START_HEIGHT,
       );
       await expect(
-        outputKind === OutputKind.executed
-          ? contract.circuits.queueAttestation1(ctx, attestation, output)
-          : contract.circuits.queueAttestation0(ctx, attestation, output),
+        contract.circuits.queueAttestation0(ctx, attestation, OUTPUT_EMPTY),
       ).rejects.toThrow(/Stale attestation/);
     },
   );
 
   it("rejects before initialise", async () => {
     const { contract, ctx } = await deployContract();
-    await expect(
-      contract.circuits.completeReplaceNonce(ctx, bytes(32, 0x5a), OUTPUT_IGNORED),
-    ).rejects.toThrow(/Not initialised/);
+    await expect(contract.circuits.completeReplaceNonce(ctx, bytes(32, 0x5a))).rejects.toThrow(
+      /Not initialised/,
+    );
   });
 
   it("settles once: a second completeReplaceNonce for the same request rejects", async () => {
     const { contract, ctx, requestId } = await replaceNonceRequested();
-    const attested = await attest(
+    const attested = await attest0(
       contract,
       ctx,
-      respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
-      OUTPUT_SUCCESS,
+      respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_EMPTY, ATTESTED_HEIGHT),
     );
-    const next = (await contract.circuits.completeReplaceNonce(attested, requestId, OUTPUT_SUCCESS))
-      .context;
-    await expect(
-      contract.circuits.completeReplaceNonce(next, requestId, OUTPUT_SUCCESS),
-    ).rejects.toThrow(/Request not sent/);
+    const next = (await contract.circuits.completeReplaceNonce(attested, requestId)).context;
+    await expect(contract.circuits.completeReplaceNonce(next, requestId)).rejects.toThrow(
+      /Request not sent/,
+    );
   });
 
   it("the replaced withdrawal settles through its unviable attestation and re-mints", async () => {
@@ -2915,23 +2918,22 @@ describe("completeReplaceNonce settle", () => {
         "replacement request id",
       ),
     );
-    const replacementMined = await attest(
+    const replacementMined = await attest0(
       contract,
       replaced,
       respond(
         MPC_RESPONSE_SECRET,
         replacementId,
         OutputKind.executed,
-        OUTPUT_SUCCESS,
+        OUTPUT_EMPTY,
         ATTESTED_HEIGHT,
       ),
-      OUTPUT_SUCCESS,
     );
     const replacementClosed = (
-      await contract.circuits.completeReplaceNonce(replacementMined, replacementId, OUTPUT_SUCCESS)
+      await contract.circuits.completeReplaceNonce(replacementMined, replacementId)
     ).context;
     // The MPC attests the replaced withdrawal unviable at the replacement's block.
-    const withdrawUnviable = await attestFailure(
+    const withdrawUnviable = await attest0(
       contract,
       replacementClosed,
       respond(MPC_RESPONSE_SECRET, withdrawId, OutputKind.unviable, OUTPUT_EMPTY, ATTESTED_HEIGHT),
@@ -2981,23 +2983,23 @@ describe("completeReplaceNonce settle", () => {
       )
     ).context;
     const bothQueued = (
-      await contract.circuits.queueAttestation1(
+      await contract.circuits.queueAttestation0(
         withdrawQueued,
         respond(
           MPC_RESPONSE_SECRET,
           replacementId,
           OutputKind.executed,
-          OUTPUT_SUCCESS,
+          OUTPUT_EMPTY,
           ATTESTED_HEIGHT,
         ),
-        OUTPUT_SUCCESS,
+        OUTPUT_EMPTY,
       )
     ).context;
     const attested = await flush(contract, bothQueued, [], [withdrawId, replacementId]);
 
-    await expect(
-      contract.circuits.completeReplaceNonce(attested, withdrawId, OUTPUT_SUCCESS),
-    ).rejects.toThrow(/Wrong action/);
+    await expect(contract.circuits.completeReplaceNonce(attested, withdrawId)).rejects.toThrow(
+      /Wrong action/,
+    );
     await expect(
       contract.circuits.completeWithdraw(attested, replacementId, OUTPUT_SUCCESS, MINT_NONCE),
     ).rejects.toThrow(/Wrong action/);
@@ -3014,7 +3016,6 @@ const EXACT_OUTPUT_SINGLE_SELECTOR = new Uint8Array([0x50, 0x23, 0xb4, 0xdf]);
 // The swap's schemas at their EXACT contract-declared widths: the round-trip test
 // below is the lockstep check for these mirrors.
 const EXPECTED_SWAP_OUTPUT_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint256"}]', 38);
-const EXPECTED_SWAP_RESPOND_SCHEMA = asciiPadded('[{"name":"amountIn","type":"uint64"}]', 37);
 
 // The vault token colour of ERC20_OUT, the ERC20 a swap buys.
 const VAULT_TOKEN_COLOR_OUT = hexToBytes(
@@ -3136,7 +3137,7 @@ describe("swap round-trip", () => {
     expect(record.params).toEqual(EXPECTED_ROUTING.params);
     expect(record.txParamType).toBe(TxParamType.evmType2);
     expect(record.outputDeserializationSchema).toEqual(EXPECTED_SWAP_OUTPUT_SCHEMA);
-    expect(record.respondSerializationSchema).toEqual(EXPECTED_SWAP_RESPOND_SCHEMA);
+    expect(record.respondSerializationSchema).toEqual(RESERVED_RESPOND_SCHEMA);
 
     // Contract-built calldata: exactOutputSingle((erc20AddressIn, erc20AddressOut, fee,
     // recipient = the vault's EVM account, amountOut, amountInMaximum, no price limit)).
@@ -3419,16 +3420,17 @@ const swapRequested = async () => {
 };
 
 /**
- * An executed swap's attested output: the spent amountIn packed by the swap's
- * respond schema, read from the COMPILED circuit, as the MPC packs it.
+ * An executed swap's attested output: the spent amountIn as the MPC attests it, the
+ * uint256 whole as 32 little-endian bytes, serialised through the swap's output schema
+ * read from the COMPILED circuit.
  */
 const swapOutput = (amountIn: bigint): Uint8Array =>
-  serializeRespondOutput(pureCircuits.swapRespondSchema(), { amountIn });
+  serializeRespondOutput(pureCircuits.swapOutputSchema(), { amountIn });
 
 const OUTPUT_SWAP = swapOutput(SWAP_AMOUNT_IN_SPENT);
 
-// completeSwap takes an 8-byte output on every verdict and ignores it on a failure.
-const OUTPUT_SWAP_IGNORED = new Uint8Array(8);
+// completeSwap takes a 32-byte output on every verdict and ignores it on a failure.
+const OUTPUT_SWAP_IGNORED = new Uint8Array(32);
 
 // The second caller-chosen nonce completeSwap takes, for the change coin.
 const CHANGE_NONCE = bytes(32, 0x3f);
@@ -3531,9 +3533,14 @@ describe("swapAmountIn", () => {
     { name: "one base unit", amountIn: 1n },
     { name: "a typical spend", amountIn: SWAP_AMOUNT_IN_SPENT },
     { name: "the Uint<64> maximum", amountIn: UINT64_MAX },
-  ])("decodes $name as swapRespondSchema() packs it", ({ amountIn }) => {
-    const output = serializeRespondOutput(pureCircuits.swapRespondSchema(), { amountIn });
+  ])("narrows $name from the 32 little-endian bytes the MPC attests", ({ amountIn }) => {
+    const output = swapOutput(amountIn);
+    expect(output).toEqual(Uint8Array.from(numericAbiWord(amountIn)).reverse());
     expect(pureCircuits.swapAmountIn(output)).toBe(amountIn);
+  });
+
+  it.each(UINT64_OVERFLOW_CASES)("refuses $name in-circuit", ({ value, error }) => {
+    expect(() => pureCircuits.swapAmountIn(swapOutput(value))).toThrow(error);
   });
 });
 
@@ -3551,8 +3558,8 @@ describe("completeSwap settle", () => {
       );
       const attested =
         outputKind === OutputKind.executed
-          ? await attest8(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          ? await attest32(contract, ctx, attestation, signedOutput)
+          : await attest0(contract, ctx, attestation);
 
       const next = (
         await contract.circuits.completeSwap(
@@ -3589,8 +3596,8 @@ describe("completeSwap settle", () => {
       );
       const attested =
         outputKind === OutputKind.executed
-          ? await attest8(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          ? await attest32(contract, ctx, attestation, signedOutput)
+          : await attest0(contract, ctx, attestation);
 
       await expect(
         contract.circuits.completeSwap(
@@ -3607,7 +3614,7 @@ describe("completeSwap settle", () => {
   it("rejects an amountIn other than the attested one", async () => {
     // Presenting a smaller amountIn would mint more change than the swap left.
     const { contract, ctx, requestId } = await swapRequested();
-    const attested = await attest8(
+    const attested = await attest32(
       contract,
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
@@ -3620,7 +3627,7 @@ describe("completeSwap settle", () => {
 
   it("rejects a changeNonce equal to mintNonce on an executed swap", async () => {
     const { contract, ctx, requestId } = await swapRequested();
-    const attested = await attest8(
+    const attested = await attest32(
       contract,
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
@@ -3633,7 +3640,7 @@ describe("completeSwap settle", () => {
 
   it("a failed swap re-mints under mintNonce alone, whatever changeNonce is", async () => {
     const { contract, ctx, requestId } = await swapRequested();
-    const attested = await attestFailure(
+    const attested = await attest0(
       contract,
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_EMPTY, ATTESTED_HEIGHT),
@@ -3657,7 +3664,7 @@ describe("completeSwap settle", () => {
   });
 
   it.each([
-    { name: "queueAttestation8", outputKind: OutputKind.executed, output: OUTPUT_SWAP },
+    { name: "queueAttestation32", outputKind: OutputKind.executed, output: OUTPUT_SWAP },
     { name: "queueAttestation0", outputKind: OutputKind.failed, output: OUTPUT_EMPTY },
   ])(
     "$name refuses an attestation at or below the swap's lastSeen",
@@ -3672,7 +3679,7 @@ describe("completeSwap settle", () => {
       );
       await expect(
         outputKind === OutputKind.executed
-          ? contract.circuits.queueAttestation8(ctx, attestation, output)
+          ? contract.circuits.queueAttestation32(ctx, attestation, output)
           : contract.circuits.queueAttestation0(ctx, attestation, output),
       ).rejects.toThrow(/Stale attestation/);
     },
@@ -3689,7 +3696,7 @@ describe("completeSwap settle", () => {
       secret: MPC_RESPONSE_SECRET,
       presented: swapOutput(1n),
     },
-  ])("queueAttestation8 refuses $name", async ({ secret, presented }) => {
+  ])("queueAttestation32 refuses $name", async ({ secret, presented }) => {
     const { contract, ctx, requestId } = await swapRequested();
     const attestation = respond(
       secret,
@@ -3698,15 +3705,15 @@ describe("completeSwap settle", () => {
       OUTPUT_SWAP,
       ATTESTED_HEIGHT,
     );
-    await expect(contract.circuits.queueAttestation8(ctx, attestation, presented)).rejects.toThrow(
+    await expect(contract.circuits.queueAttestation32(ctx, attestation, presented)).rejects.toThrow(
       /Invalid attestation signature/,
     );
   });
 
-  it("queueAttestation8 rejects before initialise", async () => {
+  it("queueAttestation32 rejects before initialise", async () => {
     const { contract, ctx } = await deployContract();
     await expect(
-      contract.circuits.queueAttestation8(
+      contract.circuits.queueAttestation32(
         ctx,
         respond(
           MPC_RESPONSE_SECRET,
@@ -3735,7 +3742,7 @@ describe("completeSwap settle", () => {
 
   it("settles once: a second completeSwap for the same request rejects", async () => {
     const { contract, ctx, requestId } = await swapRequested();
-    const attested = await attestFailure(
+    const attested = await attest0(
       contract,
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_EMPTY, ATTESTED_HEIGHT),
@@ -3783,7 +3790,7 @@ describe("completeSwap settle", () => {
       )
     ).context;
     const bothQueued = (
-      await contract.circuits.queueAttestation8(
+      await contract.circuits.queueAttestation32(
         withdrawQueued,
         respond(MPC_RESPONSE_SECRET, swapId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
         OUTPUT_SWAP,
@@ -3806,10 +3813,9 @@ describe("completeSwap settle", () => {
 // `Bytes [0x6e, 0x55, 0x3f, 0x65]` hardcoded in erc20-vault.compact.
 const STATA_DEPOSIT_SELECTOR = new Uint8Array([0x6e, 0x55, 0x3f, 0x65]);
 
-// The supply's schemas at their exact contract-declared widths: the round trip below
-// is the lockstep check for the compiled supplyOutputSchema and supplyRespondSchema.
+// The supply's output schema at its exact contract-declared width: the round trip below
+// is the lockstep check for the compiled supplyOutputSchema.
 const SUPPLY_OUTPUT_SCHEMA = asciiPadded('[{"name":"shares","type":"uint256"}]', 36);
-const SUPPLY_RESPOND_SCHEMA = asciiPadded('[{"name":"shares","type":"uint64"}]', 35);
 
 // The vault token colours of the pinned Aave pair: a supply surrenders the
 // underlying's, and its shares are minted in the wrapper's.
@@ -3826,15 +3832,15 @@ const STATA_UNDERLYING_MINT_KEY = bytesToHex(
   pureCircuits.vaultTokenDomainSeparator(STATA_UNDERLYING),
 );
 
-// The shares an executed supply is attested with, packed by the compiled respond
-// schema to its 8-byte width, the way the MPC packs them.
+// The shares an executed supply is attested with, the uint256 whole as 32 little-endian
+// bytes, serialised through the compiled output schema the way the MPC serialises them.
 const SUPPLY_SHARES = 360_679n;
-const OUTPUT_SUPPLY = serializeRespondOutput(pureCircuits.supplyRespondSchema(), {
-  shares: SUPPLY_SHARES,
-});
+const supplyOutput = (shares: bigint): Uint8Array =>
+  serializeRespondOutput(pureCircuits.supplyOutputSchema(), { shares });
+const OUTPUT_SUPPLY = supplyOutput(SUPPLY_SHARES);
 
-// completeSupply takes an 8-byte output on every verdict and ignores it on a failure.
-const OUTPUT_SUPPLY_IGNORED = new Uint8Array(8);
+// completeSupply takes a 32-byte output on every verdict and ignores it on a failure.
+const OUTPUT_SUPPLY_IGNORED = new Uint8Array(32);
 
 /**
  * A supply's `startSupply` arguments: the input index, the `SupplyRequest` and the
@@ -3933,7 +3939,7 @@ describe("supply round-trip", () => {
     expect(record.params).toEqual(EXPECTED_ROUTING.params);
     expect(record.txParamType).toBe(TxParamType.evmType2);
     expect(record.outputDeserializationSchema).toEqual(SUPPLY_OUTPUT_SCHEMA);
-    expect(record.respondSerializationSchema).toEqual(SUPPLY_RESPOND_SCHEMA);
+    expect(record.respondSerializationSchema).toEqual(RESERVED_RESPOND_SCHEMA);
 
     // Contract-built calldata: deposit(amount, receiver = the vault's own account).
     expect(calldata.is_some).toBe(true);
@@ -4174,11 +4180,11 @@ const supplyRequested = async () => {
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
 
-describe("queueAttestation8", () => {
+describe("queueAttestation32", () => {
   it("rejects an attestation not signed by the pinned MPC response key", async () => {
     const { contract, ctx, requestId } = await supplyRequested();
     await expect(
-      contract.circuits.queueAttestation8(
+      contract.circuits.queueAttestation32(
         ctx,
         respond(IMPOSTER_SECRET, requestId, OutputKind.executed, OUTPUT_SUPPLY, ATTESTED_HEIGHT),
         OUTPUT_SUPPLY,
@@ -4189,7 +4195,7 @@ describe("queueAttestation8", () => {
   it("rejects an output other than the one the MPC signed", async () => {
     const { contract, ctx, requestId } = await supplyRequested();
     await expect(
-      contract.circuits.queueAttestation8(
+      contract.circuits.queueAttestation32(
         ctx,
         respond(
           MPC_RESPONSE_SECRET,
@@ -4198,7 +4204,7 @@ describe("queueAttestation8", () => {
           OUTPUT_SUPPLY,
           ATTESTED_HEIGHT,
         ),
-        serializeRespondOutput(pureCircuits.supplyRespondSchema(), { shares: SUPPLY_SHARES + 1n }),
+        supplyOutput(SUPPLY_SHARES + 1n),
       ),
     ).rejects.toThrow(/Invalid attestation signature/);
   });
@@ -4206,7 +4212,7 @@ describe("queueAttestation8", () => {
   it("rejects before initialise", async () => {
     const { contract, ctx } = await deployContract();
     await expect(
-      contract.circuits.queueAttestation8(
+      contract.circuits.queueAttestation32(
         ctx,
         respond(
           MPC_RESPONSE_SECRET,
@@ -4230,7 +4236,7 @@ describe("queueAttestation8", () => {
       ATTESTED_HEIGHT,
     );
 
-    const queued = (await contract.circuits.queueAttestation8(ctx, attestation, OUTPUT_SUPPLY))
+    const queued = (await contract.circuits.queueAttestation32(ctx, attestation, OUTPUT_SUPPLY))
       .context;
     expect(ledgerOf(queued).inputAttestationBuffer.lookup(requestId)).toEqual({
       blockHeight: ATTESTED_HEIGHT,
@@ -4309,9 +4315,14 @@ describe("supplyShares", () => {
     { name: "one share", shares: 1n },
     { name: "a typical share count", shares: SUPPLY_SHARES },
     { name: "the Uint<64> maximum", shares: UINT64_MAX },
-  ])("decodes $name as supplyRespondSchema() packs it", ({ shares }) => {
-    const output = serializeRespondOutput(pureCircuits.supplyRespondSchema(), { shares });
+  ])("narrows $name from the 32 little-endian bytes the MPC attests", ({ shares }) => {
+    const output = supplyOutput(shares);
+    expect(output).toEqual(Uint8Array.from(numericAbiWord(shares)).reverse());
     expect(pureCircuits.supplyShares(output)).toBe(shares);
+  });
+
+  it.each(UINT64_OVERFLOW_CASES)("refuses $name in-circuit", ({ value, error }) => {
+    expect(() => pureCircuits.supplyShares(supplyOutput(value))).toThrow(error);
   });
 });
 
@@ -4329,8 +4340,8 @@ describe("completeSupply settle", () => {
       );
       const attested =
         outputKind === OutputKind.executed
-          ? await attest8(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          ? await attest32(contract, ctx, attestation, signedOutput)
+          : await attest0(contract, ctx, attestation);
 
       const next = (
         await contract.circuits.completeSupply(attested, requestId, presentedOutput, MINT_NONCE)
@@ -4360,8 +4371,8 @@ describe("completeSupply settle", () => {
       );
       const attested =
         outputKind === OutputKind.executed
-          ? await attest8(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          ? await attest32(contract, ctx, attestation, signedOutput)
+          : await attest0(contract, ctx, attestation);
 
       await expect(
         contract.circuits.completeSupply(
@@ -4377,7 +4388,7 @@ describe("completeSupply settle", () => {
   it("rejects a share count other than the one the execution was attested with", async () => {
     // Presenting more shares would mint wrapper tokens the vault account never received.
     const { contract, ctx, requestId } = await supplyRequested();
-    const attested = await attest8(
+    const attested = await attest32(
       contract,
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SUPPLY, ATTESTED_HEIGHT),
@@ -4387,14 +4398,14 @@ describe("completeSupply settle", () => {
       contract.circuits.completeSupply(
         attested,
         requestId,
-        serializeRespondOutput(pureCircuits.supplyRespondSchema(), { shares: SUPPLY_SHARES + 1n }),
+        supplyOutput(SUPPLY_SHARES + 1n),
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Output does not match the attestation/);
   });
 
   it.each([
-    { name: "queueAttestation8", outputKind: OutputKind.executed, output: OUTPUT_SUPPLY },
+    { name: "queueAttestation32", outputKind: OutputKind.executed, output: OUTPUT_SUPPLY },
     { name: "queueAttestation0", outputKind: OutputKind.failed, output: OUTPUT_EMPTY },
   ])(
     "$name refuses an attestation at or below the supply's lastSeen",
@@ -4409,7 +4420,7 @@ describe("completeSupply settle", () => {
       );
       await expect(
         outputKind === OutputKind.executed
-          ? contract.circuits.queueAttestation8(ctx, attestation, output)
+          ? contract.circuits.queueAttestation32(ctx, attestation, output)
           : contract.circuits.queueAttestation0(ctx, attestation, output),
       ).rejects.toThrow(/Stale attestation/);
     },
@@ -4424,7 +4435,7 @@ describe("completeSupply settle", () => {
 
   it("settles once: a second completeSupply for the same request rejects", async () => {
     const { contract, ctx, requestId } = await supplyRequested();
-    const attested = await attest8(
+    const attested = await attest32(
       contract,
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SUPPLY, ATTESTED_HEIGHT),
@@ -4478,25 +4489,24 @@ describe("completeSupply settle", () => {
 // `Bytes [0xba, 0x08, 0x76, 0x52]` hardcoded in erc20-vault.compact.
 const STATA_REDEEM_SELECTOR = new Uint8Array([0xba, 0x08, 0x76, 0x52]);
 
-// The redeem's schemas at their exact contract-declared widths: the round trip below
-// is the lockstep check for the compiled redeemOutputSchema and redeemRespondSchema.
+// The redeem's output schema at its exact contract-declared width: the round trip below
+// is the lockstep check for the compiled redeemOutputSchema.
 const REDEEM_OUTPUT_SCHEMA = asciiPadded('[{"name":"assets","type":"uint256"}]', 36);
-const REDEEM_RESPOND_SCHEMA = asciiPadded('[{"name":"assets","type":"uint64"}]', 35);
 
 // The shares a redeem surrenders, distinct from AMOUNT so the round trip shows the
 // request's own field reaching the calldata.
 const REDEEM_SHARES = 360_679n;
 
 // The underlying assets an executed redeem is attested with (principal plus accrued
-// interest), packed by the compiled respond schema to its 8-byte width, the way the
-// MPC packs them.
+// interest), the uint256 whole as 32 little-endian bytes, serialised through the compiled
+// output schema the way the MPC serialises them.
 const REDEEM_ASSETS = 2_780_944n;
-const OUTPUT_REDEEM = serializeRespondOutput(pureCircuits.redeemRespondSchema(), {
-  assets: REDEEM_ASSETS,
-});
+const redeemOutput = (assets: bigint): Uint8Array =>
+  serializeRespondOutput(pureCircuits.redeemOutputSchema(), { assets });
+const OUTPUT_REDEEM = redeemOutput(REDEEM_ASSETS);
 
-// completeRedeem takes an 8-byte output on every verdict and ignores it on a failure.
-const OUTPUT_REDEEM_IGNORED = new Uint8Array(8);
+// completeRedeem takes a 32-byte output on every verdict and ignores it on a failure.
+const OUTPUT_REDEEM_IGNORED = new Uint8Array(32);
 
 /**
  * A redeem's `startRedeem` arguments: the input index, the `RedeemRequest` and the
@@ -4595,7 +4605,7 @@ describe("redeem round-trip", () => {
     expect(record.params).toEqual(EXPECTED_ROUTING.params);
     expect(record.txParamType).toBe(TxParamType.evmType2);
     expect(record.outputDeserializationSchema).toEqual(REDEEM_OUTPUT_SCHEMA);
-    expect(record.respondSerializationSchema).toEqual(REDEEM_RESPOND_SCHEMA);
+    expect(record.respondSerializationSchema).toEqual(RESERVED_RESPOND_SCHEMA);
 
     // Contract-built calldata: redeem(shares, receiver = owner = the vault's own account).
     expect(calldata.is_some).toBe(true);
@@ -4904,9 +4914,14 @@ describe("redeemAssets", () => {
     { name: "one base unit", assets: 1n },
     { name: "a typical asset amount", assets: REDEEM_ASSETS },
     { name: "the Uint<64> maximum", assets: UINT64_MAX },
-  ])("decodes $name as redeemRespondSchema() packs it", ({ assets }) => {
-    const output = serializeRespondOutput(pureCircuits.redeemRespondSchema(), { assets });
+  ])("narrows $name from the 32 little-endian bytes the MPC attests", ({ assets }) => {
+    const output = redeemOutput(assets);
+    expect(output).toEqual(Uint8Array.from(numericAbiWord(assets)).reverse());
     expect(pureCircuits.redeemAssets(output)).toBe(assets);
+  });
+
+  it.each(UINT64_OVERFLOW_CASES)("refuses $name in-circuit", ({ value, error }) => {
+    expect(() => pureCircuits.redeemAssets(redeemOutput(value))).toThrow(error);
   });
 });
 
@@ -4924,8 +4939,8 @@ describe("completeRedeem settle", () => {
       );
       const attested =
         outputKind === OutputKind.executed
-          ? await attest8(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          ? await attest32(contract, ctx, attestation, signedOutput)
+          : await attest0(contract, ctx, attestation);
 
       const next = (
         await contract.circuits.completeRedeem(attested, requestId, presentedOutput, MINT_NONCE)
@@ -4955,8 +4970,8 @@ describe("completeRedeem settle", () => {
       );
       const attested =
         outputKind === OutputKind.executed
-          ? await attest8(contract, ctx, attestation, signedOutput)
-          : await attestFailure(contract, ctx, attestation);
+          ? await attest32(contract, ctx, attestation, signedOutput)
+          : await attest0(contract, ctx, attestation);
 
       await expect(
         contract.circuits.completeRedeem(
@@ -4972,7 +4987,7 @@ describe("completeRedeem settle", () => {
   it("rejects an asset amount other than the one the execution was attested with", async () => {
     // Presenting more assets would mint underlying the vault account never received.
     const { contract, ctx, requestId } = await redeemRequested();
-    const attested = await attest8(
+    const attested = await attest32(
       contract,
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_REDEEM, ATTESTED_HEIGHT),
@@ -4982,14 +4997,14 @@ describe("completeRedeem settle", () => {
       contract.circuits.completeRedeem(
         attested,
         requestId,
-        serializeRespondOutput(pureCircuits.redeemRespondSchema(), { assets: REDEEM_ASSETS + 1n }),
+        redeemOutput(REDEEM_ASSETS + 1n),
         MINT_NONCE,
       ),
     ).rejects.toThrow(/Output does not match the attestation/);
   });
 
   it.each([
-    { name: "queueAttestation8", outputKind: OutputKind.executed, output: OUTPUT_REDEEM },
+    { name: "queueAttestation32", outputKind: OutputKind.executed, output: OUTPUT_REDEEM },
     { name: "queueAttestation0", outputKind: OutputKind.failed, output: OUTPUT_EMPTY },
   ])(
     "$name refuses an attestation at or below the redeem's lastSeen",
@@ -5004,7 +5019,7 @@ describe("completeRedeem settle", () => {
       );
       await expect(
         outputKind === OutputKind.executed
-          ? contract.circuits.queueAttestation8(ctx, attestation, output)
+          ? contract.circuits.queueAttestation32(ctx, attestation, output)
           : contract.circuits.queueAttestation0(ctx, attestation, output),
       ).rejects.toThrow(/Stale attestation/);
     },
@@ -5019,7 +5034,7 @@ describe("completeRedeem settle", () => {
 
   it("settles once: a second completeRedeem for the same request rejects", async () => {
     const { contract, ctx, requestId } = await redeemRequested();
-    const attested = await attest8(
+    const attested = await attest32(
       contract,
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_REDEEM, ATTESTED_HEIGHT),
@@ -5043,14 +5058,14 @@ describe("completeRedeem settle", () => {
       ),
     );
     const supplyQueued = (
-      await contract.circuits.queueAttestation8(
+      await contract.circuits.queueAttestation32(
         redeemed,
         respond(MPC_RESPONSE_SECRET, supplyId, OutputKind.executed, OUTPUT_SUPPLY, ATTESTED_HEIGHT),
         OUTPUT_SUPPLY,
       )
     ).context;
     const bothQueued = (
-      await contract.circuits.queueAttestation8(
+      await contract.circuits.queueAttestation32(
         supplyQueued,
         respond(MPC_RESPONSE_SECRET, redeemId, OutputKind.executed, OUTPUT_REDEEM, ATTESTED_HEIGHT),
         OUTPUT_REDEEM,
@@ -5505,7 +5520,7 @@ const USER_CIRCUIT_CASES: UserCircuitCase[] = [
     },
   },
   {
-    name: "queueAttestation8 for a swap",
+    name: "queueAttestation32 for a swap",
     run: async (contract, ctx) => {
       const { context: shared, outIndex } = await swap(contract, ctx, VALID_SWAP);
       const requestId = sentRequestId(shared, outIndex);
@@ -5518,12 +5533,12 @@ const USER_CIRCUIT_CASES: UserCircuitCase[] = [
       );
       return {
         shared,
-        user: await contract.circuits.queueAttestation8(shared, attestation, OUTPUT_SWAP),
+        user: await contract.circuits.queueAttestation32(shared, attestation, OUTPUT_SWAP),
       };
     },
   },
   {
-    name: "queueAttestation8 for a supply",
+    name: "queueAttestation32 for a supply",
     run: async (contract, ctx) => {
       const { context: shared, outIndex } = await supply(contract, ctx, VALID_SUPPLY);
       const requestId = sentRequestId(shared, outIndex);
@@ -5536,12 +5551,12 @@ const USER_CIRCUIT_CASES: UserCircuitCase[] = [
       );
       return {
         shared,
-        user: await contract.circuits.queueAttestation8(shared, attestation, OUTPUT_SUPPLY),
+        user: await contract.circuits.queueAttestation32(shared, attestation, OUTPUT_SUPPLY),
       };
     },
   },
   {
-    name: "queueAttestation8 for a redeem",
+    name: "queueAttestation32 for a redeem",
     run: async (contract, ctx) => {
       const { context: shared, outIndex } = await redeem(contract, ctx, VALID_REDEEM);
       const requestId = sentRequestId(shared, outIndex);
@@ -5554,7 +5569,7 @@ const USER_CIRCUIT_CASES: UserCircuitCase[] = [
       );
       return {
         shared,
-        user: await contract.circuits.queueAttestation8(shared, attestation, OUTPUT_REDEEM),
+        user: await contract.circuits.queueAttestation32(shared, attestation, OUTPUT_REDEEM),
       };
     },
   },
@@ -5658,21 +5673,14 @@ const USER_CIRCUIT_CASES: UserCircuitCase[] = [
         requestId: sentRequestId(withdrawn, withdrawIndex),
       });
       const requestId = sentRequestId(sent, outIndex);
-      const shared = await attest(
+      const shared = await attest0(
         contract,
         sent,
-        respond(
-          MPC_RESPONSE_SECRET,
-          requestId,
-          OutputKind.executed,
-          OUTPUT_SUCCESS,
-          ATTESTED_HEIGHT,
-        ),
-        OUTPUT_SUCCESS,
+        respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_EMPTY, ATTESTED_HEIGHT),
       );
       return {
         shared,
-        user: await contract.circuits.completeReplaceNonce(shared, requestId, OUTPUT_SUCCESS),
+        user: await contract.circuits.completeReplaceNonce(shared, requestId),
       };
     },
   },
@@ -5681,7 +5689,7 @@ const USER_CIRCUIT_CASES: UserCircuitCase[] = [
     run: async (contract, ctx) => {
       const { context: sent, outIndex } = await swap(contract, ctx, VALID_SWAP);
       const requestId = sentRequestId(sent, outIndex);
-      const shared = await attest8(
+      const shared = await attest32(
         contract,
         sent,
         respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SWAP, ATTESTED_HEIGHT),
@@ -5704,7 +5712,7 @@ const USER_CIRCUIT_CASES: UserCircuitCase[] = [
     run: async (contract, ctx) => {
       const { context: sent, outIndex } = await supply(contract, ctx, VALID_SUPPLY);
       const requestId = sentRequestId(sent, outIndex);
-      const shared = await attest8(
+      const shared = await attest32(
         contract,
         sent,
         respond(
@@ -5727,7 +5735,7 @@ const USER_CIRCUIT_CASES: UserCircuitCase[] = [
     run: async (contract, ctx) => {
       const { context: sent, outIndex } = await redeem(contract, ctx, VALID_REDEEM);
       const requestId = sentRequestId(sent, outIndex);
-      const shared = await attest8(
+      const shared = await attest32(
         contract,
         sent,
         respond(
@@ -6942,8 +6950,7 @@ const EVENT_MISSING_CASES: EventMissingCase[] = [
     name: "completeReplaceNonce",
     eventMap: "bidirectionalReplaceNonceMap",
     requested: replaceNonceRequested,
-    complete: (contract, ctx, requestId) =>
-      contract.circuits.completeReplaceNonce(ctx, requestId, OUTPUT_IGNORED),
+    complete: (contract, ctx, requestId) => contract.circuits.completeReplaceNonce(ctx, requestId),
   },
   {
     name: "completeSwap",
@@ -7057,7 +7064,7 @@ describe("invariant guards, on a ledger built by hand", () => {
     "$name refuses a settled request whose event is gone",
     async ({ name, eventMap, requested, complete }) => {
       const { contract, ctx, requestId } = await requested();
-      const attested = await attestFailure(
+      const attested = await attest0(
         contract,
         ctx,
         respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_EMPTY, ATTESTED_HEIGHT),

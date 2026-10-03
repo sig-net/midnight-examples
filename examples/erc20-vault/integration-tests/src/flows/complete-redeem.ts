@@ -16,7 +16,7 @@ import type { RespondOutcome } from "./respond-output.ts";
 
 /**
  * Settle a resolved redeem outcome: {@link queueAndFlushAttestation}, then call
- * `completeRedeem` with the request id, the output bytes (eight zero bytes for
+ * `completeRedeem` with the request id, the output bytes (32 zero bytes for
  * a failed or unviable redeem, whose output the circuit ignores) and a random
  * mint nonce. An executed redeem mints the attested assets as the
  * stataUnderlying vault coin. A failed or unviable one re-mints the surrendered
@@ -39,7 +39,7 @@ export async function settleRedeem(context: VaultContext, outcome: RespondOutcom
   );
 
   await queueAndFlushAttestation(context, outcome);
-  const serializedOutput = executed ? outcome.serializedOutput : new Uint8Array(8);
+  const serializedOutput = executed ? outcome.serializedOutput : new Uint8Array(32);
 
   // A fresh random mint nonce per settle: the circuit threads it into the mint
   // verbatim, so randomness HERE is what keeps the minted coin unlinkable to the

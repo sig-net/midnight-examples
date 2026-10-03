@@ -1,7 +1,7 @@
 // Settle side of the nonce replacement flow: queue the MPC's attestation of the
 // vault's self-transfer, flush it, then close the request through
-// `completeReplaceNonce` with the request id and the output bytes the attestation
-// signs.
+// `completeReplaceNonce` with the request id. Every verdict on a replacement
+// attests the EMPTY output (its output schema is empty), so no output bytes travel.
 import { OutputKind, type RequestIdHex, requestIdHex } from "@sig-net/midnight";
 import { VAULT_REPLACE_NONCE_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 
@@ -13,10 +13,9 @@ import type { RespondOutcome } from "./respond-output.ts";
 
 /**
  * Settle a resolved replacement outcome: {@link queueAndFlushAttestation}, then call
- * `completeReplaceNonce` with the request id and the output bytes (one zero byte for
- * a failed or unviable self-transfer, whose output the circuit ignores). Every
- * verdict only closes the request, as the replacement surrendered nothing. This
- * wallet must hold the deployer's identity, which started it.
+ * `completeReplaceNonce` with the request id. Every verdict only closes the request,
+ * as the replacement surrendered nothing. This wallet must hold the deployer's
+ * identity, which started it.
  *
  * @param context - The flow context, holding the deployer's identity.
  * @param outcome - The attested outcome from {@link pollRespondBidirectional}.
@@ -33,13 +32,8 @@ export async function settleReplaceNonce(
   );
 
   await queueAndFlushAttestation(context, outcome);
-  const serializedOutput =
-    outcome.event.outputKind === OutputKind.executed ? outcome.serializedOutput : new Uint8Array(1);
 
-  const result = await context.vault.callTx.completeReplaceNonce(
-    outcome.event.requestId,
-    serializedOutput,
-  );
+  const result = await context.vault.callTx.completeReplaceNonce(outcome.event.requestId);
   console.log(`completeReplaceNonce settled in tx ${result.public.txId}`);
 }
 

@@ -28,7 +28,7 @@ import {
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { logEvmFeeCap } from "../evm-logging.ts";
-import { TRANSFER_RESULT_MPC_ROUTING } from "../mpc-routing.ts";
+import { REPLACE_NONCE_MPC_ROUTING } from "../mpc-routing.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { flushUntil } from "./vault-queue.ts";
 
@@ -104,13 +104,13 @@ export async function startReplaceNonce(
   // sender (the vault contract, kernel.self() in-circuit), the pinned chain, the
   // replaced request's nonce, the gas the start copied, a zero-value transfer to the
   // vault's own EVM address with no calldata, the vault's own 32-byte derivation path,
-  // and the contract-fixed routing.
+  // and the contract-fixed routing under the empty output schema.
   const keyVersion = SIGNET_DEFAULT_KEY_VERSION;
   const expectedRecord: SignBidirectionalEvent = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     keyVersion,
     path: VAULT_PATH_BYTES,
-    ...TRANSFER_RESULT_MPC_ROUTING,
+    ...REPLACE_NONCE_MPC_ROUTING,
     txParamType: TxParamType.evmType2,
     txParams: {
       to: before.vaultEvmAddress,

@@ -31,7 +31,7 @@ export interface SwapSettlement {
 
 /**
  * Settle a resolved swap outcome: {@link queueAndFlushAttestation}, then call
- * `completeSwap` with the request id, the output bytes (8 zero bytes for a
+ * `completeSwap` with the request id, the output bytes (32 zero bytes for a
  * failed or unviable swap, whose output the circuit ignores) and two random mint
  * nonces. An executed swap mints the exact `amountOut` of the bought ERC20 and
  * the unspent change of the sold one. A failed or unviable swap re-mints the
@@ -43,7 +43,7 @@ export interface SwapSettlement {
  * @param outcome - The attested outcome from {@link pollRespondBidirectional}.
  * @returns The settled request and the input it spent.
  * @throws {Error} If the request is not open on the vault ledger, or an executed
- *   outcome's output is not 8 bytes.
+ *   outcome's output is not 32 bytes.
  */
 export async function settleSwap(
   context: VaultContext,
@@ -77,7 +77,7 @@ export async function settleSwap(
   );
 
   await queueAndFlushAttestation(context, outcome);
-  const serializedOutput = amountIn === undefined ? new Uint8Array(8) : outcome.serializedOutput;
+  const serializedOutput = amountIn === undefined ? new Uint8Array(32) : outcome.serializedOutput;
 
   // Fresh random nonces per settle: the circuit threads each into its mint
   // verbatim, so randomness HERE is what keeps the minted coins unlinkable to
