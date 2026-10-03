@@ -449,10 +449,8 @@ async function initialiseVaultStep(env: NodeJS.ProcessEnv): Promise<void> {
     console.log(`allowed ${String(added.length)} new ERC20(s)`);
     await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
     const state = await readLedger();
-    if (state.initialised !== 1n) {
-      throw new Error(
-        `the vault ledger reports initialised=${String(state.initialised)}, expected 1n`,
-      );
+    if (!state.initialised) {
+      throw new Error("the vault ledger reports initialised=false, expected true");
     }
     const sealedVaultEvmAddress = `0x${bytesToHex(state.vaultEvmAddress)}`.toLowerCase();
     if (sealedVaultEvmAddress !== config.vaultEvmAddress.toLowerCase()) {
