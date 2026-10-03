@@ -2,7 +2,7 @@
 // (environment check -> wallet seeds + root funding -> EVM chain + output
 // source + trace RPC check + test token + allowed tokens -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
 // vault zk compile + deploy -> MPC response key -> derived EVM addresses ->
-// vault initialise -> fork dealing -> fork dependency check -> MPC hand-off printout) from the
+// vault initialise -> fork dealing -> vault EVM approvals -> fork dependency check -> MPC hand-off printout) from the
 // harness's generic steps plus the vault-specific steps below. The vitest
 // globalSetup `setup` runs it via `runSetupPipeline` in vitest's main process,
 // and `scripts/setup-local.ts` runs the same steps outside vitest to bring up
@@ -18,6 +18,7 @@ import {
   formatSecp256k1PublicKey,
   getMpcOutputCacheUrl,
   normaliseSecp256k1PublicKey,
+  type RequestIdHex,
 } from "@sig-net/midnight";
 import {
   deployedNetwork,
@@ -33,6 +34,7 @@ import {
   readVaultLedger,
   STATA_USDC,
   UNISWAP_SWAP_ROUTER_02,
+  VAULT_APPROVE_REQUESTS_PATH,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   deployVault,
@@ -67,10 +69,19 @@ import type { TestProject } from "vitest/node";
 import { stataAvailable } from "./evm-stata.ts";
 import { uniswapAvailable } from "./evm-swap.ts";
 import { addAllowedTokens } from "./flows/add-allowed-tokens.ts";
+import { broadcastEvm } from "./flows/broadcast-evm.ts";
+import { settleApprove } from "./flows/complete-approve.ts";
 import { initialise } from "./flows/initialise.ts";
+import {
+  pollRespondBidirectional,
+  type RespondOutcome,
+} from "./flows/poll-respond-bidirectional.ts";
+import { pollSignatureResponse } from "./flows/poll-signature-response.ts";
+import { startApproveRouter, startApproveStata } from "./flows/start-approve.ts";
 import { dealForkEvmAccounts, SEPOLIA_EURC, SEPOLIA_USDC } from "./fork-funding.ts";
 import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
+import { POLL_TIMEOUT_MS } from "./poll-timeout.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 import { createVaultSession } from "./vault-session.ts";
 
@@ -485,6 +496,55 @@ async function initialiseVaultStep(env: NodeJS.ProcessEnv): Promise<void> {
   }
 }
 
+/**
+ * Run both vault-account approvals (Uniswap router + stata wrapper) through
+ * the full circuit flow, after the fork dealing has funded the vault account's
+ * gas. The swap and supply specs spend these allowances; establishing them
+ * here instead of only in a dedicated spec file keeps every spec
+ * self-sufficient, which is what lets the gate run sharded across jobs —
+ * tests/approve-e2e.test.ts still exercises the circuit as a spec.
+ *
+ * @param env - The suite's env accumulator.
+ * @throws {Error} If any step of either approval round trip fails, or the MPC
+ *   does not attest an approval as succeeded.
+ */
+async function approveVaultSpendersStep(env: NodeJS.ProcessEnv): Promise<void> {
+  const session = createVaultSession(env);
+  try {
+    const context = await session.vaultContext();
+    const approvals: readonly { name: string; start: () => Promise<RequestIdHex> }[] = [
+      {
+        name: "router approval",
+        start: () => startApproveRouter(context, { erc20Address: context.erc20Address }),
+      },
+      { name: "stata approval", start: () => startApproveStata(context) },
+    ];
+    for (const { name, start } of approvals) {
+      const requestId = await start();
+      const signedTransaction = await pollSignatureResponse(context, {
+        requestId,
+        intervalMs: 1000,
+        timeoutMs: POLL_TIMEOUT_MS,
+        expectedSigner: context.evmVaultAddress,
+        requestsPath: VAULT_APPROVE_REQUESTS_PATH,
+      });
+      await broadcastEvm(context, { transaction: signedTransaction });
+      const outcome: RespondOutcome = await pollRespondBidirectional(context, {
+        requestId,
+        intervalMs: 1000,
+        timeoutMs: POLL_TIMEOUT_MS,
+        requestsPath: VAULT_APPROVE_REQUESTS_PATH,
+      });
+      if (!outcome.succeeded) {
+        throw new Error(`the MPC did not attest the ${name} as succeeded`);
+      }
+      await settleApprove(context, outcome);
+    }
+  } finally {
+    await session.stop();
+  }
+}
+
 // Step names match what the operator greps for and what STEP_THROUGH prompts show.
 const STEPS: readonly SetupStep[] = [
   [
@@ -536,6 +596,10 @@ const STEPS: readonly SetupStep[] = [
   [
     "setup: deal derived EVM accounts (ETH + real USDC on an anvil fork, funding hints on a real chain)",
     dealForkEvmAccounts,
+  ],
+  [
+    "setup: approve the vault's EVM spenders (Uniswap router + stata wrapper)",
+    approveVaultSpendersStep,
   ],
   [
     "setup: verify Sepolia dependencies (Uniswap router + stataUSDC wrapper)",
