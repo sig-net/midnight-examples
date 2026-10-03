@@ -15,8 +15,10 @@
 import {
   abiWordToUint128,
   bytesToHex,
+  OutputKind,
   requestIdBytes,
   type RequestIdHex,
+  requestIdHex,
   stripHexPrefix,
   verifyRespondBidirectionalSignature,
 } from "@sig-net/midnight";
@@ -26,7 +28,8 @@ import {
   readVaultLedger,
   VAULT_DEPOSIT_REQUESTS_PATH,
   VAULT_PATH_BYTES,
-  VAULT_REQUESTS_PATH,
+  VAULT_WITHDRAW_REQUESTS_PATH,
+  vaultGasEnvelope,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   banner,
@@ -43,7 +46,6 @@ import { formatEther, JsonRpcProvider, parseEther, parseUnits, type Transaction 
 import { afterAll, describe, expect, it } from "vitest";
 
 import { fundingSummary } from "../src/evm-logging.ts";
-import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { settleDeposit } from "../src/flows/complete-deposit.ts";
 import { settleWithdraw } from "../src/flows/complete-withdraw.ts";
@@ -192,19 +194,19 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const decoded = await pollSignetNotification({
         env,
         callerAddress: vaultAddress,
-        requestsPath: [1, 3],
+        requestsPath: VAULT_DEPOSIT_REQUESTS_PATH,
         requestId: depositTransactionSignatureRequestId,
         description: `for request ${depositTransactionSignatureRequestId}`,
       });
 
       // callerAddress points at the vault (the contract whose authenticated
-      // ledger holds the request); the event map's resolved ledger-tree path
-      // is [1, 3] (chunked past 15 fields). The notification is a doorbell declaring WHICH request (the
-      // disclosed id) and WHERE to look, and the MPC reads the declared
-      // request from the vault's own authenticated ledger.
+      // ledger holds the request), and requestsPath is the event map's
+      // resolved ledger-tree path. The notification is a doorbell declaring
+      // WHICH request (the disclosed id) and WHERE to look, and the MPC reads
+      // the declared request from the vault's own authenticated ledger.
       expect(decoded.version).toBe(1);
       expect(decoded.callerAddress).toBe(stripHexPrefix(vaultAddress).toLowerCase());
-      expect(decoded.requestsPath).toEqual([1, 3]);
+      expect(decoded.requestsPath).toEqual(VAULT_DEPOSIT_REQUESTS_PATH);
 
       banner([
         "Golden SignBidirectionalEventNotification decoded from the live indexer:",
@@ -294,10 +296,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
-      // The attestation carries only the MPC's signature: the poll traces the
-      // sweep's mined transaction for its raw output, re-packs it per the
-      // schema and verifies the posted events' signatures over it against the
-      // response key the vault pinned.
+      // The output the attestation signs over travels off chain: the poll
+      // traces the sweep's mined transaction for its raw output, re-packs it
+      // per the schema and verifies the posted events' signatures over it
+      // against the response key the vault pinned.
       const context = await session.vaultContext();
       depositSweepTransactionRespondBidirectional = await pollRespondBidirectional(context, {
         requestId: depositTransactionSignatureRequestId,
@@ -316,30 +318,37 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
       expect(
         verifyRespondBidirectionalSignature(
-          requestIdBytes(depositTransactionSignatureRequestId),
           outcome.serializedOutput,
           outcome.event,
           mpcResponseKey,
         ),
         "the attestation must verify over the recomputed output",
       ).toBe(true);
+      expect(
+        requestIdHex(outcome.event.requestId),
+        "the verified event must name the deposit request",
+      ).toBe(depositTransactionSignatureRequestId);
+      const digest = calculateSignetAttestationDigest(
+        requestIdBytes(depositTransactionSignatureRequestId),
+        outcome.event.blockHeight,
+        outcome.event.outputKind,
+        outcome.serializedOutput,
+      );
+      expect(outcome.event.digest, "the posted digest must be the one recomputed here").toEqual(
+        digest,
+      );
 
       banner([
         `Found deposit RespondBidirectionalEvent (signature-verified) on the signet contract: ` +
           `success '${String(outcome.succeeded)}' ` +
-          `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${String(outcome.serializedOutput.length)} byte(s))`,
+          `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${String(outcome.serializedOutput.length)} byte(s), ` +
+          `kind ${OutputKind[outcome.event.outputKind]}, block ${String(outcome.event.blockHeight)})`,
         "",
-        `Recomputed digest: 0x${bytesToHex(
-          calculateSignetAttestationDigest(
-            requestIdBytes(depositTransactionSignatureRequestId),
-            outcome.serializedOutput,
-          ),
-        )}`,
+        `Recomputed digest: 0x${bytesToHex(digest)}`,
         "",
-        "Neither the output nor its digest went on-chain: the raw bytes came",
-        "from a debug_traceTransaction of the mined sweep transaction,",
-        "were re-packed here, and the posted",
-        "signature verified over them.",
+        "The output stayed off chain: the raw bytes came from a",
+        "debug_traceTransaction of the mined sweep transaction, were",
+        "re-packed here, and the posted signature verified over them.",
       ]);
     },
     POLL_TIMEOUT_MS + 5 * MINUTE,
@@ -361,19 +370,19 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(depositSweepTransactionRespondBidirectional).toBeDefined();
 
       const context = await session.vaultContext();
-      const requestKey = requestIdBytes(depositTransactionSignatureRequestId);
+      const requestIndex = requestIdBytes(depositTransactionSignatureRequestId);
 
       const isRequestOnLedger = async () => {
         const ledger = await readVaultLedger(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
-        return ledger.depositEventMap.member(requestKey);
+        return ledger.bidirectionalDepositMap.member(requestIndex);
       };
 
       // Rerun against a kept contract address: if a prior run already claimed
       // this request the entry is gone and completeDeposit would reject with
-      // "Deposit not found", so skip cleanly instead.
+      // "Request not sent", so skip cleanly instead.
       if (!(await isRequestOnLedger())) {
         logSkip(
           "completeDeposit",
@@ -382,11 +391,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         return;
       }
 
-      await settleDeposit(
-        context,
-        depositTransactionSignatureRequestId,
-        depositSweepTransactionRespondBidirectional,
-      );
+      await settleDeposit(context, depositSweepTransactionRespondBidirectional);
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       expect(
@@ -409,16 +414,21 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   const WITHDRAW_AMOUNT = parseUnits("0.1", 6);
 
   it(
-    "withdraw funding preflight: check vault EVM account for minimum ETH (gas) and ERC20 balances.",
+    "withdraw funding preflight: check vault EVM account for the withdraw gas budget and ERC20 balance.",
     async () => {
       const rpcUrl = requireEnv("EVM_RPC_URL");
       const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
       const erc20Address = requireEnv("ERC20_ADDRESS");
+      const context = await session.vaultContext();
 
-      // The withdraw tx is sent FROM the vault's derived account, which pays
-      // its own gas: require the full fee-cap budget of one MPC-signed ERC20
-      // transfer (gas limit x max fee per gas).
-      const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
+      // The withdraw tx is sent FROM the vault's derived account, which pays its
+      // own gas: require the fee-cap budget the vault's gas settings stamp on a
+      // withdrawal (gas limit x max fee per gas).
+      const { gasLimit, maxFeePerGas } = vaultGasEnvelope(
+        await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress),
+        "withdraw",
+      );
+      const gasBudget = gasLimit * maxFeePerGas;
       const ethBalance = await getEthBalance(rpcUrl, vaultAddress);
       console.log(
         `${vaultAddress}: ${fundingSummary(ethBalance, gasBudget, 18, "ETH")} (maximum gas fee)`,
@@ -430,11 +440,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
       const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, vaultAddress);
       console.log(
-        `${vaultAddress}: ${fundingSummary(balance, parseUnits("0.1", decimals), decimals, erc20Address)}`,
+        `${vaultAddress}: ${fundingSummary(balance, WITHDRAW_AMOUNT, decimals, erc20Address)}`,
       );
       expect(
         balance,
-        `the vault ${vaultAddress} must hold >= 0.1 of ERC20 ${erc20Address} — did the deposit sweep land?`,
+        `the vault ${vaultAddress} must hold >= 0.1 of ERC20 ${erc20Address}: did the deposit sweep land?`,
       ).toBeGreaterThanOrEqual(WITHDRAW_AMOUNT);
     },
     MINUTE,
@@ -445,7 +455,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   let withdrawTransactionSignatureRequestId: RequestIdHex;
 
   it(
-    "withdraw [erc-vault contract method call]: escrow shielded vault tokens and read the request back MPC-style",
+    "withdraw [erc-vault contract method call]: burn shielded vault tokens and read the request back MPC-style",
     async () => {
       // A request id given in the environment resumes a prior run (for
       // skipping steps during local development / OOM recovery).
@@ -460,31 +470,29 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
       const context = await session.vaultContext();
 
-      // The withdraw tx sender is the VAULT's derived EVM account; its next
-      // nonce comes from the chain, exactly as a wallet would fetch it. The
-      // destination is the user's derived account, so the suite's funds cycle.
-      const evmNonce = await getTransactionNonce(
-        requireEnv("EVM_RPC_URL"),
-        requireEnv("EVM_VAULT_ADDRESS"),
-      );
-      const destEvmAddress = requireEnv("EVM_USER_ADDRESS");
+      // The withdraw tx sender is the VAULT's derived EVM account, at the nonce
+      // the flush assigns: the vault's next nonce, as no other vault request runs
+      // beside this one. The destination is the user's derived account, so the
+      // suite's funds cycle.
+      const vaultNonceBefore = (
+        await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)
+      ).vaultAccountNonce;
 
       withdrawTransactionSignatureRequestId = await startWithdraw(context, {
         amount: WITHDRAW_AMOUNT,
-        destEvmAddress,
-        evmNonce,
+        destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
       });
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       expect(withdrawTransactionSignatureRequestId).toMatch(/^[0-9a-f]{64}$/);
 
-      // MPC-convention verification: the request resolves from RAW vault
-      // state through the same reader the response server uses — recorded
-      // under the VAULT's derivation path, with contract-built calldata.
+      // MPC-convention verification: the request resolves from RAW vault state
+      // through the same reader the response server uses, recorded under the
+      // VAULT's derivation path, with contract-built calldata.
       const record = await session
-        .responseReader(VAULT_REQUESTS_PATH)
+        .responseReader(VAULT_WITHDRAW_REQUESTS_PATH)
         .getSignatureRequest(withdrawTransactionSignatureRequestId);
-      expect(record.txParams.nonce).toBe(evmNonce);
+      expect(record.txParams.nonce).toBe(vaultNonceBefore);
       expect(record.txParams.calldata.is_some).toBe(true);
       expect(abiWordToUint128(calldataWordAt(record.txParams.calldata.value.words, 1))).toBe(
         WITHDRAW_AMOUNT,
@@ -496,7 +504,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         "",
         `  request id: ${withdrawTransactionSignatureRequestId}`,
         "",
-        "The caller's shielded vault tokens are escrowed. The response server",
+        "The caller's shielded vault tokens are burned. The response server",
         "should pick the request up on its next poll and sign the EVM transfer",
         'FROM the vault\'s derived account (path "vault").',
       ]);
@@ -507,7 +515,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   it(
     "watch withdraw signature request: the withdraw emitted a notification event on the signet contract",
     async () => {
-      // The same event poll the MPC runs for discovery: withdraw
+      // The same event poll the MPC runs for discovery: sendWithdraw
       // cross-contract-called signBidirectional to emit this.
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
       const vaultAddress = requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS");
@@ -515,13 +523,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const decoded = await pollSignetNotification({
         env,
         callerAddress: vaultAddress,
-        requestsPath: [0, 0],
+        requestsPath: VAULT_WITHDRAW_REQUESTS_PATH,
         requestId: withdrawTransactionSignatureRequestId,
         description: `for withdraw request ${withdrawTransactionSignatureRequestId}`,
       });
 
       expect(decoded.callerAddress).toBe(stripHexPrefix(vaultAddress).toLowerCase());
-      expect(decoded.requestsPath).toEqual([0, 0]);
+      expect(decoded.requestsPath).toEqual(VAULT_WITHDRAW_REQUESTS_PATH);
 
       banner([
         "Notification event observed for the withdraw request:",
@@ -542,13 +550,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
 
       const context = await session.vaultContext();
-      // Withdraw transactions are signed by the VAULT's derived account, not
-      // the user's — verify the MPC's signature against it.
+      // Withdraw transactions are signed by the VAULT's derived account, not the
+      // user's: verify the MPC's signature against it.
       signedWithdrawTransaction = await pollSignatureResponse(context, {
         requestId: withdrawTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: POLL_TIMEOUT_MS,
         expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+        requestsPath: VAULT_WITHDRAW_REQUESTS_PATH,
       });
 
       banner([
@@ -570,9 +579,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const context = await session.vaultContext();
 
       // Rerun tolerance: if this signed tx already mined on a previous run,
-      // re-broadcasting is an idempotent no-op, so the expected delta is 0
-      // rather than the withdrawn amount. The delta is asserted either way, so
-      // a rerun still proves the broadcast moved nothing twice.
+      // re-broadcasting is an idempotent no-op, so the expected delta is 0. The
+      // delta is asserted either way, so a rerun still proves the broadcast
+      // moved nothing twice.
       const alreadyMined =
         signedWithdrawTransaction.hash !== null &&
         (await isTransactionMined(rpcUrl, signedWithdrawTransaction.hash));
@@ -616,10 +625,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         requestId: withdrawTransactionSignatureRequestId,
         intervalMs: 1000,
         timeoutMs: POLL_TIMEOUT_MS,
+        requestsPath: VAULT_WITHDRAW_REQUESTS_PATH,
       });
 
       // Happy-day flow: the broadcast step saw the transfer mine, so the MPC
-      // must attest success (the 1-byte 0x01 result), not its failure output.
+      // must attest success (the 1-byte 0x01 result), not a failure kind.
       expect(
         withdrawRespondBidirectional.succeeded,
         "the MPC must attest the withdraw transfer as succeeded",
@@ -637,60 +647,48 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   it(
     "completeWithdraw [erc-vault contract method call]: verify the MPC attestation in-circuit and settle the withdrawal",
     async () => {
-      // Final leg of the withdraw round trip: the request is on the vault
-      // ledger and the MPC's response is posted (previous steps). Settling
-      // re-verifies the response IN-CIRCUIT (ECDSA signature against the
-      // stored MPC response key)
-      // and branches on the EVM result — this is the HAPPY path, so the
-      // withdrawal finalizes with NO refund (the surrendered value stays
-      // burned) and the request + its pending-withdrawal marker are CONSUMED
-      // (double-settle protection). Both removals are publicly observable on
-      // RAW ledger state — present before, absent after — and only happen if
-      // every in-circuit check passed.
+      // Final leg of the withdraw round trip: the request is on the vault ledger
+      // and the MPC's response is posted (previous steps). Settling queues and
+      // flushes the attestation, re-checks the output against its digest
+      // IN-CIRCUIT and branches on the EVM result. This is the HAPPY path, so
+      // the withdrawal closes with NO re-mint (the surrendered value stays
+      // burned) and the request is CONSUMED (double-settle protection). The
+      // removal is publicly observable on RAW ledger state (present before,
+      // absent after) and only happens if every in-circuit check passed.
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
       expect(withdrawRespondBidirectional).toBeDefined();
 
       const context = await session.vaultContext();
-      const requestKey = requestIdBytes(withdrawTransactionSignatureRequestId);
-      const readLedger = () =>
-        readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+      const requestIndex = requestIdBytes(withdrawTransactionSignatureRequestId);
+      const isRequestOnLedger = async () =>
+        (
+          await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)
+        ).bidirectionalWithdrawMap.member(requestIndex);
 
       // Rerun against a kept contract address: if a prior run already settled
-      // this request the pending-withdrawal marker is gone and completeWithdraw
-      // would reject with "Withdrawal not found" — skip cleanly instead.
-      const before = await readLedger();
-      if (!before.withdrawSettleViews.member(requestKey)) {
+      // this request the entry is gone and completeWithdraw would reject with
+      // "Request not sent", so skip cleanly instead.
+      if (!(await isRequestOnLedger())) {
         logSkip(
           "completeWithdraw",
-          `withdrawal ${withdrawTransactionSignatureRequestId} already settled (no pending marker on the ledger)`,
+          `withdrawal ${withdrawTransactionSignatureRequestId} already settled (not on the ledger)`,
         );
         return;
       }
-      expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-      await settleWithdraw(
-        context,
-        withdrawTransactionSignatureRequestId,
-        withdrawRespondBidirectional,
-      );
+      await settleWithdraw(context, withdrawRespondBidirectional);
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
-      const after = await readLedger();
       expect(
-        after.signBidirectionalEventMap.member(requestKey),
+        await isRequestOnLedger(),
         "completeWithdraw must consume the request from the ledger",
-      ).toBe(false);
-      expect(
-        after.withdrawSettleViews.member(requestKey),
-        "completeWithdraw must consume the pending-withdrawal marker",
       ).toBe(false);
 
       banner([
-        `Withdraw ${withdrawTransactionSignatureRequestId} settled (success — no refund).`,
+        `Withdraw ${withdrawTransactionSignatureRequestId} settled (success, no re-mint).`,
         "",
-        "The vault verified the MPC attestation in-circuit, finalized the",
-        "withdrawal, and removed the request and its refund marker from the",
-        "ledger.",
+        "The vault verified the MPC attestation in-circuit, closed the",
+        "withdrawal, and removed the request from its ledger.",
       ]);
     },
     15 * MINUTE,

@@ -19,7 +19,7 @@ import {
 import { getMidnightNodeConfig, type MidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 import {
   createVaultPrivateState,
-  VAULT_REQUESTS_PATH,
+  VAULT_DEPOSIT_REQUESTS_PATH,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   type DeployedVaultContract,
@@ -162,20 +162,17 @@ export async function createVaultContext(
  *
  * @param context - The flow's context.
  * @param requestsPath - The resolved ledger-tree path of the request map.
- *   Defaults to VAULT_REQUESTS_PATH ([0, 0], the signBidirectionalEventMap the
- *   approves and withdraw share); deposits pass VAULT_DEPOSIT_REQUESTS_PATH
- *   ([1, 3], the depositEventMap), swaps VAULT_SWAP_REQUESTS_PATH ([1, 7], the
- *   swapEventMap), supply and redeem their own maps' exported paths.
+ *   Defaults to VAULT_DEPOSIT_REQUESTS_PATH (the bidirectionalDepositMap).
  * @returns The reader.
  */
 export function createResponseReader(
   context: VaultContext,
-  requestsPath: readonly number[] = VAULT_REQUESTS_PATH,
+  requestsPath: readonly number[] = VAULT_DEPOSIT_REQUESTS_PATH,
 ): SignetRequestResponseReader {
   return new SignetRequestResponseReader({
     requesterContractAddress: context.vaultContractAddress,
     // The requestsPath the vault's notifications pack (erc20-vault.compact).
-    // The vault's 20 ledger fields chunk the state tree, so every path is depth 2.
+    // The vault's 34 ledger fields chunk the state tree, so every path is depth 2.
     requesterRequestsPath: requestsPath,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,

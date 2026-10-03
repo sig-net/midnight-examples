@@ -61,7 +61,7 @@ export function buildVaultProviders(
   const vaultZkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH);
 
   // The callee (signet contract) circuits, resolved for the cross-contract
-  // proof provider so deposit's whole call tree proves.
+  // proof provider so every send circuit's whole call tree proves.
   const signetZkConfigProvider = new NodeZkConfigProvider<string>(signetContractManagedPath);
 
   // The wallet, adapted to midnight-js's balancer + submitter interfaces
@@ -122,7 +122,7 @@ export function buildVaultProviders(
     // transcript). This is NOT the wallet's proving config: the facade's
     // proof server only proves the wallet's own balancing additions when it
     // finalizes a recipe. The call transcript is proven here first. Spans the
-    // vault AND the signet contract so deposit's cross-contract call
+    // vault AND the signet contract so each send circuit's cross-contract call
     // resolves keys for the whole call tree.
     proofProvider: createCrossContractProofServerProvider(
       config.proofServerUrl,

@@ -85,8 +85,8 @@ const STATE_POLL_INTERVAL_MS = 3_000;
 /**
  * Wait until the wallet's synced state satisfies `predicate`, polling the
  * facade. For observing the effect of a submitted transaction (own or
- * incoming) on balances — e.g. a transfer's outputs arriving at the
- * receiving wallet.
+ * incoming) on balances, such as a transfer's outputs arriving at the
+ * receiving wallet. The deadline includes time spent waiting for synchronisation.
  *
  * @param facade - A started wallet facade.
  * @param predicate - Returns true when the awaited state has been reached.
@@ -99,13 +99,28 @@ export async function waitForFacadeState(
   predicate: (state: FacadeState) => boolean,
   timeoutMs = 300_000,
 ): Promise<FacadeState> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const state = await facade.waitForSyncedState();
-    if (predicate(state)) return state;
-    if (Date.now() >= deadline) {
-      throw new Error(`facade state did not satisfy the predicate within ${String(timeoutMs)} ms`);
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    deadlineTimer = setTimeout(() => {
+      reject(
+        new Error(`facade state did not satisfy the predicate within ${String(timeoutMs)} ms`),
+      );
+    }, timeoutMs);
+  });
+  try {
+    for (;;) {
+      const state: FacadeState = await Promise.race([facade.waitForSyncedState(), expired]);
+      if (predicate(state)) return state;
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          pollTimer = setTimeout(resolve, STATE_POLL_INTERVAL_MS);
+        }),
+        expired,
+      ]);
     }
-    await new Promise((resolve) => setTimeout(resolve, STATE_POLL_INTERVAL_MS));
+  } finally {
+    clearTimeout(deadlineTimer);
+    clearTimeout(pollTimer);
   }
 }

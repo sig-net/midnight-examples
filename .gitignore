@@ -17,3 +17,5 @@ package-lock.json
 **/src/managed/
 .env.local
 .env.stagenet
+# Local e2e and mutation evidence for reviewers (logs print wallet seeds and keys)
+review-logs/

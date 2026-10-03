@@ -1,6 +1,6 @@
 // The example's setup pipeline: compose the ordered steps
 // (environment check -> wallet seeds + root funding -> EVM chain + output
-// source + trace RPC check + test token -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
+// source + trace RPC check + test token + allowed tokens -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
 // vault zk compile + deploy -> MPC response key -> derived EVM addresses ->
 // vault initialise -> fork dealing -> fork dependency check -> MPC hand-off printout) from the
 // harness's generic steps plus the vault-specific steps below. The vitest
@@ -28,6 +28,7 @@ import {
 } from "@sig-net/midnight-contract-deploy";
 import {
   deriveVaultEvmAddress,
+  evmAddressBytes,
   printVaultState,
   readVaultLedger,
   STATA_USDC,
@@ -36,6 +37,7 @@ import {
 import {
   deployVault,
   InitialiseVaultOutcome,
+  resolveAllowedTokens,
   resolveInitialiseConfig,
   resumeVaultDeploy,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
@@ -64,8 +66,9 @@ import type { TestProject } from "vitest/node";
 
 import { stataAvailable } from "./evm-stata.ts";
 import { uniswapAvailable } from "./evm-swap.ts";
+import { addAllowedTokens } from "./flows/add-allowed-tokens.ts";
 import { initialise } from "./flows/initialise.ts";
-import { dealForkEvmAccounts, SEPOLIA_USDC } from "./fork-funding.ts";
+import { dealForkEvmAccounts, SEPOLIA_EURC, SEPOLIA_USDC } from "./fork-funding.ts";
 import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
@@ -81,6 +84,7 @@ import { createVaultSession } from "./vault-session.ts";
 export const VAULT_PIPELINE_KEYS = [
   "EVM_CHAIN_ID",
   "ERC20_ADDRESS",
+  "EVM_ALLOWED_TOKENS",
   "MPC_ROOT_KEY",
   "MPC_SECP256K1_PUBKEY",
   "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
@@ -323,11 +327,9 @@ function ensureRespondOutputSource(env: NodeJS.ProcessEnv): void {
 }
 
 /**
- * Refuse an `EVM_RPC_URL` without `debug_traceTransaction` when the deposit
- * and withdraw polls recompute attested outputs from the trace. Under
- * `mpc-cache` those polls read the MPC's output cache, so a non-tracing
- * endpoint is accepted; the swap, supply and redeem polls always trace, and
- * their specs fail on such an endpoint at the poll.
+ * Refuse an `EVM_RPC_URL` without `debug_traceTransaction` when the attestation
+ * polls recompute attested outputs from the trace. Under `mpc-cache` every poll
+ * reads the MPC's output cache, so a non-tracing endpoint is accepted.
  *
  * @param env - The suite's env accumulator (reads `RESPOND_OUTPUT_SOURCE` and `EVM_RPC_URL`).
  * @throws {Error} If the source is the EVM node and the endpoint refuses the method.
@@ -365,6 +367,22 @@ function ensureErc20Address(env: NodeJS.ProcessEnv): void {
 }
 
 /**
+ * Default `EVM_ALLOWED_TOKENS` to the ERC20s the suites deposit and swap into beyond the
+ * stata underlying `initialise` allows: `ERC20_ADDRESS` and Sepolia EURC. The happy-day
+ * initialise spec allows them, and every later spec relies on it.
+ *
+ * @param env - The suite's env accumulator (reads `ERC20_ADDRESS`).
+ */
+function ensureAllowedTokens(env: NodeJS.ProcessEnv): void {
+  if (env.EVM_ALLOWED_TOKENS) {
+    logSkip("default EVM_ALLOWED_TOKENS", `EVM_ALLOWED_TOKENS is set (${env.EVM_ALLOWED_TOKENS})`);
+    return;
+  }
+  env.EVM_ALLOWED_TOKENS = `${requireEnv(env, "ERC20_ADDRESS")},${SEPOLIA_EURC}`;
+  console.log(`defaulted EVM_ALLOWED_TOKENS=${env.EVM_ALLOWED_TOKENS}`);
+}
+
+/**
  * Verify the EVM protocols the vault's circuits call are deployed at `EVM_RPC_URL`: the Uniswap
  * SwapRouter02 behind the swap flows, and the stataUSDC wrapper behind the supply/redeem flows.
  * Both are pinned Sepolia addresses, so an absent one is a fork misconfiguration, and catching it
@@ -397,11 +415,11 @@ async function verifyForkDependencies(env: NodeJS.ProcessEnv): Promise<void> {
 /**
  * Call the vault's `initialise` circuit through the same session-shaped flow
  * the suites drive (the deployer-gated one-off sealing the vault's EVM
- * address, chain, EVM targets and MPC response key), then verify the sealed
- * ledger state against the resolved config — the invariants every flow file
- * assumes. Running it here instead of as happy-day's first test makes every
- * flow file independent of file order, which is what lets the gate run
- * sharded across jobs against separate stacks.
+ * address, chain, EVM targets, MPC response key and allowed ERC20s), then verify
+ * the sealed ledger state against the resolved config — the invariants every
+ * flow file assumes. Running it here instead of as happy-day's first test
+ * makes every flow file independent of file order, which is what lets the
+ * gate run sharded across jobs against separate stacks.
  *
  * @param env - The suite's env accumulator (reads everything the deploy
  *   package's `resolveInitialiseConfig` reads).
@@ -422,6 +440,13 @@ async function initialiseVaultStep(env: NodeJS.ProcessEnv): Promise<void> {
         "vault is already initialised (rerun against a kept contract)",
       );
     }
+    // Every later spec deposits or swaps into these. A rerun adds only the missing ones.
+    const allowedTokens = resolveAllowedTokens(env);
+    if (allowedTokens.length === 0) {
+      throw new Error("EVM_ALLOWED_TOKENS resolved to an empty list — the suites deposit these");
+    }
+    const added = await addAllowedTokens(context, allowedTokens);
+    console.log(`allowed ${String(added.length)} new ERC20(s)`);
     await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
     const state = await readLedger();
     if (state.initialised !== 1n) {
@@ -448,6 +473,15 @@ async function initialiseVaultStep(env: NodeJS.ProcessEnv): Promise<void> {
         `the sealed MPC response key 0x${sealedResponseKey} does not match the resolved config 0x${resolvedResponseKey}`,
       );
     }
+    // initialise allows the stata underlying itself, the deployer every listed ERC20.
+    if (!state.allowedTokens.member(state.stataUnderlying)) {
+      throw new Error("the stata underlying is missing from the vault's allowed tokens");
+    }
+    for (const token of allowedTokens) {
+      if (!state.allowedTokens.member(evmAddressBytes(token))) {
+        throw new Error(`${token} is missing from the vault's allowed tokens`);
+      }
+    }
   } finally {
     await session.stop();
   }
@@ -468,6 +502,7 @@ const STEPS: readonly SetupStep[] = [
   ["setup: default RESPOND_OUTPUT_SOURCE to the EVM node's trace", ensureRespondOutputSource],
   ["setup: verify EVM_RPC_URL serves debug_traceTransaction", verifyTraceRpc],
   ["setup: default ERC20_ADDRESS to real Sepolia USDC", ensureErc20Address],
+  ["setup: default EVM_ALLOWED_TOKENS to the ERC20s the suites move", ensureAllowedTokens],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
   [
     "setup: check/derive MPC_SECP256K1_PUBKEY public key",
@@ -497,7 +532,7 @@ const STEPS: readonly SetupStep[] = [
   ["setup: check/derive vault EVM address", ensureVaultEvmAddress],
   ["setup: check/derive user EVM address", ensureUserEvmAddress],
   [
-    "setup: initialise vault contract (seal vault EVM address + MPC response key)",
+    "setup: initialise vault contract (seal EVM address + response key, allow suites' ERC20s)",
     initialiseVaultStep,
   ],
   [

@@ -11,6 +11,8 @@ import { isAnvil } from "./evm-anvil.ts";
 
 /** Real Sepolia USDC (the swap suite's tokenIn), also present on a Sepolia fork. */
 export const SEPOLIA_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
+/** Real Sepolia EURC (the swap suites' tokenOut), also present on a Sepolia fork. */
+export const SEPOLIA_EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
 // Aave v3 Sepolia PoolConfigurator + a pool admin: the live USDC reserve is supplied ~2x over its
 // cap, so maxDeposit is 0 and stataUSDC deposits revert. The fork lifts the cap through these.
 const AAVE_POOL_CONFIGURATOR = "0x7Ee60D184C24Ef7AfC1Ec7Be59A0f448A0abd138";

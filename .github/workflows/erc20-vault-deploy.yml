@@ -55,6 +55,10 @@
 # - EVM_ROUTER / EVM_STATA_UNDERLYING / EVM_STATA_TOKEN (optional)
 #   - EVM target overrides, defaulting to the Sepolia canonicals
 #   - example: 0x followed by 40 hex chars
+# - EVM_ALLOWED_TOKENS (optional)
+#   - comma-separated ERC20s the deployer allows after initialise, beyond
+#     the stata underlying. Unset, users can deposit only the stata underlying
+#   - example: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238,0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4
 # - MIDNIGHT_NODE_URL / MIDNIGHT_NODE_INDEXER_URL (optional)
 #   - endpoint overrides, defaulting to the committed per-network endpoints
 #   - example: https://rpc.stagenet.shielded.tools
@@ -220,6 +224,9 @@ jobs:
           EVM_ROUTER: ${{ vars.EVM_ROUTER }}
           EVM_STATA_UNDERLYING: ${{ vars.EVM_STATA_UNDERLYING }}
           EVM_STATA_TOKEN: ${{ vars.EVM_STATA_TOKEN }}
+          # The ERC20s the deployer allows after initialise. Blank allows none
+          # beyond the stata underlying.
+          EVM_ALLOWED_TOKENS: ${{ vars.EVM_ALLOWED_TOKENS }}
           # Optional per-environment endpoint overrides. Every network has
           # committed defaults, and a blank var falls through to them.
           MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}

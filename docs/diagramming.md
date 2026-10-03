@@ -317,7 +317,7 @@ box tightens around the surviving members and the lanes close over the
 deleted actors. ONE value exemption exists: the MPC
 lane's `n-read` note names in its `From:` section the request event map(s)
 actually present in that diagram's contract box, each name bold. With one map
-the name shares the `From:` line (`From: signBidirectionalEventMap`), and
+the name shares the `From:` line (`From: bidirectionalDepositMap`), and
 with more than one the `From:` keyword takes its own line and each name
 follows on its own line.
 The actor map lists every request event map, and a flow's copy lists exactly

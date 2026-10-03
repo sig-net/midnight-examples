@@ -17,16 +17,20 @@ import { BaseSequencer, type TestSpecification } from "vitest/node";
 // vault, and happy-day cycles the funds later flows build on.
 const FILE_ORDER = [
   "happy-day-e2e.test.ts",
+  "allowed-tokens-e2e.test.ts",
   "deposit-withdrawal-failure-refund.test.ts",
   "deposit-claimant-not-caller.test.ts",
-  "benchmark.test.ts",
   "false-claimer.test.ts",
   "bearer-transfer.test.ts",
+  "approve-e2e.test.ts",
   "swap-e2e.test.ts",
   "supply-redeem-e2e.test.ts",
   "supply-refund-e2e.test.ts",
   "swap-refund-e2e.test.ts",
   "redeem-refund-e2e.test.ts",
+  "admin-replace-nonce-e2e.test.ts",
+  // Last: its concurrent submissions are the load most likely to poison the local stack.
+  "concurrent-flush-e2e.test.ts",
 ];
 
 const rank = (moduleId: string): number => {

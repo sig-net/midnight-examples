@@ -1,6 +1,7 @@
 import {
   asciiPadded,
   parseRequestIdHex,
+  requestIdBytes,
   type SignatureResponseVerdict,
   type SignBidirectionalEvent,
   type SignetRequestResponseReader,
@@ -10,7 +11,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { pollRespondBidirectional } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import * as outcomes from "../src/flows/respond-output.ts";
-import { ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES } from "../src/mpc-routing.ts";
+import {
+  ERC20_TRANSFER_RESULT_SCHEMA,
+  ERC20_TRANSFER_RESULT_SCHEMA_BYTES,
+} from "../src/mpc-routing.ts";
 import { OutputSource } from "../src/output-source.ts";
 import * as contextModule from "../src/vault-context.ts";
 
@@ -31,6 +35,7 @@ describe("signature timeout diagnostics", () => {
     signer: "0x456",
     rejectedReason: "wrong signer",
     response: {
+      requestId: requestIdBytes(REQUEST),
       signature: {
         bigR: { x: new Uint8Array(32), y: new Uint8Array(32) },
         s: new Uint8Array(32),
@@ -73,8 +78,14 @@ describe("attestation timeout diagnostics", () => {
   // The schemas the poll hands every tick come off the request record, the
   // vault's transfer schema in both directions.
   const REQUEST_RECORD = {
-    outputDeserializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
-    respondSerializationSchema: asciiPadded(ERC20_TRANSFER_RESULT_SCHEMA, VAULT_SCHEMA_BYTES),
+    outputDeserializationSchema: asciiPadded(
+      ERC20_TRANSFER_RESULT_SCHEMA,
+      ERC20_TRANSFER_RESULT_SCHEMA_BYTES,
+    ),
+    respondSerializationSchema: asciiPadded(
+      ERC20_TRANSFER_RESULT_SCHEMA,
+      ERC20_TRANSFER_RESULT_SCHEMA_BYTES,
+    ),
   } as SignBidirectionalEvent;
 
   it("retains the last execution observation failure and passes the record's schemas", async () => {
@@ -110,6 +121,7 @@ describe("attestation timeout diagnostics", () => {
       },
       undefined,
       expect.anything(),
+      expect.any(outcomes.RespondPollMemo),
     );
     expect(vi.getTimerCount()).toBe(0);
   });

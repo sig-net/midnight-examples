@@ -69,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [happy-day-aave, swap-refunds]
+        shard: [supply-redeem-nonce, swap-approve-happy, redeem-refunds]
     uses: ./.github/workflows/example-test.yaml
     # The reusable workflow sees no secrets unless the caller passes them.
     # Passed by name (never `secrets: inherit`): the callee's declared
@@ -78,9 +78,10 @@ jobs:
       SEPOLIA_FORK_RPC_URL: ${{ secrets.SEPOLIA_FORK_RPC_URL }}
     with:
       example-dir: erc20-vault
-      # ~21 min each: Aave round trip + redeem refund + happy-day | swap
-      # success path + the remaining refund branches.
-      gate-spec: ${{ matrix.shard == 'happy-day-aave' && 'tests/happy-day-e2e.test.ts tests/supply-redeem-e2e.test.ts tests/redeem-refund-e2e.test.ts' || 'tests/swap-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/swap-refund-e2e.test.ts tests/supply-refund-e2e.test.ts' }}
+      gate-spec: >-
+        ${{ matrix.shard == 'supply-redeem-nonce' && 'tests/supply-redeem-e2e.test.ts tests/supply-refund-e2e.test.ts tests/admin-replace-nonce-e2e.test.ts' ||
+        matrix.shard == 'swap-approve-happy' && 'tests/swap-e2e.test.ts tests/approve-e2e.test.ts tests/happy-day-e2e.test.ts' ||
+        'tests/redeem-refund-e2e.test.ts tests/swap-refund-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts' }}
   # The full suite stays a single job: it runs every e2e file regardless of
   # gate-spec, so sharding it would only duplicate the work.
   full:

@@ -1,170 +1,369 @@
-// Swap REFUND round trip: deposit tokenIn, then submit a swap whose amountInMaximum is set
-// below the real cost so exactOutputSingle reverts on-chain ("Too much requested"). The MPC
-// attests the failure output and completeSwap routes to refund, re-minting the surrendered
-// amountInMaximum of tokenIn. The swap-side twin of deposit-withdrawal-failure-refund. It runs
-// against the Sepolia fork the setup pipeline verifies, where the Uniswap router is deployed.
+// The swap refund e2e flow: a swap that REVERTS on-chain must end with the MPC
+// attesting it as failed over an empty output, and `completeSwap`'s failure branch
+// re-minting the burned shielded USDC cap to the caller and consuming the request.
 //
+// Failure-injection strategy (deliberate, deterministic): cap the spend at HALF a
+// live quote for the exact EURC output, so `exactOutputSingle` must spend more than
+// `amountInMaximum` and the router reverts. The responder attests a mined
+// `status 0` receipt as failed. The spec runs on the Sepolia fork the setup
+// pipeline verifies, where the router is deployed. The swap-side twin of
+// tests/deposit-withdrawal-failure-refund.test.ts.
+//
+// The arrange stage runs a full deposit round trip first (the caller must hold
+// the shielded USDC it surrenders). Run AFTER tests/approve-e2e.test.ts
+// (FILE_ORDER), so the swap reverts on its cap, not on a missing allowance.
 // Recovery from a run that died mid-flow (proof-server OOM): rerun this file with
-// SWAP_REFUND_DEPOSIT_REQUEST_ID / SWAP_REFUND_SWAP_REQUEST_ID set to the ids the failed run
-// printed. Each leg then resumes its request instead of recording a fresh one, and a leg a
-// prior run already settled skips its settle.
-import type { RequestIdHex } from "@sig-net/midnight";
-import { resolveInitialiseConfig } from "@sig-net/midnight-examples-erc20-vault-deploy";
-import { banner, getErc20Balance, getEthBalance } from "@sig-net/midnight-examples-test-harness";
+// SWAP_REFUND_DEPOSIT_REQUEST_ID / SWAP_REFUND_SWAP_REQUEST_ID set to the ids the
+// failed run printed.
+//
+// Tests drive the vault THROUGH the example's typed flow functions
+// (src/flows/), in-process, never a subprocess.
+import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import {
+  readVaultLedger,
+  VAULT_SWAP_REQUESTS_PATH,
+  vaultGasEnvelope,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { waitForFacadeState } from "@sig-net/midnight-examples-lib";
+import {
+  banner,
+  getErc20Balance,
+  getEthBalance,
+  logSkip,
+  requireEnv as requireEnvOf,
+} from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
-import { formatEther, formatUnits, parseEther } from "ethers";
+import { formatEther, formatUnits, parseEther, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { fundingSummary } from "../src/evm-logging.ts";
 import { quoteExactOutputSingle } from "../src/evm-swap.ts";
-import { SWAP_GAS_LIMIT, SWAP_MAX_FEE_PER_GAS } from "../src/evm-swap.ts";
-import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
+import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
+import { settleSwap } from "../src/flows/complete-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
-import { initialise } from "../src/flows/initialise.ts";
-import { runSwapRoundTrip } from "../src/flows/swap-round-trip.ts";
+import {
+  pollRespondBidirectional,
+  type RespondOutcome,
+} from "../src/flows/poll-respond-bidirectional.ts";
+import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
+import { startSwap } from "../src/flows/start-swap.ts";
+import { SEPOLIA_EURC } from "../src/fork-funding.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
+// ethers types `hash` nullable for the unsigned case. A transaction that came
+// back from the MPC is signed, so a null here is a broken response, not a
+// formatting concern.
+const signedTxHash = (transaction: Transaction): string => {
+  if (transaction.hash === null) {
+    throw new Error("expected a signed transaction to carry a hash");
+  }
+  return transaction.hash;
+};
+
+const MINUTE = 60_000;
+
+/**
+ * The setup-populated env accumulator: repo-root `.env` overlaid with the
+ * real environment (which wins), plus every value the globalSetup pipeline
+ * derived or deployed. Empty when RUN_INTEGRATION_TESTS is unset: the suite
+ * below skips before reading it.
+ */
 const env = injectE2eEnv();
+
+/** Assert a setup step populated `name`, failing with a pointed message. */
+const requireEnv = (name: string): string => requireEnvOf(env, name);
+
+// Wallet facade + vault context shared by every test in this file (lazily
+// built, so the offline path never touches the network), stopped once in
+// afterAll.
 const session = createVaultSession(env);
 
-const EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
+// The USDC/EURC pool's fee tier.
 const FEE = 500n;
-// exactOutput refund: request AMOUNT_OUT but cap the spend BELOW its real cost, so the router
-// reverts ("Too much requested") and the swap must refund. The cost is arbitrary on the fork's
-// thin pool, so derive the cap from a LIVE quote (half the quoted input) rather than hardcode.
-const AMOUNT_OUT = 3_000_000n; // 3 EURC exact receive
+// exactOutput: ask for EXACTLY 3 EURC while capping the spend below its cost.
+const AMOUNT_OUT = 3_000_000n;
 
-describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap-refund e2e", () => {
+/**
+ * The input cap the doomed swap surrenders: half the live quote for
+ * {@link AMOUNT_OUT}, below its real cost whatever the fork pool's price.
+ *
+ * @param rpcUrl - The EVM JSON-RPC endpoint.
+ * @param erc20Address - The sold ERC20.
+ * @returns The `amountInMaximum` the router must revert above.
+ */
+const doomedCap = async (rpcUrl: string, erc20Address: string): Promise<bigint> =>
+  (await quoteExactOutputSingle(rpcUrl, erc20Address, SEPOLIA_EURC, FEE, AMOUNT_OUT)).amountIn / 2n;
+
+describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e", () => {
   installFlowHooks();
+
   afterAll(async () => {
     await session.stop();
   });
 
   it(
-    "funding preflight: user EVM account holds the deposited cap, vault EVM account holds the approve + swap gas budget",
+    "funding preflight: user EVM account holds the deposited cap, vault EVM account holds the swap gas budget",
     async () => {
-      const context = await session.vaultContext();
-      const depositResumeId = env.SWAP_REFUND_DEPOSIT_REQUEST_ID as RequestIdHex | undefined;
+      const rpcUrl = requireEnv("EVM_RPC_URL");
+      const userAddress = requireEnv("EVM_USER_ADDRESS");
+      const vaultAddress = requireEnv("EVM_VAULT_ADDRESS");
+      const erc20Address = requireEnv("ERC20_ADDRESS");
 
       // The user's derived account pays the sweep gas and supplies the deposited ERC20.
-      const userEth = await getEthBalance(context.evmRpcUrl, context.evmUserAddress);
+      const userEth = await getEthBalance(rpcUrl, userAddress);
       console.log(
-        `${context.evmUserAddress}: ${fundingSummary(userEth, parseEther("0.01"), 18, "ETH")} (funding reserve)`,
+        `${userAddress}: ${fundingSummary(userEth, parseEther("0.01"), 18, "ETH")} (funding reserve)`,
       );
-      expect(
-        userEth,
-        `fund ${context.evmUserAddress} with >= 0.01 ETH on EVM`,
-      ).toBeGreaterThanOrEqual(parseEther("0.01"));
-      // Half the live quote, the cap the main test deposits (it re-quotes, and the pool does not
-      // move in between).
-      const { amountIn: quotedIn } = await quoteExactOutputSingle(
-        context.evmRpcUrl,
-        context.erc20Address,
-        EURC,
-        FEE,
-        AMOUNT_OUT,
+      expect(userEth, `fund ${userAddress} with >= 0.01 ETH on EVM`).toBeGreaterThanOrEqual(
+        parseEther("0.01"),
       );
       // A resumed deposit already swept its ERC20, so nothing is required then.
-      const required = depositResumeId === undefined ? quotedIn / 2n : 0n;
-      const { balance, decimals } = await getErc20Balance(
-        context.evmRpcUrl,
-        context.erc20Address,
-        context.evmUserAddress,
-      );
+      const required = env.SWAP_REFUND_DEPOSIT_REQUEST_ID
+        ? 0n
+        : await doomedCap(rpcUrl, erc20Address);
+      const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
       console.log(
-        `${context.evmUserAddress}: ${fundingSummary(balance, required, decimals, context.erc20Address)} (deposited cap)`,
+        `${userAddress}: ${fundingSummary(balance, required, decimals, erc20Address)} (deposited cap)`,
       );
       expect(
         balance,
-        `fund ${context.evmUserAddress} with >= ${formatUnits(required, decimals)} of ERC20 ${context.erc20Address} on EVM`,
+        `fund ${userAddress} with >= ${formatUnits(required, decimals)} of ERC20 ${erc20Address} on EVM`,
       ).toBeGreaterThanOrEqual(required);
 
-      // The vault's derived account sends the router approve (first use) and the swap itself.
-      const gasBudget =
-        ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS +
-        SWAP_GAS_LIMIT * SWAP_MAX_FEE_PER_GAS;
-      const vaultEth = await getEthBalance(context.evmRpcUrl, context.evmVaultAddress);
+      // The vault's derived account sends the doomed swap, at the vault's swap gas
+      // settings. A revert burns less than the cap, which is the budget required.
+      const context = await session.vaultContext();
+      const { gasLimit, maxFeePerGas } = vaultGasEnvelope(
+        await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress),
+        "swap",
+      );
+      const gasBudget = gasLimit * maxFeePerGas;
+      const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
       console.log(
-        `${context.evmVaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,
+        `${vaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,
       );
       expect(
         vaultEth,
-        `fund the vault's derived account ${context.evmVaultAddress} with >= ${formatEther(gasBudget)} ETH on EVM`,
+        `fund the vault's derived account ${vaultAddress} with >= ${formatEther(gasBudget)} ETH on EVM`,
       ).toBeGreaterThanOrEqual(gasBudget);
     },
-    5 * 60_000,
+    5 * MINUTE,
   );
 
   it(
-    "refunds tokenIn when the swap reverts on-chain (amountInMaximum too low)",
+    "vault-initialised preflight: the vault contract is initialised (read-only)",
     async () => {
       const context = await session.vaultContext();
-      const depositResumeId = env.SWAP_REFUND_DEPOSIT_REQUEST_ID as RequestIdHex | undefined;
-      const swapResumeId = env.SWAP_REFUND_SWAP_REQUEST_ID as RequestIdHex | undefined;
-
-      // Seal the config before any flow. A kept contract address that is already initialised
-      // is left untouched.
-      await initialise(context, await resolveInitialiseConfig(env, context.vaultContractAddress));
-
-      // Cap the spend at HALF the live quote — guaranteed under the real cost, so the swap
-      // reverts. The deposited coin IS the surrendered cap, so deposit exactly it.
-      const { amountIn: quotedIn } = await quoteExactOutputSingle(
-        context.evmRpcUrl,
-        context.erc20Address,
-        EURC,
-        FEE,
-        AMOUNT_OUT,
+      const state = await readVaultLedger(
+        context.providers.publicDataProvider,
+        context.vaultContractAddress,
       );
-      const cap = quotedIn / 2n;
-      const deposit = await runDepositRoundTrip(session, {
-        amount: cap,
-        reuseRequestId: depositResumeId,
+      expect(
+        state.initialised,
+        "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
+      ).toBe(true);
+    },
+    5 * MINUTE,
+  );
+
+  // Populated by the arrange stage for the start stage.
+  let amountInMaximum: bigint;
+
+  it(
+    "arrange: deposit round trip mints the shielded USDC the doomed swap will surrender",
+    async () => {
+      amountInMaximum = await doomedCap(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"));
+      const { requestId } = await runDepositRoundTrip(session, {
+        amount: amountInMaximum,
+        reuseRequestId: env.SWAP_REFUND_DEPOSIT_REQUEST_ID as RequestIdHex | undefined,
       });
+
       banner([
-        `Deposit ${deposit.requestId} complete.`,
+        `Arrange deposit ${requestId} complete: the caller holds the doomed cap of ${String(amountInMaximum)} base units.`,
         "",
         "If a later step dies (e.g. proof-server OOM), resume with",
-        `  SWAP_REFUND_DEPOSIT_REQUEST_ID=${deposit.requestId}`,
+        `  SWAP_REFUND_DEPOSIT_REQUEST_ID=${requestId}`,
       ]);
 
-      // The caller's own shielded tokenIn balance (the owner can read it, though it is not
-      // publicly observable): the swap burns the surrendered coin, and a successful refund
-      // must re-mint it, leaving this balance unchanged (net-zero).
-      const color = vaultTokenType(context.erc20Address, context.vaultContractAddress);
-      const readBalance = async () =>
-        (await (await session.wallet()).facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
-      const balanceBefore = await readBalance();
-      // The coin the swap surrenders must be in hand before it is recorded, and a resumed request
-      // already burned it, so nothing is required.
-      expect(balanceBefore).toBeGreaterThanOrEqual(swapResumeId === undefined ? cap : 0n);
+      expect(requestId).toMatch(/^[0-9a-f]{64}$/);
+    },
+    2 * POLL_TIMEOUT_MS + 15 * MINUTE,
+  );
 
-      // amountInMaximum (the cap) below the real cost -> exactOutputSingle reverts -> the settle re-mints tokenIn.
-      const result = await runSwapRoundTrip(session, {
-        tokenOut: EURC,
+  // Populated by the start stage (or SWAP_REFUND_SWAP_REQUEST_ID) for the later stages.
+  let swapRequestId: RequestIdHex;
+
+  it(
+    "startSwap: burn the shielded USDC cap for a buy it cannot pay for",
+    async () => {
+      if (env.SWAP_REFUND_SWAP_REQUEST_ID) {
+        swapRequestId = env.SWAP_REFUND_SWAP_REQUEST_ID as RequestIdHex;
+        logSkip("swap", `SWAP_REFUND_SWAP_REQUEST_ID present, resuming swap '${swapRequestId}'`);
+        return;
+      }
+      expect(amountInMaximum).toBeDefined();
+
+      const context = await session.vaultContext();
+      swapRequestId = await startSwap(context, {
+        erc20AddressOut: SEPOLIA_EURC,
         fee: FEE,
         amountOut: AMOUNT_OUT,
-        amountInMaximum: cap,
-        reuseRequestId: swapResumeId,
+        amountInMaximum,
       });
-      expect(result.refunded).toBe(true);
+      expect(swapRequestId).toMatch(/^[0-9a-f]{64}$/);
 
-      // The refund re-minted exactly the surrendered tokenIn. A fresh run burns and re-mints
-      // within this run (net-zero). A resumed request burned its coin in the prior run, so the
-      // run that settles observes only the re-mint, of the cap the prior run quoted (which this
-      // run cannot read back, hence a strict rise rather than an exact delta).
-      const balanceAfter = await readBalance();
-      const delta = balanceAfter - balanceBefore;
-      const refundObservedHere = swapResumeId !== undefined && result.settled;
-      expect(
-        refundObservedHere ? delta > 0n : delta === 0n,
-        `shielded tokenIn balance moved by ${String(delta)}`,
-      ).toBe(true);
-      console.log(
-        `SWAP REFUND E2E OK: swap reverted -> tokenIn refunded (shielded balance ${String(balanceAfter)})`,
-      );
+      banner([
+        `Doomed swap request recorded on the vault ledger:`,
+        "",
+        `  request id: ${swapRequestId}`,
+        "",
+        "The caller's shielded USDC cap is burned. If a later step dies,",
+        `resume with SWAP_REFUND_SWAP_REQUEST_ID=${swapRequestId}`,
+      ]);
     },
-    5 * POLL_TIMEOUT_MS + 30 * 60_000,
+    5 * MINUTE,
+  );
+
+  // Populated by the poll step below for the broadcast step.
+  let signedSwapTransaction: Transaction;
+
+  it(
+    "pollSignatureResponse: the MPC signs the doomed swap with the vault's account",
+    async () => {
+      expect(swapRequestId).toBeDefined();
+
+      const context = await session.vaultContext();
+      signedSwapTransaction = await pollSignatureResponse(context, {
+        requestId: swapRequestId,
+        intervalMs: 1000,
+        timeoutMs: POLL_TIMEOUT_MS,
+        expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+        requestsPath: VAULT_SWAP_REQUESTS_PATH,
+      });
+
+      banner([
+        `MPC signed response for doomed swap ${swapRequestId} found from Signet Contract.`,
+        "",
+        `Signed tx hash: ${signedTxHash(signedSwapTransaction)}`,
+      ]);
+    },
+    POLL_TIMEOUT_MS + 5 * MINUTE,
+  );
+
+  it(
+    "broadcast the doomed swap: it mines and REVERTS on its cap",
+    async () => {
+      expect(signedSwapTransaction).toBeDefined();
+      const context = await session.vaultContext();
+
+      // The router must spend more than amountInMaximum for the exact output, so
+      // the swap mines with `status 0`: a valid outcome the MPC attests as failed.
+      // A rerun finds the same mined receipt.
+      const receipt = await broadcastEvm(context, {
+        transaction: signedSwapTransaction,
+        tolerateRevert: true,
+      });
+      expect(receipt.status, "the capped swap must revert on-chain").toBe(0);
+
+      banner([
+        `Doomed swap ${signedTxHash(signedSwapTransaction)} mined and reverted, as arranged.`,
+        "",
+        "The responder should observe the status-0 receipt and post its",
+        "failed attestation (an empty output under OutputKind.failed) on",
+        "its next poll.",
+      ]);
+    },
+    3 * MINUTE,
+  );
+
+  // Populated by the poll step below for the settle step.
+  let swapAttestation: RespondOutcome;
+
+  it(
+    "pollRespondBidirectional: the MPC attests the swap as FAILED",
+    async () => {
+      expect(swapRequestId).toBeDefined();
+
+      // A post declaring a failure is checked over the empty output the protocol
+      // attests: no trace is needed to match it.
+      const context = await session.vaultContext();
+      swapAttestation = await pollRespondBidirectional(context, {
+        requestId: swapRequestId,
+        intervalMs: 1000,
+        timeoutMs: POLL_TIMEOUT_MS,
+        requestsPath: VAULT_SWAP_REQUESTS_PATH,
+      });
+
+      expect(
+        swapAttestation.event.outputKind,
+        "a mined revert must be attested under OutputKind.failed",
+      ).toBe(OutputKind.failed);
+      expect(swapAttestation.serializedOutput, "a failure's output is empty").toHaveLength(0);
+
+      banner([
+        `Found failure attestation for doomed swap ${swapRequestId}:`,
+        "",
+        `  output kind:  ${OutputKind[swapAttestation.event.outputKind]} (signature-verified)`,
+        `  block height: ${String(swapAttestation.event.blockHeight)}`,
+      ]);
+    },
+    POLL_TIMEOUT_MS + 5 * MINUTE,
+  );
+
+  it(
+    "completeSwap: the failure attestation re-mints the burned USDC cap and consumes the request",
+    async () => {
+      expect(swapRequestId).toBeDefined();
+      expect(swapAttestation).toBeDefined();
+
+      const context = await session.vaultContext();
+      const requestIndex = requestIdBytes(swapRequestId);
+      const isRequestOnLedger = async () =>
+        (
+          await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)
+        ).bidirectionalSwapMap.member(requestIndex);
+
+      // Rerun against a kept contract address: if a prior run already settled
+      // this request the entry is gone and completeSwap would reject with
+      // "Request not sent", so skip cleanly instead.
+      if (!(await isRequestOnLedger())) {
+        logSkip("completeSwap", `swap ${swapRequestId} already settled (not on the ledger)`);
+        return;
+      }
+
+      const color = vaultTokenType(
+        requireEnv("ERC20_ADDRESS"),
+        requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
+      );
+      const wallet = await session.wallet();
+      const balanceBefore =
+        (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
+
+      const { request, amountIn } = await settleSwap(context, swapAttestation);
+
+      expect(
+        await isRequestOnLedger(),
+        "completeSwap must consume the request from the ledger",
+      ).toBe(false);
+      expect(amountIn, "completeSwap must take its failure branch").toBeUndefined();
+      // The re-mint is a coin addressed to this wallet, so its balance shows it.
+      const reminted = await waitForFacadeState(
+        wallet.facade,
+        (state) =>
+          (state.shielded.balances[color] ?? 0n) >= balanceBefore + request.amountInMaximum,
+      );
+      expect(reminted.shielded.balances[color] ?? 0n).toBe(balanceBefore + request.amountInMaximum);
+
+      banner([
+        `Swap ${swapRequestId} settled with a RE-MINT.`,
+        "",
+        "The vault verified the MPC's failure attestation, re-minted the",
+        `burned ${String(request.amountInMaximum)} USDC cap to the swapper, and removed`,
+        "the request from its ledger.",
+      ]);
+    },
+    15 * MINUTE,
   );
 });

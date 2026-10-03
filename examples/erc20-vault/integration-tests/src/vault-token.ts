@@ -2,8 +2,8 @@
 // contract's compiled `vaultTokenDomainSeparator` circuit plus the runtime's
 // `rawTokenType` (the off-chain twin of the in-circuit
 // `tokenType(domainSep, kernel.self())`) — never a TS re-implementation.
-// Shared by the withdraw flow (the surrendered coin's color) and by tests
-// that read a wallet's shielded balance of the vault token.
+// Shared by the start flows (a surrendered coin's color) and by tests that
+// read a wallet's shielded balance of the vault token.
 
 import {
   type ContractAddress,

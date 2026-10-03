@@ -80,8 +80,11 @@ services:
       # Forked: inherit Sepolia's chain id (11155111) so real-token semantics hold; the suites
       # deal ETH/USDC via anvil cheatcodes (a forked real token has no open mint). Bare:
       # anvil's default id 31337.
+      # The fakenet attests only once a transaction's block is `finalized`, which anvil
+      # places two epochs behind the head: one-second blocks and one-slot epochs finalise
+      # a block two seconds after it is mined.
       - >
-        anvil --host 0.0.0.0
+        anvil --host 0.0.0.0 --block-time 1 --slots-in-an-epoch 1
         ${SEPOLIA_FORK_RPC_URL:+--fork-url ${SEPOLIA_FORK_RPC_URL}}
         ${SEPOLIA_FORK_BLOCK:+--fork-block-number ${SEPOLIA_FORK_BLOCK}}
     ports:
@@ -101,7 +104,7 @@ services:
     # service. Manual equivalent (and the FAKENET_MANAGED=0 path):
     #   docker compose --profile fakenet up -d --force-recreate fakenet
     container_name: 'fakenet-responder'
-    image: 'ghcr.io/sig-net/fakenet:0.25.0'
+    image: 'ghcr.io/sig-net/fakenet:0.31.0'
     profiles: ['fakenet']
     depends_on:
       indexer:

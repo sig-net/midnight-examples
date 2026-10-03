@@ -53,10 +53,10 @@ import {
 
 import { VAULT_MANAGED_PATH, vaultCompiledContract } from "./vault-contract-binding.ts";
 
-// The full 17-circuit deploy overflows a block. Even the 9 core circuits overflow it (the
-// post-burn keys are large), so the base registers just ONE small circuit and every other
-// circuit is added by a maintenance update right after (each a tiny, fitting tx).
-const BASE_DEPLOY_CIRCUITS: readonly string[] = ["approveRouter"];
+// Verifier keys are large, so the base registers just ONE small circuit and every other
+// circuit is added by a maintenance update right after, each a transaction carrying a
+// single key.
+const BASE_DEPLOY_CIRCUITS: readonly string[] = ["setGasParams"];
 
 const MINUTE_MS = 60_000;
 // Funding must finish within the base intent's 30-minute lifetime.

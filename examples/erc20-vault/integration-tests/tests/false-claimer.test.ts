@@ -148,7 +148,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(
           state.initialised,
           "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
-        ).toBe(1n);
+        ).toBe(true);
       },
       5 * MINUTE,
     );
@@ -177,7 +177,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
-        requestOnLedger = ledger.depositEventMap.member(requestIdBytes(requestId));
+        requestOnLedger = ledger.bidirectionalDepositMap.member(requestIdBytes(requestId));
 
         banner([
           `Arrange deposit ${requestId} complete — attested, UNCLAIMED, on the ledger: ${String(requestOnLedger)}.`,
@@ -203,13 +203,15 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         // Identity B presents the SAME request id and the SAME valid MPC
         // response, i.e. everything a claim needs except the right secret key.
-        // The circuit recomputes B's commitment from the callerSecretKey
-        // witness, compares it to the commitment the deposit's settle view pins
-        // (A's), and rejects during local transaction building.
+        // The arrange step already queued and flushed the attestation, so B's
+        // unfunded wallet goes straight to completeDeposit, which recomputes
+        // B's ownership commitment from the callerSecretKey witness, compares
+        // it to the one the deposit's entry pins (A's), and rejects during
+        // local transaction building.
         const falseClaimerContext = await falseClaimerSession.vaultContext();
         await expect(
           completeDeposit(falseClaimerContext, { requestId: depositRequestId }),
-        ).rejects.toThrow(/Not the depositor/);
+        ).rejects.toThrow(/Not the requester/);
 
         // The rejection happened client-side, so nothing was consumed: the
         // request must still sit on the ledger, claimable by identity A.
@@ -219,7 +221,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          ledger.depositEventMap.member(requestIdBytes(depositRequestId)),
+          ledger.bidirectionalDepositMap.member(requestIdBytes(depositRequestId)),
           "the rejected claim must not consume the request",
         ).toBe(true);
 
@@ -249,7 +251,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          ledger.depositEventMap.member(requestIdBytes(depositRequestId)),
+          ledger.bidirectionalDepositMap.member(requestIdBytes(depositRequestId)),
           "the rightful claim must consume the request from the ledger",
         ).toBe(false);
 

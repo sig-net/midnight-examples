@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-twelve-spec suite (106 tests: eleven e2e specs carrying 100, plus the offline
+fifteen-spec suite (111 tests: fourteen e2e specs carrying 105, plus the offline
 `benchmark-tooling` spec carrying 6). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest
@@ -50,10 +50,14 @@ recipe in `.github/workflows/example-test.yaml` (the `Install / update the
 compact toolchain` step).
 
 One value MUST be in `.env` before the stack comes up: `SEPOLIA_FORK_RPC_URL`
-(any Sepolia RPC). The compose anvil forks Sepolia from it so the real Uniswap V3
-deployment and real USDC are present. Without it anvil is a bare chain and the
-suites fail dealing tokens. (`SEPOLIA_FORK_BLOCK` is optional: pin a block for
-determinism, needs an archive RPC.) Everything else the setup pipeline creates:
+(an ARCHIVE Sepolia RPC, e.g. `https://sepolia.gateway.tenderly.co`). The
+compose anvil forks Sepolia from it so the real Uniswap V3 deployment and real
+USDC are present. Without it anvil is a bare chain and the suites fail dealing
+tokens. Archive matters for `admin-replace-nonce-e2e`: the fakenet locates the
+block that consumed the replaced nonce by bisecting the account nonce over chain
+history, and a pruned RPC (publicnode) fails that read with "state at block #N
+is pruned", so the unviable attestation never posts and the spec times out.
+(`SEPOLIA_FORK_BLOCK` is optional: pin a block for determinism.) Everything else the setup pipeline creates:
 it appends the generated wallet seeds (root + the deployer/user/mpc
 responder/bearer roles, funded from root), the MPC public key it derives from
 the root key (`MPC_SECP256K1_PUBKEY`) and the fakenet hand-off values
@@ -113,8 +117,9 @@ vault with every circuit).
   `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
   **6**, `benchmark` **43**, `false-claimer` **6**, `bearer-transfer` **11**,
   `swap-e2e` **1**, `supply-redeem-e2e` **1**, `supply-refund-e2e` **1**,
-  `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**, then the unpinned offline
-  `benchmark-tooling` **6** last. 101 total. The setup
+  `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**,
+  `vault-queue-e2e` **5**, `vault-queue-benchmark` **4**, `admin-replace-nonce-e2e` **1**,
+  then the unpinned offline `benchmark-tooling` **6** last. 111 total. The setup
   pipeline verifies Uniswap and the stataUSDC wrapper are deployed on the fork,
   so a fork missing either fails the run at setup rather than mid-spec.
 - **Wallets are role wallets funded from ROOT at setup.** The setup's

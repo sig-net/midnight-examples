@@ -18,3 +18,18 @@ export async function getEvmChainId(rpcUrl: string): Promise<bigint> {
     provider.destroy();
   }
 }
+
+/**
+ * The latest block number the EVM node at `rpcUrl` reports.
+ *
+ * @param rpcUrl - The EVM JSON-RPC endpoint.
+ * @returns The latest block number.
+ */
+export async function getEvmBlockNumber(rpcUrl: string): Promise<bigint> {
+  const provider = new JsonRpcProvider(rpcUrl);
+  try {
+    return BigInt(await provider.getBlockNumber());
+  } finally {
+    provider.destroy();
+  }
+}

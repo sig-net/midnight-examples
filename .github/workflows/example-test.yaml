@@ -45,8 +45,8 @@ jobs:
     runs-on: ubuntu-latest
     # The claim/settle proofs are the pacing (and memory) item: a single one
     # peaks >12 GiB inside the proof server, so the default 4-core/16 GB
-    # runner is marginal — happy-day-only as the PR gate keeps the wall clock
-    # and OOM exposure down; the full suite is opt-in via `full-suite`.
+    # runner is marginal: the caller's gate specs keep the wall clock and OOM
+    # exposure below the full suite's, which is opt-in via `full-suite`.
     timeout-minutes: ${{ inputs.full-suite && 300 || 150 }}
     # Job-level so EVERY step (and every docker compose invocation) sees the fork URL. The
     # setup pipeline recreates the fakenet responder with `docker compose up`; if that step

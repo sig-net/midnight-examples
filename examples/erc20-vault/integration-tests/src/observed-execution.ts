@@ -1,17 +1,22 @@
 // What the EVM did with an MPC-signed transaction, as a client obtains it on
-// its own: the MPC's attestation carries only a signature over (requestId,
-// serializedOutput), never the output, so the client recovers the raw
-// execution output independently and checks the signature against it. The
+// its own: the output the MPC's attestation signs over travels off chain, so
+// the client recovers the raw execution output independently and checks the
+// signature against it. The
 // mined transaction is rebuilt from chain data alone (the request record plus
-// a posted signature, exactly as the broadcast did), then its top call
-// frame's return data is read with `debug_traceTransaction`, the RPC method
-// the MPC itself observes with. `EVM_RPC_URL` must serve that method on every
+// a posted signature, exactly as the broadcast did), then a contract call's
+// top frame is read with `debug_traceTransaction`, the RPC method the MPC
+// itself observes with. `EVM_RPC_URL` must serve that method on every
 // network: anvil does, and hosted endpoints often gate it behind a paid tier,
 // so the setup pipeline probes it before anything is deployed. An observation
 // is UNTRUSTED until the attestation signature check: it only gates which
 // candidate output is tried, never what is accepted.
 
 import {
+  type EvmTraceOutput,
+  evmTraceOutputFromCallFrame,
+  EvmTraceOutputKind,
+  isEvmContractCall,
+  type JsonValue,
   type RequestIdHex,
   signBidirectionalEventToSignedEvmTransaction,
   type SignetRequestResponseReader,
@@ -28,17 +33,23 @@ export interface ObservedExecution {
   /** Whether the remote execution succeeded (the transaction mined with status 1). */
   readonly success: boolean;
   /**
-   * The raw EVM return data of the mined call's top frame as 0x-prefixed hex
-   * (`0x` for a plain transfer). null for a failed execution, which has no
-   * attested output.
+   * Whether the mined transaction is a contract call, decided from its input
+   * the MPC's way (`isEvmContractCall`).
    */
-  readonly output: string | null;
+  readonly isContractCall: boolean;
+  /**
+   * The mined call's top-frame return data as `debug_traceTransaction`
+   * reports it, `NotTraced` for a plain transfer (the MPC traces contract
+   * calls only). null for a failed execution, which has no attested output.
+   */
+  readonly trace: EvmTraceOutput | null;
   /** The remote transaction's hash. */
   readonly txHash: string;
+  readonly blockNumber: bigint;
 }
 
 const TRACE_METHOD = "debug_traceTransaction";
-const CALL_TRACER = { tracer: "callTracer" } as const;
+const CALL_TRACER = { tracer: "callTracer", tracerConfig: { onlyTopCall: true } } as const;
 
 /** The standard JSON-RPC code for a method the node does not know. */
 const METHOD_NOT_FOUND_CODE = -32601;
@@ -136,19 +147,35 @@ async function minedTransactionReceipt(
 }
 
 /**
- * The top call frame of a `callTracer` trace, in the field read here. Nodes
- * omit `output` when the frame returned no data (anvil does for a plain
- * transfer).
+ * The `debug_traceTransaction` callTracer top frame of a mined transaction.
+ *
+ * @param provider - The EVM chain the transaction mined on.
+ * @param evmRpcUrl - The endpoint behind `provider`, for the error message.
+ * @param txHash - The mined transaction.
+ * @returns The RPC's `result`, unvalidated.
+ * @throws {Error} When the RPC refuses the method.
  */
-interface CallTracerFrame {
-  readonly output?: string;
+async function traceTopCallFrame(
+  provider: JsonRpcProvider,
+  evmRpcUrl: string,
+  txHash: string,
+): Promise<JsonValue> {
+  try {
+    return (await provider.send(TRACE_METHOD, [txHash, CALL_TRACER])) as JsonValue;
+  } catch (error) {
+    throw new Error(
+      `${TRACE_METHOD} failed for ${txHash} on ${evmRpcUrl}: the endpoint must ` +
+        `serve it to recover the execution output the MPC attests (${String(error)})`,
+      { cause: error },
+    );
+  }
 }
 
 /**
  * Observe the execution of the request's transaction by tracing it on the
  * EVM chain: wait up to `timeoutMs` for a posted signature whose transaction
- * has a receipt, then report its status and, for a successful execution, the
- * top frame's return data from `debug_traceTransaction`. UNTRUSTED: the
+ * has a receipt, then report its status and, for a successful contract call,
+ * the top frame's return data from `debug_traceTransaction`. UNTRUSTED: the
  * caller verifies the MPC's attestation signature over what this returns.
  *
  * @param reader - The reader over the vault / signet pair the request lives in.
@@ -157,7 +184,8 @@ interface CallTracerFrame {
  * @param timeoutMs - How long to wait for a mined transaction before failing.
  * @returns The observed execution.
  * @throws {Error} When no posted signature names a mined transaction within `timeoutMs`,
- *   the vault holds no such request, or the RPC refuses `debug_traceTransaction`.
+ *   the vault holds no such request, the RPC refuses `debug_traceTransaction`, or the
+ *   traced frame is one the MPC refuses (`evmTraceOutputFromCallFrame`).
  */
 export async function observeExecution(
   reader: SignetRequestResponseReader,
@@ -179,20 +207,32 @@ export async function observeExecution(
           `posted signatures names a transaction ${evmRpcUrl} holds a receipt for`,
       );
     }
+    const transaction = await provider.getTransaction(receipt.hash);
+    if (transaction === null) {
+      throw new Error(`${evmRpcUrl} holds a receipt but no transaction for ${receipt.hash}`);
+    }
+    const isContractCall = isEvmContractCall(transaction.data);
     if (receipt.status !== 1) {
-      return { requestId, success: false, output: null, txHash: receipt.hash };
+      return {
+        requestId,
+        success: false,
+        isContractCall,
+        trace: null,
+        txHash: receipt.hash,
+        blockNumber: BigInt(receipt.blockNumber),
+      };
     }
-    let frame: CallTracerFrame;
-    try {
-      frame = (await provider.send(TRACE_METHOD, [receipt.hash, CALL_TRACER])) as CallTracerFrame;
-    } catch (error) {
-      throw new Error(
-        `${TRACE_METHOD} failed for ${receipt.hash} on ${evmRpcUrl}: the endpoint must ` +
-          `serve it to recover the execution output the MPC attests (${String(error)})`,
-        { cause: error },
-      );
-    }
-    return { requestId, success: true, output: frame.output ?? "0x", txHash: receipt.hash };
+    const trace: EvmTraceOutput = isContractCall
+      ? evmTraceOutputFromCallFrame(await traceTopCallFrame(provider, evmRpcUrl, receipt.hash))
+      : { kind: EvmTraceOutputKind.NotTraced };
+    return {
+      requestId,
+      success: true,
+      isContractCall,
+      trace,
+      txHash: receipt.hash,
+      blockNumber: BigInt(receipt.blockNumber),
+    };
   } finally {
     provider.destroy();
   }
