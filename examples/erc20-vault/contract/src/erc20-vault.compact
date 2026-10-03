@@ -471,6 +471,12 @@ circuit settleRequest(
   return [out.entry, record];
 }
 
+// The outcomes for which the requested transaction never executed, so the
+// requester is refunded what they surrendered at start.
+pure circuit outcomeRefunds(outputKind: OutputKind): Boolean {
+  return outputKind == OutputKind.failed || outputKind == OutputKind.unviable;
+}
+
 // #####################################################################################
 // Admin with EVM transactions
 // #####################################################################################
@@ -1117,7 +1123,7 @@ export circuit completeWithdraw(
       "Output does not match the attestation"
     );
   }
-  if (!executed || !deserialize<VaultResponse, 1>(output).success) {
+  if (outcomeRefunds(record.outputKind) || !deserialize<VaultResponse, 1>(output).success) {
     mintShieldedToken(
       vaultTokenDomainSeparator(args.request.erc20Address),
       args.request.amount as Uint<64>,
@@ -1336,7 +1342,8 @@ export circuit completeSwap(
       disclose(changeNonce),
       recipient
     );
-  } else {
+  }
+  if (outcomeRefunds(record.outputKind)) {
     mintShieldedToken(
       vaultTokenDomainSeparator(args.request.erc20AddressIn),
       args.request.amountInMaximum as Uint<64>,
@@ -1520,7 +1527,8 @@ export circuit completeSupply(
       disclose(mintNonce),
       caller
     );
-  } else {
+  }
+  if (outcomeRefunds(record.outputKind)) {
     mintShieldedToken(
       vaultTokenDomainSeparator(stataUnderlying),
       args.request.amount as Uint<64>,
@@ -1706,7 +1714,8 @@ export circuit completeRedeem(
       disclose(mintNonce),
       caller
     );
-  } else {
+  }
+  if (outcomeRefunds(record.outputKind)) {
     mintShieldedToken(
       vaultTokenDomainSeparator(stataToken),
       args.request.shares as Uint<64>,
