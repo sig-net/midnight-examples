@@ -145,7 +145,7 @@ export function deployInitialiseEnvironmentTable(
     EVM_ROUTER: targets.routerAddress,
     EVM_STATA_UNDERLYING: targets.stataUnderlyingAddress,
     EVM_STATA_TOKEN: targets.stataTokenAddress,
-    EVM_ALLOWED_TOKENS: supplied("EVM_ALLOWED_TOKENS"),
+    EVM_ALLOWED_TOKENS: envOrUndefined(env, "EVM_ALLOWED_TOKENS") ?? "(the EVM chain's defaults)",
     MIDNIGHT_VAULT_CONTRACT_ADDRESS: supplied("MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
     EVM_VAULT_ADDRESS: supplied("EVM_VAULT_ADDRESS"),
     MPC_RESPONSE_KEY: supplied("MPC_RESPONSE_KEY"),

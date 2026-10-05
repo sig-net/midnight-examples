@@ -11,7 +11,7 @@ import {
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { resolveVaultContractAddress, withDeployerVault } from "./deployer-vault.ts";
-import { resolveAllowedTokens } from "./evm-targets.ts";
+import { defaultAllowedTokens, resolveAllowedTokens } from "./evm-targets.ts";
 
 /**
  * Call the vault's `addAllowedToken` circuit once for each of `tokens` the
@@ -55,9 +55,10 @@ export async function addAllowedTokensToVaultContract(
 
 /**
  * Join a deployed vault as the deployer and allow every ERC20
- * `EVM_ALLOWED_TOKENS` lists: the standalone counterpart of
- * {@link addAllowedTokensToVaultContract} for entrypoints that hold no session.
- * An empty list starts no wallet.
+ * `EVM_ALLOWED_TOKENS` lists, or the vault's chain defaults (see
+ * {@link defaultAllowedTokens}) when it lists none: the standalone counterpart
+ * of {@link addAllowedTokensToVaultContract} for entrypoints that hold no
+ * session.
  *
  * @param env - The environment: `EVM_ALLOWED_TOKENS` and everything {@link withDeployerVault}
  *   reads. Defaults to `process.env`.
@@ -77,12 +78,19 @@ export async function addAllowedTokensToVault(
     contractAddress,
     "add allowed ERC20s to",
   );
-  const tokens = resolveAllowedTokens(env);
-  if (tokens.length === 0) {
-    console.log("EVM_ALLOWED_TOKENS lists no ERC20s, nothing to allow");
-    return [];
-  }
-  return withDeployerVault(env, vaultContractAddress, (vault, publicDataProvider) =>
-    addAllowedTokensToVaultContract(vault, publicDataProvider, vaultContractAddress, tokens),
-  );
+  const listed = resolveAllowedTokens(env);
+  return withDeployerVault(env, vaultContractAddress, async (vault, publicDataProvider) => {
+    let tokens = listed;
+    if (listed.length === 0) {
+      // The chain the vault sealed at initialise decides the defaults, as an
+      // allowed ERC20 can never be removed.
+      const { evmChainId } = await readVaultLedger(publicDataProvider, vaultContractAddress);
+      tokens = defaultAllowedTokens(evmChainId);
+      console.log(
+        `EVM_ALLOWED_TOKENS lists no ERC20s, so the vault gets the ${String(tokens.length)} ` +
+          `default(s) of its EVM chain ${String(evmChainId)}`,
+      );
+    }
+    return addAllowedTokensToVaultContract(vault, publicDataProvider, vaultContractAddress, tokens);
+  });
 }

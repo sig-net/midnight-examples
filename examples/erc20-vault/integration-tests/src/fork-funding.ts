@@ -3,16 +3,12 @@
 // writing the holder's slot in the token's balance mapping directly (anvil_setStorageAt, the
 // same mechanism as foundry's `deal`), so dealing needs no funded source account and repeated
 // redeploy campaigns can never exhaust one. On any other node the accounts are funded by hand.
-import { AAVE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { AAVE_USDC, CIRCLE_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { type ContractWriteMethod, requireEnv } from "@sig-net/midnight-examples-test-harness";
 import { ethers } from "ethers";
 
 import { isAnvil } from "./evm-anvil.ts";
 
-/** Real Sepolia USDC (the swap suite's tokenIn), also present on a Sepolia fork. */
-export const SEPOLIA_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
-/** Real Sepolia EURC (the swap suites' tokenOut), also present on a Sepolia fork. */
-export const SEPOLIA_EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
 // Aave v3 Sepolia PoolConfigurator + a pool admin: the live USDC reserve is supplied ~2x over its
 // cap, so maxDeposit is 0 and stataUSDC deposits revert. The fork lifts the cap through these.
 const AAVE_POOL_CONFIGURATOR = "0x7Ee60D184C24Ef7AfC1Ec7Be59A0f448A0abd138";
@@ -119,7 +115,7 @@ export async function dealFork(
   aaveUsdc = 0n,
 ): Promise<void> {
   await provider.send("anvil_setBalance", [to, ONE_ETH]);
-  if (usdc > 0n) await dealErc20(provider, SEPOLIA_USDC, to, usdc);
+  if (usdc > 0n) await dealErc20(provider, CIRCLE_USDC, to, usdc);
   if (aaveUsdc > 0n) await dealErc20(provider, AAVE_USDC, to, aaveUsdc);
 }
 
@@ -179,9 +175,9 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
   // Fail loudly BEFORE dealing: if USDC has no code, the EVM is not forking Sepolia (almost
   // always a missing/empty SEPOLIA_FORK_RPC_URL), and the balance-slot probe would fail with an
   // opaque decode error instead of this pointed one.
-  if ((await provider.getCode(SEPOLIA_USDC)) === "0x") {
+  if ((await provider.getCode(CIRCLE_USDC)) === "0x") {
     throw new Error(
-      `${SEPOLIA_USDC} has no code on ${rpcUrl}: the EVM is not forking Sepolia. Set ` +
+      `${CIRCLE_USDC} has no code on ${rpcUrl}: the EVM is not forking Sepolia. Set ` +
         `SEPOLIA_FORK_RPC_URL (in CI, the caller workflow must also pass \`secrets: inherit\`).`,
     );
   }

@@ -20,6 +20,7 @@
 // (src/flows/), in-process, never a subprocess.
 import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
+  CIRCLE_EURC,
   readVaultLedger,
   VAULT_SWAP_REQUESTS_PATH,
   vaultGasEnvelope,
@@ -47,7 +48,6 @@ import {
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startSwap } from "../src/flows/start-swap.ts";
-import { SEPOLIA_EURC } from "../src/fork-funding.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
@@ -94,7 +94,7 @@ const AMOUNT_OUT = 3_000_000n;
  * @returns The `amountInMaximum` the router must revert above.
  */
 const doomedCap = async (rpcUrl: string, erc20Address: string): Promise<bigint> =>
-  (await quoteExactOutputSingle(rpcUrl, erc20Address, SEPOLIA_EURC, FEE, AMOUNT_OUT)).amountIn / 2n;
+  (await quoteExactOutputSingle(rpcUrl, erc20Address, CIRCLE_EURC, FEE, AMOUNT_OUT)).amountIn / 2n;
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e", () => {
   installFlowHooks();
@@ -207,7 +207,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e
 
       const context = await session.vaultContext();
       swapRequestId = await startSwap(context, {
-        erc20AddressOut: SEPOLIA_EURC,
+        erc20AddressOut: CIRCLE_EURC,
         fee: FEE,
         amountOut: AMOUNT_OUT,
         amountInMaximum,
