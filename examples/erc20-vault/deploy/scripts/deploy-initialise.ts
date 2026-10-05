@@ -12,7 +12,7 @@
 
 import { addAllowedTokensToVault } from "../src/add-allowed-tokens.ts";
 import { deployVault } from "../src/deploy-vault.ts";
-import { buildEntrypointEnv } from "../src/entrypoint-env.ts";
+import { buildEntrypointEnv, deployInitialiseEnvironmentTable } from "../src/entrypoint-env.ts";
 import { resolveAllowedTokens } from "../src/evm-targets.ts";
 import {
   assertInitialiseInputsPresent,
@@ -21,6 +21,9 @@ import {
 } from "../src/initialise-vault.ts";
 
 const env = buildEntrypointEnv();
+
+console.log("deploying and initialising the vault with:");
+console.table(deployInitialiseEnvironmentTable(env, process.env));
 
 // Before spending a whole multistage deploy: a missing chain id, a malformed
 // router override or allowed token, or a leftover previous vault's values must
