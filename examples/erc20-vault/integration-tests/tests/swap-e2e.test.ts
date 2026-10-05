@@ -18,6 +18,7 @@
 // (src/flows/), in-process, never a subprocess.
 import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import {
+  CIRCLE_EURC,
   pureCircuits,
   readVaultLedger,
   VAULT_SWAP_REQUESTS_PATH,
@@ -46,7 +47,6 @@ import {
 } from "../src/flows/poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startSwap } from "../src/flows/start-swap.ts";
-import { SEPOLIA_EURC } from "../src/fork-funding.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
@@ -100,7 +100,7 @@ const quotedCap = async (rpcUrl: string, erc20Address: string): Promise<bigint> 
     await quoteExactOutputSingle(
       rpcUrl,
       erc20Address,
-      SEPOLIA_EURC,
+      CIRCLE_EURC,
       FEE,
       AMOUNT_OUT,
       CAP_SLIPPAGE_BPS,
@@ -215,7 +215,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
 
       const context = await session.vaultContext();
       swapRequestId = await startSwap(context, {
-        erc20AddressOut: SEPOLIA_EURC,
+        erc20AddressOut: CIRCLE_EURC,
         fee: FEE,
         amountOut: AMOUNT_OUT,
         amountInMaximum,
@@ -332,7 +332,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
 
       const vaultContractAddress = requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS");
       const inColor = vaultTokenType(requireEnv("ERC20_ADDRESS"), vaultContractAddress);
-      const outColor = vaultTokenType(SEPOLIA_EURC, vaultContractAddress);
+      const outColor = vaultTokenType(CIRCLE_EURC, vaultContractAddress);
       const wallet = await session.wallet();
       const before = (await wallet.facade.waitForSyncedState()).shielded.balances;
       const inBefore = before[inColor] ?? 0n;

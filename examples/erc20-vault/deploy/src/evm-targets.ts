@@ -6,9 +6,14 @@
 import { envOrUndefined } from "@sig-net/midnight-contract-deploy";
 import {
   AAVE_USDC,
+  CHAINLINK_LINK,
+  CIRCLE_EURC,
+  CIRCLE_USDC,
   evmAddressBytes,
+  SEPOLIA_CHAIN_ID,
   STATA_USDC,
   UNISWAP_SWAP_ROUTER_02,
+  WETH9,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 /** The EVM contracts `initialise` seals into the vault. */
@@ -73,4 +78,19 @@ export function resolveAllowedTokens(env: Record<string, string | undefined>): r
     if (!tokens.some((seen) => seen.toLowerCase() === token.toLowerCase())) tokens.push(token);
   }
   return tokens;
+}
+
+/**
+ * The ERC20s the deployer allows when `EVM_ALLOWED_TOKENS` lists none: on
+ * Sepolia, Circle's USDC and EURC, WETH and LINK. Every one returns the ABI
+ * `bool` the ERC20 standard specifies from `transfer`, `approve` and
+ * `transferFrom`, which is what the MPC decodes a call's output as. A token
+ * that returns nothing there (USDT) can never be attested, so it must never
+ * join this list.
+ *
+ * @param evmChainId - The EIP-155 chain id sealed into the vault at `initialise`.
+ * @returns The chain's default ERC20s as 0x hex, empty for a chain with none.
+ */
+export function defaultAllowedTokens(evmChainId: bigint): readonly string[] {
+  return evmChainId === SEPOLIA_CHAIN_ID ? [CIRCLE_USDC, CIRCLE_EURC, WETH9, CHAINLINK_LINK] : [];
 }

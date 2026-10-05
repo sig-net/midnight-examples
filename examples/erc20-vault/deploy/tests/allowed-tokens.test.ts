@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { resolveAllowedTokens } from "../src/evm-targets.ts";
+import { defaultAllowedTokens, resolveAllowedTokens } from "../src/evm-targets.ts";
 
 const USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
@@ -54,5 +54,20 @@ describe("resolveAllowedTokens", () => {
 
   it.each(REFUSED)("refuses $name", ({ listed, error }) => {
     expect(() => resolveAllowedTokens({ EVM_ALLOWED_TOKENS: listed })).toThrow(error);
+  });
+});
+
+describe("defaultAllowedTokens", () => {
+  it("allows Circle's USDC and EURC, WETH and LINK on Sepolia", () => {
+    expect(defaultAllowedTokens(11155111n)).toEqual([
+      USDC,
+      EURC,
+      "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",
+      "0x779877A7B0D9E8603169DdbD7836e478b4624789",
+    ]);
+  });
+
+  it.each([1n, 31337n, 0n])("allows nothing by default on chain %s", (evmChainId) => {
+    expect(defaultAllowedTokens(evmChainId)).toEqual([]);
   });
 });

@@ -1,7 +1,8 @@
 // Deploy + initialise entrypoint (`yarn deploy-initialise:erc20-vault`): the
 // one-shot bring-up of a vault on a REMOTE network, where no test pipeline runs
 // the steps for you: deploy, initialise, then allow the ERC20s
-// EVM_ALLOWED_TOKENS lists. Every step is the same function the e2e setup and
+// EVM_ALLOWED_TOKENS lists, or the defaults of the vault's EVM chain when it
+// lists none. Every step is the same function the e2e setup and
 // the flow tests exercise locally, so the multistage deploy this performs is
 // continuously tested. Prints the address to set as
 // NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS in the frontend.

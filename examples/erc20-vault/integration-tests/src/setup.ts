@@ -21,6 +21,8 @@ import {
   type WalletRegistry,
 } from "@sig-net/midnight-contract-deploy";
 import {
+  CIRCLE_EURC,
+  CIRCLE_USDC,
   deriveVaultEvmAddress,
   STATA_USDC,
   UNISWAP_SWAP_ROUTER_02,
@@ -51,7 +53,7 @@ import type { TestProject } from "vitest/node";
 
 import { stataAvailable } from "./evm-stata.ts";
 import { uniswapAvailable } from "./evm-swap.ts";
-import { dealForkEvmAccounts, SEPOLIA_EURC, SEPOLIA_USDC } from "./fork-funding.ts";
+import { dealForkEvmAccounts } from "./fork-funding.ts";
 import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
@@ -342,9 +344,9 @@ function ensureErc20Address(env: NodeJS.ProcessEnv): void {
     logSkip("default ERC20_ADDRESS", `ERC20_ADDRESS is set (${env.ERC20_ADDRESS})`);
     return;
   }
-  env.ERC20_ADDRESS = SEPOLIA_USDC;
+  env.ERC20_ADDRESS = CIRCLE_USDC;
   console.log(
-    `defaulted ERC20_ADDRESS=${SEPOLIA_USDC} (real Sepolia USDC — the suites fork Sepolia)`,
+    `defaulted ERC20_ADDRESS=${CIRCLE_USDC} (real Sepolia USDC — the suites fork Sepolia)`,
   );
 }
 
@@ -360,7 +362,7 @@ function ensureAllowedTokens(env: NodeJS.ProcessEnv): void {
     logSkip("default EVM_ALLOWED_TOKENS", `EVM_ALLOWED_TOKENS is set (${env.EVM_ALLOWED_TOKENS})`);
     return;
   }
-  env.EVM_ALLOWED_TOKENS = `${requireEnv(env, "ERC20_ADDRESS")},${SEPOLIA_EURC}`;
+  env.EVM_ALLOWED_TOKENS = `${requireEnv(env, "ERC20_ADDRESS")},${CIRCLE_EURC}`;
   console.log(`defaulted EVM_ALLOWED_TOKENS=${env.EVM_ALLOWED_TOKENS}`);
 }
 

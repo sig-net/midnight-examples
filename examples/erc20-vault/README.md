@@ -683,16 +683,20 @@ exercised on every local e2e run.
 yarn deploy:erc20-vault
 
 # a remote network (stagenet): deploy, run the deployer-gated initialise,
-# then allow the ERC20s EVM_ALLOWED_TOKENS lists
+# then allow the ERC20s EVM_ALLOWED_TOKENS lists. With none listed, a vault on
+# Sepolia gets Circle's USDC and EURC, WETH and LINK, and one on any other
+# chain gets nothing.
 yarn deploy-initialise:erc20-vault
 
 # initialise a vault that already exists (recovers a run whose deploy landed
 # but whose initialise did not: initialise is one-shot and idempotent)
 yarn initialise:erc20-vault
 
-# allow every ERC20 EVM_ALLOWED_TOKENS lists that the vault does not allow
-# yet: deposits and swaps accept only allowed ERC20s, so run this whenever
-# the list grows. The vault never removes a token.
+# allow every ERC20 EVM_ALLOWED_TOKENS lists (or, with none listed, the same
+# chain defaults as above) that the vault does not allow yet: deposits and
+# swaps accept only allowed ERC20s, so run this whenever the list grows. The
+# vault never removes a token. List only ERC20s whose transfer and approve
+# return a bool: the MPC cannot attest a token that returns nothing (USDT).
 yarn add-allowed-tokens:erc20-vault
 
 # install the circuits a split deploy left missing (recovers a run that died
