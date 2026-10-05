@@ -5,11 +5,16 @@
 
 import {
   envOrUndefined,
+  findMpcRootPublicKey,
+  findSignetContractAddress,
+  getFaucetUrl,
   getMidnightNodeConfig,
   MidnightNetwork,
   type NetworkId,
 } from "@sig-net/midnight-contract-deploy";
 import { buildBaseEnv, loadRepoDotEnv } from "@sig-net/midnight-examples-lib";
+
+import { resolveEvmTargets } from "./evm-targets.ts";
 
 // The inputs an operator supplies per network that a deploy entrypoint seals
 // into the contract: the signet address at deploy, the MPC public key at
@@ -73,5 +78,92 @@ export function assertEnvFileMatchesNetwork(
       `"${networkId}". Those values are network-scoped and are sealed into the contract ` +
       "permanently, so export the ones belonging to this network (or remove them from .env) " +
       "rather than deploying against another network's values.",
+  );
+}
+
+/** Where a deploy entrypoint's effective setting came from. */
+export enum EntrypointEnvSource {
+  /** The real environment, exported for this run. */
+  Shell = "shell",
+  /** The repo-root `.env` file. */
+  EnvFile = ".env file",
+  /** Neither supplies it, so the built-in or SDK-published value applies. */
+  Default = "default",
+}
+
+/** One row of {@link deployInitialiseEnvironmentTable}. */
+export interface EntrypointEnvRow {
+  /** The value the run uses, abbreviated in the middle past 66 characters. */
+  value: string;
+  /** Which source supplied {@link value}. */
+  source: EntrypointEnvSource;
+}
+
+/**
+ * Tabulate every environment variable a deploy-and-initialise run reads, each
+ * with the value it resolves to and the source that supplied it. Secrets show
+ * as `(hidden)`, and `EVM_RPC_URL` shows its origin only, as RPC providers put
+ * API keys in the path.
+ *
+ * @param env - The merged environment the run reads (see {@link buildEntrypointEnv}).
+ * @param processEnv - The real environment, to tell its values from the `.env` file's.
+ * @returns One row per variable, keyed by variable name.
+ * @throws {Error} If `NETWORK_ID`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` or
+ *   `MPC_SECP256K1_PUBKEY` is malformed.
+ */
+export function deployInitialiseEnvironmentTable(
+  env: Record<string, string | undefined>,
+  processEnv: Record<string, string | undefined>,
+): Record<string, EntrypointEnvRow> {
+  const none = "(none)";
+  const supplied = (name: string): string => envOrUndefined(env, name) ?? none;
+  const secret = (name: string): string =>
+    envOrUndefined(env, name) === undefined ? none : "(hidden)";
+  const nodeConfig = getMidnightNodeConfig(env);
+  const targets = resolveEvmTargets(env);
+  const evmRpcUrl = envOrUndefined(env, "EVM_RPC_URL");
+  const evmRpcOrigin =
+    evmRpcUrl !== undefined && URL.canParse(evmRpcUrl)
+      ? new URL(evmRpcUrl).origin
+      : secret("EVM_RPC_URL");
+
+  const values: Record<string, string> = {
+    NETWORK_ID: nodeConfig.networkId,
+    MIDNIGHT_NODE_URL: nodeConfig.nodeUrl,
+    MIDNIGHT_NODE_INDEXER_URL: nodeConfig.indexerUrl,
+    MIDNIGHT_NODE_INDEXER_WS_URL: nodeConfig.indexerWsUrl,
+    MIDNIGHT_NODE_PROOF_SERVER_URL: nodeConfig.proofServerUrl,
+    MIDNIGHT_FAUCET_URL: getFaucetUrl(env, nodeConfig.networkId) ?? none,
+    DEPLOYER_SEED: secret("DEPLOYER_SEED"),
+    VAULT_DEPLOYER_SECRET_KEY: secret("VAULT_DEPLOYER_SECRET_KEY"),
+    MAINTENANCE_SIGNING_KEY: secret("MAINTENANCE_SIGNING_KEY"),
+    MIDNIGHT_SIGNET_CONTRACT_ADDRESS: findSignetContractAddress(env)?.value ?? none,
+    MPC_SECP256K1_PUBKEY: findMpcRootPublicKey(env)?.value ?? none,
+    EVM_RPC_URL: evmRpcOrigin,
+    EVM_CHAIN_ID: supplied("EVM_CHAIN_ID"),
+    EVM_START_HEIGHT: supplied("EVM_START_HEIGHT"),
+    EVM_ROUTER: targets.routerAddress,
+    EVM_STATA_UNDERLYING: targets.stataUnderlyingAddress,
+    EVM_STATA_TOKEN: targets.stataTokenAddress,
+    EVM_ALLOWED_TOKENS: supplied("EVM_ALLOWED_TOKENS"),
+    MIDNIGHT_VAULT_CONTRACT_ADDRESS: supplied("MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
+    EVM_VAULT_ADDRESS: supplied("EVM_VAULT_ADDRESS"),
+    MPC_RESPONSE_KEY: supplied("MPC_RESPONSE_KEY"),
+  };
+
+  const sourceOf = (name: string): EntrypointEnvSource => {
+    if (envOrUndefined(env, name) === undefined) return EntrypointEnvSource.Default;
+    return envOrUndefined(processEnv, name) === undefined
+      ? EntrypointEnvSource.EnvFile
+      : EntrypointEnvSource.Shell;
+  };
+  return Object.fromEntries(
+    Object.entries(values).map(([name, value]) => [
+      name,
+      {
+        value: value.length > 66 ? `${value.slice(0, 32)}…${value.slice(-32)}` : value,
+        source: sourceOf(name),
+      },
+    ]),
   );
 }

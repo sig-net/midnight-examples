@@ -5,9 +5,14 @@
 // up would produce a contract that can never work.
 
 import { MidnightNetwork } from "@sig-net/midnight";
+import { UNISWAP_SWAP_ROUTER_02 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { describe, expect, it } from "vitest";
 
-import { assertEnvFileMatchesNetwork } from "../src/entrypoint-env.ts";
+import {
+  assertEnvFileMatchesNetwork,
+  deployInitialiseEnvironmentTable,
+  EntrypointEnvSource,
+} from "../src/entrypoint-env.ts";
 
 // What a local e2e run leaves in the repo-root .env.
 const LOCAL_ENV_FILE = {
@@ -110,5 +115,57 @@ describe("assertEnvFileMatchesNetwork", () => {
     };
     // The error names every stale variable, so one run fixes them all.
     for (const name of names) expect(check).toThrow(name);
+  });
+});
+
+describe("deployInitialiseEnvironmentTable", () => {
+  it("reports the local defaults when nothing is set", () => {
+    const table = deployInitialiseEnvironmentTable({}, {});
+    expect(table).toMatchObject({
+      NETWORK_ID: { value: "undeployed", source: EntrypointEnvSource.Default },
+      MIDNIGHT_NODE_URL: { value: "http://127.0.0.1:9944", source: EntrypointEnvSource.Default },
+      DEPLOYER_SEED: { value: "(none)", source: EntrypointEnvSource.Default },
+      MIDNIGHT_SIGNET_CONTRACT_ADDRESS: { value: "(none)", source: EntrypointEnvSource.Default },
+      EVM_RPC_URL: { value: "(none)", source: EntrypointEnvSource.Default },
+      EVM_ROUTER: { value: UNISWAP_SWAP_ROUTER_02, source: EntrypointEnvSource.Default },
+    });
+    expect(Object.keys(table)).toHaveLength(21);
+  });
+
+  it("names the source of each value, and hides secrets and the RPC path", () => {
+    // secp256k1's generator point, compressed: the smallest valid public key to write out.
+    const mpcPublicKey = "0x0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+    const seed = "5e".repeat(32);
+    const fileEnv = {
+      DEPLOYER_SEED: seed,
+      MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "aa".repeat(32),
+      EVM_CHAIN_ID: "31337",
+      EVM_ROUTER: `0x${"12".repeat(20)}`,
+    };
+    const processEnv = {
+      MPC_SECP256K1_PUBKEY: mpcPublicKey,
+      EVM_RPC_URL: "https://sepolia.example/v2/api-key",
+      EVM_ROUTER: "   ",
+    };
+
+    const table = deployInitialiseEnvironmentTable({ ...fileEnv, ...processEnv }, processEnv);
+
+    expect(table).toMatchObject({
+      DEPLOYER_SEED: { value: "(hidden)", source: EntrypointEnvSource.EnvFile },
+      MIDNIGHT_SIGNET_CONTRACT_ADDRESS: {
+        value: "aa".repeat(32),
+        source: EntrypointEnvSource.EnvFile,
+      },
+      EVM_CHAIN_ID: { value: "31337", source: EntrypointEnvSource.EnvFile },
+      MPC_SECP256K1_PUBKEY: {
+        value: "0x0479be667ef9dcbbac55a06295ce87…fd17b448a68554199c47d08ffb10d4b8",
+        source: EntrypointEnvSource.Shell,
+      },
+      EVM_RPC_URL: { value: "https://sepolia.example", source: EntrypointEnvSource.Shell },
+      // The blank shell value masks the file's, so the built-in router applies.
+      EVM_ROUTER: { value: UNISWAP_SWAP_ROUTER_02, source: EntrypointEnvSource.Default },
+    });
+    expect(JSON.stringify(table)).not.toContain(seed);
+    expect(JSON.stringify(table)).not.toContain("api-key");
   });
 });
