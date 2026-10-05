@@ -8,8 +8,8 @@
 // The unviable attestation needs an ARCHIVE Sepolia RPC behind the anvil fork: the
 // fakenet responder finds the block that consumed the replaced nonce by bisecting
 // the account's nonce over chain history. The replacement's executed attestation
-// carries the success value the MPC synthesises for a plain transfer, which returns
-// no data: the poll recomputes it from the respond schema (see completeReplaceNonce).
+// commits to the EMPTY output: a plain transfer returns no data and the request's
+// output schema is empty, so every verdict on it settles at width 0.
 //
 // Run AFTER tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives there, and
 // the session's identity must be the deployer's (the setup defaults
@@ -398,9 +398,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         expect(replacementAttestation.event.outputKind).toBe(OutputKind.executed);
         expect(
-          replacementAttestation.succeeded,
-          "a plain transfer attests the schema's synthesised success value",
-        ).toBe(true);
+          replacementAttestation.serializedOutput,
+          "a plain transfer under the empty output schema attests the empty output",
+        ).toHaveLength(0);
+        expect(replacementAttestation.succeeded).toBe(true);
       },
       POLL_TIMEOUT_MS + 5 * MINUTE,
     );

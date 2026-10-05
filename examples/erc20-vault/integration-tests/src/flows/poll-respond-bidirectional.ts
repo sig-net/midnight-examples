@@ -6,20 +6,16 @@
 import { OutputKind, type RequestIdHex } from "@sig-net/midnight";
 
 import { PollProgress } from "../poll-progress.ts";
+import { schemaJson } from "../schema-json.ts";
 import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import {
   fetchAttestedRespondOutcome,
   type RespondOutcome,
-  type RespondOutputSchemas,
   RespondPollMemo,
 } from "./respond-output.ts";
 
-export {
-  fetchAttestedRespondOutcome,
-  type RespondOutcome,
-  type RespondOutputSchemas,
-} from "./respond-output.ts";
+export { fetchAttestedRespondOutcome, type RespondOutcome } from "./respond-output.ts";
 
 /** Options for {@link pollRespondBidirectional}. */
 export interface PollRespondBidirectionalOptions {
@@ -37,17 +33,6 @@ export interface PollRespondBidirectionalOptions {
 }
 
 /**
- * The JSON text of an on-ledger schema field. The contract stores each
- * schema NUL-padded to its declared Compact width (`pad(N, "...")`).
- *
- * @param padded - The schema bytes as the request record carries them.
- * @returns The schema's JSON text, padding removed.
- */
-function schemaJson(padded: Uint8Array): string {
-  return new TextDecoder().decode(padded).replace(/\0+$/u, "");
-}
-
-/**
  * Poll the signet contract until an MPC respond-bidirectional attestation
  * for `options.requestId` VERIFIES over the independently recomputed output,
  * and return the resolved outcome.
@@ -58,9 +43,9 @@ function schemaJson(padded: Uint8Array): string {
  * events' signatures against it (see `fetchAttestedRespondOutcome`): the
  * event log is unauthenticated, and that check is what makes a returned
  * record meaningful off-chain. The queue circuits run the same check
- * in-circuit, which is the actual authentication gate. The schemas the
- * recomputation runs are the request record's own, read once here: they are
- * what the MPC ran, and the reader, the pinned response key and the observed
+ * in-circuit, which is the actual authentication gate. The output schema the
+ * recomputation runs is the request record's own, read once here: it is what
+ * the MPC ran, and the reader, the pinned response key and the observed
  * output are likewise resolved once for the whole poll
  * ({@link RespondPollMemo}). This flow owns the poll loop, the timeout, and
  * the reporting: it logs the outcome (the verified output kind and, for an
@@ -89,10 +74,7 @@ export async function pollRespondBidirectional(
 
   const memo = new RespondPollMemo(createResponseReader(context, options.requestsPath));
   const request = await memo.reader.getSignatureRequest(options.requestId);
-  const schemas: RespondOutputSchemas = {
-    outputDeserializationSchema: schemaJson(request.outputDeserializationSchema),
-    respondSerializationSchema: schemaJson(request.respondSerializationSchema),
-  };
+  const outputSchema = schemaJson(request.outputDeserializationSchema);
 
   // The reads are single-shot; this loop owns the cadence and the give-up
   // timeout.
@@ -107,7 +89,7 @@ export async function pollRespondBidirectional(
         context,
         options.requestId,
         context.respondOutputSource,
-        schemas,
+        outputSchema,
         options.requestsPath,
         progress,
         memo,

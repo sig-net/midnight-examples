@@ -23,11 +23,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_OUTPUT } from "../src/empty-output.ts";
 import { fetchAttestedRespondOutcome, RespondPollMemo } from "../src/flows/respond-output.ts";
-import { ERC20_TRANSFER_RESULT_SCHEMA } from "../src/mpc-routing.ts";
+import {
+  ERC20_TRANSFER_OUTPUT_SCHEMA,
+  REPLACE_NONCE_OUTPUT_SCHEMA,
+  SWAP_MPC_ROUTING,
+} from "../src/mpc-routing.ts";
 import type { ObservedExecution } from "../src/observed-execution.ts";
 import * as observedModule from "../src/observed-execution.ts";
 import { OutputSource } from "../src/output-source.ts";
 import { PollProgress } from "../src/poll-progress.ts";
+import { schemaJson } from "../src/schema-json.ts";
 import * as contextModule from "../src/vault-context.ts";
 
 const REQUEST_ID = parseRequestIdHex("ab".repeat(32));
@@ -38,16 +43,19 @@ const EXPECTED_OBJECT_PATH = `/v1/test/${NETWORK_ID}/${SIGNET_CONTRACT_ADDRESS}/
 // post attestations the way the MPC does.
 const MPC_RESPONSE_SECRET = new Uint8Array(32).fill(7);
 const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
-// The vault's transfer schema in both directions, as its request records carry it.
-const SCHEMAS = {
-  outputDeserializationSchema: ERC20_TRANSFER_RESULT_SCHEMA,
-  respondSerializationSchema: ERC20_TRANSFER_RESULT_SCHEMA,
-};
+// The output schemas the request records carry: the single bool of a transfer,
+// the empty schema of a nonce replacement, the uint256 of a swap.
+const OUTPUT_SCHEMA = ERC20_TRANSFER_OUTPUT_SCHEMA;
+const SWAP_OUTPUT_SCHEMA = schemaJson(SWAP_MPC_ROUTING.outputDeserializationSchema);
 // This suite plays the MPC, so the attested destination height is whatever
 // it claims: the check is that the height is signed, not that it is real.
 const BLOCK_HEIGHT = 77n;
 const TRANSFER_TRUE = new Uint8Array([0x01]);
 const TRANSFER_FALSE = new Uint8Array([0x00]);
+// An attested swap amountIn of 1: the uint256 whole, little-endian. Its first
+// byte is the bool schema's success byte, so it pins that an attested value
+// never reads as a verdict.
+const SWAP_AMOUNT_IN_ONE = Uint8Array.from([0x01, ...new Uint8Array(31)]);
 
 /** An MPC post attesting `serializedOutput` under `outputKind` for {@link REQUEST_ID}. */
 function attest(outputKind: OutputKind, serializedOutput: Uint8Array): RespondBidirectionalEvent {
@@ -146,31 +154,49 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
   it.each([
     {
       name: "a transfer that returned true",
+      outputSchema: OUTPUT_SCHEMA,
       outputKind: OutputKind.executed,
       cached: TRANSFER_TRUE,
       succeeded: true,
     },
     {
       name: "a transfer that returned false",
+      outputSchema: OUTPUT_SCHEMA,
       outputKind: OutputKind.executed,
       cached: TRANSFER_FALSE,
       succeeded: false,
     },
     {
       name: "a reverted transfer (failed, empty output)",
+      outputSchema: OUTPUT_SCHEMA,
       outputKind: OutputKind.failed,
       cached: EMPTY_OUTPUT,
       succeeded: false,
     },
     {
       name: "a transfer whose nonce another transaction took (unviable, empty output)",
+      outputSchema: OUTPUT_SCHEMA,
       outputKind: OutputKind.unviable,
       cached: EMPTY_OUTPUT,
       succeeded: false,
     },
+    {
+      name: "an executed nonce replacement (empty schema, empty output)",
+      outputSchema: REPLACE_NONCE_OUTPUT_SCHEMA,
+      outputKind: OutputKind.executed,
+      cached: EMPTY_OUTPUT,
+      succeeded: true,
+    },
+    {
+      name: "an executed swap (uint256 output: a value, never a verdict)",
+      outputSchema: SWAP_OUTPUT_SCHEMA,
+      outputKind: OutputKind.executed,
+      cached: SWAP_AMOUNT_IN_ONE,
+      succeeded: false,
+    },
   ])(
     "resolves $name from the cached bytes the attestation signs",
-    async ({ outputKind, cached, succeeded }) => {
+    async ({ outputSchema, outputKind, cached, succeeded }) => {
       const paths: string[] = [];
       const baseUrl = await serveBucket({ status: 200, body: cached }, paths);
       const event = attest(outputKind, cached);
@@ -180,7 +206,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
         contextWithCache(baseUrl),
         REQUEST_ID,
         OutputSource.MPCCache,
-        SCHEMAS,
+        outputSchema,
       );
 
       expect(outcome).toEqual({ event, serializedOutput: cached, succeeded });
@@ -197,7 +223,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
       contextWithCache(baseUrl),
       REQUEST_ID,
       OutputSource.MPCCache,
-      SCHEMAS,
+      OUTPUT_SCHEMA,
       undefined,
       progress,
     );
@@ -222,7 +248,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
       contextWithCache(baseUrl),
       REQUEST_ID,
       OutputSource.MPCCache,
-      SCHEMAS,
+      OUTPUT_SCHEMA,
       undefined,
       progress,
     );
@@ -242,7 +268,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
       contextWithCache(baseUrl),
       REQUEST_ID,
       OutputSource.MPCCache,
-      SCHEMAS,
+      OUTPUT_SCHEMA,
       undefined,
       progress,
     );
@@ -262,7 +288,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
       contextWithCache(baseUrl),
       REQUEST_ID,
       OutputSource.MPCCache,
-      SCHEMAS,
+      OUTPUT_SCHEMA,
     );
 
     expect(outcome).toBeUndefined();
@@ -277,7 +303,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
         contextWithCache(undefined),
         REQUEST_ID,
         OutputSource.MPCCache,
-        SCHEMAS,
+        OUTPUT_SCHEMA,
       ),
     ).rejects.toThrow("mpc-cache needs MPC_OUTPUT_CACHE_URL set");
   });
@@ -327,7 +353,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.EVMNode", () => {
       contextWithCache(undefined),
       REQUEST_ID,
       OutputSource.EVMNode,
-      SCHEMAS,
+      OUTPUT_SCHEMA,
     );
 
     expect(outcome).toEqual({ event, serializedOutput: EMPTY_OUTPUT, succeeded: false });
@@ -345,27 +371,52 @@ describe("fetchAttestedRespondOutcome under OutputSource.EVMNode", () => {
       contextWithCache(undefined),
       REQUEST_ID,
       OutputSource.EVMNode,
-      SCHEMAS,
+      OUTPUT_SCHEMA,
     );
 
     expect(outcome).toEqual({ event, serializedOutput: TRANSFER_TRUE, succeeded: true });
   });
 
-  it("recomputes a plain transfer's executed output from the MPC's schema defaults", async () => {
+  it("recomputes an executed nonce replacement's empty output from a plain transfer's trace", async () => {
     vi.spyOn(observedModule, "observeExecution").mockResolvedValue(
       observation(true, false, PLAIN_TRANSFER_TRACE),
     );
-    const event = attest(OutputKind.executed, TRANSFER_TRUE);
+    const event = attest(OutputKind.executed, EMPTY_OUTPUT);
     stubChainReads([event]);
 
     const outcome = await fetchAttestedRespondOutcome(
       contextWithCache(undefined),
       REQUEST_ID,
       OutputSource.EVMNode,
-      SCHEMAS,
+      REPLACE_NONCE_OUTPUT_SCHEMA,
     );
 
-    expect(outcome).toEqual({ event, serializedOutput: TRANSFER_TRUE, succeeded: true });
+    expect(outcome).toEqual({ event, serializedOutput: EMPTY_OUTPUT, succeeded: true });
+  });
+
+  it("yields no executed candidate when a plain transfer's trace meets the bool schema", async () => {
+    // The MPC refuses to attest such a request's execution at all, so a post
+    // declaring it executed can only be forged: the decode failure drops the
+    // candidate and the post fails to verify.
+    vi.spyOn(observedModule, "observeExecution").mockResolvedValue(
+      observation(true, false, PLAIN_TRANSFER_TRACE),
+    );
+    stubChainReads([attest(OutputKind.executed, TRANSFER_TRUE)]);
+    const progress = new PollProgress("test", 1000);
+
+    const outcome = await fetchAttestedRespondOutcome(
+      contextWithCache(undefined),
+      REQUEST_ID,
+      OutputSource.EVMNode,
+      OUTPUT_SCHEMA,
+      undefined,
+      progress,
+    );
+
+    expect(outcome).toBeUndefined();
+    expect(progress.summary()).toContain(
+      "no signature verifies against the vault response key and the evm-node output",
+    );
   });
 
   it("still verifies a failure post while the executed post's observation fails", async () => {
@@ -379,7 +430,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.EVMNode", () => {
       contextWithCache(undefined),
       REQUEST_ID,
       OutputSource.EVMNode,
-      SCHEMAS,
+      OUTPUT_SCHEMA,
     );
 
     expect(outcome).toEqual({ event: failure, serializedOutput: EMPTY_OUTPUT, succeeded: false });
@@ -395,7 +446,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.EVMNode", () => {
       contextWithCache(undefined),
       REQUEST_ID,
       OutputSource.EVMNode,
-      SCHEMAS,
+      OUTPUT_SCHEMA,
       undefined,
       progress,
     );
@@ -421,7 +472,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.EVMNode", () => {
           context,
           REQUEST_ID,
           OutputSource.EVMNode,
-          SCHEMAS,
+          OUTPUT_SCHEMA,
           undefined,
           undefined,
           memo,

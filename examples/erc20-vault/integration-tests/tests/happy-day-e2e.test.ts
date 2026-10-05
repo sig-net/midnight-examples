@@ -347,7 +347,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
       // The output the attestation signs over travels off chain: the poll
-      // traces the sweep's mined transaction for its raw output, re-packs it
+      // traces the sweep's mined transaction for its raw output, Borsh-encodes it
       // per the schema and verifies the posted events' signatures over it
       // against the response key the vault pinned.
       const context = await session.vaultContext();
@@ -398,7 +398,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         "",
         "The output stayed off chain: the raw bytes came from a",
         "debug_traceTransaction of the mined sweep transaction, were",
-        "re-packed here, and the posted signature verified over them.",
+        "Borsh-encoded here, and the posted signature verified over them.",
       ]);
     },
     POLL_TIMEOUT_MS + 5 * MINUTE,

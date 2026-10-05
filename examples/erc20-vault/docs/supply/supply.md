@@ -79,11 +79,10 @@ As illustrated, the flow comprises 9 steps:
     pinned [`stataToken`](../../contract/src/erc20-vault.compact), so the
     minted shares land in the vault's own account and nowhere else, and a
     client cannot point the pooled funds at a contract of their own.
-  - A wrapper deposit returns a `uint256` share count the MPC repacks as a
-    `uint64`, so the request carries its own schemas
-    ([`supplyOutputSchema`](../../contract/src/erc20-vault.compact) and
-    [`supplyRespondSchema`](../../contract/src/erc20-vault.compact)), and
-    their widths are part of the supply map's ledger type.
+  - A wrapper deposit returns a `uint256` share count, which the MPC attests
+    whole as 32 little-endian bytes, so the request carries its own output
+    schema ([`supplyOutputSchema`](../../contract/src/erc20-vault.compact)),
+    whose width is part of the supply map's ledger type.
   - The record goes into `bidirectionalSupplyMap` under its request id, signed
     for the vault's own account (path `pad(32, "vault")`) at the assigned
     nonce and the gas the start copied, and the singleton's
@@ -106,14 +105,14 @@ As illustrated, the flow comprises 9 steps:
     resolves the MPC's attestation as it does for a
     [deposit](../deposit/deposit.md). A post declaring **`executed`** is
     checked over the wrapper's return decoded per the `uint256` output schema
-    and re-packed per the `uint64` respond schema, the 8 bytes that carry the
-    shares minted. The exchange rate is live, so the shares come from the
+    and Borsh-serialised as the MPC does, the 32 little-endian bytes that carry
+    the shares minted. The exchange rate is live, so the shares come from the
     attestation and are never computed in advance. A post declaring
     **`failed`** or **`unviable`** is checked over the EMPTY output.
 - **7.** queue the attestation at its output's width
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     submits an executed supply to
-    [`queueAttestation8`](../../contract/src/erc20-vault.compact) and a failed
+    [`queueAttestation32`](../../contract/src/erc20-vault.compact) and a failed
     or unviable one to `queueAttestation0`. The circuit verifies the MPC's
     signature over the output against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), finds the open
@@ -125,7 +124,7 @@ As illustrated, the flow comprises 9 steps:
 - **9.** completeSupply(...) mints the attested shares as stataToken vault coins
   - The supplier calls
     [`completeSupply`](../../contract/src/erc20-vault.compact) with the
-    request id, the 8-byte serialised output and a mint nonce. The circuit
+    request id, the 32-byte serialised output and a mint nonce. The circuit
     requires the flushed attestation, a block height strictly above the
     entry's `lastSeen` and the caller's ownership commitment, which makes
     every mint supplier-only, then removes the request's event, its
@@ -133,7 +132,7 @@ As illustrated, the flow comprises 9 steps:
   - An `executed` verdict requires the output to hash to the record's digest,
     then mints the attested share count, which the pure
     [`supplyShares`](../../contract/src/erc20-vault.compact) circuit
-    deserialises from the output, as the `stataToken` vault coin.
+    narrows from the output in-circuit, as the `stataToken` vault coin.
   - A `failed` or `unviable` verdict means the wrapper took nothing, so the
     circuit re-mints the surrendered `stataUnderlying` amount, and the output
     it is passed is ignored. Either mint goes to the caller under a
@@ -204,7 +203,7 @@ sequenceDiagram
     MPC->>Singleton: respondBidirectional(...) posts the attestation
     DApp->>Singleton: polls for the attestation
     Note over User,Vault: Step 7: queue the attestation at its output's width
-    User->>Vault: queueAttestation8(...) or queueAttestation0(...)
+    User->>Vault: queueAttestation32(...) or queueAttestation0(...)
     Note over User,Vault: Step 8: flushQueue(...) moves the attestation into the output buffer
     User->>Vault: flushQueue(...)
     Note over User,Vault: Step 9: completeSupply(...) mints the attested shares as stataToken vault coins
