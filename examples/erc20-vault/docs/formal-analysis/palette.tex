@@ -1,12 +1,14 @@
-% The document's only colour definitions. Named by role, not by hue, so a
-% re-theme touches this file alone.
-\definecolor{hdblue}{HTML}{1E3A8A}    % headings and frame titles
-\definecolor{ctgrey}{HTML}{F6F6F6}    % table row and frame-title fill
-\definecolor{refgrey}{HTML}{E2E8F0}   % circuit-box title fill
-\definecolor{boxrule}{HTML}{334155}   % neutral frame border
-\definecolor{pubbg}{HTML}{EFF6FF}     % public-information box fill
-\definecolor{pubrule}{HTML}{1D4ED8}   % public-information box border
+% Box colours by role, each taken from the brand palette sig-brand.sty
+% defines. The four semantic annotation colours below are outside that
+% palette on purpose: the prose names them (blue for Midnight's layer, red
+% for secrets) so they must stay recognisable whatever the brand theme.
+\colorlet{boxtitle}{SigDark}
+\colorlet{boxrule}{SigShell}
+\colorlet{boxfill}{SigShell!20!SigCream}
+\colorlet{boxbg}{SigCream}
+\colorlet{pubbg}{SigBrand}
+\colorlet{pubrule}{SigHeader}
+\colorlet{addrule}{SigDark}
 \definecolor{mntbg}{HTML}{D3E6F7}     % Midnight-provided component fill
 \definecolor{mntrule}{HTML}{3E7CB1}   % Midnight-provided component border
-\definecolor{addrule}{HTML}{000000}   % marker for material added in revision
 \definecolor{bordo}{RGB}{128,0,32}    % secret values in protocol text

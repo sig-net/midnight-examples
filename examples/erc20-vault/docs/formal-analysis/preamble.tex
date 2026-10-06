@@ -1,19 +1,15 @@
-\usepackage[a4paper,top=2.1cm,bottom=2.1cm,left=2.2cm,right=2.2cm]{geometry}
-\usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
+% Page layout, fonts, headings, title block and footer come from the
+% Sig.Network document template (sig-brand.sty), which .latexmkrc locates.
 \usepackage[table,dvipsnames]{xcolor}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs,longtable,array,ragged2e,enumitem}
-\usepackage{titlesec,fancyhdr,mdframed}
+\usepackage{mdframed}
 \usepackage[most]{tcolorbox}
 \usepackage[htt]{hyphenat}
-\usepackage[colorlinks=true,linkcolor=NavyBlue,urlcolor=NavyBlue,citecolor=NavyBlue]{hyperref}
+\usepackage{hyperref}
+\usepackage{sig-brand}
+\emergencystretch=3em
 
 \input{palette}
 
-\titleformat{\section}{\Large\bfseries\color{hdblue}}{\thesection}{0.7em}{}
-\titleformat{\subsection}{\normalsize\bfseries\color{hdblue}}{\thesubsection}{0.5em}{}
-\titleformat{\subsubsection}{\normalsize\bfseries\color{hdblue}}{\thesubsubsection}{0.5em}{}
-\pagestyle{fancy}\fancyhf{}
 \newcolumntype{L}[1]{>{\RaggedRight\arraybackslash}p{#1}}
-\renewcommand{\arraystretch}{1.18}

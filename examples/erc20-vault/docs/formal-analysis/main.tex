@@ -1,17 +1,15 @@
-% !TeX program = pdflatex
+% !TeX program = xelatex
 \documentclass[11pt]{article}
 \input{preamble}
 \input{macros}
 
 \begin{document}
 
-\title{%
-  {\LARGE\bfseries\color{hdblue} SigNet's Public-to-Private Cross-Chain \Payment System}\\[0.4em]
-  {\Large\color{gray} Formal Treatment of its Security Analysis}%
-}
+\title{SigNet's Public-to-Private Cross-Chain \Payment System\\[2pt]
+  {\large\mdseries Formal Treatment of its Security Analysis}}
 
-\author{Alessandra Scafuro\\ \href{mailto:alessandra@sig.network}{\texttt{alessandra@sig.network}}}
 \maketitle
+\noindent{\color{SigInkSoft}\footnotesize Alessandra Scafuro, \href{mailto:alessandra@sig.network}{alessandra@sig.network}}\par\vspace{\baselineskip}
 \begin{abstract}
     This document establishes the foundation for analyzing the soundness and unlinkability of SigNet’s Public-to-Private Cross-Chain System.  The system comprises several complex components: the MPC systems, the Midnight  shielded-transaction layer and shielded-computation layer, the Ethereum ledger.
     After establishing the foundations, this document  focuses exclusively on the  \href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{vault contract} \emph{Version 0.1}\footnote{ This is an   \href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{\textbf{earlier version}} of the  system. A  \href{https://github.com/sig-net/midnight-examples/blob/dev/examples/erc20-vault/contract/src/erc20-vault.compact}{new version} is available and contains modifications that are not formally analyzed here. Nevertheless, the proof strategy used in this paper should extend to the new version. }. 

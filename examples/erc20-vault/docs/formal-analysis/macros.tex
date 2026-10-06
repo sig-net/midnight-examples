@@ -9,16 +9,16 @@
 \newcounter{expfig}
 \newenvironment{ExpFig}[2]%
  {\refstepcounter{expfig}\label{#1}%
-  \begin{mdframed}[linecolor=boxrule,linewidth=0.7pt,backgroundcolor=ctgrey,
+  \begin{mdframed}[linecolor=boxrule,linewidth=0.7pt,backgroundcolor=boxfill,
     innertopmargin=7pt,innerbottommargin=7pt,innerleftmargin=9pt,innerrightmargin=9pt,
     skipabove=9pt,skipbelow=3pt]\small
   \begin{center}\textbf{#2}\end{center}\vspace{-2pt}\noindent}
  {\end{mdframed}\vspace{-4pt}\begin{center}\footnotesize Fig.~\arabic{expfig}\end{center}\vspace{4pt}}
 
 \newenvironment{ProcBox}[1]%
- {\begin{mdframed}[linecolor=boxrule,linewidth=0.8pt,backgroundcolor=white,
+ {\begin{mdframed}[linecolor=boxrule,linewidth=0.8pt,backgroundcolor=boxbg,
     innertopmargin=6pt,innerbottommargin=6pt,innerleftmargin=8pt,innerrightmargin=8pt,
-    frametitle={\normalsize\bfseries\color{hdblue}#1},frametitlebackgroundcolor=ctgrey,
+    frametitle={\normalsize\bfseries\color{boxtitle}#1},frametitlebackgroundcolor=boxfill,
     frametitlerule=true,frametitlerulewidth=0.4pt,skipabove=8pt]\small}%
  {\end{mdframed}}
 
@@ -34,25 +34,25 @@
 \renewcommand{\thecktctr}{C\arabic{cktctr}}
 \newenvironment{CktBox}[2]%
  {\refstepcounter{cktctr}\label{#1}%
-  \begin{mdframed}[linecolor=hdblue,linewidth=0.8pt,backgroundcolor=white,
+  \begin{mdframed}[linecolor=boxtitle,linewidth=0.8pt,backgroundcolor=boxbg,
     innertopmargin=6pt,innerbottommargin=6pt,innerleftmargin=8pt,innerrightmargin=8pt,
-    frametitle={\color{hdblue}Circuit~\thecktctr{} --- #2},
-    frametitlebackgroundcolor=refgrey,frametitlerule=true,frametitlerulewidth=0.4pt,
+    frametitle={\color{boxtitle}Circuit~\thecktctr{} --- #2},
+    frametitlebackgroundcolor=boxfill,frametitlerule=true,frametitlerulewidth=0.4pt,
     skipabove=9pt,skipbelow=9pt]\small\sloppy}%
  {\end{mdframed}}
 
 \newenvironment{TxtBox}[2]%
  {\label{#1}%
-  \begin{mdframed}[linecolor=hdblue,linewidth=0.8pt,backgroundcolor=white,
+  \begin{mdframed}[linecolor=boxtitle,linewidth=0.8pt,backgroundcolor=boxbg,
     innertopmargin=6pt,innerbottommargin=6pt,innerleftmargin=8pt,innerrightmargin=8pt,
-    frametitle={\normalsize\bfseries\color{hdblue} #2},
-    frametitlebackgroundcolor=refgrey,frametitlerule=true,frametitlerulewidth=0.4pt,
+    frametitle={\normalsize\bfseries\color{boxtitle} #2},
+    frametitlebackgroundcolor=boxfill,frametitlerule=true,frametitlerulewidth=0.4pt,
     skipabove=9pt,skipbelow=9pt]\small\sloppy}%
  {\end{mdframed}}
 
 \newcounter{stepctr}[subsection]
 \newenvironment{Steps}%
- {\begin{list}{\footnotesize\textcolor{hdblue}{Step \arabic{stepctr}.}}%
+ {\begin{list}{\footnotesize\textcolor{boxtitle}{Step \arabic{stepctr}.}}%
    {\usecounter{stepctr}\setlength{\leftmargin}{3.6em}\setlength{\itemsep}{3pt}%
     \setlength{\parsep}{0pt}\setlength{\topsep}{3pt}\setlength{\labelwidth}{3.2em}}}%
  {\end{list}}
@@ -97,8 +97,9 @@
 \newcommand{\ale}[1]{\textcolor{red}{#1}}
 \ifDRAFT\else\renewcommand{\ale}[1]{}\fi
 \newcommand{\remove}[1]{}
+\newcommand{\upd}[1]{#1}
 \newcommand{\ADDEDINL}[1]{\textcolor{addrule}{#1}}
-\newcommand{\newversion}[1]{{\textcolor{hdblue}{\textbf{Differences with the new version:}} #1}}
+\newcommand{\newversion}[1]{{\textcolor{boxtitle}{\textbf{Differences with the new version:}} #1}}
 
 % Colour roles inside protocol text.
 \newcommand{\secret}[1]{\textcolor{bordo}{#1}}
