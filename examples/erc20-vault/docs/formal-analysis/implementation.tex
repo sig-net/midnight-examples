@@ -1,7 +1,7 @@
 \section{Our Implementation: Components}
 \label{sec:components}
 
-The implementation is the ERC20 Vault contract.  Consult the \href{ https://github.com/sig-net/midnight-examples/blob/dev/examples/erc20-vault/README.md}{ERC20 Vault README}  for a
+The implementation is the ERC20 Vault contract.  Consult the \href{\analysedReadmeUrl}{ERC20 Vault README}  for a
 high-level description of the contract logic and components.
 
 
@@ -200,13 +200,22 @@ identifier, the Signet singleton, and the deployer's identity commitment
 
 
 \vspace{5pt}
-\newversion{The latest version  maintains and publishes the following additional maps: ($\inputRequestBuffer$,
-$\outputRequestBuffer$, $\inputAttestationBuffer$, $\outputAttestationBuffer$).
-These data structures are used to collect requests/attestation, and then to process them.
-These new tables are used for bookkeeping, and do not introduce any user-dependent information,  hence, they do not alter the privacy proof.
-These new tables do not invalidate the  properties  that each request is unique and processed 
-once. }
-\ale{here----}
+\newversion{The latest release replaces $\sigNonce$ and the five settle-view maps with a
+request queue shared by every action: $\inputRequestBuffer$ and $\outputRequestBuffer$ hold
+requests before and after nonce assignment, $\inputAttestationBuffer$ and
+$\outputAttestationBuffer$ hold verified attestations before and after they are folded into
+the block-height watermark $\lastseen$, $\vaultNonce$ is the vault EVM account's next nonce,
+and \code{evictionMap} maps a sent $\rid$ back to its queue entry. Each action keeps a map of
+its queued arguments (\code{depositArgsMap}, \code{withdrawArgsMap}, \ldots) and a map of its
+sent requests (\code{bidirectionalDepositMap}, \ldots). A queue entry carries exactly one
+user-dependent value, the ownership commitment
+$\ownComm(\inIndex, \usersk) = \Hash(\usersk \concat \inIndex \concat \text{``vault:request:''})$
+over a caller-chosen random index $\inIndex$, which stands in for $\refundComm(\usersk, \rid)$.
+Everything else in these tables is bookkeeping (nonces, block heights, argument hashes and
+attestation digests) that does not depend on the caller, so the tables do not alter the
+privacy proof. They preserve the property that each request is unique and processed once:
+completion consumes the entry, and a second identical request is refused while the first is
+open.}
 %-------------------------------------------------------------------------------------
 %-------------------------------------------------------------------------------------
 \subsection{The shielded Layer: Midnight Computation}
@@ -336,17 +345,32 @@ happened on $\Lpub$ (Ethereum), and complete the request on $\Lshd$ (Midnight). 
 The following table maps each call to their circuits.
 \input{table-circuits}
 
-\newversion{In the new version,  the global counter $\sigNonce$  is dropped, and is replaced by a global timing parameter $\lastseen$.
-Transaction nonces are not assigned at request time (and are not derived from the global parameter) by the caller of   {\code{startX}} (for any action X , except Deposit), but by dedicated circuits that can be called by any party.
+\newversion{In the latest release the global counter $\sigNonce$ is dropped. A request id
+is made distinct by the EVM transaction nonce instead, and freshness comes from the
+block-height watermark $\lastseen$. Transaction nonces are not assigned at request time by
+the caller of {\code{startX}} (for any action X except Deposit, whose caller names the nonce
+of their own derived account), but by a dedicated circuit that any party can call.
 
-Specifically,   in the new design, each circuit {\code{startX}}  only prepares the transaction parameters,  without the request nonce and  request ID. This \emph{partial} request   is added to the \emph{buffer} of requests waiting for  nonce assignment.
-Every so often, the pool of requests is processed by a  circuit called $\cktFlush$ that
-assigns a nonce and a freshness value to each request, and a circuit 
-$\cktSend$ that finally computes the request ID $\rid$ using the values set in the 
-$\cktFlush$ and sends the complete request to the MPC to be processed.
-Both  $\cktFlush$ and $\cktSend$ are permissionless and can be executed by everyone.
-Note, $\cktFlush$ and $\cktSend$   only add time-stamping information that are not  user-dependent. As such those circuits do not alter the privacy analysis described in Sec.~\ref{sec:proof}. 
-Circuits $\cktFlush$ and $\cktSend$ implement efficiency optimizations and replay attack protection. 
+Specifically, each circuit {\code{startX}} only validates and records the transaction
+parameters, without the EVM nonce and without the request id, under a caller-chosen random
+index $\inIndex$. This \emph{partial} request is added to the buffer $\inputRequestBuffer$ of
+requests waiting for nonce assignment. Every so often the queue is processed by the circuit
+$\cktFlush$, which assigns the vault account's next nonce $\vaultNonce$ (a counter only
+$\cktFlush$ reads or writes) to each vault-signed request and stamps every request with the
+current $\lastseen$, and by the per-action circuits $\cktSend$ (\code{sendDeposit},
+\code{sendWithdraw}, \ldots), which build the complete request from the flushed entry, compute
+$\rid = \reqIdOf(\req)$ and notify the MPC. On the way back, the circuits $\cktQueueAtt$
+verify the MPC's attestation signature and queue the attestation, $\cktFlush$ folds it into
+$\outputAttestationBuffer$ and raises $\lastseen$ to its block height, and {\code{completeX}}
+consumes the request together with its attestation.
+$\cktFlush$, $\cktSend$ and $\cktQueueAtt$ are permissionless, take no witness and can be
+executed by everyone.
+Note, these circuits only add nonce and time-stamping information that is not user-dependent.
+As such they do not alter the privacy analysis described in Sec.~\ref{sec:proof}. They
+implement efficiency optimisations, contention avoidance and replay-attack protection. The
+refund circuits ({\code{refundX}}) are folded into {\code{completeX}}, which refunds on a
+failed or unviable verdict, and every {\code{completeX}}, the success branch of
+$\cktCompleteWithdraw$ included, is gated on the requester's ownership commitment.
 }
 
 
@@ -372,21 +396,21 @@ that the MPC knows where to read $\req$ from.
 \item \textbf{Derive off-chain}
       \[\begin{aligned}
         \vaultEvmAddr &\gets \Derive(\mpcRootPk\bc \vaultAddr\bc \keyPathLit),\\
-        \mpcRespKey &\gets \Derive(\mpcRootPk\bc \vaultAddr\bc \text{'response-key'}).
+        \mpcRespKey &\gets \Derive(\mpcRootPk\bc \vaultAddr\bc \text{``midnight response key''}).
       \end{aligned}\]
 \item \textbf{Run $\cktInit$} --- \cktref{ckt:initialize}.
 \item \textbf{Run $\cktApprove$} once per ERC20 that will ever be swapped ---
       \cktref{ckt:approverouter}.
 \end{Steps}
 Output the public parameters:\\
-$\pp = (\vaultAddr, \vaultEvmAddr, \mpcRespKey, \chainId, \routerAddr, \text{singleton address},
-\mpcRespKey)$.
+$\pp = (\vaultAddr\bc \vaultEvmAddr\bc \mpcRespKey\bc \chainId\bc \routerAddr\bc \underAddr\bc
+\wrapAddr\bc \text{singleton address})$.
 \end{ProcBox}
 
 
 \begin{CktBox}{ckt:initialize}{$\cktInit$}
 \fld{Arguments.} $\vaultEvmAddr$, $\routerAddr$, \ADDEDINL{$\underAddr$, $\wrapAddr$},
-$\chainId$, $\caipId$, $\mpcRespKey$.
+$\chainId$, $\mpcRespKey$.
 \fld{Witness.} $\usersk$.
 \fld{Reads.} $\initFlag$, $\deplComm$.
 \fld{Steps.}
@@ -395,11 +419,11 @@ $\chainId$, $\caipId$, $\mpcRespKey$.
 \item $\assert \lnk{fn:userComm}{\userComm(\usersk)} = \deplComm$.
 \item $\assert \chainId > 0$, \; $\routerAddr \neq 0$,
       \ADDEDINL{\; $\underAddr \neq 0$, \; $\wrapAddr \neq 0$}.
-\item Write $\initFlag \gets 1$ and the seven pinned values.
+\item Write $\initFlag \gets 1$ and the six pinned values.
 \end{enumerate}
 \begin{OutList}
 \oitem{\Dvault} $\initFlag \gets 1$; $\vaultEvmAddr$, $\routerAddr$,
-  \ADDEDINL{$\underAddr$, $\wrapAddr$}, $\chainId$, $\caipId$, $\mpcRespKey$ written.
+  \ADDEDINL{$\underAddr$, $\wrapAddr$}, $\chainId$, $\mpcRespKey$ written.
 \oitem{\Dshd} $\emptyset$.
 \oitem{\stmt} $(\cktInit,\; \Dvault,\; \comIO)$.
 \oitem{\wit} $\usersk$.
@@ -566,12 +590,12 @@ contract, because the \emph{vault} pays for this transaction.
  \item \textbf{MPC}. The MPC signs the evm request with the key derived
        at $\keyPath = \keyPathLit$, so from $\vaultEvmAddr$, the pool's own account. Once the request is executed,  the MPC signs an attestation $\attSig$ of the outcome $\evmOut$.
 \item \textbf{Settlement call on success: $\cktCompleteWithdraw$}, success branch  (\cktref{ckt:completewithdraw}). \textbf{$\Dshd = \emptyset$ and $\wit = \bot$ on this branch}.
-\item \textbf{Settlement call on failure: $\cktCompleteWithdraw$'s failure branch, or $\cktRefund$}
+\item \textbf{Settlement call on failure: $\cktCompleteWithdraw$'s failure branch, or $\cktRefundWithdraw$}
       -  \cktref{ckt:completewithdraw} and \cktref{ckt:refundwithdraw}, both which gates on
       $\lnk{fn:refundComm}{\refundComm(\usersk, \rid)}$ against the stored marker  and re-mints $\amt$ under a fresh
       $\mintNonce$. The two circuits differ only in which attested output routes to them: an
       executed transfer that returned false goes to $\cktCompleteWithdraw$; a transaction that never
-       executed goes to $\cktRefund$.
+       executed goes to $\cktRefundWithdraw$.
  \end{Steps}
 
 \medskip
@@ -1104,7 +1128,7 @@ so no allowance to a third party is involved.
       interest.
 \item \textbf{Settlement call on success: $\cktCompleteRedeem$} (\cktref{ckt:completeredeem}).
       Redeemer-gated; mints \emph{one} coin, of colour $\colrU$ and value $\amtAssets$.
-\item \textbf{Settlement call on failure: $\cktRefund$}, redeem branch
+\item \textbf{Settlement call on failure: $\cktRefundRedeem$}
       (\cktref{ckt:refundredeem}). Re-mints the \emph{full} $\amtShares$ of color $\colrW$.
 \end{Steps}
 

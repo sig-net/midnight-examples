@@ -12,9 +12,9 @@
 \noindent{\color{SigInkSoft}\footnotesize Alessandra Scafuro, \href{mailto:alessandra@sig.network}{alessandra@sig.network}}\par\vspace{\baselineskip}
 \begin{abstract}
     This document establishes the foundation for analyzing the soundness and unlinkability of SigNet’s Public-to-Private Cross-Chain System.  The system comprises several complex components: the MPC systems, the Midnight  shielded-transaction layer and shielded-computation layer, the Ethereum ledger.
-    After establishing the foundations, this document  focuses exclusively on the  \href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{vault contract} \emph{Version 0.1}\footnote{ This is an   \href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{\textbf{earlier version}} of the  system. A  \href{https://github.com/sig-net/midnight-examples/blob/dev/examples/erc20-vault/contract/src/erc20-vault.compact}{new version} is available and contains modifications that are not formally analyzed here. Nevertheless, the proof strategy used in this paper should extend to the new version. }. 
+    After establishing the foundations, this document  focuses exclusively on the  \href{\analysedContractUrl}{vault contract} at release tag \texttt{\analysedTag}\footnote{This is an \href{\analysedContractUrl}{\textbf{earlier version}} of the system. The latest release, \href{\latestContractUrl}{\texttt{\latestTag}}, contains modifications that are not formally analysed here. Section~\ref{sec:version} lists them. Nevertheless, the proof strategy used in this paper should extend to the latest release.}.
     (For a high-level description of the system logic consult the
-   \href{ https://github.com/sig-net/midnight-examples/blob/dev/examples/erc20-vault/README.md}{ERC20 Vault readme} available on our repository.)
+   \href{\analysedReadmeUrl}{ERC20 Vault readme} of that release.)
  
      Since the vault is written in compact language (provided by Midnight) and it relies on primitives provided by the Midnight shielded-transaction layer, our proof explicitly identifies the cryptographic properties that we assume from the Midnight components, though we do not formally prove that the Mindnight components achieve them.
     The document is organized as follows.
@@ -24,7 +24,7 @@
        This section establishes a formal model for a Public-to-Private Cross-Chain \Payment System over two abstract ledgers: a public ledger ($\Lpub$) and a private ledger ($\Lshd$). It defines core operations (e.g., Deposit, Withdraw, Swap, Supply, Redeem) and their inputs/outputs description, providing a generalized framework adaptable to any pair of chains.
         
         \item  Section~\ref{ssec:unlinakbility}: Formal definition of \emph{Unlinkability} in a \emph{Public-to-Private} Cross-chain \Payment System. This section expresses  the  unlinkability that a public-to-private chain system can achieve via a Game-Based definition, standard in cryptographic proofs. We preferred the game-based approach over the simulation-based approach in the Universal Composability Framework for simplicity. We believe that the game clearly identifies what is protected (and what is leaked) in a public-to-private chain system.
-        \item  Section~\ref{sec:components} and Section~\ref{sec:instantiation}:  Implementation. We provide  an abridged   description of the  \href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{vault contract} (Version 0.1). 
+        \item  Section~\ref{sec:components} and Section~\ref{sec:instantiation}:  Implementation. We provide  an abridged   description of the  \href{\analysedContractUrl}{vault contract} (release \texttt{\analysedTag}).  
       Our implementation  uses  shielded-transaction layer and shielded-computation layer  provided by Midnight. When useful, we use \MidNoteT{blue-shaded boxes} to highlight that we are using a midnight component, and therefore we rely on its security and soundness.
       Furthermore, our contract uses the SygNet's MPC signing system that is treated here as a \emph{trusted signing system}. We also assume that all components related to emitting and processing chain events are trusted.
         \item Section~\ref{sec:assumptions}: Assumptions. We state  the cryptographic assumptions we use and the ones that we inherit from the     Midnight private circuit-layer  and shielded-coin layer.
@@ -36,19 +36,39 @@
     \end{enumerate} 
 
 \end{abstract}
-\section{Version analyzed in this document }
-This document analyses an  earlier version of the system (\href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{link})
- which   used a  counter-based  approach to prevent replay attacks.
+\section{Version analysed in this document}
+\label{sec:version}
+This document analyses the vault contract at release tag
+\href{\analysedContractUrl}{\texttt{\analysedTag}}. The contract source at that tag is
+byte-identical to the source at the earlier tags \texttt{erc20-vault-v0.1.0} and
+\texttt{erc20-vault-v0.2.0}, so the analysis covers those releases as well. Every circuit,
+ledger field and source identifier quoted in this document is taken from that version, which
+prevents replay attacks and keeps request ids distinct with a global request counter
+($\sigNonce$).
 
-The new version (\href{https://github.com/sig-net/midnight-examples/blob/dev/examples/erc20-vault/contract/src/erc20-vault.compact}{link}) addresses replay attacks with a new design based on timing information (updating the last-seen block), and introduces a mechanism to process many requests in parallel,  while preventing contention. 
+The latest release is \href{\latestContractUrl}{\texttt{\latestTag}}. It is not formally
+analysed here. It drops the global counter in favour of a design based on timing information
+(a block-height watermark, $\lastseen$, raised by every attestation the vault folds in) and
+introduces a request queue that lets many requests be processed in parallel while preventing
+contention: a request is started by its caller, assigned a nonce and sent to the MPC by
+permissionless circuits, and settled by its caller once a permissionless circuit has queued
+the MPC's attestation. The refund circuits are folded into the completion circuits, the
+per-request authentication marker becomes a keyed commitment over a caller-chosen random
+index in place of the request id, and deployer-gated administration circuits (gas settings,
+an allow-list of deposit and swap tokens, the approvals and an emergency nonce replacement)
+are added.
 
-The new version introduces public procedures (circuits) to organize requests sent to the MPC and attestations received from it.  These  procedures do not use any private inputs,  can be executed by anyone and are anonymous (i.e., the identity of the caller is not leaked by the circuit computation). As such, they do  not affect the rationale behind the unlinkability  proofs provided in this document.
-The soundness approach is expected to remain unchanged, but this must be confirmed with a formal security proof.
+The public procedures (circuits) the latest release introduces to organise requests sent to
+the MPC and attestations received from it do not use any private inputs, can be executed by
+anyone and are anonymous (i.e., the identity of the caller is not leaked by the circuit
+computation). As such, they do not affect the rationale behind the unlinkability proofs
+provided in this document. The soundness approach is expected to remain unchanged, but this
+must be confirmed with a formal security proof.
 
 \vspace{5pt}
 In the document, we will use  the paragraph-header: ``
 \newversion{...}''
-to  describe the differences with the new version.
+to  describe the differences with the latest release.
 
 \newpage
 

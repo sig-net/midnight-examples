@@ -1,12 +1,18 @@
 \section{Proof of Withdrawer Unlinkability}
 \label{sec:proof}
 
- \newversion{ The same  proof  \emph{strategy} described in this section applies  to the new version.
-This is because the circuits added in the new version are simply \textbf{bookkeeping} circuits that label the requests differently. 
- This labeling  \textbf{does not add any user-dependent information} to the 
- requests as such they do not introduce any link to the caller.
- Furthermore the circuits are \emph{permissionless} -- they can be called by anyone, without needing proof of any secret and  \emph{anonymous} -- the 
+ \newversion{ The same  proof  \emph{strategy} described in this section applies  to the latest release.
+This is because the circuits it adds ($\cktFlush$, $\cktSend$, $\cktQueueAtt$) are simply \textbf{bookkeeping} circuits that label the requests differently.
+ This labeling  \textbf{does not add any user-dependent information} to the
+ requests, as such they do not introduce any link to the caller.
+ Furthermore the circuits are \emph{permissionless} -- they can be called by anyone, without needing proof of any secret and  \emph{anonymous} -- the
 identity of the caller is not revealed at application layer.
+Two changes to the circuits this section does analyse must be carried through the proof: the
+marker $\refundComm(\usersk, \rid)$ becomes $\ownComm(\inIndex, \usersk)$, a keyed hash of the
+same secret over the caller-chosen random index $\inIndex$ in place of $\rid$ (the source
+requires $\inIndex$ to be fresh per request, which the argument must assume), and
+$\cktCompleteWithdraw$ proves that marker on every verdict, so its success branch is no
+longer witness-free.
 }
 
 
