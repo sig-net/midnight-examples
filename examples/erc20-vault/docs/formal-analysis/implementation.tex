@@ -1,0 +1,1286 @@
+\section{Our Implementation: Components}
+\label{sec:components}
+
+The implementation is the ERC20 Vault contract.  Consult the \href{ https://github.com/sig-net/midnight-examples/blob/dev/examples/erc20-vault/README.md}{ERC20 Vault README}  for a
+high-level description of the contract logic and components.
+
+
+\subsection{System Components}
+\noindent
+\textbf{Trusted Bridge $\SigSys$'s MPC.}
+The instantiation of the cross-chain system relies on $\SigSys$'s MPC system acting as
+a trusted bridge that listen for events (actions such as $\Deposit,\Swap,$ etc) on  Midnight 
+and executed them on Ethereum.
+Between a request   (e.g., $\Deposit$) and its
+settlement  circuit, three steps run outside any proof : the committee signs the requested EVM transaction;
+a relayer broadcasts it; the committee observes the result and posts a signed attestation of it back
+to Midnight.
+
+
+$\SigSys$'s MPC  Signing System  is trusted to satisfy:
+    \begin{enumerate}
+        \item  \textbf{MPC committee integrity:}  the committee signs only what the protocol authorises. 
+        \item \textbf{Attestation faithfulness:}  MPC only provide attestations for events that have been executed on $\Lpub$ (Ethereum). The MPC attests failed only if the transaction did not execute. 
+    \end{enumerate}.
+
+\begin{center}
+\begin{tabular}{@{}L{2.7cm}L{5.4cm}L{6.3cm}@{}}
+\toprule
+\textbf{Definition} & \textbf{Instantiated by} & \textbf{Notes} \\
+\midrule
+$\Lpub$ &  Ethereum & accounts are EVM addresses; types are ERC20
+  contracts; everything public \\
+  \midrule
+$\Lshd$ & Midnight  &  enables private payments  and execution of contract with private inputs.\\
+\midrule
+$\SigSys$  & SigNetwork MPC &  It manages the vault account on Ethereum and provides the attestations for it.\\
+% \midrule
+% $\Setup$ & deploy, $\cktInit$, $\cktApprove$ & \S\ref{ssec:setupinst} \\
+% $\Deposit$ & $\cktDeposit$ $\to$ MPC $\to$ $\cktCompleteDeposit$ & \S\ref{ssec:depinst} \\
+% $\Withdraw$ & $\cktWithdraw$ $\to$ MPC $\to$ $\cktCompleteWithdraw$ or $\cktRefund$ &
+%   \S\ref{ssec:wdinst} \\
+% $\Swap$ & $\cktSwap$ $\to$ MPC $\to$ $\cktCompleteSwap$ or $\cktRefund$ & \S\ref{ssec:swapinst} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+
+% $\Setup$ additionally publishes $\SigSys$'s public key ${\sf PK}_\SigSys$ in $\pp$.
+% \medskip
+
+
+\subsubsection{Key derivation}
+\label{ssec:derive}
+
+$\SigSys$ holds a single root key pair $(\mathsf{sk}_{\mathsf{root}}, \mpcRootPk)$ on
+secp256k1, with $\mpcRootPk = \mathsf{sk}_{\mathsf{root}} \cdot G$ for the group generator
+$G$ of order $n$. Every account it signs with is an \emph{additively derived} child of that
+root, scoped by the requesting contract and by a $32$-byte path.
+
+
+\begin{definition}[Additive key derivation]
+\label{def:derive}
+Let $\varepsilon : \{0,1\}^{*} \to \mathbb{Z}_n$ be
+\[
+  \Epsilon(\vaultAddr, \keyPath) \;=\;
+  \Kec\bigl(\, \text{prefix} \,\|\, \chainId \,\|\, \vaultAddr \,\|\, \keyPath \,\bigr)
+  \bmod n ,
+\]
+The derived key pair is
+\begin{flalign*}
+  &\mathsf{sk}_{\mathsf{der}} \;=\; \mathsf{sk}_{\mathsf{root}} + \varepsilon(\vaultAddr, \keyPath) \bmod n ,& \\
+  &\Derive(\mpcRootPk\bc \vaultAddr\bc \keyPath) \;=\; \mpcRootPk + \Epsilon(\vaultAddr, \keyPath) \cdot G .&
+\end{flalign*}
+Where an EVM account is wanted, $\derivedAddr$ is the standard address encoding of the
+derived public key: the low $20$ bytes of $\Kec$ applied to its uncompressed encoding.
+\end{definition}
+
+\noindent Three properties of Definition~\ref{def:derive} are used throughout.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=3pt,topsep=3pt]
+\item \textbf{Public computability.} $\Derive$ takes only public inputs and addition on the
+      curve is public, so \emph{anyone} can compute $\derivedAddr$ from $\mpcRootPk$,
+      $\vaultAddr$ and $\keyPath$. The private half requires $\mathsf{sk}_{\mathsf{root}}$
+      and therefore exists only inside $\SigSys$. This is what makes a deposit's
+      $\keyPath = \userComm(\usersk)$ sufficient to expose the depositor's EVM address to an
+      observer of $\Lshd$ alone.
+\item \textbf{Contract scoping.} $\vaultAddr$ enters the derivation string, so no contract
+      can reach another contract's derived accounts.
+\item \textbf{Path separation.} Within one contract, distinct paths give unrelated keys.
+      The vault uses exactly three: $\userComm(\usersk)$ for a depositor's account,
+      the constant $\keyPathLit$ for the vault's own pooled account, and the fixed string
+      $\text{``midnight response key''}$ for $\mpcRespKey$, which signs attestations and
+      never signs transactions.
+\end{itemize}
+
+\noindent The key version $\keyVer$ selects which root key is used and is carried in every
+request record; it is suppressed above, and throughout the document, since a single version
+is in use.
+
+
+\medskip
+\noindent
+\textbf{Derived Addresses:}
+
+The value $\keyPath$ can be:
+\begin{itemize}
+    \item User address: $\derivedAddr$ uses $\keyPath=\userComm(\usersk)$ (defined below)
+    \item Vault address:  $\vaultEvmAddr$  uses $\keyPath=\mathtt{''vault''}$
+    \item  MPC Response Address: $\mpcRespKey$  uses $\keyPath=\mathtt{''midnight response key''}$. The attestation key $\mpcRespKey$ is derived the
+same way with a fixed protocol string and pinned at $\cktInit$.
+\end{itemize}
+
+
+\subsection{User's Keys}
+\label{ssec:userskeys}
+A user  $U_i$ of  the cross-chain system holds:
+\begin{itemize}
+    \item { \bf Application secret key:} $\usersk_i$: a private key for the cross-chain system: $\usersk_i\leftarrow\{0,1\}^{\lambda}$. This is randomly chosen upon the first Deposit request.
+      \item \textbf{Public account }$\pubAddr_i$  on $\Lpub$; (used to fund the derived account).
+      \item \textbf{Shielded Account } ($\callerZKey_i$, $\callerZKeySk_i$) on $\Lshd$. \\
+      In Midnight a shielded account consists of two public keys:
+\begin{enumerate}
+    \item \textbf{Coin Key-Pair} (Spending Key): 
+    \begin{enumerate}
+        \item $\coinsk$ = $\SHA\bigl(\text{``midnight:csk''} \concat \seed\bigr)$
+        \item $\coinpk = \SHA\bigl(\text{``midnight:zswap-pk[v1]''} \concat \coinsk\bigr)$
+    \end{enumerate}
+    
+    \item \textbf{Encryption Key-Pair} (Discovery key): 
+    \begin{enumerate}
+          \item $\encsk$: a group element generated via Poseidon hash function.
+        \item $\encpk = \gen^{\encsk}$
+    \end{enumerate}
+\end{enumerate}
+\noindent So
+\[
+  \shdAcct \;=\; \bigl(\,(\coinsk, \coinpk),\;\; (\encsk, \encpk)\,\bigr)
+\]
+
+\begin{center}
+\begin{tabular}{@{}L{1.7cm}L{1.7cm}L{11.0cm}@{}}
+\toprule
+\textbf{Key} & \textbf{Exposure} & \textbf{Use} \\
+\midrule
+$\coinpk$ & public & \textbf{ownership}: used as a rcpt when Minting \\
+$\coinsk$ & secret & \textbf{spending}:  used as sender when Spending \\
+$\encpk$  & public & \textbf{payability}: used to compute ciphertext in Spending a coin\\
+$\encsk$  & secret & \textbf{scanning} : used to decrypt in order to Receive a coin \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{itemize}
+
+
+The  circuits  of our contract only use the $\coinpk$ as a parameter to mint shielded coins.
+The other keys are used by the Midnight's circuits.
+
+
+\subsubsection{User Authentication Values}
+\label{ssec:derived}
+\label{ssec:hashcomputation}
+We use the following hash functions:
+\begin{itemize}
+    \item $\Hash$: A keyed hash function, used to compute our authentication tags. We require that this function satisfies Pseudorandomness (Def.~\ref{def:prf}) and Multi-user Pseudorandomness (Def.~\ref{def:muprf}) in addition to collision-resistance. Recall also that collision-resistance implies one-wayness (pre-image resistance).
+
+    \begin{align*}
+\hypertarget{fn:userComm}{\userComm(\usersk)} &= \Hash\bigl(\text{``vault:user:''}\bc \usersk\bigr)
+  &&\text{\small identity; the MPC path in Deposit. }\\
+\hypertarget{fn:refundComm}{\refundComm(\usersk, \rid)} &= \Hash\bigl(\text{``vault:refund:''}\bc \usersk\bc \rid\bigr)
+  &&\text{\small the authentication tag.}
+\end{align*}
+We instantiate $\Hash$ with the \texttt{transientHash} implemented by Midnight~\footnote{\href{https://github.com/midnightntwrk/midnight-ledger/blob/cc909e042a17695f7ba62fc195a8d770d150b63e/transient-crypto/src/hash.rs}{Lines L75-L81}.}(based on Poseidon~\cite{poseidon}).
+Poseidon follows a sponge-like approach and is a good candidate for Multi-user PRF security~\cite{KeyedDuplex17}.
+
+    \item $\Kec$: A collision resistance hash function used to compute digests.
+    \begin{align*} 
+\hypertarget{fn:domSep}{\domSep(\tokType)} &= \Hash\bigl(\text{``erc20:vault:''}\bc \tokType\bigr)
+  &&\text{\small one shielded type per ERC20}\\
+ \hypertarget{fn:reqIdOf}\rid &= \Kec(\req)
+   &&\text{\small over the whole request record (\textbf{except skemas})}\\
+%\hypertarget{fn:attDigest}{\attDigest(\rid, \evmOut)} &= \Kec(\rid \concat \evmOut)
+%\newversion{}
+\end{align*}
+\end{itemize}
+
+
+The \textbf{outcome} the MPC attests, is computed using the following formula:
+ \begin{align*} 
+ \hypertarget{fn:attDigest}{\attDigest(\rid, \evmOut)}  = & \Kec(\rid \concat \evmOut.\kind \| \evmOut.\outlt \| \evmOut.\blockheight)
+\end{align*}
+  % &&\text{\small what the committee attests}
+We instantiate $\Hash$ with the \texttt{transientHash} implemented by Midnight.
+
+\subsection{The vault's public state}
+\label{ssec:state}
+\input{table-vault}
+
+\noindent Also pinned at setup and public: the vault's own address $\vaultAddr$, the EVM chain
+identifier, the Signet singleton, and the deployer's identity commitment
+
+
+\vspace{5pt}
+\newversion{The latest version  maintains and publishes the following additional maps: ($\inputRequestBuffer$,
+$\outputRequestBuffer$, $\inputAttestationBuffer$, $\outputAttestationBuffer$).
+These data structures are used to collect requests/attestation, and then to process them.
+These new tables are used for bookkeeping, and do not introduce any user-dependent information,  hence, they do not alter the privacy proof.
+These new tables do not invalidate the  properties  that each request is unique and processed 
+once. }
+\ale{here----}
+%-------------------------------------------------------------------------------------
+%-------------------------------------------------------------------------------------
+\subsection{The shielded Layer: Midnight Computation}
+\label{ssec:shieldedcomputation}
+
+Midnight provides shielded coin payments and private circuit evaluation.
+We highlight with  \mnhl{shaded blue} the computation that are strictly Midnight's layer  and not the vault's own logic.
+
+\vspace{5pt}
+\noindent
+\textbf{Midnight shielded-coin layer.}
+In Midnight,  a raw secret coin is the tuple:
+$c=(\mathsf{nonce}, \mathsf{color}, \mathsf{value})$.
+Here are the functions applied to the secret coin:
+\begin{align*}
+\hypertarget{fn:coinCommit}{\coinCommit(c, \mathsf{rcpt})} &= \PersistantHash\bigl(\text{cc-tag} \concat \mathsf{nonce} \concat
+  \mathsf{color} \concat \mathsf{value} \concat \mathsf{rcpt}\bigr)\\
+\hypertarget{fn:coinNull}{\coinNull(c, \mathsf{sndr})} &= \PersistantHash\bigl(\text{cn-tag} \concat \mathsf{nonce} \concat
+  \mathsf{color} \concat \mathsf{value} \concat \mathsf{sndr}\bigr)\\
+\hypertarget{fn:tokenTypeOf}{\tokenTypeOf(\domSep(\tokType), \vaultAddr)} &= \PersistantHash\bigl(\text{tok-tag} \concat
+  \domSep(\tokType) \concat \vaultAddr\bigr)
+\end{align*}
+
+
+% {\em User's coins vs contract coins.} For a \emph{user}-held coin the
+% recipient  holds the coin \emph{public} key and the sender slot the coin \emph{secret} key, so
+% an observer holding $\coinCommit$ cannot compute $\coinNull$. For a \emph{contract}-held coin both
+% slots hold the same public contract address.
+
+
+\medskip
+\noindent\textbf{ Midnight Private-Circuit Computation.}
+Midnight's contract computation is performed through circuits.
+Every argument of a circuit is a \emph{private} input
+of the proof.
+A call to a  circuit $C$ on private arguments $\mathsf{in}$ and witness $\wit$ produces public outputs and state changes  
+for the vault contract $\Dvault$ and the Midnight chain $\Dshd$; 
+it also produces a statement $\stmt$ and a zk proof $\zkproof$.
+\[
+  \bigl(\; \Dvault,\;\; \Dshd,\;\; \stmt,\;\; \zkproof \;\bigr).
+\]
+
+\begin{center}
+\begin{tabular}{@{}L{1.6cm}L{5cm}L{5cm}@{}}
+\toprule
+\textbf{Output} & \textbf{It contains} & \textbf{Chain Updates} \\
+\midrule
+$\Dvault$ & the list of assignments the call makes to the vault's public entries of
+  \S\ref{ssec:state} & \textbf{the vault's} state on $\Lshd$ \\
+\addlinespace[2pt]
+$\Dshd$ & the list of coin commitments, nullifiers and mint records the call declares &
+  \bluedot\textbf{Midnight's} state, not the vault's.\\
+\addlinespace[2pt]
+$\stmt$ & the public statement: the tuple an observer of $\Lshd$ reads off the call &
+  --- \\
+\addlinespace[2pt]
+$\zkproof$ & a proof that $\Rel_C(\stmt, \wit)$ holds & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+ $\Dvault$, $\Dshd$ and $\stmt$  respect the following inclusion:
+
+\[
+  \Dvault \;\subseteq\; \stmt, \qquad \Dshd \;\subseteq\; \stmt,
+  \qquad\text{and in general}\qquad \stmt \;\supsetneq\; \Dvault \cup \Dshd .
+\]
+\begin{itemize}[nosep,leftmargin=1.4em,topsep=3pt]
+\item $\stmt$ also carries values that  do not update any state: the
+      identifier $\rid$,  the commitment $\comIO$, the
+      attestation the caller presented, and $\zkproof$ itself.
+\item $\Rel_C$ is a \emph{predicate over $\stmt$ and $\wit$}, not a state update. This statement is verified inside the proof. Everything in $\stmt$ is visible.
+\end{itemize}
+
+\medskip
+\noindent
+\textbf{Midnight   Commitments.} We write $\comIO$ to denote the commitments  to the inputs and outputs of the circuit being called which are produced by the circuit computation.
+The statement $\stmt$ contains $\comIO$.
+
+
+\medskip
+\noindent\textbf{How to read a circuit box.} \emph{Arguments} are the  inputs to the circuit (private);
+\emph{witness} are the secret used to prove relations,   \emph{reads} are the public entries consulted; \emph{steps}
+are the assertions and computations in source order;  A
+\bluedot marked line or a blue block  highlights  Midnight's functions.
+
+
+% \subsection{The attested outcome value}
+% \label{ssec:outcomeval}
+
+% Every settlement call consumes an attested outcome $\evmOut$, presented by the caller and
+% authenticated only through $\attDigest(\rid, \evmOut)$. Exactly two kinds of value occur.
+
+% \begin{definition}[$\succeeded$ and $\failed$]
+% \label{def:evmout}
+% Fix a request $\rid$ recorded by a request call. The attested outcome $\evmOut$ posted by $\SigSys$
+% for $\rid$ is one of:
+% \begin{itemize}[nosep,leftmargin=1.4em,topsep=2pt]
+% \item a \emph{success value}, written $\evmOut \in \succeeded$: the encoding, under the response
+%       schema $\schemaOut$ named in $\req$, of the return value of the EVM call that $\req$
+%       requested. Its width and contents depend on the schema --- a one-byte boolean for a transfer,
+%       an eight-byte integer for a swap, a supply or a redeem.
+% \item the \emph{failure value}, written $\failed$: a single fixed protocol constant, independent of
+%       the schema and of the request, posted when the requested transaction never executed. It is
+%       the value $\failed$ that gates $\cktRefund$.
+% \end{itemize}
+% $\succeeded$ and $\failed$ are disjoint, and this disjointness is what routes an outcome to one
+% settlement circuit rather than another.
+% \end{definition}
+
+%-------------------------------------------------------------------------------------
+% ---------------------------------------------------------------------
+
+
+\section{Our Implementation: Circuits}
+\label{sec:instantiation}
+
+In this section we show our implementation of the interface of Definition~\ref{def:system}.
+
+\noindent
+\textbf{Two calls per flow.}
+Each procedure of Definition~\ref{def:system} is performed by the circuits below.
+Each action: $\Deposit$, $\Withdraw$,  $\Swap$, $\Supply$, $\Redeem$, is performed by \emph{two} calls to the vault contract, with the $\SigSys$ bridge in
+between. The first call records what the MPC should sign and takes 
+the values relevant to the call (transaction parameters). The second presents $\SigSys$'s attestation of what
+happened on $\Lpub$ (Ethereum), and complete the request on $\Lshd$ (Midnight). Request calls are prefixed with \textsf{start}; settlement calls are prefixed with \textsf{complete}
+The following table maps each call to their circuits.
+\input{table-circuits}
+
+\newversion{In the new version,  the global counter $\sigNonce$  is dropped, and is replaced by a global timing parameter $\lastseen$.
+Transaction nonces are not assigned at request time (and are not derived from the global parameter) by the caller of   {\code{startX}} (for any action X , except Deposit), but by dedicated circuits that can be called by any party.
+
+Specifically,   in the new design, each circuit {\code{startX}}  only prepares the transaction parameters,  without the request nonce and  request ID. This \emph{partial} request   is added to the \emph{buffer} of requests waiting for  nonce assignment.
+Every so often, the pool of requests is processed by a  circuit called $\cktFlush$ that
+assigns a nonce and a freshness value to each request, and a circuit 
+$\cktSend$ that finally computes the request ID $\rid$ using the values set in the 
+$\cktFlush$ and sends the complete request to the MPC to be processed.
+Both  $\cktFlush$ and $\cktSend$ are permissionless and can be executed by everyone.
+Note, $\cktFlush$ and $\cktSend$   only add time-stamping information that are not  user-dependent. As such those circuits do not alter the privacy analysis described in Sec.~\ref{sec:proof}. 
+Circuits $\cktFlush$ and $\cktSend$ implement efficiency optimizations and replay attack protection. 
+}
+
+
+\medskip
+\noindent
+\textbf{Notification to $\SigSys$.} Every request call ends with a
+cross-contract call to the Signet singleton, which emits an event the MPC polls. We write
+$\notif(\vaultAddr, \rid, M)$ for that event: it carries the vault's address, the request
+identifier, and the identity of the ledger map $M$ in which the request record was stored, so
+that the MPC knows where to read $\req$ from. 
+
+
+\subsection{Setup: \texorpdfstring{$\Setup^{\Lpub,\Lshd}(1^{\secpar})$}{Setup}}
+\label{ssec:setupinst2}
+
+\begin{ProcBox}{$\pp \gets \Setup^{\Lpub,\Lshd}(1^{\secpar})$}
+\sloppy Run once by the deployer, who holds a secret $\usersk_D$ of their own.
+\begin{Steps}
+\item \textbf{Deploy the contract} on $\Lshd$ with two constructor arguments: the deployer's
+      identity $\deplComm = \lnk{fn:userComm}{\userComm(\usersk_D)}$ and the address of the Signet
+      singleton. The contract's own address $\vaultAddr$ becomes known here, which is why the
+      remaining values cannot be pinned in the constructor.
+\item \textbf{Derive off-chain}
+      \[\begin{aligned}
+        \vaultEvmAddr &\gets \Derive(\mpcRootPk\bc \vaultAddr\bc \keyPathLit),\\
+        \mpcRespKey &\gets \Derive(\mpcRootPk\bc \vaultAddr\bc \text{'response-key'}).
+      \end{aligned}\]
+\item \textbf{Run $\cktInit$} --- \cktref{ckt:initialize}.
+\item \textbf{Run $\cktApprove$} once per ERC20 that will ever be swapped ---
+      \cktref{ckt:approverouter}.
+\end{Steps}
+Output the public parameters:\\
+$\pp = (\vaultAddr, \vaultEvmAddr, \mpcRespKey, \chainId, \routerAddr, \text{singleton address},
+\mpcRespKey)$.
+\end{ProcBox}
+
+
+\begin{CktBox}{ckt:initialize}{$\cktInit$}
+\fld{Arguments.} $\vaultEvmAddr$, $\routerAddr$, \ADDEDINL{$\underAddr$, $\wrapAddr$},
+$\chainId$, $\caipId$, $\mpcRespKey$.
+\fld{Witness.} $\usersk$.
+\fld{Reads.} $\initFlag$, $\deplComm$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag = 0$.
+\item $\assert \lnk{fn:userComm}{\userComm(\usersk)} = \deplComm$.
+\item $\assert \chainId > 0$, \; $\routerAddr \neq 0$,
+      \ADDEDINL{\; $\underAddr \neq 0$, \; $\wrapAddr \neq 0$}.
+\item Write $\initFlag \gets 1$ and the seven pinned values.
+\end{enumerate}
+\begin{OutList}
+\oitem{\Dvault} $\initFlag \gets 1$; $\vaultEvmAddr$, $\routerAddr$,
+  \ADDEDINL{$\underAddr$, $\wrapAddr$}, $\chainId$, $\caipId$, $\mpcRespKey$ written.
+\oitem{\Dshd} $\emptyset$.
+\oitem{\stmt} $(\cktInit,\; \Dvault,\; \comIO)$.
+\oitem{\wit} $\usersk$.
+\oitem{\Rel} $\userComm(\usersk) =\deplComm$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:approverouter}{$\cktApprove$}
+\fld{Arguments.} $\tokType$, $\evmNonce$, $\keyVer$.
+\fld{Witness.} none.
+\fld{Reads.} $\initFlag$, $\routerAddr$, $\vaultAddr$, $\sigNonce$, $\chainId$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$ and $\tokType \neq 0$.
+\item $\evmTxOf \gets$ ``approve $\routerAddr$ for an unlimited amount of $\tokType$''. \emph{The
+      spender and the amount come from pinned state; the caller chooses only the token.}
+\item $\req \gets (\vaultAddr\bc \sigNonce\bc \keyVer\bc \keyPath{=}\keyPathLit\bc \evmTxOf\bc
+      \chainId)$; \; $\rid \gets \lnk{fn:reqIdOf}{\reqIdOf(\req)}$; \;
+      $\assert \rid \notin \reqMap$.
+\end{enumerate}
+\begin{OutList}
+\oitem{\Dvault} $\sigNonce \mathrel{+}= 1$; \; $\reqMap[\rid] \gets \req$ ---
+  \emph{never removed by any circuit}.
+\oitem{\Dshd} $\emptyset$.
+\oitem{\stmt} $(\cktApprove,\; \req,\; \rid,\; \notif(\vaultAddr, \rid, \reqMap))$.
+\oitem{\wit} $\bot$.
+\oitem{\Rel} $\mathsf{true}$ - the witness is empty and every argument is in $\stmt$, so
+  $\zkproof$ certifies a computation an observer can redo. 
+\end{OutList}
+\end{CktBox}
+
+% ---------------------------------------------------------------------
+\subsection{Deposit}
+\label{ssec:depinst2}
+
+\begin{ProcBox}{$\Pi.\Deposit^{\Lpub, \Lshd}\bigl([\pubAddr]\bc \shdAcct\bc \tokType\bc \amt\bc
+      \auxx \,;\, (\secret{\usersk}, \freshrn{\mintNonce})\bigr)$.}
+\sloppy
+\emph{Private input.} secret key $\usersk$; and a fresh $\mintNonce$, used at Step~4.\\
+\emph{Public arguments.} $\tokType$ is an ERC20 contract,
+and $\auxx = (\evmNonce, \gasEnv, \keyVer)$.
+The receiving \zkswap account $\shdAcct$  is not public per-se, but we 
+do not aim to protect it.
+
+\begin{Steps}
+\item \textbf{Fund the derived account:} outside any circuit, on $\Lpub$. The caller pays $\amt$ of $\tokType$  to  the MPC controlled account $\derivedAddr$ on $\Lpub$. Where,  
+      $\derivedAddr = \Derive\bigl(\mpcRootPk\bc \vaultAddr\bc
+      \lnk{fn:userComm}{\userComm(\usersk)}\bigr)$. See \S\ref{ssec:derived}.
+\item \textbf{Request call: $\cktDeposit$} (\cktref{ckt:deposit}). Recomputes
+      $\keyPath \gets \lnk{fn:userComm}\userComm(\usersk)$ from the witness and request
+      $\text{transfer}(\vaultEvmAddr, \amt)$ under $\rid$. \emph{$\Dshd = \emptyset$: no coin
+      moves.}
+\item \textbf{MPC}. The committee signs on behalf of  $\derivedAddr$ a transfer to $\vaultEvmAddr$, and posts $\attSig$ over
+      $\lnk{fn:attDigest}{\attDigest(\rid, \evmOut)}$.
+\item \textbf{Settlement call: $\cktCompleteDeposit$} (\cktref{ckt:completedeposit}). Verifies
+      $\attSig$, consumes $\reqMap[\rid]$, authenticated the request on $\userComm(\usersk) = \req.\keyPath$, and mints
+      $\amt$ to $\shdAcct$ using randomness $\mintNonce$.
+\end{Steps}
+
+\medskip
+Outcome: $\succeeded$ once Step~4 completes; $\failed$ if the EVM transfer did not execute, in which
+case the value never left $\derivedAddr$;
+Private output: $\usersk,\mintNonce$.
+\end{ProcBox}
+
+
+\begin{CktBox}{ckt:deposit}{$\srcStartDeposit$}
+\fld{Arguments.} $\evmNonce$, $\gasEnv$, $\keyVer$, $(\tokType, \amt)$.
+\fld{Witness.} $\usersk$.
+\fld{Reads.} $\initFlag$, $\vaultEvmAddr$, $\vaultAddr$, $\sigNonce$, $\chainId$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$, \; $\tokType \neq 0$, \; $\gasEnv > 0$, \;
+      $0 < \amt \leq 2^{64}-1$.
+\item $\keyPath \gets \lnk{fn:userComm}{\userComm(\usersk)}$.
+\item $\evmTxOf \gets$ ``$\text{transfer}(\vaultEvmAddr, \amt)$ on $\tokType$'', with $\evmNonce$,
+      $\gasEnv$, on $\chainId$.
+\item $\req \gets (\vaultAddr\bc \sigNonce\bc \keyVer\bc \keyPath\bc \evmTxOf\bc \chainId)$; \;
+      $\rid \gets \lnk{fn:reqIdOf}{\reqIdOf(\req)}$; \;
+      \ADDEDINL{$\assert \rid \notin \depositMap$}.
+\end{enumerate}
+\begin{OutList}
+\oitem{\Dvault} $\sigNonce \mathrel{+}= 1$; \; \ADDEDINL{$\depositMap[\rid] \gets \req$}; \;
+  \ADDEDINL{$\depositView[\rid] \gets (\keyPath,\; \tokType,\; \amt)$}.
+\oitem{\Dshd} $\emptyset$.
+\oitem{\stmt} $(\cktStartDeposit,\; \req,\; \rid,\; \depositView[\rid],\;
+  \notif(\vaultAddr, \rid, \depositMap),\; \comIO)$, where $\req$ exposes
+  $\tokType, \amt, \vaultEvmAddr, \evmNonce, \gasEnv, \sigNonce$ and
+  $\keyPath = \userComm(\usersk)$.
+\oitem{\wit} $\usersk$.
+\oitem{\Rel} $\req.\keyPath = \userComm(\usersk)$ \;$\wedge$\;
+  $\depositView[\rid].\fComm = \userComm(\usersk)$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:completedeposit}{$\cktCompleteDeposit$}
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$, $\freshrn{\mintNonce}$,  $\shdAcct$.
+\fld{Witness.} $\usersk$.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$, \ADDEDINL{$\depositMap$, $\depositView[\rid]$}.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$ and $\evmOut$ reports success.
+\item $\assert \EcdsaVf\bigl(\lnk{fn:attDigest}{\attDigest(\rid, \evmOut)}\bc \attSig\bc
+      \mpcRespKey\bigr)$ --- \textbf{gate 1}, the authentication of the MPC.
+\item \ADDEDINL{$\assert \rid \in \depositMap$; \; remove $\depositMap[\rid]$} ---
+      \textbf{gate 3}, at most once, enforced by the ledger through $\Dvault$, not by $\Rel$.
+\item \ADDEDINL{$\assert \lnk{fn:userComm}{\userComm(\usersk)} = \depositView[\rid].\fComm$;} \;
+      remove $\depositView[\rid]$ --- \textbf{gate 2}, enforces depositor-only.
+\item \ADDEDINL{$\amt \gets \depositView[\rid].\fAmt$, \;
+      $\tokType \gets \depositView[\rid].\fErc$}.
+\end{enumerate}
+\MidNote{\textbf{Midnight operation.} Execute Midnight Circuit $\mintShieldedToken$ on input
+$\domSep, \amt, \mintNonce, \callerZKey$. Let $\coinMint =
+\bigl(\;\freshrn{\mintNonce}, \mathsf{color}, \amt \bigr)$}
+where  $\mathsf{color}=\lnk{fn:tokenTypeOf}{\tokenTypeOf}\bigl(\domSep(\tokType),
+\vaultAddr\bigr)$
+\begin{OutList}
+\oitem{\Dvault} \ADDEDINL{$\depositMap[\rid]$ removed; $\depositView[\rid]$ removed}.
+\oitem{\Dshd} \bluedot mint record $\bigl(\lnk{fn:domSep}{\domSep(\tokType)},\, \amt\bigr)$;
+  \bluedot output  $\lnk{fn:coinCommit}{\coinCommit(\coinMint, \shdAcct)}$.
+\oitem{\stmt} $\bigl(\cktCompleteDeposit,\; \rid,\; \attSig,\;
+  (\domSep(\tokType), \amt),\; \coinCommit(\coinMint, \callerZKey)\bigr)$.
+\oitem{\wit} $(\usersk,\; \mintNonce,\; \shdAcct)$.
+\oitem{\Rel} $\userComm(\usersk)$ $= \depositView[\rid].\fComm$ \;$\wedge$\;
+  $\EcdsaVf(\attDigest(\rid,\evmOut)$, $\attSig$, $\mpcRespKey)$ \;$\wedge$\;
+  the published commitment opens to $(\mintNonce, \cdot, \amt, \callerZKey)$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{PubBox}{Transcript from  $\Deposit$}
+\textbf{On $\Lpub$:} [$\pubAddr \to \derivedAddr$],  and
+$\derivedAddr \to \vaultEvmAddr$ (signed by the committee), both in the clear.
+
+\smallskip
+\textbf{On $\Lshd$:} $\stmt_{\cktDeposit}$ and
+$\stmt_{\cktCompleteDeposit}$.
+
+\smallskip
+\textbf{An observer therefore holds} $\userComm(\usersk)$, hence $\derivedAddr$, hence the edge from
+the caller's own EVM account to their identity in this system; $\tokType$ and $\amt$; $\rid$, so \textbf{the settlement call is  linked
+to the request call}. Hidden: $\usersk$, $\mintNonce$.
+\end{PubBox}
+% ---------------------------------------------------------------------
+\subsection{Withdraw}
+\label{ssec:wdinst2}
+
+\begin{ProcBox}{$\Withdraw^{\Lpub, \Lshd}\bigl(\shdAcct\bc \destAddr*\bc \tokType\bc \amt\bc
+      \auxx \,;\, \privIn\bigr)$}\label{box:withdraw}
+\sloppy
+\emph{Private input.} $\privIn$ holds $\usersk$; the secret key $\coinsk$ associated to the $\zkswap$ account $\srcAcct$; a
+fresh $\burnNonce$, used at Step~1; and, only if the flow ends in $\failed$, a fresh $\mintNonce$
+used at Step~4.
+\emph{Public arguments.} $\auxx = (\evmNonce, \keyVer)$ only: the gas envelope is fixed in the
+contract, because the \emph{vault} pays for this transaction.
+
+ \begin{Steps}
+ \item \textbf{Request call: $\cktWithdraw$} (\cktref{ckt:startwithdraw}).
+ The caller hands the contract  a coin descriptor   $\coinIn = \bigl(\burnNonce,\;\mathsf{color}, \amt\bigr)$; the circuit burns it, records  $\text{transfer}(\destAddr^*, \amt)$ under $\rid$ with $\keyPath = \keyPathLit$ o, and add the authentication tag to the map:  $\wdView[\rid] \gets \lnk{fn:refundComm}{\refundComm(\usersk, \rid)}$.
+   \smallskip
+     
+ \item \textbf{MPC}. The MPC signs the evm request with the key derived
+       at $\keyPath = \keyPathLit$, so from $\vaultEvmAddr$, the pool's own account. Once the request is executed,  the MPC signs an attestation $\attSig$ of the outcome $\evmOut$.
+\item \textbf{Settlement call on success: $\cktCompleteWithdraw$}, success branch  (\cktref{ckt:completewithdraw}). \textbf{$\Dshd = \emptyset$ and $\wit = \bot$ on this branch}.
+\item \textbf{Settlement call on failure: $\cktCompleteWithdraw$'s failure branch, or $\cktRefund$}
+      -  \cktref{ckt:completewithdraw} and \cktref{ckt:refundwithdraw}, both which gates on
+      $\lnk{fn:refundComm}{\refundComm(\usersk, \rid)}$ against the stored marker  and re-mints $\amt$ under a fresh
+      $\mintNonce$. The two circuits differ only in which attested output routes to them: an
+      executed transfer that returned false goes to $\cktCompleteWithdraw$; a transaction that never
+       executed goes to $\cktRefund$.
+ \end{Steps}
+
+\medskip
+Outcome: $\succeeded$ via Step~3, $\failed$ via Step~4. Private output: $\usersk$.
+\end{ProcBox}
+
+
+\begin{CktBox}{ckt:startwithdraw}{$\cktStartWithdraw$}
+\fld{Arguments.} $\evmNonce$, $\keyVer$, $(\tokType, \amt, \destAddr)$, and
+$\coinIn = (\burnNonce, \mathsf{color}, \mathsf{value})$.
+\fld{Witness.} $\usersk$ (and $\coinsk$ at the wallet layer).
+\fld{Reads.} $\initFlag$, $\vaultAddr$, $\sigNonce$, $\chainId$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$, \; $\tokType \neq 0$, \; $0 < \amt \leq 2^{64}-1$.
+\item $\assert \coinIn.\mathsf{color} =
+      \lnk{fn:tokenTypeOf}{\tokenTypeOf(\domSep(\tokType), \vaultAddr)}$ \; and \;
+      $\coinIn.\mathsf{value} = \amt$.
+\item $\evmTxOf \gets$ ``$\text{transfer}(\destAddr, \amt)$ on $\tokType$'', with $\evmNonce$ and a
+      contract-fixed gas envelope, on $\chainId$.
+\item $\keyPath \gets \keyPathLit$.
+\item $\req \gets (\vaultAddr\bc \sigNonce\bc \keyVer\bc \keyPath\bc \evmTxOf\bc \chainId)$; \;
+      $\rid \gets \lnk{fn:reqIdOf}{\reqIdOf(\req)}$; \; $\assert \rid \notin \reqMap$.
+\end{enumerate}
+\MidNote{\textbf{Midnight operations: burn.}
+$\mnhl{\code{receiveShielded}}(\coinIn)$ then
+$\mnhl{\code{sendImmediateShielded}}(\coinIn, \burnAddr, \amt)$.}
+\begin{OutList}
+\oitem{\Dvault} $\sigNonce \mathrel{+}= 1$; \; $\reqMap[\rid] \gets \req$; \;
+  \ADDEDINL{$\wdView[\rid] \gets \bigl(\lnk{fn:refundComm}{\refundComm(\usersk, \rid)},\;
+  \tokType,\; \amt\bigr)$}.
+\oitem{\Dshd} \bluedot $\coinCommit(\coinIn, \vaultAddr)$, \;
+  \bluedot $\coinNull(\coinIn, \vaultAddr)$, \;
+  \bluedot $\coinCommit(\coinBurnOut, \burnAddr)$, \;
+  \bluedot $\{\coinNull(\coinFund_i, \coinsk)\}_i$ and $\coinCommit(\coinChange, \srcAcct)$.
+\oitem{\stmt} $\bigl(\cktStartWithdraw,\; \req,\; \rid,\; \wdView[\rid],\; \Dshd,\;
+  \notif(\vaultAddr, \rid, \reqMap),\; \comIO\bigr)$.
+  \ADDEDINL{The view publishes $\tokType$ and $\amt$.}
+\oitem{\wit} $(\usersk,\; \burnNonce,\; \coinsk)$.
+\oitem{\Rel} $\coinIn.\mathsf{color} = \tokenTypeOf(\domSep(\tokType), \vaultAddr)$ \;$\wedge$\;
+  $\coinIn.\mathsf{value} = \amt$ \;$\wedge$\;
+  $\wdView[\rid].\fComm = \refundComm(\usersk, \rid)$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:failgate}{$\cktFailGate$ - shared across refund circuits (\srcFailGate)}
+Not exported. Called first by $\cktRefundWithdraw$, $\cktRefundSwap$, $\cktRefundSupply$ and
+$\cktRefundRedeem$.
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$ of width $5$.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$.
+\item $\assert \EcdsaVf\bigl(\lnk{fn:attDigest}{\attDigest(\rid, \evmOut)}\bc \attSig\bc
+      \mpcRespKey\bigr)$.
+\item $\assert \evmOut = \failed$.
+\end{enumerate}
+\begin{OutList}
+\oitem{\Dvault} none of its own.
+\oitem{\Dshd} $\emptyset$.
+\oitem{\stmt} $(\rid,\; \attSig,\; \evmOut)$, merged into the caller circuit's statement.
+\oitem{\wit} $\bot$.
+\oitem{\Rel} $\EcdsaVf(\attDigest(\rid,\evmOut), \attSig, \mpcRespKey)$ \;$\wedge$\;
+  $\evmOut = \failed$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:completewithdraw}{$\cktCompleteWithdraw$}
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$ of width $1$, $\mintNonce$.
+\fld{Witness.} $\usersk$ - \emph{failure branch only}.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$, \ADDEDINL{$\wdView[\rid]$}, $\reqMap$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$ and
+      $\assert \EcdsaVf\bigl(\lnk{fn:attDigest}{\attDigest(\rid, \evmOut)}\bc \attSig\bc
+      \mpcRespKey\bigr)$.
+\item \ADDEDINL{$\assert \rid \in \wdView$}. 
+\item Remove $\reqMap[\rid]$. \ADDEDINL{The record is not read.}
+\item $\okbit \gets$ the success bit of $\evmOut$.
+\item \ADDEDINL{If $\okbit = 0$:
+      $\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)}$
+      $= \wdView[\rid].\fComm$, then mint
+      $\coinMint = \bigl(\mintNonce,\, \tokenTypeOf(\domSep(\wdView[\rid].\fErc), \vaultAddr),\,
+      \wdView[\rid].\fAmt\bigr)$
+      to the caller's own shielded account.}
+\item Remove $\wdView[\rid]$.
+\end{enumerate}
+\begin{OutList}
+\oitem{\Dvault} $\reqMap[\rid]$ removed; \ADDEDINL{$\wdView[\rid]$ removed}.
+\oitem{\Dshd} $\okbit = 1$: $\emptyset$. \quad $\okbit = 0$: \bluedot mint record
+  $\bigl(\domSep(\wdView[\rid].\fErc),\, \wdView[\rid].\fAmt\bigr)$; \;
+  \bluedot $\coinCommit(\coinMint, \text{caller})$.
+\oitem{\stmt} $\bigl(\cktCompleteWithdraw,\; \rid,\; \attSig,\; \okbit,\; \Dshd\bigr)$.
+\oitem{\wit} $\okbit = 1$: $\bot$. \quad $\okbit = 0$: $(\usersk, \mintNonce)$.
+\oitem{\Rel} $\okbit = 1$: $\EcdsaVf(\attDigest(\rid,\evmOut), \attSig, \mpcRespKey)$. \quad
+  $\okbit = 0$: the same, $\wedge$ $\refundComm(\usersk, \rid)$ $= \wdView[\rid].\fComm$ $\wedge$
+  the published commitment opens to $(\mintNonce, \cdot, \wdView[\rid].\fAmt, \text{caller})$.
+\end{OutList}
+\fld{$\wit = \bot$ on the success branch.} The proof certifies a statement with no secret in it, so
+any third party holding the attestation can produce the same call. $\mintNonce$ is an argument on
+both branches; on the success branch it is simply unused.
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:refundwithdraw}{ $\cktRefundWithdraw$}
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$ of width $5$, $\mintNonce$.
+\fld{Witness.} $\usersk$.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$, $\wdView[\rid]$, $\reqMap$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item Run $\cktFailGate(\rid, \attSig, \evmOut)$.
+\item $\assert \rid \in \wdView$.
+\item $\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)} = \wdView[\rid].\fComm$ (authenticating the withdrawer).
+\item Remove $\reqMap[\rid]$ and $\wdView[\rid]$.
+\end{enumerate}
+\MidNote{\textbf{Midnight operation.} Mint, to the caller's own shielded account,
+\[\coinMint = \bigl(\mintNonce,\;
+\lnk{fn:tokenTypeOf}{\tokenTypeOf(\domSep(\wdView[\rid].\fErc), \vaultAddr)},\;
+\wdView[\rid].\fAmt\bigr).\]}
+\begin{OutList}
+\oitem{\Dvault} $\reqMap[\rid]$ removed; $\wdView[\rid]$ removed.
+\oitem{\Dshd} \bluedot mint record
+  $\bigl(\domSep(\wdView[\rid].\fErc),\, \wdView[\rid].\fAmt\bigr)$; \;
+  \bluedot $\lnk{fn:coinCommit}{\coinCommit(\coinMint, \text{caller})}$.
+\oitem{\stmt} $\bigl(\cktRefundWithdraw,\; \rid,\; \attSig,\; \Dvault,\; \Dshd\bigr)$.
+\oitem{\wit} $(\usersk,\; \mintNonce)$.
+\oitem{\Rel} $\refundComm(\usersk, \rid)$ $= \wdView[\rid].\fComm$ \;$\wedge$\; the relation of
+  $\cktFailGate$ \;$\wedge$\; the published commitment opens to
+  $(\mintNonce, \cdot, \wdView[\rid].\fAmt, \text{caller})$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{PubBox}{What $\Withdraw$ publishes}
+\textbf{On $\Lpub$:} on success, one transfer $\vaultEvmAddr \to \destAddr$ of $\amt$ of $\tokType$.
+\emph{Nothing tied to $\srcAcct$ appears.}
+
+\smallskip
+\textbf{On $\Lshd$:} $\stmt_{\cktWithdraw}$, the settlement
+statement. Of these, the components that involve the caller at all are: the marker
+$\refundComm(\usersk, \rid)$;  the coins sent to the burn address $\burnAddr$ in the $\cktStartWithdraw$ (the identity of the payer for this coins is protected by Mindnight's library under the assumption that $\burnNonce$ is private and is random), and -- in case of failure -- the new coins minted to the caller of $\cktRefundWithdraw$ (the identity of the payer for this coins is protected by Mindnight's library under the assumption that $\mintNonce$ is private and is random).
+
+
+\smallskip
+\textbf{Hidden:} which shielded account funded the call/ asked for a refund.
+\end{PubBox}
+
+
+%---------------------------------------------------------------------
+%---------------------------------------------------------------------------
+
+
+\subsection{Swap}
+\label{ssec:swapinst2}
+
+\begin{ProcBox}{$\Pi.\Swap^{\Lpub, \Lshd}\bigl(\shdAcct\bc \tokType\bc \amt\bc
+    \tokTypeB\bc \amtB\bc \auxx \,;\, \privIn\bigr)$}
+\sloppy
+\emph{Private input.} As $\Withdraw$: $\usersk$, $\coinsk$ of $\srcAcct$, a fresh $\burnNonce$ at
+Step~1, and a fresh $\mintNonce$ at Step~3 and a fresh $\changeNonce$ in Step 4.).
+\emph{Public arguments.} $\amt$ is a \emph{maximum} input $\amtMax$ and $\amtB$ an exact output
+$\amtOut$; (in an honest use $\srcAcct$ is the recipient of the swapped coin);
+$\auxx = (\evmNonce, \keyVer, \feeTier)$.
+\begin{Steps}
+\item \textbf{Request call: $\cktSwap$} - \cktref{ckt:startswap}. Same shape as $\cktWithdraw$: a   coin descriptor for $\amtMax$ of $\tokType$ is surrendered and burned, an exact-output exchange is
+      recorded under $\rid$ in the map $\swapMap$, and
+      $\swapView[\rid] \gets \lnk{fn:refundComm}{\refundComm(\usersk, \rid)}$ is recorded.
+\item \textbf{MPC}. As in withdraw,   the MPC signs the swap request on behalf of  $\vaultEvmAddr$. Once the request is executed,  the MPC signs an attestation $\attSig$ of the outcome $\evmOut$.
+\item \textbf{Settlement call on success: $\cktCompleteSwap$} - \cktref{ckt:completeswap}.
+If the transaction is successful, the user can claim the new-colored coin and the change, after proving knowledge of the pre-image of $\refundComm$.
+
+\item \textbf{Settlement call on failure: $\cktRefundSwap$}. If the transaction reverts on $\Lpub$, user calls  Circuit \cktref{ckt:refundswap} to re-mint a coin with the full $\amtMax$ of the original color, after proving  knowledge of the pre-image of $\refundComm$.
+\end{Steps}
+
+\medskip
+Outcome: $\succeeded$ via Step~3, $\failed$ via Step~4.
+Private output: the new coins minted.
+\end{ProcBox}
+
+
+\begin{CktBox}{ckt:startswap}{$\cktStartSwap$}
+\fld{Arguments.} $\evmNonce$, $\keyVer$, $(\tokType, \tokTypeB, \feeTier, \amtOut, \amtMax)$, and
+$\coinIn = (\burnNonce, \mathsf{color}, \mathsf{value})$.
+\fld{Witness.} $\usersk$ (and $\coinsk$ at the wallet layer).
+\fld{Reads.} $\initFlag$, $\routerAddr$, $\vaultEvmAddr$, $\vaultAddr$, $\sigNonce$, $\chainId$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$, \; $\tokType \neq 0$, \; $\tokTypeB \neq 0$, \;
+      $0 < \amtOut \leq 2^{64}-1$, \; $0 < \amtMax \leq 2^{64}-1$.
+\item $\assert \coinIn.\mathsf{color} =
+      \lnk{fn:tokenTypeOf}{\tokenTypeOf(\domSep(\tokType), \vaultAddr)}$ \; and \;
+      $\coinIn.\mathsf{value} = \amtMax$.
+\item $\evmTxOf \gets$ ``exact-output exchange of at most $\amtMax$ of $\tokType$ for exactly
+      $\amtOut$ of $\tokTypeB$ at $\feeTier$, recipient  is $\vaultEvmAddr$, no price bound'',
+      to $\routerAddr$, contract-fixed gas envelope.
+\item $\keyPath \gets \keyPathLit$, as in $\cktStartWithdraw$.
+\item $\req \gets (\vaultAddr\bc \sigNonce\bc \keyVer\bc \keyPath\bc \evmTxOf\bc \chainId)$; \;
+      $\rid \gets \lnk{fn:reqIdOf}{\reqIdOf(\req)}$; \; $\assert \rid \notin \swapMap$.
+\end{enumerate}
+\MidNote{\textbf{Midnight operations: burn}, exactly as in \cktref{ckt:startwithdraw}:
+$\mnhl{\code{receiveShielded}}(\coinIn)$ then
+$\mnhl{\code{sendImmediateShielded}}(\coinIn, \burnAddr, \amtMax)$.}
+\begin{OutList}
+\oitem{\Dvault} $\sigNonce \mathrel{+}= 1$; \; $\swapMap[\rid] \gets \req$; \;
+  \ADDEDINL{$\swapView[\rid] \gets \bigl(\lnk{fn:refundComm}{\refundComm(\usersk, \rid)},\;
+  \tokType,\; \tokTypeB,\; \amtOut,\; \amtMax\bigr)$}.
+\oitem{\Dshd} as \cktref{ckt:startwithdraw}, with $\amtMax$ in place of $\amt$: \;
+  \bluedot $\coinCommit(\coinIn, \vaultAddr)$, \; \bluedot $\coinNull(\coinIn, \vaultAddr)$, \;
+  \bluedot $\coinCommit(\coinBurnOut, \burnAddr)$, \;
+  \bluedot $\coinNull(\coinFund, \coinsk)$ and $\coinCommit(\coinChange, \srcAcct)$.
+\oitem{\stmt} $\bigl(\cktStartSwap,\; \req,\; \rid,\; \swapView[\rid],\; \Dshd,\;
+  \notif(\vaultAddr, \rid, \swapMap),\; \comIO\bigr)$, where $\req$ exposes
+  $\tokType, \tokTypeB, \feeTier, \amtOut, \amtMax$.
+  \ADDEDINL{The view publishes $\tokType$, $\tokTypeB$, $\amtOut$ and $\amtMax$.}
+\oitem{\wit} $(\usersk,\; \burnNonce,\; \coinsk)$.
+\oitem{\Rel} as \cktref{ckt:startwithdraw}, over $\swapView$ and $\amtMax$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:completeswap}{$\cktCompleteSwap$}
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$ of width $8$, $\freshrn{\mintNonce}$,
+\ADDEDINL{$\freshrn{\changeNonce}$}.
+\fld{Witness.} $\usersk$, $\mintNonce$, \ADDEDINL{$\changeNonce$}.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$, \ADDEDINL{$\swapView[\rid]$}, $\swapMap$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$; \; \ADDEDINL{$\assert \changeNonce \neq \mintNonce$}.
+\item $\assert \EcdsaVf\bigl(\lnk{fn:attDigest}{\attDigest(\rid, \evmOut)}\bc \attSig\bc
+      \mpcRespKey\bigr)$.
+\item \ADDEDINL{$\assert \rid \in \swapView$}; \; remove $\swapMap[\rid]$.
+\item \ADDEDINL{$\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)} = \swapView[\rid].\fComm$}
+      (authenticating the swapper); \; remove $\swapView[\rid]$.
+\item \ADDEDINL{$\amtOut \gets \swapView[\rid].\fAmtOut$,}
+      \ADDEDINL{$\tokTypeB \gets \swapView[\rid].\fTokOut$,}
+      \ADDEDINL{$\amtMax \gets \swapView[\rid].\fAmtMax$,}
+      \ADDEDINL{$\tokType \gets \swapView[\rid].\fTokIn$}; \;
+      $\amtIn \gets$ the attested value in $\evmOut$. \;
+      $\amtRem \gets \amtMax - \amtIn$.
+\end{enumerate}
+\MidNote{\textbf{Midnight operations: two mints.} $\mintShieldedToken$ is called twice, both times
+to the caller's own shielded account:
+$\coinMint = \bigl(\mintNonce,\; \tokenTypeOf(\domSep(\tokTypeB), \vaultAddr),\; \amtOut\bigr)$ and
+$\coinRem = \bigl(\changeNonce,\; \tokenTypeOf(\domSep(\tokType), \vaultAddr),\; \amtRem\bigr)$.
+The second runs even when $\amtRem = 0$.}
+\begin{OutList}
+\oitem{\Dvault} $\swapMap[\rid]$ removed; \ADDEDINL{$\swapView[\rid]$ removed}.
+\oitem{\Dshd} \bluedot mint record $\bigl(\domSep(\tokTypeB),\, \amtOut\bigr)$; \;
+  \bluedot mint record $\bigl(\domSep(\tokType),\, \amtRem\bigr)$; \;
+  \bluedot $\coinCommit(\coinMint, \text{caller})$; \;
+  \bluedot $\coinCommit(\coinRem, \text{caller})$.
+\oitem{\stmt} $\bigl(\cktCompleteSwap,\; \rid,\; \attSig,\; \amtIn,\; \Dvault,\; \Dshd\bigr)$.
+\oitem{\wit} $(\usersk,\; \mintNonce,\; \ADDEDINL{\changeNonce})$.
+\oitem{\Rel} $\refundComm(\usersk, \rid)$ $= \swapView[\rid].\fComm$ \;$\wedge$\;
+  $\EcdsaVf(\attDigest(\rid,\evmOut)$, $\attSig$, $\mpcRespKey)$ \;$\wedge$\;
+  $\changeNonce$ $\neq \mintNonce$ \;$\wedge$\;
+  the first commitment opens to $(\mintNonce, \cdot, \amtOut, \text{caller})$ \;$\wedge$\;
+  the second opens to $(\changeNonce, \cdot, \amtRem, \text{caller})$.
+\end{OutList}
+\end{CktBox}
+
+\begin{CktBox}{ckt:refundswap}{$\cktRefundSwap$ }
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$ of with 5, $\mintNonce$.
+\fld{Witness.} $\usersk$.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$, $\swapView[\rid]$, $\swapMap$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item Run \hyperref[ckt:failgate]{$\cktFailGate(\rid, \attSig, \evmOut)$}.
+\item $\assert \rid \in \swapView$.
+\item $\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)} = \swapView[\rid].\fComm$ -
+      \textbf{the swapper gate}.
+\item Remove $\swapMap[\rid]$ and $\swapView[\rid]$.
+\end{enumerate}
+\MidNote{\textbf{Midnight operation.} Mint, to the caller's own shielded account,
+$\coinMint = \bigl(\mintNonce,\; \mathsf{color},\;
+\swapView[\rid].\fAmtMax\bigr).$}
+where $\mathsf{color}= \lnk{fn:tokenTypeOf}{\tokenTypeOf(\domSep(\swapView[\rid].\fTokIn), 
+\vaultAddr)}$.
+\begin{OutList}
+\oitem{\Dvault} $\swapMap[\rid]$ removed; $\swapView[\rid]$ removed.
+\oitem{\Dshd} \bluedot mint record
+  $\bigl(\domSep(\swapView[\rid].\fTokIn),\, \swapView[\rid].\fAmtMax\bigr)$; \;
+  \bluedot $\coinCommit(\coinMint, \text{caller})$.
+\oitem{\stmt} $\bigl(\cktRefundSwap,\; \rid,\; \attSig,\; \Dvault,\; \Dshd\bigr)$.
+\oitem{\wit} $(\usersk,\; \mintNonce)$.
+\oitem{\Rel} $\refundComm(\usersk, \rid)$ $= \swapView[\rid].\fComm$ \;$\wedge$\; the relation of
+  $\cktFailGate$ \;$\wedge$\; the published commitment opens to
+  $(\mintNonce, \cdot, \swapView[\rid].\fAmtMax, \text{caller})$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{PubBox}{What $\Swap$ publishes}
+\textbf{On $\Lpub$:} the exchange in the clear: both tokens/colors and amounts, $\feeTier$, the recipient $\vaultEvmAddr$, $\amtMax$, $\amtOut$, and the resulting movements through the pool.
+
+\smallskip
+\textbf{On $\Lshd$:} as $\Withdraw$, over $\swapMap$ and $\swapMarkerMap$, with two mint
+records at settlement. Mints do not leak any information about the payer and receiver.
+
+\smallskip
+\textbf{The executed price is public.} $\amtMax \in \req$ and $\amtIn \in \stmt_{\cktCompleteSwap}$
+outright, and $\amtChg$ is published as a mint record as well. With both tokens, $\feeTier$ and the block position also public,every vault swap is a
+fully transparent trade.  No address -  besides the vault address  - is involved in the trade.
+\end{PubBox}
+
+
+\subsection{\texorpdfstring{$\Supply$ and $\Redeem$}{Supply and Redeem}}
+\label{ssec:lendinst}
+
+The lending flow $\Supply$ and $\Redeem$ moves value between an ERC20 and its interest-bearing wrapper, both pinned at
+$\Setup$ (\S\ref{ssec:state}), the token being lent is 
+at address $\underAddr$, the receipt token is at address $\wrapAddr$.
+$\Supply$ and $\Redeem$ are both a $\Swap$.
+$\Supply$ burns a coin of the underlying
+color and mints one of the wrapper color; $\Redeem$ does the reverse.  They differ from
+$\Swap$ in  that  \textbf{the minted amount is read from the attestation, not from
+the request}. In $\Swap$, $\amtOut$ is a field of $\req$ that the caller fixed before
+anything was burned; in $\Supply$ and $\Redeem$ the corresponding quantity is whatever the
+lending market returned, and it reaches the circuit only through $\evmOut$.
+
+
+Throughout the paper we use:
+\begin{align*}
+  \colrU &\;=\; \lnk{fn:tokenTypeOf}{\tokenTypeOf}\bigl(\domSep(\underAddr),\, \vaultAddr\bigr), \\
+  \colrW &\;=\; \lnk{fn:tokenTypeOf}{\tokenTypeOf}\bigl(\domSep(\wrapAddr),\, \vaultAddr\bigr)
+\end{align*}
+for the two shielded colors involved: $\colrU$ the color of the lent ERC20, $\colrW$ the color of
+the wrapper.
+
+\subsubsection{Supply}
+
+\begin{ProcBox}{$\Pi.\Supply^{\Lpub, \Lshd}\bigl(\shdAcct\bc \tokType\bc \amt\bc \auxx \,;\,
+      \privIn\bigr)$}
+\label{box:supply}
+\sloppy
+\emph{Private input.} $\privIn$ holds $\usersk$; the secret key $\coinsk$ associated to the
+\zkswap\ account $\srcAcct$; a fresh \freshrn{$\burnNonce$}, used at Step~1; and a fresh
+\freshrn{$\mintNonce$}, used at Step~3 on success or at Step~4 on failure.\\
+\emph{Public arguments.} $\tokType = \underAddr$, read from pinned state rather than supplied;
+$\auxx = (\evmNonce, \keyVer)$ only. The gas envelope is contract-fixed, because the
+\emph{vault}'s own EVM account pays for this transaction. Requires $\cktApproveWrap$
+(\cktref{ckt:approvestata}) to have been run once, so that the wrapper may pull the underlying.
+
+\begin{Steps}
+\item \textbf{Request call: $\cktStartSupply$} (\cktref{ckt:startsupply}). The caller hands the contract a
+      coin descriptor $\coinIn = (\burnNonce,\, \colrU,\, \amt)$; the circuit burns it, files
+      ``$\text{deposit}(\amt, \vaultEvmAddr)$ on $\wrapAddr$'' under $\rid$ in $\supplyMap$ with
+      $\keyPath = \keyPathLit$, and pins
+      $\supplyMarkerMap[\rid] \gets \lnk{fn:refundComm}{\refundComm(\usersk, \rid)}$. The caller address does not appear in the transaction.
+\item \textbf{MPC.} The committee signs with the key derived at $\keyPath = \keyPathLit$, so from
+      $\vaultEvmAddr$, the pool's own account; the relayer broadcasts; the committee observes the
+      execution, reads the returned share count against $\schemaIn$, re-serialises it against
+      $\schemaOut$, and posts $\attSig$ over
+      $\lnk{fn:attDigest}{\attDigest(\rid, \evmOut)}$.
+\item \textbf{Settlement call on success: $\cktCompleteSupply$} (\cktref{ckt:completesupply}).
+      Supplier-gated; mints \emph{one} coin, of color $\colrW$ and value $\amtShares$ read from
+      $\evmOut$.
+\item \textbf{Settlement call on failure:  execute $\cktRefundSupply$}   (\cktref{ckt:refundsupply}):  Re-mints the \emph{full} $\amt$ of color $\colrU$ - the deposit never executed, so nothing was spent.
+\end{Steps}
+
+\medskip
+Outcome: $\succeeded$ via Step~3, $\failed$ via Step~4. Private output: $\usersk$, and the new coins minted.
+\end{ProcBox}
+
+
+\begin{CktBox}{ckt:approvestata}{$\cktApproveStata$}
+\fld{Arguments.} $\evmNonce$, $\keyVer$.
+\fld{Witness.} none.
+\fld{Reads.} $\initFlag$, $\underAddr$, $\wrapAddr$, $\vaultAddr$, $\sigNonce$, $\chainId$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$.
+\item $\evmTxOf \gets$ ``approve $\wrapAddr$ for an unlimited amount'', sent to $\underAddr$,
+      contract-fixed gas envelope.
+\item $\keyPath \gets \keyPathLit$; \;
+      $\req \gets (\vaultAddr\bc \sigNonce\bc \keyVer\bc \keyPath\bc \evmTxOf\bc \chainId)$; \;
+      $\rid \gets \reqIdOf(\req)$; \; $\assert \rid \notin \reqMap$.
+\end{enumerate}
+\begin{OutList}
+\oitem{\Dvault} $\sigNonce \mathrel{+}= 1$; \; $\reqMap[\rid] \gets \req$.
+\oitem{\Dshd} $\emptyset$.
+\oitem{\stmt} $\bigl(\cktApproveStata,\; \req,\; \rid,\; \notif(\vaultAddr, \rid, \reqMap),\;
+  \comIO\bigr)$.
+\oitem{\wit} $\bot$.
+\oitem{\Rel} the request is well formed.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:startsupply}{$\srcStartSupply: \cktStartSupply$}
+\fld{Arguments.} $\evmNonce$, $\keyVer$, $\amt$, and
+$\coinIn = (\burnNonce, \mathsf{color}, \mathsf{value})$.
+\fld{Witness.} $\usersk$ (and $\coinsk$ at the wallet layer).
+\fld{Reads.} $\initFlag$, $\underAddr$, $\wrapAddr$, $\vaultEvmAddr$, $\vaultAddr$, $\sigNonce$,
+$\chainId$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$, \; $0 < \amt \leq 2^{64}-1$.
+\item $\assert \coinIn.\mathsf{color} = \colrU$ \; and \; $\coinIn.\mathsf{value} = \amt$.
+\item $\evmTxOf \gets$ ``$\srcDepositSel$ for $\amt$, recipient $\vaultEvmAddr$'', sent to
+      $\wrapAddr$, contract-fixed gas envelope.
+\item $\keyPath \gets \keyPathLit$.
+\item $\req \gets (\vaultAddr\bc \sigNonce\bc \keyVer\bc \keyPath\bc \evmTxOf\bc \chainId)$; \;
+      $\rid \gets \lnk{fn:reqIdOf}{\reqIdOf(\req)}$; \; $\assert \rid \notin \supplyMap$.
+\end{enumerate}
+\MidNote{\textbf{Midnight operations: burn.}
+$\mnhl{\code{receiveShielded}}(\coinIn)$ then
+$\mnhl{\code{sendImmediateShielded}}(\coinIn, \burnAddr, \amt)$.}
+\begin{OutList}
+\oitem{\Dvault} $\sigNonce \mathrel{+}= 1$; \; $\supplyMap[\rid] \gets \req$; \;
+  \ADDEDINL{$\supplyView[\rid] \gets \bigl(\lnk{fn:refundComm}{\refundComm(\usersk, \rid)},\;
+  \amt\bigr)$}.
+\oitem{\Dshd} \bluedot $\coinCommit(\coinIn, \vaultAddr)$, \;
+  \bluedot $\coinNull(\coinIn, \vaultAddr)$, \;
+  \bluedot $\coinCommit(\coinBurnOut, \burnAddr)$, \;
+  \bluedot $\{\coinNull(\coinFund, \coinsk)\}$ and $\coinCommit(\coinChange, \srcAcct)$.
+\oitem{\stmt} $\bigl(\cktStartSupply,\; \req,\; \rid,\; \supplyView[\rid],\; \Dshd,\;
+  \notif(\vaultAddr, \rid, \supplyMap),\; \comIO\bigr)$.
+\oitem{\wit} $(\usersk,\; \burnNonce,\; \coinsk)$.
+\oitem{\Rel} $\coinIn.\mathsf{color} = \colrU$ \;$\wedge$\; $\coinIn.\mathsf{value} = \amt$
+  \;$\wedge$\; $\supplyView[\rid].\fComm = \refundComm(\usersk, \rid)$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:completesupply}{$\cktCompleteSupply$}
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$ of width $8$, $\freshrn{\mintNonce}$.
+\fld{Witness.} $\usersk$, $\mintNonce$.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$, \ADDEDINL{$\supplyView[\rid]$}, $\supplyMap$, $\wrapAddr$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$ and
+      $\assert \EcdsaVf\bigl(\lnk{fn:attDigest}{\attDigest(\rid, \evmOut)}\bc \attSig\bc
+      \mpcRespKey\bigr)$.
+\item $\assert \rid \in \supplyMap$; \; remove $\supplyMap[\rid]$.
+\item \ADDEDINL{$\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)} =
+      \supplyView[\rid].\fComm$} (authentication \textbf{supplier-only}); \; remove $\supplyView[\rid]$.
+\item $\amtShares \gets$ the attested value in $\evmOut$, released publicly.
+\end{enumerate}
+\MidNote{\textbf{Midnight operation.} Mint
+$\coinMintW = \bigl(\freshrn{\mintNonce},\; \colrW,\; \amtShares\bigr)$
+to $\usrTag{\coinpk \text{ of } \setlAcct}$.}
+\begin{OutList}
+\oitem{\Dvault} $\supplyMap[\rid]$ removed; \ADDEDINL{$\supplyView[\rid]$ removed}.
+\oitem{\Dshd} \bluedot mint record $\bigl(\domSep(\wrapAddr),\, \amtShares\bigr)$; \;
+  \bluedot $\coinCommit(\coinMintW$, $\coinpk$ of $\shdAcct)$.
+\oitem{\stmt} $\bigl(\cktCompleteSupply,\; \rid,\; \attSig,\; \amtShares,\; \Dvault,\;
+  \Dshd\bigr)$.
+\oitem{\wit} $(\usersk,\; \mintNonce)$.
+\oitem{\Rel} $\refundComm(\usersk, \rid)$ $= \supplyView[\rid].\fComm$ \;$\wedge$\;
+  $\EcdsaVf(\attDigest(\rid,\evmOut)$, $\attSig$, $\mpcRespKey)$ \;$\wedge$\;
+  the commitment opens to
+  $\bigl(\mintNonce,\, \colrW,\, \amtShares,\, \coinpk\bigr)$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:refundsupply}{$\cktRefundSupply$}
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$ of with 5, $\mintNonce$.
+\fld{Witness.} $\usersk$.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$, $\supplyView[\rid]$, $\supplyMap$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item Run \hyperref[ckt:failgate]{$\cktFailGate(\rid, \attSig, \evmOut)$}.
+\item $\assert \rid \in \supplyView$.
+\item $\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)} = \supplyView[\rid].\fComm$ - (authentication:
+      \textbf{supplier-only}).
+\item Remove $\supplyMap[\rid]$ and $\supplyView[\rid]$.
+\end{enumerate}
+\MidNote{\textbf{Midnight operation.} Mint
+$\coinMint = \bigl(\freshrn{\mintNonce},\; \colrU,\; \supplyView[\rid].\fAmt\bigr)$
+to $\usrTag{\coinpk \text{ of } \setlAcct}$.}
+\begin{OutList}
+\oitem{\Dvault} $\supplyMap[\rid]$ removed; $\supplyView[\rid]$ removed.
+\oitem{\Dshd} \bluedot mint record
+  $\bigl(\domSep(\underAddr),\, \supplyView[\rid].\fAmt\bigr)$; \;
+  \bluedot $\coinCommit\bigl(\coinMint,\, \usrTag{\coinpk \text{ of } \setlAcct}\bigr)$.
+\oitem{\stmt} $\bigl(\cktRefundSupply,\; \rid,\; \attSig,\; \Dvault,\; \Dshd\bigr)$.
+\oitem{\wit} $(\usersk,\; \mintNonce)$.
+\oitem{\Rel} $\refundComm(\usersk, \rid)$ $= \supplyView[\rid].\fComm$ \;$\wedge$\; the relation of
+  $\cktFailGate$ \;$\wedge$\; the commitment opens to
+  $\bigl(\mintNonce,\, \colrU,\, \supplyView[\rid].\fAmt,\, \usrTag{\coinpk \text{ of }
+  \shdAcct}\bigr)$.
+\end{OutList}
+\end{CktBox}
+
+\begin{PubBox}{What $\Supply$ publishes}
+\textbf{On $\Lpub$:} the supply in the clear: the wrapper contract called, the amount of the
+underlying supplied, the receiver $\vaultEvmAddr$, and the share count returned. The vault's own account is the sender, so \emph{nothing tied to $\srcAcct$ appears}.
+
+\smallskip
+\textbf{On $\Lshd$:} $\stmt_{\cktSupply}$, the MPC signatures, and the settlement statement.
+Of these, the components that involve the caller at all are: the marker
+$\refundComm(\usersk, \rid)$; the coins burned to the contract: the nullifier and the new coin commitment destined to $\burnAddr$ (the private and random nonce $\burnNonce$ protects the identity of the caller of $\cktStartSupply)$), the new private coins minted in the $\cktCompleteSupply/\cktRefundSupply$ destined  to $\shdAcct$ (the private and random nonce $\mintNonce$ protects the identity of the recipient).
+
+\smallskip
+\textbf{The exchange rate is public.} $\amt$ is a field of $\req$ and $\amtShares$ is
+released by the settlement call and published again as a mint record, so
+$\amt / \amtShares$. This is
+information about $\Lpub$, not about the caller, and it is identical for every supplier in the same
+block.
+
+\smallskip
+\textbf{Hidden:} which shielded account funded the call; which shielded account received the shares.\end{PubBox}
+
+
+\subsubsection{Redeem}
+
+\begin{ProcBox}{$\Pi.\Redeem^{\Lpub, \Lshd}\bigl(\shdAcct\bc \wrapOf{\tokType}\bc \amtShares\bc
+      \auxx \,;\, \privIn\bigr)$}
+\label{box:redeem}
+\sloppy
+\emph{Private input.} As $\Supply$: $\usersk$; $\coinsk$ of $\srcAcct$; a fresh
+\freshrn{$\burnNonce$} at Step~1; and a fresh \freshrn{$\mintNonce$} at Step~3 on success or Step~4
+on failure.\\
+\emph{Public arguments.} $\wrapOf{\tokType} = \wrapAddr$, read from pinned state;
+$\auxx = (\evmNonce, \keyVer)$ only. No approval leg is needed: the vault redeems its own shares,
+so no allowance to a third party is involved.
+
+\begin{Steps}
+\item \textbf{Request call: $\cktRedeem$} (\cktref{ckt:startredeem}). The caller hands the contract a coin
+      descriptor $\coinIn = (\burnNonce,\, \colrW,\, \amtShares)$; the circuit burns it, files
+      ``$\text{redeem}(\amtShares, \vaultEvmAddr, \vaultEvmAddr)$ on $\wrapAddr$'' under $\rid$ in
+      $\redeemMap$ with $\keyPath = \keyPathLit$, and pins
+      $\redeemMarkerMap[\rid] \gets \lnk{fn:refundComm}{\refundComm(\usersk, \rid)}$.
+\item \textbf{MPC.} As in $\Supply$, signing from $\vaultEvmAddr$. The committee reports
+      $\amtAssets$, the amount of the underlying the market returned --- principal plus accrued
+      interest.
+\item \textbf{Settlement call on success: $\cktCompleteRedeem$} (\cktref{ckt:completeredeem}).
+      Redeemer-gated; mints \emph{one} coin, of colour $\colrU$ and value $\amtAssets$.
+\item \textbf{Settlement call on failure: $\cktRefund$}, redeem branch
+      (\cktref{ckt:refundredeem}). Re-mints the \emph{full} $\amtShares$ of color $\colrW$.
+\end{Steps}
+
+\medskip
+Outcome: $\succeeded$ via Step~3, $\failed$ via Step~4, $\pending$ otherwise. Private output:
+$\usersk$.
+\end{ProcBox}
+
+% \begin{CktBox}{ckt:redeem}{$\cktRedeem$ --- the request call of $\Redeem$}
+% \fld{Arguments.} $\evmNonce$, $\keyVer$, $\amtShares$, and the coin to surrender
+% $\coinIn = (\burnNonce,\; \colr,\; \mathsf{value})$.
+% \fld{Witness.} $\usersk$; and, at the wallet layer, $\coinsk$ of $\srcAcct$ and the openings of the
+% coins the wallet spends.
+% \fld{Reads.} $\initFlag$, $\wrapAddr$, $\vaultEvmAddr$, $\vaultAddr$, $\sigNonce$, $\chainId$.
+% \fld{Steps.}
+% \begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+% \item $\assert \initFlag \geq 1$, \; $0 < \amtShares \leq 2^{64}-1$. \textbf{This bounds the
+%       \emph{input}, and only the input.} The refund path re-mints $\amtShares$, so the bound makes
+%       the refund always representable; it says nothing about $\amtAssets$, which is what the success
+%       path mints. That asymmetry is the subject of Warning~\ref{warn:redeembound}.
+% \item $\assert \coinIn.\colr = \colrW$ \; and \; $\coinIn.\mathsf{value} = \amtShares$. As in
+%       $\cktSupply$, both compared values are public and $\burnNonce$ is unconstrained.
+% \item $\evmTxOf \gets$ ``$\srcRedeemSel$: redeem $\amtShares$ shares, receiver $\vaultEvmAddr$,
+%       owner $\vaultEvmAddr$'', sent to $\wrapAddr$, on $\chainId$, no native value,
+%       \textbf{contract-fixed} gas envelope. \emph{Both the receiver and the owner are read from
+%       pinned state}: the shares being redeemed are the pool's, and the assets return to the pool.
+% \item $\keyPath \gets \keyPathLit$.
+% \item $\req \gets (\vaultAddr\bc \sigNonce\bc \keyVer\bc \keyPath\bc \evmTxOf\bc \chainId\bc
+%       \schemaIn\bc \schemaOut)$, with the two contract-fixed redeem schemas; \;
+%       $\rid \gets \lnk{fn:reqIdOf}{\reqIdOf(\req)}$; \; $\assert \rid \notin \redeemMap$.
+% \end{enumerate}
+
+% \MidNote{\textbf{Midnight operations: burn redeemed coin}, as in \cktref{ckt:supply}:
+% $\mnhl{\opReceive}(\coinIn)$ then $\mnhl{\opSendImm}(\coinIn, \burnAddr, \amtShares)$.}
+
+% \smallskip
+% \noindent\textbf{The four coins this call touches.} Identical in structure to the table of
+% \cktref{ckt:supply}, with $\colrW$ in place of $\colrU$ and $\amtShares$ in place of $\amt$:
+% $\coinIn = (\burnNonce,\, \colrW,\, \amtShares)$;
+% $\coinFund_i$ of colour $\colrW$ summing to $V \geq \amtShares$;
+% $\coinChange = (\cdot,\, \colrW,\, V - \amtShares)$;
+% $\coinBurnOut = \bigl(\evolveNonce(\burnNonce),\, \colrW,\, \amtShares\bigr)$.
+
+% \begin{OutList}
+% \oitem{\Dvault} $\sigNonce \mathrel{+}= 1$; \; $\redeemMap[\rid] \gets \req$; \;
+%   $\redeemMarkerMap[\rid] \gets \lnk{fn:refundComm}{\refundComm(\usersk, \rid)}$.
+% \oitem{\Dshd} exactly the five entries of \cktref{ckt:supply}, with $\colrW$ and $\amtShares$
+%   substituted: \; \bluedot $\{\coinNull(\coinFund_i, \usrTag{\coinsk})\}_i$, \;
+%   \bluedot $\coinNull(\coinIn, \ctrTag{\vaultAddr})$, \;
+%   \bluedot $\coinCommit(\coinIn, \ctrTag{\vaultAddr})$, \;
+%   \bluedot $\coinCommit(\coinBurnOut, \burnAddr)$, \;
+%   \bluedot $\coinCommit(\coinChange, \usrTag{\coinpk})$.
+% \oitem{\stmt} $\bigl(\cktRedeem,$ $\req,$ $\rid,$ $\refundComm(\usersk, \rid),$ $\Dshd,$
+%   $\notif(\vaultAddr, \rid, \redeemMap),$ $\comIO\bigr)$, where $\req$ exposes
+%   $\wrapAddr, \amtShares, \vaultEvmAddr, \evmNonce, \sigNonce$ and $\keyPath = \keyPathLit$. The
+%   notification \textbf{names $\redeemMap$}.
+% \oitem{\wit} $\bigl(\usersk,\; \burnNonce,\; \coinsk,\; \{\coinFund_i\}_i\bigr)$.
+% \oitem{\Rel} $\redeemMarkerMap[\rid] = \refundComm(\usersk, \rid)$ \;$\wedge$\;
+%   $\coinIn = (\burnNonce, \colrW, \amtShares)$ opens both
+%   $\coinCommit(\coinIn, \ctrTag{\vaultAddr})$ and $\coinNull(\coinIn, \ctrTag{\vaultAddr})$
+%   \;$\wedge$\; each $\coinFund_i$ opens its published nullifier under $\coinsk$ and is unspent
+%   \;$\wedge$\; the colour balances.
+% \end{OutList}
+% \end{CktBox}
+
+% \ADDEDMARK{Current source: \srcStartRedeem. Changes from Circuit~C15: the pending marker is now
+% $\redeemView[\rid]$, a record holding the caller commitment and the share count, in place of
+% $\redeemMarkerMap[\rid]$, which held the commitment alone.}
+\begin{CktBox}{ckt:startredeem}{$\cktStartRedeem$ : (\srcStartRedeem)}
+\fld{Arguments.} $\evmNonce$, $\keyVer$, $\amtShares$, and
+$\coinIn = (\burnNonce, \mathsf{color}, \mathsf{value})$.
+\fld{Witness.} $\usersk$ (and $\coinsk$ at the wallet layer).
+\fld{Reads.} $\initFlag$, $\wrapAddr$, $\vaultEvmAddr$, $\vaultAddr$, $\sigNonce$, $\chainId$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$, \; $0 < \amtShares \leq 2^{64}-1$.
+\item $\assert \coinIn.\mathsf{color} = \colrW$ \; and \; $\coinIn.\mathsf{value} = \amtShares$.
+\item $\evmTxOf \gets$ ``$\srcRedeemSel$ for $\amtShares$, receiver $\vaultEvmAddr$, owner
+      $\vaultEvmAddr$'', sent to $\wrapAddr$, contract-fixed gas envelope.
+\item $\keyPath \gets \keyPathLit$.
+\item $\req \gets (\vaultAddr\bc \sigNonce\bc \keyVer\bc \keyPath\bc \evmTxOf\bc \chainId)$; \;
+      $\rid \gets \lnk{fn:reqIdOf}{\reqIdOf(\req)}$; \; $\assert \rid \notin \redeemMap$.
+\end{enumerate}
+\MidNote{\textbf{Midnight operations: burn.}
+$\mnhl{\code{receiveShielded}}(\coinIn)$ then
+$\mnhl{\code{sendImmediateShielded}}(\coinIn, \burnAddr, \amtShares)$.}
+\begin{OutList}
+\oitem{\Dvault} $\sigNonce \mathrel{+}= 1$; \; $\redeemMap[\rid] \gets \req$; \;
+  \ADDEDINL{$\redeemView[\rid] \gets \bigl(\lnk{fn:refundComm}{\refundComm(\usersk, \rid)},\;
+  \amtShares\bigr)$}.
+\oitem{\Dshd} \bluedot $\coinCommit(\coinIn, \vaultAddr)$, \;
+  \bluedot $\coinNull(\coinIn, \vaultAddr)$, \;
+  \bluedot $\coinCommit(\coinBurnOut, \burnAddr)$, \;
+  \bluedot $\{\coinNull(\coinFund_i, \coinsk)\}_i$ and $\coinCommit(\coinChange, \srcAcct)$.
+\oitem{\stmt} $\bigl(\cktStartRedeem,\; \req,\; \rid,\; \redeemView[\rid],\; \Dshd,\;
+  \notif(\vaultAddr, \rid, \redeemMap),\; \comIO\bigr)$.
+\oitem{\wit} $(\usersk,\; \burnNonce,\; \coinsk)$.
+\oitem{\Rel} $\coinIn.\mathsf{color} = \colrW$ \;$\wedge$\; $\coinIn.\mathsf{value} = \amtShares$
+  \;$\wedge$\; $\redeemView[\rid].\fComm = \refundComm(\usersk, \rid)$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:completeredeem}{$\cktCompleteRedeem$}
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$ of width $8$, $\freshrn{\mintNonce}$.
+\fld{Witness.} $\usersk$, $\mintNonce$.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$, \ADDEDINL{$\redeemView[\rid]$}, $\redeemMap$,
+$\underAddr$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item $\assert \initFlag \geq 1$ and
+      $\assert \EcdsaVf\bigl(\lnk{fn:attDigest}{\attDigest(\rid, \evmOut)}\bc \attSig\bc
+      \mpcRespKey\bigr)$.
+\item $\assert \rid \in \redeemMap$; \; remove $\redeemMap[\rid]$.
+\item \ADDEDINL{$\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)} =
+      \redeemView[\rid].\fComm$} --- \textbf{redeemer-only}; \; remove $\redeemView[\rid]$.
+\item $\amtAssets \gets$ the attested value in $\evmOut$, \textbf{released publicly}.
+\end{enumerate}
+\MidNote{\textbf{Midnight operation.} Mint
+$\coinMintU = \bigl(\freshrn{\mintNonce},\; \colrU,\; \amtAssets\bigr)$
+to $\coinpk$.}
+\begin{OutList}
+\oitem{\Dvault} $\redeemMap[\rid]$ removed; \ADDEDINL{$\redeemView[\rid]$ removed}.
+\oitem{\Dshd} \bluedot mint record $\bigl(\domSep(\underAddr),\, \amtAssets\bigr)$; \;
+  \bluedot $\coinCommit\bigl(\coinMintU,\, \coinpk\bigr)$.
+\oitem{\stmt} $\bigl(\cktCompleteRedeem,\; \rid,\; \attSig,\; \amtAssets,\; \Dvault,\;
+  \Dshd\bigr)$.
+\oitem{\wit} $(\usersk,\; \mintNonce)$.
+\oitem{\Rel} $\refundComm(\usersk, \rid)$ $= \redeemView[\rid].\fComm$ \;$\wedge$\;
+  $\EcdsaVf(\attDigest(\rid,\evmOut)$, $\attSig$, $\mpcRespKey)$ \;$\wedge$\;
+  the commitment opens to
+  $\bigl(\mintNonce,\, \colrU,\, \amtAssets,\, \coinpk\bigr)$.
+\end{OutList}
+\end{CktBox}
+
+
+\begin{CktBox}{ckt:refundredeem}{$\cktRefundRedeem$}
+\fld{Arguments.} $\rid$, $\attSig$, $\evmOut$ of width $5$, $\mintNonce$.
+\fld{Witness.} $\usersk$.
+\fld{Reads.} $\initFlag$, $\mpcRespKey$, $\redeemView[\rid]$, $\redeemMap$.
+\fld{Steps.}
+\begin{enumerate}[nosep,leftmargin=1.7em,topsep=2pt]
+\item Run \hyperref[ckt:failgate]{$\cktFailGate(\rid, \attSig, \evmOut)$}.
+
+\item $\assert \rid \in \redeemView$.
+\item $\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)} = \redeemView[\rid].\fComm$ (authenticating 
+      \textbf{redeemer-only}).
+\item Remove $\redeemMap[\rid]$ and $\redeemView[\rid]$.
+\end{enumerate}
+\MidNote{\textbf{Midnight operation.} Mint
+$\coinMint = \bigl(\freshrn{\mintNonce},\; \colrW,\; \redeemView[\rid].\fShares\bigr)$
+to $\usrTag{\coinpk \text{ of } \setlAcct}$.}
+\begin{OutList}
+\oitem{\Dvault} $\redeemMap[\rid]$ removed; $\redeemView[\rid]$ removed.
+\oitem{\Dshd} \bluedot mint record
+  $\bigl(\domSep(\wrapAddr),\, \redeemView[\rid].\fShares\bigr)$; \;
+  \bluedot $\coinCommit\bigl(\coinMint,\, \usrTag{\coinpk \text{ of } \setlAcct}\bigr)$.
+\oitem{\stmt} $\bigl(\cktRefundRedeem,\; \rid,\; \attSig,\; \Dvault,\; \Dshd\bigr)$.
+\oitem{\wit} $(\usersk,\; \mintNonce)$.
+\oitem{\Rel} $\refundComm(\usersk, \rid)$ $= \redeemView[\rid].\fComm$ \;$\wedge$\; the relation of
+  $\cktFailGate$ \;$\wedge$\; the commitment opens to
+  $\bigl(\mintNonce,\, \colrW,\, \redeemView[\rid].\fShares,\, \usrTag{\coinpk \text{ of }
+  \setlAcct}\bigr)$.
+\end{OutList}
+\end{CktBox}
+\begin{PubBox}{What $\Redeem$ publishes}
+\textbf{On $\Lpub$:} the redemption in the clear: the wrapper called, the share count burned,  and the amount of the underlying returned. The vault's account $\vaultEvmAddr$ is involved in all transactions on $\Lpub$ so nothing tied to $\srcAcct$ appears.
+
+\smallskip
+\textbf{On $\Lshd$:} as $\Supply$, over $\redeemMap$ and $\redeemMarkerMap$, with the two colors exchanged.
+
+\smallskip
+\textbf{The accrued yield is public.} $\amtShares$ is a field of $\req$ and $\amtAssets$ is released
+by the settlement call, so the realised rate is recoverable, and with it the interest the position
+earned. 
+
+\smallskip
+\textbf{Hidden:} which shielded account funded the call; which received the assets.
+\end{PubBox}

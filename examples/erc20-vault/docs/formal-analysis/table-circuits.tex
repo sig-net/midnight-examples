@@ -1,0 +1,15 @@
+
+\begin{center}
+\begin{tabular}{@{}L{2.4cm}L{11.8cm}@{}}
+\toprule
+\textbf{Procedure} & \textbf{Circuits that implement it} \\
+\midrule
+$\Setup$    & $\cktInit$ (\cktref{ckt:initialize}); $\cktApprove$ (\cktref{ckt:approverouter}); $\cktApproveStata$ (\cktref{ckt:approvestata}) \\
+$\Deposit$  & $\cktStartDeposit$ (\cktref{ckt:deposit}), then $\cktCompleteDeposit$ (\cktref{ckt:completedeposit}) \\
+$\Withdraw$ & $\cktStartWithdraw$ (\cktref{ckt:startwithdraw}), then $\cktCompleteWithdraw$ (\cktref{ckt:completewithdraw}) or $\cktRefundWithdraw$ (\cktref{ckt:refundwithdraw}) \\
+$\Swap$     & $\cktStartSwap$ (\cktref{ckt:startswap}), then $\cktCompleteSwap$ (\cktref{ckt:completeswap}) or $\cktRefundSwap$ (\cktref{ckt:refundswap}) \\
+$\Supply$   & $\cktStartSupply$ (\cktref{ckt:startsupply}), then $\cktCompleteSupply$ (\cktref{ckt:completesupply}) or $\cktRefundSupply$ (\cktref{ckt:refundsupply}) \\
+$\Redeem$   & $\cktStartRedeem$ (\cktref{ckt:startredeem}), then $\cktCompleteRedeem$ (\cktref{ckt:completeredeem}) or $\cktRefundRedeem$ (\cktref{ckt:refundredeem}) \\
+\bottomrule
+\end{tabular}
+\end{center}

@@ -1,0 +1,69 @@
+% !TeX program = pdflatex
+\documentclass[11pt]{article}
+\input{preamble}
+\input{macros}
+
+\begin{document}
+
+\title{%
+  {\LARGE\bfseries\color{hdblue} SigNet's Public-to-Private Cross-Chain \Payment System}\\[0.4em]
+  {\Large\color{gray} Formal Treatment of its Security Analysis}%
+}
+
+\author{Alessandra Scafuro\\ \href{mailto:alessandra@sig.network}{\texttt{alessandra@sig.network}}}
+\maketitle
+\begin{abstract}
+    This document establishes the foundation for analyzing the soundness and unlinkability of SigNet’s Public-to-Private Cross-Chain System.  The system comprises several complex components: the MPC systems, the Midnight  shielded-transaction layer and shielded-computation layer, the Ethereum ledger.
+    After establishing the foundations, this document  focuses exclusively on the  \href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{vault contract} \emph{Version 0.1}\footnote{ This is an   \href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{\textbf{earlier version}} of the  system. A  \href{https://github.com/sig-net/midnight-examples/blob/dev/examples/erc20-vault/contract/src/erc20-vault.compact}{new version} is available and contains modifications that are not formally analyzed here. Nevertheless, the proof strategy used in this paper should extend to the new version. }. 
+    (For a high-level description of the system logic consult the
+   \href{ https://github.com/sig-net/midnight-examples/blob/dev/examples/erc20-vault/README.md}{ERC20 Vault readme} available on our repository.)
+ 
+     Since the vault is written in compact language (provided by Midnight) and it relies on primitives provided by the Midnight shielded-transaction layer, our proof explicitly identifies the cryptographic properties that we assume from the Midnight components, though we do not formally prove that the Mindnight components achieve them.
+    The document is organized as follows.
+    
+    \begin{enumerate}
+        \item   Section~\ref{sec:definition}: Formal definition of  Public-to-Private Cross-chain Payment System.
+       This section establishes a formal model for a Public-to-Private Cross-Chain \Payment System over two abstract ledgers: a public ledger ($\Lpub$) and a private ledger ($\Lshd$). It defines core operations (e.g., Deposit, Withdraw, Swap, Supply, Redeem) and their inputs/outputs description, providing a generalized framework adaptable to any pair of chains.
+        
+        \item  Section~\ref{ssec:unlinakbility}: Formal definition of \emph{Unlinkability} in a \emph{Public-to-Private} Cross-chain \Payment System. This section expresses  the  unlinkability that a public-to-private chain system can achieve via a Game-Based definition, standard in cryptographic proofs. We preferred the game-based approach over the simulation-based approach in the Universal Composability Framework for simplicity. We believe that the game clearly identifies what is protected (and what is leaked) in a public-to-private chain system.
+        \item  Section~\ref{sec:components} and Section~\ref{sec:instantiation}:  Implementation. We provide  an abridged   description of the  \href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{vault contract} (Version 0.1). 
+      Our implementation  uses  shielded-transaction layer and shielded-computation layer  provided by Midnight. When useful, we use \MidNoteT{blue-shaded boxes} to highlight that we are using a midnight component, and therefore we rely on its security and soundness.
+      Furthermore, our contract uses the SygNet's MPC signing system that is treated here as a \emph{trusted signing system}. We also assume that all components related to emitting and processing chain events are trusted.
+        \item Section~\ref{sec:assumptions}: Assumptions. We state  the cryptographic assumptions we use and the ones that we inherit from the     Midnight private circuit-layer  and shielded-coin layer.
+    
+        \item  Section~\ref{sec:proof}: A semi-formal analysis of the security of implementation. We prove that our cross-chain system achieves the unlikability properties (under the assumption that the network is anonymized) and  the soundness  property.
+        In each section, we state the model and cryptographic assumptions we require for the proof. 
+
+        \item Section~\ref{sec:conclusions}: Conclusions. Finally,  we distill essential  takeaways from this treatment. We explain what our analysis means for a user.
+    \end{enumerate} 
+
+\end{abstract}
+\section{Version analyzed in this document }
+This document analyses an  earlier version of the system (\href{https://github.com/sig-net/midnight-examples/blob/erc20-vault-v0.3.0/examples/erc20-vault/contract/src/erc20-vault.compact}{link})
+ which   used a  counter-based  approach to prevent replay attacks.
+
+The new version (\href{https://github.com/sig-net/midnight-examples/blob/dev/examples/erc20-vault/contract/src/erc20-vault.compact}{link}) addresses replay attacks with a new design based on timing information (updating the last-seen block), and introduces a mechanism to process many requests in parallel,  while preventing contention. 
+
+The new version introduces public procedures (circuits) to organize requests sent to the MPC and attestations received from it.  These  procedures do not use any private inputs,  can be executed by anyone and are anonymous (i.e., the identity of the caller is not leaked by the circuit computation). As such, they do  not affect the rationale behind the unlinkability  proofs provided in this document.
+The soundness approach is expected to remain unchanged, but this must be confirmed with a formal security proof.
+
+\vspace{5pt}
+In the document, we will use  the paragraph-header: ``
+\newversion{...}''
+to  describe the differences with the new version.
+
+\newpage
+
+\input{definition}
+\input{implementation}
+\input{assumptions}
+\input{proof}
+\input{soundness}
+\input{conclusions}
+
+% Every entry is listed, cited or not, as further reading.
+\nocite{*}
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
