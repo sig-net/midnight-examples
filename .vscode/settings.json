@@ -19,6 +19,12 @@
   // redline CI on a diff the editor thinks is fine.
   "prettier.prettierPath": "./node_modules/prettier",
 
+  // latexmk's rc file is Perl. Without this the editor guesses TypeScript
+  // and flags every `$variable` as an undeclared name.
+  "files.associations": {
+    ".latexmkrc": "perl"
+  },
+
   "search.exclude": {
     "**/src/managed": true,
     "**/.yarn": true
