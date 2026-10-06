@@ -32,5 +32,12 @@
   // be rewritten every time a dependency changes on disk.
   "latex-workshop.latex.recipe.default": "latexmk (latexmkrc)",
   "latex-workshop.latex.build.enableMagicComments": false,
-  "latex-workshop.latex.autoBuild.run": "never"
+  "latex-workshop.latex.autoBuild.run": "never",
+
+  // ChkTeX lints the sources on save, reading the .chktexrc beside main.tex.
+  // The extension's stock arguments start with -wall, which turns on every
+  // warning class including "use \( instead of $" and buries the useful
+  // notes under thousands of those, so the arguments keep ChkTeX's defaults.
+  "latex-workshop.linting.chktex.enabled": true,
+  "latex-workshop.linting.chktex.exec.args": ["-e16", "-q"]
 }

@@ -3,9 +3,9 @@
 %-----------------------------------------------------------------------------------------------------
 \section{Cryptographic Assumptions}
 \label{sec:assumptions}
- 
-Before presenting a formal security proof for the unlikability (\S~\ref{sec:proof} and soundness (\S~\ref{sec:soundness} )
-properties of the protocol described in Section~\ref{sec:instantiation}, 
+
+Before presenting a formal security proof for the unlikability (\S~\ref{sec:proof}) and soundness (\S~\ref{sec:soundness})
+properties of the protocol described in Section~\ref{sec:instantiation},
 we define the cryptographic assumptions that we use in the proofs.
 Most of the cryptographic assumptions we list below are inherited from the Midnight shielded-circuit and shielded-coin layer..
 
@@ -65,12 +65,12 @@ loss of a factor $m$. However,   the multi-user version  is preferred to avoid t
 
 \subsection{Hash Functions}
 \begin{definition}[Collision-Resistant Hash Function~\cite{KatzLindell}]
-\label{def:crhf} 
+\label{def:crhf}
 A hash function family $\mathcal{H} = \{H_{pp} : \{0,1\}^* \to \{0,1\}^{\ell(\secpar)}\}_{pp \in \{0,1\}^{\secpar}}$ parameterized by public parameters $pp$ and security parameter $\secpar$ is \emph{collision-resistant} if for every PPT adversary $\mathcal{A}$, there exists a negligible function $\negl(\secpar)$ such that:
-    
+
     \[
-\Pr\left[ 
-  pp \leftarrow \mathrm{Gen}(1^{\secpar}), \, (x, x') \leftarrow \mathcal{A}(1^{\secpar}, pp) : x \neq x' \land H_{pp}(x) = H_{pp}(x') 
+\Pr\left[
+  pp \leftarrow \mathrm{Gen}(1^{\secpar}), \, (x, x') \leftarrow \mathcal{A}(1^{\secpar}, pp) : x \neq x' \land H_{pp}(x) = H_{pp}(x')
 \right] \le \negl(\secpar)
 \]
 \end{definition}
@@ -171,7 +171,7 @@ $\CS$ is \emph{computationally binding} if for every PPT $\Adv$,
 \end{definition}
 
 \noindent The coin commitment $\coinCommit$ of \S\ref{ssec:hashcomputation} is used as a commitment
-in this sense, with the coin nonce playing the role of $r$ and the tuple $(\colr, \mathsf{value}, \rcpt)$ the role of $m$.  
+in this sense, with the coin nonce playing the role of $r$ and the tuple $(\colr, \mathsf{value}, \rcpt)$ the role of $m$.
 % In Midnight's instantiation $\ck$ are the parameters
 % used to instantiate hash function $\PersistantHash$.
 % Standard treatments of both properties are
@@ -208,7 +208,7 @@ is negligible in the security parameter $\lambda$, where the experiment is defin
 \vspace{7pt}
 
 
-\underline{$\mathbf{Exp}_{\Pi, \mathcal{A}}^{\mathrm{ik\text{-}cpa}\text{-}b}(\lambda)$ for $b \in \{0,1\}$} 
+\underline{$\mathbf{Exp}_{\Pi, \mathcal{A}}^{\mathrm{ik\text{-}cpa}\text{-}b}(\lambda)$ for $b \in \{0,1\}$}
 \begin{enumerate}
     \item $(pk_0, sk_0) \gets \mathsf{KeyGen}(1^\lambda)$ and $(pk_1, sk_1) \gets \mathsf{KeyGen}(1^\lambda)$
     \item $(m, \mathrm{st}) \gets \mathcal{A}_1(pk_0, pk_1)$

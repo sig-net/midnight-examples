@@ -1,12 +1,12 @@
-\section{Private-Public Cross-chain \Payment System: Formal Definition}
+\section{Private-Public Cross-chain \Payment{} System: Formal Definition}
 \label{sec:definition}
-This section describes the functionality that  a Private-Public Cross-chain \Payment  System provides formally. The system is defined in terms of the commands it provide. Each command is defined via the input-output interface.
+This section describes the functionality that  a Private-Public Cross-chain \Payment{}  System provides formally. The system is defined in terms of the commands it provide. Each command is defined via the input-output interface.
 
 
-A cross-chain \payment system is a bridge between a public  EVM-ledger  $\Lpub$ (e.g., Ethereum) and a private (shielded) ledger $\Lshd$ (e.g., Midnight). The users of the cross-chain system are users of possess account on both chains. The system and the users interact with each chain using the available interface.
+A cross-chain \payment{} system is a bridge between a public  EVM-ledger  $\Lpub$ (e.g., Ethereum) and a private (shielded) ledger $\Lshd$ (e.g., Midnight). The users of the cross-chain system are users of possess account on both chains. The system and the users interact with each chain using the available interface.
 
 
-\begin{definition}[Public-to-Private Cross-chain \Payment System]
+\begin{definition}[Public-to-Private Cross-chain \Payment{} System]
 \label{def:system}
 A \emph{public-to-private cross-chain defi system} $\Pi$, relative to $\Lpub$ and $\Lshd$,
 consists of the following PPT procedures.
@@ -16,7 +16,7 @@ Each procedure outputs the following  tuple:
 \[
 \bigl(\ \stpub',\ \stshd',\ \trans, \outc; \ \prvOut\ \bigr),
 \]
-where  $\stpub',\ \stshd'$ are the resulting state  updates for  each ledger; $\trans$ is the public transcript the execution of the call produces; 
+where  $\stpub',\ \stshd'$ are the resulting state  updates for  each ledger; $\trans$ is the public transcript the execution of the call produces;
  $\outc$ indicates if the function terminates  successfully, or it failed (functions are not guaranteed to terminate)  and $\prvOut$ is a  private output the caller retains.
 
 \begin{enumerate}[leftmargin=1.8em,itemsep=6pt]
@@ -26,9 +26,9 @@ where  $\stpub',\ \stshd'$ are the resulting state  updates for  each ledger; $\
 
 \item $\Pi.\Deposit^{\Lpub, \Lshd}\bigl([\pubAddr]\bc \shdAcct\bc \tokType\bc \amt\bc
       \auxx \,;\, \privIn\bigr)$.\\
-  Called by the holder of the  $\shdAcct$, whose secret is in $\privIn$, $\auxx$ carries execution parameters of the chains. 
-  On $\succeeded$: $\amt$ units of $\tokType$  is moved to a vault on $\Lpub$ and credited to 
-  $\shdAcct$.  On $\failed$ no operation is performed. 
+  Called by the holder of the  $\shdAcct$, whose secret is in $\privIn$, $\auxx$ carries execution parameters of the chains.
+  On $\succeeded$: $\amt$ units of $\tokType$  is moved to a vault on $\Lpub$ and credited to
+  $\shdAcct$.  On $\failed$ no operation is performed.
   $\pubAddr$ is the address on $\Lpub$ that funded the deposit to the vault. The parenthesis [] emphasize that $\shdAcct$ doesn't need to be the holder of  $\pubAddr$ -- though in the practical instantiation it is~\footnote{In our implementation, an address $\pubAddr$ must send funds to an intermediate, application-derived account, that is controlled by the Bridge. Such intermediate account is the used to deposit the amount $\amt$ to the vault address. We explicitly list $\pubAddr$ as a public genesis address (independent on the implementation), to stress that the link between the accounts on the two ledgers is revealed by a deposit}.
 \item $\Pi.\Withdraw^{\Lpub, \Lshd}\bigl(\shdAcct\bc \destAddr*\bc \tokType\bc \amt\bc
       \auxx \,;\, \privIn\bigr)$.\\
@@ -41,7 +41,7 @@ where  $\stpub',\ \stshd'$ are the resulting state  updates for  each ledger; $\
     \tokTypeB\bc \amtB\bc \auxx \,;\, \privIn\bigr)$.\\
   Called by the holder of $\srcAcct$. On $\succeeded$: $\amt$ units of $\tokType$ are swapped with $\amt'$ units  of $\tokType'$.
   On $\failed$: $\shdAcct$'s balance is unchanged.
- 
+
 
 
 \item $\Pi.\Supply^{\Lpub, \Lshd}\bigl(\shdAcct\bc [\tokType,\tokTypeB]\bc \amt\bc \auxx \,;\, \privIn\bigr)$.\\
@@ -53,7 +53,7 @@ where  $\stpub',\ \stshd'$ are the resulting state  updates for  each ledger; $\
   \smallskip
   $\amtShares$ is determined by the state of
   $\Lpub$ at the moment of execution,  and
-  is reported back in $\trans$. 
+  is reported back in $\trans$.
   [$\tokType,\tokTypeB$] are optional parameters (our implementation of $\Supply$ they are fixed and defined in the initial parameters $\pp$.).
 
 \item $\Pi.\Redeem^{\Lpub, \Lshd}\bigl(\shdAcct\bc [\tokType']\bc \amtShares\bc \auxx
@@ -69,21 +69,21 @@ where  $\stpub',\ \stshd'$ are the resulting state  updates for  each ledger; $\
 
 \section{Definition of Unlinkability.}
 \label{ssec:unlinakbility}
-A Public-to-Private  Cross-chain \Payment  System is designed for actions 
+A Public-to-Private  Cross-chain \Payment{}  System is designed for actions
 to be initiated on a private chain and to have effect on a vault on the  public chain.
 The latter, requires that amounts of the transactions be revealed. With that in mind, there are two notions of unlinkability that one could aim for:
 \begin{itemize}
     \item \emph{Transaction unlinkability}: can an observer  tie a
-withdrawal to a user? This connection could depend on amounts and on the order of events, and cannot be a property of a protocol: if the public chain records that the vault received  only two deposits, one of  $10$ from $\pubAddr_{A}$  and one deposit of $6$ from $\pubAddr_{B}$ later  a withdrawal of $7$  to a  fresh new account  $\pubAddr^*$,  leaks 
+withdrawal to a user? This connection could depend on amounts and on the order of events, and cannot be a property of a protocol: if the public chain records that the vault received  only two deposits, one of  $10$ from $\pubAddr_{A}$  and one deposit of $6$ from $\pubAddr_{B}$ later  a withdrawal of $7$  to a  fresh new account  $\pubAddr^*$,  leaks
 that the withdrawal request came from the user controlling $\pubAddr_{A}$, regardless of the cryptography involved in the withdrawal process.
 \item \emph{Cryptographic  unlinkability}:  do the protocol messages give any \emph{additional} help, besides what can be inferred from the public amounts displayed on the public chain?
-\end{itemize} 
+\end{itemize}
 
 In this section we target the latter.
-We provide   the notion of \emph{Withdrawer's Unlinkability} that states that it should be computationally infeasible from any PPT adversary to guess the identity of the 
+We provide   the notion of \emph{Withdrawer's Unlinkability} that states that it should be computationally infeasible from any PPT adversary to guess the identity of the
 shielded account associated to a withdrawal, even given full knowledge of the deposit and withdrawal/swaps/supply/redeems performed by all honest users (and even actively participating as a malicious user in the system). We capture this   definition with a formal cryptographic game,  the ithdrawer unlinkability game $\unlinkgame_{\Pi,\Adv}(1^{\secpar})$.
 
-In the experiment, there is a challenger that  (honestly) simulates the  cross-chain system and the two ledgers for the adversary. The adversary  can choose the operations that are executed  in the cross-chain system: it can create honest accounts, and make them perform any action (i.e., deposits, withdrawals,  swaps, supply redeem)  
+In the experiment, there is a challenger that  (honestly) simulates the  cross-chain system and the two ledgers for the adversary. The adversary  can choose the operations that are executed  in the cross-chain system: it can create honest accounts, and make them perform any action (i.e., deposits, withdrawals,  swaps, supply redeem)
 on amount and types of her choice.
 In the formal game this is modeled by the fact that the adversary has oracle access to  each action provided by the system and by the two chains. The oracles are described in Section~\ref{ssec:oracles}.
 
@@ -96,9 +96,9 @@ The adversary wins the game if it guesses correctly with a probability better th
 \vspace{5pt}
 \noindent
 \textbf{The power of the adversary.}
-We consider an adversary that has full view of all public protocol messages and 
+We consider an adversary that has full view of all public protocol messages and
 Ledger's messages.
-Furthermore, we consider an adversary that can have any type of side channel information about the users. For instance, the adversary could know that 
+Furthermore, we consider an adversary that can have any type of side channel information about the users. For instance, the adversary could know that
 a certain action (e.g., Withdraw, Deposit, Supply, etc) was issued by a specific user.
 Formally, we model this knowledge by giving to the adversary oracle access
 to all the calls $\Deposit$, $\Withdraw$, $\Swap$, $\Supply$, $\Redeem$ provided by our interface. The adversary can decide which users perform which action and choose the amount,.
@@ -144,10 +144,10 @@ Below we describe the ledger oracles provided to the adversary.
 \begin{itemize}[leftmargin=1.4em,itemsep=3pt]
 \item $\ONewShd() \to \shdAcct_i$, it allows to create new account on the shielded chain. The ledger
       creates it, $\Chal$ retains the account secret, and the public part of the shielded address $\shdAcct_i$ is returned to $\Adv$.
-\item $\OMint(\shdAcct_i, \tokType, \amt)$: it allows to  instruct a transfer $\amt$ to the private pool, for account $\shdAcct_i$, on $\Lshd$. The secret associated to this call are maintained by the challenger. 
+\item $\OMint(\shdAcct_i, \tokType, \amt)$: it allows to  instruct a transfer $\amt$ to the private pool, for account $\shdAcct_i$, on $\Lshd$. The secret associated to this call are maintained by the challenger.
 
-\item $\OTransShd(\shdAcct_i, \shdAcct_j, \tokType, \amt)$: this oracle allows a \emph{public} transfer on $\Lshd$. 
-\item $\OShdTrans(\shdAcct, \shdAcct', \tokType, \amt)$: this oracle allows  $\Adv$ to request a \emph{shielded} transfer on $\Lshd$ on accounts of their choice $\shdAcct, \shdAcct'$.   
+\item $\OTransShd(\shdAcct_i, \shdAcct_j, \tokType, \amt)$: this oracle allows a \emph{public} transfer on $\Lshd$.
+\item $\OShdTrans(\shdAcct, \shdAcct', \tokType, \amt)$: this oracle allows  $\Adv$ to request a \emph{shielded} transfer on $\Lshd$ on accounts of their choice $\shdAcct, \shdAcct'$.
 
 \item $\Lshd.\LExecute(\shdAcct_i, \contract,  \contractinput)$: this oracle call allows  $\Adv$ to request execution of $\contract$ on behalf of  $\shdAcct_i$  on public input $\contractinput$. The private input is maintained by the challenger.
  % Let $\Leak(\shdAcct_i,\cdot,\cdot)$ be the leakage output from such a call (defined in Definition~\ref{def:fingerprint}).
@@ -170,8 +170,8 @@ The challenger then honestly executes  those calls on behalf of honest users (i.
 \begin{itemize}[leftmargin=1.4em,itemsep=3pt]
 \item $\ODep(\pubAddr, \shdAcct, \tokType, \amt, \auxx, \outc)$:
 The challenger runs $\Deposit$ on behalf of $\shdAcct$, and using  $\pubAddr$ as the source account on the public chain.
-On $\succeeded$, add $\amt$ to $\bal[\shdAcct][\tokType]$ 
-and update the ledger balance of  $\pubAddr$. 
+On $\succeeded$, add $\amt$ to $\bal[\shdAcct][\tokType]$
+and update the ledger balance of  $\pubAddr$.
 \item $\OWd(\shdAcct, \destAddr*, \tokType, \amt)$: runs $\Withdraw$ on behalf of
       the holder of $\shdAcct$, provided $\bal[\shdAcct][\tokType] \ge \amt$. On $\succeeded$,
       moves $\amt$ from $\bal[\shdAcct][\tokType]$ to $\ledgerBal[\pubAddr][\tokType]$.
@@ -210,7 +210,7 @@ and update the ledger balance of  $\pubAddr$.
 
 \vspace{10pt}
 $\Adv$ has access to  the ledger oracles  and cross-chain oracle defined in \S\ref{ssec:oracles} and simulated by the challenger.
-Let  $\Adv^{\mathcal{O}(\cdot)}$ denote the adversary having access to 
+Let  $\Adv^{\mathcal{O}(\cdot)}$ denote the adversary having access to
 such oracles.
 
 
@@ -218,7 +218,7 @@ such oracles.
 \item \textbf{Initialization.} $(\pp,\setupstate) \gets \Setup^{\Lpub,\Lshd}(1^{\secpar})$; $\bal := 0$;
       $\Tall := \emptyset$. $\Adv$ is given $\pp$.
 \item \textbf{Pre-challenge Training.}
-$\Adv$ has access to the oracles  described above:  
+$\Adv$ has access to the oracles  described above:
       \[(\candZero\bc \candOne\bc \tokType\bc \amt\bc \auxx^*\bc \outc^*\bc
       \mathsf{st}) \gets \Adv^{\mathcal{O}}(\pp),\]
       where $\candZero, \candOne$ are honest shielded accounts (created through the $\ONewShd$ oracle.
@@ -229,20 +229,20 @@ $\Adv$ has access to the oracles  described above:
   // If the amounts are different, the adversary can easily tell from amount posted on the public chain $\Lpub$.
    % \item if $\Leak(\candZero, \tokType, \amt) \neq \Leak(\candOne, \tokType, \amt)$, output $0$.
    %  // If the spending fingerprint of the two users is different, the adversary could distinguish what user was selected.
-   
-  \item otherwise: 
+
+  \item otherwise:
   \begin{enumerate}
       \item sample $b \gets \{0,1\}$;
-      
+
       \item create a fresh  public-chain address $\destAddr^*$ and execute
       $$\Withdraw(\candB, \destAddr^*, \tokType, \amt, \auxx \,;\, \privIn_b) $$
 
-   with the output  $$\stpub*',\ \stshd*',\ \trans^*, \outc^*$$ returned to $\Adv$.     
+   with the output  $$\stpub*',\ \stshd*',\ \trans^*, \outc^*$$ returned to $\Adv$.
   \item if $\outc^* =\succeeded$:\\ Update the balance state for both account:\\
   $\bal[\candZero][\tokType] \mathrel{-}= \amt$ \emph{and}
         $\bal[\candOne][\tokType] \mathrel{-}= \amt$; \\
         and use these amounts to simulate all the oracles \S~\ref{sec:crosschainoracles},\S~\ref{sec:ledgeroracles}.
-    \item if $\outc =\failed$ balances are not updated.     
+    \item if $\outc =\failed$ balances are not updated.
   \end{enumerate}
     \end{itemize}
 \item \textbf{Post-Challenge Training.} $\Adv$ continues to have access to all the  oracles above, with $\Chal$ answering every cross-chain oracle calls against the balance sheet $\bal$ updated   in the challenge phase.
@@ -271,7 +271,7 @@ In the Unlinkability Experiment  we assume that the cross-chain oracle calls tha
 \subsection{ Swapper, Supplier, Swapper and Redeemer Unlinkability}
 \label{sssec:lendgame}
 The exact same experiment can be applied to every action of the  cross-chain transaction system.
-Write $\act \in \{\Swap, \Supply, \Redeem\}$, and for a given action $\act$ let $\tokTypeIn$ and $\tokTypeOut$ be the input and output types. 
+Write $\act \in \{\Swap, \Supply, \Redeem\}$, and for a given action $\act$ let $\tokTypeIn$ and $\tokTypeOut$ be the input and output types.
  Let $\amt$ be the input amount and let
 $\amt^{\mathrm{out}}$ denote the amount $\Lpub$ returns, which the challenger learns when it runs the call.
 We provide general  the experiment in Figure~\ref{fig:unlinkGeneral}.
@@ -305,7 +305,7 @@ $\Adv$ has access to all oracles of \S\ref{ssec:oracles}.
       \item execute $$\act(\candB\bc \parm\bc \auxx^* \,;\, \privIn_b)$$
             with the output $$\stpub*',\ \stshd*',\ \trans^*,\ \outc^*$$ returned to $\Adv$;
 
-    \item 
+    \item
      Let $\mathsf{st}^{(0)}$ and $\mathsf{st}^{(1)}$ denote the states of the honest
       parties in the two worlds: $\mathsf{st}^{(\beta)}$ is the state that results from
       running $\act$ on behalf of $\mathsf{shAcct}_{\beta}$. The challenger executes the
@@ -331,5 +331,3 @@ $\Pi$ has \emph{action unlinkability} if for every $\act \in \{\Swap,\Supply,\Re
 every PPT $\Adv$ there is a negligible $\negl$ with
 $$\Pr[\lendunlinkgame_{\Pi,\Adv}(1^{\secpar}) = 1] \le \frac12 + \negl(\secpar).$$
 \end{definition}
-
-

@@ -1,7 +1,7 @@
 % sig-brand.sty — Sig.Network document branding
 % Requires xelatex (fontspec). Fonts and the logo are vendored in fonts/
-% and logos/ and found through TEXINPUTS and OPENTYPEFONTS, which the
-% Makefile sets, so the build is reproducible under nix.
+% and logos/ and loaded by path relative to the document directory, so a
+% bare xelatex run from that directory builds without any environment.
 \NeedsTeXFormat{LaTeX2e}
 \ProvidesPackage{sig-brand}[2026/07/20 Sig.Network branding]
 
@@ -25,17 +25,16 @@
 \definecolor{SigBrand}{HTML}{EAEEC9}   % brand 950 — highlight fill
 \definecolor{SigLink}{HTML}{8E7777}    % dark neutral 300 — links
 
-% ---- Fonts: Archivo, vendored in fonts/ (SIL OFL 1.1), found via OPENTYPEFONTS ----
+% ---- Fonts: Archivo, vendored in fonts/ (SIL OFL 1.1) ----
 \defaultfontfeatures{Ligatures=TeX}
 \setmainfont{Archivo}[
-  Extension=.otf,
+  Path=fonts/, Extension=.otf,
   UprightFont=*-Regular, ItalicFont=*-Italic,
   BoldFont=*-SemiBold, BoldItalicFont=*-SemiBoldItalic]
 \setsansfont{Archivo}[
-  Extension=.otf,
+  Path=fonts/, Extension=.otf,
   UprightFont=*-Regular, ItalicFont=*-Italic,
   BoldFont=*-SemiBold, BoldItalicFont=*-SemiBoldItalic]
-
 % ---- Page ----
 \pagecolor{SigCream}
 \color{SigInk}
@@ -53,8 +52,12 @@
   \vspace{6pt}{\color{SigShell}\hrule width 0.3\linewidth height 0.6pt}\vspace{4pt}}
 
 % ---- Section headings: letterspaced caps, Product UI style ----
+% A heading too long for one line is set ragged right and never hyphenated:
+% justifying it shrinks the word spaces until the tracked capitals run
+% together, and a split word reads as two.
 \titleformat{\section}[block]
-  {\color{SigHeader}\normalsize\bfseries\addfontfeature{LetterSpace=15}}
+  {\color{SigHeader}\normalsize\bfseries\addfontfeature{LetterSpace=15}%
+   \raggedright\hyphenpenalty=10000}
   {\thesection}{0.6em}{\MakeUppercase}
   [{\color{SigShell}\vspace{2pt}\titlerule[0.6pt]}]
 \titleformat{\subsection}

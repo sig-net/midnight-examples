@@ -1,0 +1,15 @@
+# chktex reads this file from the directory it runs in, which is this one for
+# a shell run and for the editor's linter. Lists without `=` append to the
+# stock chktexrc, so everything here adds to the defaults.
+
+# Warning 1 flags a macro followed by a space, since TeX swallows that space
+# when the macro expands to letters. These macros expand to a symbol, to
+# math or to nothing, so the space or line end after them is intended. The
+# regex covers the \src... family that names identifiers from the contract
+# source, and the longtable keywords always stand alone on their line.
+Silent { \bluedot \okbit \qed \endfirsthead \endhead \endfoot \endlastfoot } [ \\src[A-Za-z]+ ]
+
+# Warning 24 asks for every \label to sit on the heading's own line. This
+# document puts each \label on the line after its heading throughout, which
+# is a valid convention, so the warning is off.
+CmdLine { -n24 }

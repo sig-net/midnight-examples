@@ -9,7 +9,7 @@ high-level description of the contract logic and components.
 \noindent
 \textbf{Trusted Bridge $\SigSys$'s MPC.}
 The instantiation of the cross-chain system relies on $\SigSys$'s MPC system acting as
-a trusted bridge that listen for events (actions such as $\Deposit,\Swap,$ etc) on  Midnight 
+a trusted bridge that listen for events (actions such as $\Deposit,\Swap,$ etc) on  Midnight
 and executed them on Ethereum.
 Between a request   (e.g., $\Deposit$) and its
 settlement  circuit, three steps run outside any proof : the committee signs the requested EVM transaction;
@@ -19,8 +19,8 @@ to Midnight.
 
 $\SigSys$'s MPC  Signing System  is trusted to satisfy:
     \begin{enumerate}
-        \item  \textbf{MPC committee integrity:}  the committee signs only what the protocol authorises. 
-        \item \textbf{Attestation faithfulness:}  MPC only provide attestations for events that have been executed on $\Lpub$ (Ethereum). The MPC attests failed only if the transaction did not execute. 
+        \item  \textbf{MPC committee integrity:}  the committee signs only what the protocol authorises.
+        \item \textbf{Attestation faithfulness:}  MPC only provide attestations for events that have been executed on $\Lpub$ (Ethereum). The MPC attests failed only if the transaction did not execute.
     \end{enumerate}.
 
 \begin{center}
@@ -120,13 +120,13 @@ A user  $U_i$ of  the cross-chain system holds:
       \item \textbf{Shielded Account } ($\callerZKey_i$, $\callerZKeySk_i$) on $\Lshd$. \\
       In Midnight a shielded account consists of two public keys:
 \begin{enumerate}
-    \item \textbf{Coin Key-Pair} (Spending Key): 
+    \item \textbf{Coin Key-Pair} (Spending Key):
     \begin{enumerate}
         \item $\coinsk$ = $\SHA\bigl(\text{``midnight:csk''} \concat \seed\bigr)$
         \item $\coinpk = \SHA\bigl(\text{``midnight:zswap-pk[v1]''} \concat \coinsk\bigr)$
     \end{enumerate}
-    
-    \item \textbf{Encryption Key-Pair} (Discovery key): 
+
+    \item \textbf{Encryption Key-Pair} (Discovery key):
     \begin{enumerate}
           \item $\encsk$: a group element generated via Poseidon hash function.
         \item $\encpk = \gen^{\encsk}$
@@ -173,7 +173,7 @@ We instantiate $\Hash$ with the \texttt{transientHash} implemented by Midnight~\
 Poseidon follows a sponge-like approach and is a good candidate for Multi-user PRF security~\cite{KeyedDuplex17}.
 
     \item $\Kec$: A collision resistance hash function used to compute digests.
-    \begin{align*} 
+    \begin{align*}
 \hypertarget{fn:domSep}{\domSep(\tokType)} &= \Hash\bigl(\text{``erc20:vault:''}\bc \tokType\bigr)
   &&\text{\small one shielded type per ERC20}\\
  \hypertarget{fn:reqIdOf}\rid &= \Kec(\req)
@@ -185,7 +185,7 @@ Poseidon follows a sponge-like approach and is a good candidate for Multi-user P
 
 
 The \textbf{outcome} the MPC attests, is computed using the following formula:
- \begin{align*} 
+ \begin{align*}
  \hypertarget{fn:attDigest}{\attDigest(\rid, \evmOut)}  = & \Kec(\rid \concat \evmOut.\kind \| \evmOut.\outlt \| \evmOut.\blockheight)
 \end{align*}
   % &&\text{\small what the committee attests}
@@ -251,8 +251,8 @@ Here are the functions applied to the secret coin:
 Midnight's contract computation is performed through circuits.
 Every argument of a circuit is a \emph{private} input
 of the proof.
-A call to a  circuit $C$ on private arguments $\mathsf{in}$ and witness $\wit$ produces public outputs and state changes  
-for the vault contract $\Dvault$ and the Midnight chain $\Dshd$; 
+A call to a  circuit $C$ on private arguments $\mathsf{in}$ and witness $\wit$ produces public outputs and state changes
+for the vault contract $\Dvault$ and the Midnight chain $\Dshd$;
 it also produces a statement $\stmt$ and a zk proof $\zkproof$.
 \[
   \bigl(\; \Dvault,\;\; \Dshd,\;\; \stmt,\;\; \zkproof \;\bigr).
@@ -339,7 +339,7 @@ In this section we show our implementation of the interface of Definition~\ref{d
 \textbf{Two calls per flow.}
 Each procedure of Definition~\ref{def:system} is performed by the circuits below.
 Each action: $\Deposit$, $\Withdraw$,  $\Swap$, $\Supply$, $\Redeem$, is performed by \emph{two} calls to the vault contract, with the $\SigSys$ bridge in
-between. The first call records what the MPC should sign and takes 
+between. The first call records what the MPC should sign and takes
 the values relevant to the call (transaction parameters). The second presents $\SigSys$'s attestation of what
 happened on $\Lpub$ (Ethereum), and complete the request on $\Lshd$ (Midnight). Request calls are prefixed with \textsf{start}; settlement calls are prefixed with \textsf{complete}
 The following table maps each call to their circuits.
@@ -380,7 +380,7 @@ $\cktCompleteWithdraw$ included, is gated on the requester's ownership commitmen
 cross-contract call to the Signet singleton, which emits an event the MPC polls. We write
 $\notif(\vaultAddr, \rid, M)$ for that event: it carries the vault's address, the request
 identifier, and the identity of the ledger map $M$ in which the request record was stored, so
-that the MPC knows where to read $\req$ from. 
+that the MPC knows where to read $\req$ from.
 
 
 \subsection{Setup: \texorpdfstring{$\Setup^{\Lpub,\Lshd}(1^{\secpar})$}{Setup}}
@@ -451,7 +451,7 @@ $\chainId$, $\mpcRespKey$.
 \oitem{\stmt} $(\cktApprove,\; \req,\; \rid,\; \notif(\vaultAddr, \rid, \reqMap))$.
 \oitem{\wit} $\bot$.
 \oitem{\Rel} $\mathsf{true}$ - the witness is empty and every argument is in $\stmt$, so
-  $\zkproof$ certifies a computation an observer can redo. 
+  $\zkproof$ certifies a computation an observer can redo.
 \end{OutList}
 \end{CktBox}
 
@@ -465,11 +465,11 @@ $\chainId$, $\mpcRespKey$.
 \emph{Private input.} secret key $\usersk$; and a fresh $\mintNonce$, used at Step~4.\\
 \emph{Public arguments.} $\tokType$ is an ERC20 contract,
 and $\auxx = (\evmNonce, \gasEnv, \keyVer)$.
-The receiving \zkswap account $\shdAcct$  is not public per-se, but we 
+The receiving \zkswap{} account $\shdAcct$  is not public per-se, but we
 do not aim to protect it.
 
 \begin{Steps}
-\item \textbf{Fund the derived account:} outside any circuit, on $\Lpub$. The caller pays $\amt$ of $\tokType$  to  the MPC controlled account $\derivedAddr$ on $\Lpub$. Where,  
+\item \textbf{Fund the derived account:} outside any circuit, on $\Lpub$. The caller pays $\amt$ of $\tokType$  to  the MPC controlled account $\derivedAddr$ on $\Lpub$. Where,
       $\derivedAddr = \Derive\bigl(\mpcRootPk\bc \vaultAddr\bc
       \lnk{fn:userComm}{\userComm(\usersk)}\bigr)$. See \S\ref{ssec:derived}.
 \item \textbf{Request call: $\cktDeposit$} (\cktref{ckt:deposit}). Recomputes
@@ -585,7 +585,7 @@ contract, because the \emph{vault} pays for this transaction.
  \item \textbf{Request call: $\cktWithdraw$} (\cktref{ckt:startwithdraw}).
  The caller hands the contract  a coin descriptor   $\coinIn = \bigl(\burnNonce,\;\mathsf{color}, \amt\bigr)$; the circuit burns it, records  $\text{transfer}(\destAddr^*, \amt)$ under $\rid$ with $\keyPath = \keyPathLit$ o, and add the authentication tag to the map:  $\wdView[\rid] \gets \lnk{fn:refundComm}{\refundComm(\usersk, \rid)}$.
    \smallskip
-     
+
  \item \textbf{MPC}. The MPC signs the evm request with the key derived
        at $\keyPath = \keyPathLit$, so from $\vaultEvmAddr$, the pool's own account. Once the request is executed,  the MPC signs an attestation $\attSig$ of the outcome $\evmOut$.
 \item \textbf{Settlement call on success: $\cktCompleteWithdraw$}, success branch  (\cktref{ckt:completewithdraw}). \textbf{$\Dshd = \emptyset$ and $\wit = \bot$ on this branch}.
@@ -673,7 +673,7 @@ $\cktRefundRedeem$.
 \item $\assert \initFlag \geq 1$ and
       $\assert \EcdsaVf\bigl(\lnk{fn:attDigest}{\attDigest(\rid, \evmOut)}\bc \attSig\bc
       \mpcRespKey\bigr)$.
-\item \ADDEDINL{$\assert \rid \in \wdView$}. 
+\item \ADDEDINL{$\assert \rid \in \wdView$}.
 \item Remove $\reqMap[\rid]$. \ADDEDINL{The record is not read.}
 \item $\okbit \gets$ the success bit of $\evmOut$.
 \item \ADDEDINL{If $\okbit = 0$:
@@ -873,7 +873,7 @@ The second runs even when $\amtRem = 0$.}
 \MidNote{\textbf{Midnight operation.} Mint, to the caller's own shielded account,
 $\coinMint = \bigl(\mintNonce,\; \mathsf{color},\;
 \swapView[\rid].\fAmtMax\bigr).$}
-where $\mathsf{color}= \lnk{fn:tokenTypeOf}{\tokenTypeOf(\domSep(\swapView[\rid].\fTokIn), 
+where $\mathsf{color}= \lnk{fn:tokenTypeOf}{\tokenTypeOf(\domSep(\swapView[\rid].\fTokIn),
 \vaultAddr)}$.
 \begin{OutList}
 \oitem{\Dvault} $\swapMap[\rid]$ removed; $\swapView[\rid]$ removed.
@@ -907,7 +907,7 @@ fully transparent trade.  No address -  besides the vault address  - is involved
 \label{ssec:lendinst}
 
 The lending flow $\Supply$ and $\Redeem$ moves value between an ERC20 and its interest-bearing wrapper, both pinned at
-$\Setup$ (\S\ref{ssec:state}), the token being lent is 
+$\Setup$ (\S\ref{ssec:state}), the token being lent is
 at address $\underAddr$, the receipt token is at address $\wrapAddr$.
 $\Supply$ and $\Redeem$ are both a $\Swap$.
 $\Supply$ burns a coin of the underlying
@@ -1090,7 +1090,7 @@ underlying supplied, the receiver $\vaultEvmAddr$, and the share count returned.
 \smallskip
 \textbf{On $\Lshd$:} $\stmt_{\cktSupply}$, the MPC signatures, and the settlement statement.
 Of these, the components that involve the caller at all are: the marker
-$\refundComm(\usersk, \rid)$; the coins burned to the contract: the nullifier and the new coin commitment destined to $\burnAddr$ (the private and random nonce $\burnNonce$ protects the identity of the caller of $\cktStartSupply)$), the new private coins minted in the $\cktCompleteSupply/\cktRefundSupply$ destined  to $\shdAcct$ (the private and random nonce $\mintNonce$ protects the identity of the recipient).
+$\refundComm(\usersk, \rid)$; the coins burned to the contract: the nullifier and the new coin commitment destined to $\burnAddr$ (the private and random nonce $\burnNonce$ protects the identity of the caller of $\cktStartSupply$), the new private coins minted in the $\cktCompleteSupply/\cktRefundSupply$ destined  to $\shdAcct$ (the private and random nonce $\mintNonce$ protects the identity of the recipient).
 
 \smallskip
 \textbf{The exchange rate is public.} $\amt$ is a field of $\req$ and $\amtShares$ is
@@ -1273,7 +1273,7 @@ to $\coinpk$.}
 \item Run \hyperref[ckt:failgate]{$\cktFailGate(\rid, \attSig, \evmOut)$}.
 
 \item $\assert \rid \in \redeemView$.
-\item $\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)} = \redeemView[\rid].\fComm$ (authenticating 
+\item $\assert \lnk{fn:refundComm}{\refundComm(\usersk, \rid)} = \redeemView[\rid].\fComm$ (authenticating
       \textbf{redeemer-only}).
 \item Remove $\redeemMap[\rid]$ and $\redeemView[\rid]$.
 \end{enumerate}
@@ -1302,7 +1302,7 @@ to $\usrTag{\coinpk \text{ of } \setlAcct}$.}
 \smallskip
 \textbf{The accrued yield is public.} $\amtShares$ is a field of $\req$ and $\amtAssets$ is released
 by the settlement call, so the realised rate is recoverable, and with it the interest the position
-earned. 
+earned.
 
 \smallskip
 \textbf{Hidden:} which shielded account funded the call; which received the assets.
