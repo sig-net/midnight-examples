@@ -4,9 +4,10 @@
     python3 build_sequence.py deposit_data.py out.drawio
 
 One generator for the five vault flows (deposit, withdraw, swap, supply, redeem). This
-file holds only layout: a fixed lane pitch, a fixed row pitch, one label column per lane
-gap. Styles and icons are copied from the palette card at PALETTE. It prints WARN lines
-for text that will not fit and for notes or cards that overlap; a clean build prints none.
+file holds only layout: a fixed lane pitch, a row pitch that grows only where the text
+of two rows in one lane gap needs the room, one label column per lane gap. Styles and
+icons are copied from the palette card at PALETTE. It prints WARN lines for text that
+will not fit and for notes or cards that overlap; a clean build prints none.
 
 DATA FORMAT (one Python module per flow, e.g. deposit_data.py)
 --------------------------------------------------------------
@@ -23,14 +24,14 @@ OUTCOME        list of str, one line each, in the closing card.
 FOOTNOTE       str   one quiet line under the closing card.
 
 Row kinds (each row is a dict with kind and phase):
-  arrow  frm, to, label=[3 lines], step='1' or None.
+  arrow  frm, to, label=[3 or 5 lines], step='1' or None.
          step: the circle number at the arrow's start (None = continues a step).
          side: optional dict(lane, lines, dy=0): a dotted note in the gap right of
                that lane's lifeline, on this row. dy nudges it off the row line
                (to part two notes stacked in one lane).
          rows: row slots the arrow takes (default 1).
-  fork   step, frm, to, arms=[[3 lines], [3 lines]]: one circle, two arms (a choice).
-         It takes two row slots.
+  fork   step, frm, to, arms=[[3 or 5 lines], [3 or 5 lines]]: one circle, two arms
+         (a choice). It takes two row slots.
   note   lane, lines, rows=1: a solid card on one lifeline, centred over its rows.
          phase 'pre' = a precondition (not a step): neutral grey stroke.
          overlay: the card takes no row slot of its own. True = it sits over this
@@ -43,7 +44,7 @@ Mini-markup in labels, notes and outcome lines:
               of a call wrapped onto the next line)
   {text}      plain code font, spaces kept (the continuation lines of a call)
   ~text~      quiet grey text
-Each edge label is a list of THREE lines (the arrow runs through the middle line):
+Each edge label is a list of THREE or FIVE lines (the arrow runs through the middle line):
 the bold acting party alone, then the body.
 """
 import importlib.util, re, sys, os
@@ -54,19 +55,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PALETTE = os.path.join(HERE, '..', '..', '..', '..', 'docs', 'diagram-palette.drawio')
 
 # ---- grid ------------------------------------------------------------------------------
-W = 270          # lane pitch (lifeline to lifeline)
+W = 240          # lane pitch (lifeline to lifeline)
 X0 = 20          # left edge of the first lane
 HDR_Y, HDR_H = 20, 72   # header cards (pushed down by RAIL when the data has GROUPS)
 RAIL = 34        # height of the group rail above the header cards
-LINE = 15        # line pitch inside notes and cards
-P = 64           # row pitch
-BAND_TITLE = 48  # band top to first row
-BAND_TAIL = 30   # last row to band bottom
+LINE = 17        # line pitch inside notes and cards
+P = 82           # least row pitch
+BAND_TITLE = 54  # band top to first row
+BAND_TAIL = 34   # last row to band bottom
 BAND_GAP = 10
-L = 52           # label column: lifeline + L, in every lane gap
-CIRCLE = 34
+L = 36           # label column: lifeline + L, in every lane gap
+CIRCLE = 36
 FORK = 32        # where a fork's second arm turns down, from the lifeline
-FONT = 12
+FONT = 14
+CODE = 12
+SMALL = 13
 
 PHASE = {   # colour, palette circle id, palette edge id, band tint
     'fund':        ('#008695', 'circ6', 'edge6', '#EEF6F7'),
@@ -82,9 +85,9 @@ LIFELINE = '#D3D3D3'
 CARD_STROKE = '#D3D3D3'
 QUIET = '#6E6E6E'
 NOTE_PAD = 10
-NOTE_STYLE = ('text;whiteSpace=wrap;html=1;horizontal=1;verticalAlign=middle;align=left;spacing=0;spacingLeft=10;spacingRight=6;'
-              'dashed=1;dashPattern=1 2;strokeColor=default;fillColor=#FFFFFF;')   # palette 'note' plus a white fill
-CODE_STYLE = "font-family: Menlo, Monaco, 'Courier New', monospace; font-size: 12px; color: rgb(32, 32, 32);"
+NOTE_STYLE = ('text;whiteSpace=wrap;html=1;horizontal=1;verticalAlign=middle;align=left;spacing=0;spacingLeft=10;spacingRight=6;fontSize=%d;'
+              'dashed=1;dashPattern=1 2;strokeColor=default;fillColor=#FFFFFF;' % FONT)   # palette 'note' plus a white fill
+CODE_STYLE = "font-family: Menlo, Monaco, 'Courier New', monospace; font-size: %dpx; color: rgb(32, 32, 32);" % CODE
 
 # ---- text ------------------------------------------------------------------------------
 # Text is measured with the macOS fonts the pictures are drawn in (Helvetica, Menlo).
@@ -100,8 +103,8 @@ _F = _font_dir()
 FONTS = {
     'r': ImageFont.truetype(os.path.join(_F, 'Helvetica.ttc'), FONT, index=0),
     'b': ImageFont.truetype(os.path.join(_F, 'Helvetica.ttc'), FONT, index=1),
-    'c': ImageFont.truetype(os.path.join(_F, 'Menlo.ttc'), FONT, index=0),
-    'cb': ImageFont.truetype(os.path.join(_F, 'Menlo.ttc'), FONT, index=1),
+    'c': ImageFont.truetype(os.path.join(_F, 'Menlo.ttc'), CODE, index=0),
+    'cb': ImageFont.truetype(os.path.join(_F, 'Menlo.ttc'), CODE, index=1),
 }
 
 def tokens(line):
@@ -229,7 +232,7 @@ class B:
                           '<mxGeometry relative="1" as="geometry">%s</mxGeometry></mxCell>'
                           % (cid, enc_style(style), src, tgt, arr))
     def label(self, cid, edge, value, rel, bg, dy=0):
-        style = 'edgeLabel;html=1;align=left;verticalAlign=middle;labelBackgroundColor=%s;spacing=0;' % bg
+        style = 'edgeLabel;html=1;align=left;verticalAlign=middle;labelBackgroundColor=%s;spacing=0;fontSize=%d;' % (bg, FONT)
         self.cells.append('<mxCell id="%s" value="%s" style="%s" vertex="1" connectable="0" parent="%s">'
                           '<mxGeometry x="%.4f" relative="1" as="geometry"><mxPoint y="%g" as="offset" /></mxGeometry></mxCell>'
                           % (cid, enc(value), enc_style(style), edge, rel, dy))
@@ -260,18 +263,39 @@ def build(data, out):
     for band in data.BANDS:
         top = y
         ry = top + BAND_TITLE
-        rows = []
+        slots, placed, prev, low = [], [], [], 0
         for r in band['rows']:
             ov = r.get('overlay')
             if ov is not None and ov is not False:
                 # a card over rows that have their own arrows: takes no row slot.
                 # True = over this row and the next; an int n = starts n rows back.
                 back = 0 if ov is True else ov
-                rows.append((r, ry - P * back))
+                placed.append((r, len(slots) - back))
                 continue
-            rows.append((r, ry))
-            ry += P * (2 if r['kind'] == 'fork' else r.get('rows', 1))
-        bottom = ry - P + BAND_TAIL
+            items = []
+            if r['kind'] in ('arrow', 'fork'):
+                gap = lanes[min(idx[r['frm']], idx[r['to']])]['id']
+                for k, lab in enumerate([r['label']] if r['kind'] == 'arrow' else r['arms']):
+                    hl = len(lab) * FONT * 0.6
+                    items.append((gap, P * k - hl, P * k + hl, 30))
+            sd = r.get('side')
+            if sd:
+                h = LINE * len(sd['lines']) + 12
+                items.append((sd['lane'], sd.get('dy', 0) - h / 2, sd.get('dy', 0) + h / 2, 8))
+            for g, up, down, head in items:
+                if not slots:
+                    ry = max(ry, top + head - up)
+                for pg, pdown in prev:
+                    if pg == g:
+                        ry = max(ry, pdown + 8 - up)
+            placed.append((r, len(slots)))
+            n = 2 if r['kind'] == 'fork' else r.get('rows', 1)
+            slots += [ry + P * k for k in range(n)]
+            prev = [(g, ry + down) for g, up, down, head in items]
+            low = max([low] + [d for g, d in prev])
+            ry += P * n
+        rows = [(r, slots[i], slots[min(i + r.get('rows', 1), len(slots)) - 1]) for r, i in placed]
+        bottom = max(ry - P + BAND_TAIL, low + 8)
         bands.append((band, top, bottom, rows))
         y = bottom + BAND_GAP
     ll_top, ll_bot = hdr_y + HDR_H, bands[-1][2]
@@ -282,10 +306,10 @@ def build(data, out):
         b.vertex('band-' + slug(band['title']), '', 'rounded=1;arcSize=4;absoluteArcSize=0;whiteSpace=wrap;html=1;fillColor=%s;strokeColor=none;' % tint,
                  X0, top, total_w, bottom - top)
         bid = 'band-' + slug(band['title'])
-        tw = FONTS['b'].getlength(band['title']) * 11 / 12 + 4
+        tw = FONTS['b'].getlength(band['title']) * SMALL / FONT + 4
         b.vertex(bid + '-title', '<b>%s</b>' % esc(band['title']),
-                 'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=11;fontColor=%s;' % col,
-                 16, 10, tw, 16, parent=bid)
+                 'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=%d;fontColor=%s;' % (SMALL, col),
+                 16, 10, tw, SMALL + 5, parent=bid)
 
     # -- lifelines and headers
     for ln in lanes:
@@ -297,9 +321,9 @@ def build(data, out):
         pid, iw, ih = ICON[ln['icon']]
         sub = ln.get('sub')
         tlines = ln['title'].split('\n')   # a title may wrap onto two lines
-        tw = max(max(FONTS['b'].getlength(t) for t in tlines), FONTS['r'].getlength(sub) * 11 / 12 if sub else 0) + 4
+        tw = max(max(FONTS['b'].getlength(t) for t in tlines), FONTS['r'].getlength(sub) * SMALL / FONT if sub else 0) + 4
         title_html = '<b>%s</b>' % '<br>'.join(esc(t) for t in tlines)
-        th = 18 * len(tlines)
+        th = (LINE + 1) * len(tlines)
         unit = iw + 8 + tw
         ux = x - unit / 2
         iy = hdr_y + (HDR_H - ih) / 2
@@ -313,12 +337,12 @@ def build(data, out):
             b.vertex('hdr-icon-' + ln['id'], '', restyle(pstyle(pid), verticalLabelPosition=None), ux, iy, iw, ih)
         if sub:
             b.vertex('hdr-title-' + ln['id'], '<b>%s</b>' % esc(ln['title']),
-                     'text;html=1;align=left;verticalAlign=middle;spacing=0;', ux + iw + 8, hdr_y + HDR_H / 2 - 17, tw, 18)
+                     'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=%d;' % FONT, ux + iw + 8, hdr_y + HDR_H / 2 - LINE - 2, tw, LINE + 2)
             b.vertex('hdr-sub-' + ln['id'], esc(sub),
-                     'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=11;fontColor=%s;' % QUIET, ux + iw + 8, hdr_y + HDR_H / 2, tw, 16)
+                     'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=%d;fontColor=%s;' % (SMALL, QUIET), ux + iw + 8, hdr_y + HDR_H / 2, tw, SMALL + 5)
         else:
             b.vertex('hdr-title-' + ln['id'], title_html,
-                     'text;html=1;align=left;verticalAlign=middle;spacing=0;', ux + iw + 8, hdr_y + (HDR_H - th) / 2, tw, th)
+                     'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=%d;' % FONT, ux + iw + 8, hdr_y + (HDR_H - th) / 2, tw, th)
         if unit > W - 28 - 16:
             warnings.append('header %s too wide (%d)' % (ln['id'], unit))
 
@@ -347,7 +371,7 @@ def build(data, out):
 
     def circle(step, phase, x, ry, tint):
         cid = 'c' + step
-        st = restyle(pstyle(PHASE[phase][1]), fillColor=tint, fontSize=18,
+        st = restyle(pstyle(PHASE[phase][1]), fillColor=tint, fontSize=20,
                      spacingLeft=2 if len(step) == 1 else 1, spacingTop=-1)
         b.vertex(cid, step + '.', st, x - CIRCLE / 2, ry - CIRCLE / 2, CIRCLE, CIRCLE)
         return cid
@@ -361,7 +385,7 @@ def build(data, out):
     boxes = []   # (name, x, y, w, h) of every side note and card, for the overlap check
     for band, top, bottom, rows in bands:
         tint = PHASE[band['phase']][3]
-        for r, ry in rows:
+        for r, ry, ry_end in rows:
             ph = r['phase']
             if r['kind'] in ('arrow', 'fork'):
                 a, z = lx[r['frm']], lx[r['to']]
@@ -434,17 +458,17 @@ def build(data, out):
                 col = PHASE[ph][0]
                 w = width(r['lines']) + 2 * NOTE_PAD
                 h = LINE * len(r['lines']) + 16
-                cy = ry + P * (r.get('rows', 1) - 1) / 2
+                cy = (ry + ry_end) / 2
                 lo = (lx[lanes[i - 1]['id']] + 16) if i > 0 else X0 + 8
                 hi = (lx[lanes[i + 1]['id']] - 16) if i + 1 < len(lanes) else X0 + total_w - 14  # header card edge
                 nx = min(max(x - w / 2, lo), hi - w)
                 if nx < lo or w > hi - lo:
                     warnings.append('card on %s does not fit between its neighbours (%d wide)' % (r['lane'], w))
-                if h > P * r.get('rows', 1) - 10:
+                if h > ry_end - ry + P - 10:
                     warnings.append('card on %s is %d tall for %d rows' % (r['lane'], h, r.get('rows', 1)))
                 boxes.append(('card on %s row %d' % (r['lane'], ry), nx, cy - h / 2, w, h))
                 b.vertex('card-%s-%d' % (r['lane'], ry), html(r['lines']),
-                         'rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;fillColor=#FFFFFF;strokeColor=%s;strokeWidth=1.5;spacing=0;spacingLeft=%d;spacingRight=%d;' % (col, NOTE_PAD, NOTE_PAD),
+                         'rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;fillColor=#FFFFFF;strokeColor=%s;strokeWidth=1.5;spacing=0;spacingLeft=%d;spacingRight=%d;fontSize=%d;' % (col, NOTE_PAD, NOTE_PAD, FONT),
                          nx, cy - h / 2, w, h)
 
     # notes and cards must keep GAP units apart
@@ -458,19 +482,19 @@ def build(data, out):
     if getattr(data, 'OUTCOME', None):
         oy = bands[-1][2] + 22
         text = '<br>'.join(html_line(l) for l in data.OUTCOME)
-        h = 24 + 16 * len(data.OUTCOME)   # 16: a line with a code span is taller than LINE
+        h = 24 + (LINE + 1) * len(data.OUTCOME)   # LINE + 1: a line with a code span is taller than LINE
         if max(width([l]) for l in data.OUTCOME) + 40 > total_w:
             warnings.append('outcome card is wider than the lanes')
         b.vertex('outcome', text,
-                 'rounded=1;arcSize=10;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;fillColor=#FFFFFF;strokeColor=%s;spacingLeft=16;spacingRight=16;' % CARD_STROKE,
+                 'rounded=1;arcSize=10;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;fillColor=#FFFFFF;strokeColor=%s;spacingLeft=16;spacingRight=16;fontSize=%d;' % (CARD_STROKE, FONT),
                  X0, oy, max(width([l]) for l in data.OUTCOME) + 40, h)
         if getattr(data, 'FOOTNOTE', None):
             b.vertex('footnote', html_line(data.FOOTNOTE),
-                     'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=11;fontColor=%s;' % QUIET,
-                     X0 + 16, oy + h + 10, width([data.FOOTNOTE]) + 20, 16)
+                     'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=%d;fontColor=%s;' % (SMALL, QUIET),
+                     X0 + 16, oy + h + 10, width([data.FOOTNOTE]) * SMALL / FONT + 20, SMALL + 5)
         b.vertex('outcome-title', '<b>%s</b>' % esc(data.OUTCOME_TITLE),
-                 'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=11;labelBackgroundColor=#FFFFFF;fontColor=%s;spacingLeft=4;spacingRight=4;' % QUIET,
-                 X0 + 12, oy - 8, FONTS['b'].getlength(data.OUTCOME_TITLE) * 11 / 12 + 12, 16)
+                 'text;html=1;align=left;verticalAlign=middle;spacing=0;fontSize=%d;labelBackgroundColor=#FFFFFF;fontColor=%s;spacingLeft=4;spacingRight=4;' % (SMALL, QUIET),
+                 X0 + 12, oy - 9, FONTS['b'].getlength(data.OUTCOME_TITLE) * SMALL / FONT + 12, SMALL + 5)
 
     # z-order: bands, lifelines, headers, edges (with labels), circles last
     head = [c for c in b.cells if 'edge="1"' not in c and not c.startswith('<mxCell id="c') and 'connectable="0"' not in c]
