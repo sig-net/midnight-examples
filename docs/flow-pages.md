@@ -39,8 +39,8 @@ one top-level bullet with indented detail bullets:
   bullets reliably, while `1.` ordered lists lose their nesting in several
   renderers, so the list is authored as dash bullets carrying their own bold
   ordinals.
-- A branch's arms share one ordinal, one top-level bullet per arm, matching
-  the diagram's numbered circles.
+- A branch's arms share one ordinal and one top-level bullet, matching the
+  diagram's single numbered circle from which both arms leave.
 - Names are verbatim from source under the truth priority code > README >
   diagram, key terms bold, and every claim links to where it lives: the
   circuit in the contract source, the flow function in
@@ -48,7 +48,7 @@ one top-level bullet with indented detail bullets:
 
 The golden specimen of this shape is the five-step list under the diagram in
 the Sig Network Midnight Integration repository README's "Sign Bidirectional
-Flow" section: match it down to the formatting of the points.
+Protocol Flow" section: match it down to the formatting of the points.
 
 ## Code snippets
 
@@ -65,6 +65,6 @@ its step-list bullet (`- **N.** <tail>` as above) and once on a `Note over`
 line inside the mermaid fence. The flow page is where the canonical strings
 render: the flow diagram carries no step text, and it links to the page by
 the ordinal set, its numbered circles being exactly the frozen strings'
-ordinals (a branch's arms share one ordinal, one circle per arm). Text on
+ordinals (a branch's arms share one ordinal and one circle). Text on
 the diagram's arrows is edge labels under the diagramming style guide's
 golden rules, a separate vocabulary from the canonical strings.

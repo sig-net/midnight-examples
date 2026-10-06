@@ -12,7 +12,7 @@ underlying comes back as a shielded vault token of the underlying's colour.
 It is best to understand the
 [sign bidirectional flow](../../../../README.md#sign-bidirectional-protocol-flow)
 before you continue here. For more detail see the
-[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow)
+[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-protocol-flow)
 in the midnight integration repository.
 
 ## The integration
@@ -140,11 +140,11 @@ As illustrated, the flow comprises 9 steps:
 Every circuit call goes through the deployed vault, joined once with the
 caller's identity secret as private state (see
 [Runtime: joining the deployed vault](../../README.md#runtime-joining-the-deployed-vault)
-in the vault README). That secret is the user's own random value, not a wallet
-seed. The diagrams name it `MIDNIGHT_USER1_VAULT_SECRET`, and the integration
-tests take it from the `VAULT_USER_SECRET_KEY` environment variable.
+in the vault README). That secret is the user's own random value. The
+integration tests take it from the `VAULT_USER_SECRET_KEY` environment
+variable, falling back to the `USER_SEED` bytes when it is unset.
 
-The off-chain steps (4 to 6) each build a `SignetRequestResponseReader` over
+The two polling steps (4 and 6) each build a `SignetRequestResponseReader` over
 the vault and singleton pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts),
 pointed at the redeem map's ledger-tree path. The expected signer is the
@@ -153,11 +153,14 @@ vault's own account, whose derivation path is the contract-fixed
 full-width lowercase hex, padding included, and `deriveEvmAddress` takes the
 same rendering, so the vault's account derives from
 [`VAULT_PATH_HEX`](../../contract/src/index.ts).
-`deriveEvmAddress` is the concrete function behind the diagram's abstract
-`keyDerivation(...)` note, and `deriveMidnightResponseKey` is the one behind the
-response key's own note. The response key takes no path: it is per-contract and
-independent of any request's derivation path, and the queue circuits verify the
-MPC's attestation against it.
+`deriveEvmAddress` derives the vault's EVM account, and
+`deriveMidnightResponseKey` derives the response key: they are the concrete
+functions behind the abstract `keyDerivation(...)` notes on the
+[actor map](../../README.md#the-actors), and the diagram above names only
+their inputs, in its footnote. The response key does not use any request's
+derivation path: the MPC derives it for this contract under a
+reserved path that no request may name ("midnight response key" in the SDK),
+and the queue circuits verify the MPC's attestation against it.
 
 The flow needs the wrapper to exist on the chain the vault is pinned to, which
 means Sepolia or a fork of it. The setup pipeline probes for the wrapper's code

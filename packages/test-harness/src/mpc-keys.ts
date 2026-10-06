@@ -13,7 +13,10 @@ import { SigningKey } from "ethers";
  * response keys) epsilon-derive from.
  */
 export interface MpcPublicKeys {
-  /** Compressed secp256k1 public key as 0x-hex (`MPC_SECP256K1_PUBKEY`). */
+  /**
+   * Compressed secp256k1 public key as 0x-hex (the setup stores it in
+   * `MPC_SECP256K1_PUBKEY` as uncompressed SEC1 hex).
+   */
   secp256k1CompressedPubkey: string;
 }
 

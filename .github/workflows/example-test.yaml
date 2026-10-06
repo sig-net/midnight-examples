@@ -3,7 +3,7 @@
 # the root `compile:<example-dir>` / `test:<example-dir>` scripts —
 # see AGENTS.md's root-script naming rule).
 #
-#   install → format:check → compact toolchain → compile (skip-zk) → lint →
+#   compact toolchain → install → format:check → compile (skip-zk) → lint →
 #   zk keys (cached) → build → unit tests → compose up → e2e suite
 #
 # Caches (keyed on the pinned compiler version and the contract sources):

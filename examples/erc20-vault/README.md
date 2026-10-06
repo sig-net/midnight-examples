@@ -16,10 +16,12 @@ Every action runs the same six Midnight transactions around one MPC-signed EVM
 transaction: the requester's start circuit queues the request, a flush moves
 it into the output buffer, a send records the signature request for the MPC,
 the MPC's attestation is queued and flushed, and the requester's complete
-circuit settles it. All state shared between requests is read and written only
-by the permissionless `flushQueue`, so users' own calls never conflict with
-each other: [Contention handling](docs/contention-handling.md) documents the
-pattern, its invariants and its costs. The
+circuit settles it. The two cells every request shares, `globalLastSeen` and
+`vaultAccountNonce`, are read and written only by the permissionless
+`flushQueue` (`initialise` sets `globalLastSeen` once), so users' own calls
+never conflict with each other:
+[Contention handling](docs/contention-handling.md) documents the pattern, its
+invariants and its costs. The
 [deposit walkthrough](docs/deposit/deposit.md) runs through every step of one
 action.
 
@@ -28,12 +30,12 @@ action.
 | [`initialise`](#setup-step-4-pin-the-derived-addresses-and-the-response-key) | Deployment setup rather than an MPC flow: the deployer-gated one-shot that pins the vault's derived EVM address, the EVM chain, the Uniswap router, the Aave stataToken pair, the MPC response key and the EVM height attestations must exceed. |
 | `setGasParams` | The deployer resets the fee envelope and the per-action gas limits of the transactions the vault's own account signs. A request keeps the values it was started with. |
 | `addAllowedToken` | The deployer allows one more ERC20 into the vault. `startDeposit` accepts only an allowed ERC20, and `startSwap` buys only an allowed `erc20AddressOut`. `initialise` allows the stata underlying itself, and no circuit removes a token. |
-| [`flushQueue`](docs/contention-handling.md#the-flush) | The only writer of shared state: moves up to 10 queued requests and attestations into the output buffers, assigning each vault-signed request the vault account's next EVM nonce. Anyone may submit it. |
+| [`flushQueue`](docs/contention-handling.md#the-flush) | The only writer of `globalLastSeen` after `initialise` and of `vaultAccountNonce`: moves up to 10 queued requests and attestations into the output buffers, assigning each vault-signed request the vault account's next EVM nonce. Anyone may submit it. |
 | [`queueAttestation0`](docs/contention-handling.md#why-the-queue-takes-the-full-output) / `queueAttestation1` / `queueAttestation32` | Verify an MPC attestation's signature over its full output, at the output's exact width, and queue it for the flush. Anyone may submit one. |
 | [`startDeposit`](docs/deposit/deposit.md) → [`sendDeposit`](docs/deposit/deposit.md) → [`completeDeposit`](docs/deposit/deposit.md) | **The reference flow, documented step by step in the [deposit walkthrough](docs/deposit/deposit.md).** The depositor's derived EVM account transfers the ERC20 to the vault's account, and `completeDeposit` mints the shielded vault token when the attested transfer returned true. |
-| [`startWithdraw`](docs/withdraw/withdraw.md) → [`sendWithdraw`](docs/withdraw/withdraw.md) → [`completeWithdraw`](docs/withdraw/withdraw.md) | The other direction, plus the coin-spend-as-authorisation pattern: `startWithdraw` burns the surrendered vault coin, the vault's account transfers the ERC20, and `completeWithdraw` re-mints the burned amount when the transfer did not go through. |
+| [`startWithdraw`](docs/withdraw/withdraw.md) → [`sendWithdraw`](docs/withdraw/withdraw.md) → [`completeWithdraw`](docs/withdraw/withdraw.md) | The other direction, plus the coin-spend-as-authorisation pattern: `startWithdraw` burns the surrendered vault coin, the vault's account transfers the ERC20, and `completeWithdraw` re-mints the burned amount when the MPC attests the transfer failed or unviable, or that it returned false. |
 | `startApproveRouter` / `startApproveStata` → `sendApprove` → `completeApprove` | Deployer-gated: the vault's account grants the pinned Uniswap router, or the pinned stataToken wrapper, an unlimited allowance the later swaps and supplies draw on (see [Vault-signed requests](docs/contention-handling.md#vault-signed-requests)). |
-| [`startSwap`](docs/swap/swap.md) → [`sendSwap`](docs/swap/swap.md) → [`completeSwap`](docs/swap/swap.md) | `exactOutputSingle` on the pinned router: `startSwap` burns the surrendered `erc20AddressIn` coin, and `completeSwap` mints the exact `amountOut` of `erc20AddressOut` plus the unspent input as change, or re-mints the surrendered coin when the swap never executed. |
+| [`startSwap`](docs/swap/swap.md) → [`sendSwap`](docs/swap/swap.md) → [`completeSwap`](docs/swap/swap.md) | `exactOutputSingle` on the pinned router: `startSwap` burns the surrendered `erc20AddressIn` coin, and `completeSwap` mints the exact `amountOut` of `erc20AddressOut` plus the unspent input as change, or re-mints the surrendered coin when the MPC attests the swap failed or unviable. |
 | [`startSupply`](docs/supply/supply.md) → [`sendSupply`](docs/supply/supply.md) → [`completeSupply`](docs/supply/supply.md) | The vault lending on Aave through the stataToken wrapper: `startSupply` burns the surrendered underlying vault coin, the vault's account calls the wrapper's `deposit(amount, vaultEvmAddress)`, and `completeSupply` mints shielded stataToken vault tokens for the attested shares. |
 | [`startRedeem`](docs/redeem/redeem.md) → [`sendRedeem`](docs/redeem/redeem.md) → [`completeRedeem`](docs/redeem/redeem.md) | The return leg: `startRedeem` burns the surrendered stataToken coin, the vault's account calls the wrapper's `redeem(shares, vaultEvmAddress, vaultEvmAddress)`, and `completeRedeem` mints shielded underlying vault tokens for the attested assets (principal plus accrued interest). |
 | `startReplaceNonce` → `sendReplaceNonce` → `completeReplaceNonce` | Deployer-gated emergency recovery: replaces a vault-signed transaction that can never be mined with a zero-value self-transfer at the same nonce (see [Nonce replacement](docs/contention-handling.md#nonce-replacement)). |
@@ -51,26 +53,28 @@ for the protocol side.
 The actor map lays out every actor in the example and the vault contract's
 anatomy: its exported circuits, its witness and its exported ledger fields.
 
-The edges it draws are the dashed key derivations plus the three standing
-responsibilities of the dApp/relayer: picking up the singleton's
+The edges it draws are the dashed key derivations (see
+[Derived keys and accounts](#derived-keys-and-accounts)) plus the three
+standing responsibilities of the dApp/relayer: picking up the singleton's
 `SignatureRespondedEvent`s and `RespondBidirectionalEvent`s, and broadcasting
-the MPC-signed transactions. Everything else is per-flow: every other runtime
-interaction between these actors belongs to a specific MPC flow, and each
-flow's own walkthrough page draws its steps (see [The flows](#the-flows)).
+the MPC-signed transactions. Every other runtime interaction between these
+actors belongs to a specific MPC flow, and each flow's own walkthrough page
+draws and describes its steps (see [The flows](#the-flows)).
 
 - **Sig Network Distributed MPC**: signs requested transactions with keys
   derived for the requesting contract, and attests their execution outcomes.
-  It only ever signs.
+  It never broadcasts them.
 - **Midnight Blockchain (source chain)** hosts two contracts: the
   **Sig Network Singleton Contract**, which the vault notifies of each request
   and through which the MPC posts its responses as contract events, and the
   **ERC20 Vault Contract**, this example's contract, whose exported circuits
-  appear on the map.
+  appear on the map and are listed in
+  [The vault's circuits](#the-vaults-circuits).
 - **EVM Blockchain (destination chain)** hosts what the vault transacts with:
   the ERC20 token contract being bridged, the Uniswap V3 router (swap) and
   the Aave stataToken wrapper (supply / redeem), the vault's own derived EVM
   account holding the pooled tokens, and the destination account a withdraw
-  pays out to (`WithdrawRequest.destEvmAddress`, any EVM address the caller
+  pays out to (`WithdrawRequest.destEvmAddress`, any non-zero EVM address the caller
   names). The vault's own account grants two standing allowances on those
   token contracts: an approval started with `startApproveRouter` lets the
   Uniswap router spend an ERC20, and one started with `startApproveStata`
@@ -78,8 +82,8 @@ flow's own walkthrough page draws its steps (see [The flows](#the-flows)).
 - **Vault dApp/Relayer**: the off-chain client. It polls the singleton's
   emitted events for the MPC's signature, assembles and broadcasts the
   MPC-signed transaction to the EVM chain, then polls for the MPC's
-  attestation and hands the attested output back for settling. The MPC only
-  signs: broadcasting is the relayer's responsibility. The permissionless
+  attestation and hands the attested output back for settling. The MPC never
+  broadcasts: broadcasting is the relayer's responsibility. The permissionless
   Midnight calls (`flushQueue`, the send circuits and the queue circuits) may
   come from any wallet: the integration flows submit them from the user's
   own.
@@ -114,7 +118,7 @@ below for the vault's own code, step by step.
 
 Each user flow has its own walkthrough page pairing the flow's diagram, its
 step-by-step description linking into the contract and the flow code, and its
-sequence diagram:
+mermaid sequence diagram:
 
 - [Deposit](docs/deposit/deposit.md)
 - [Withdraw](docs/withdraw/withdraw.md)
@@ -136,39 +140,45 @@ the same steps and are described in
 
 Every key the MPC signs with is scoped by the requesting contract:
 
-`derivedSigningKey = f(mpcRootKey[keyVersion], vaultContractAddress, path)`
+`derivedSigningKey = f(mpcRootKey[keyVersion], caip2ChainId, vaultContractAddress, path)`
 
-The path is 32 opaque bytes of the client contract's choosing. There are no
-format requirements, and the contract address is always part of the
-derivation, so no contract can ever reach another contract's derived keys.
-Within one contract, distinct paths yield disjoint accounts. The vault uses
-exactly three derivations:
+`caip2ChainId` is the fixed `midnight:mainnet` for every Midnight network. The
+path is 32 opaque bytes of the client contract's choosing. There are no
+format requirements, except that the reserved value
+`pad(32, "midnight response key")` is refused, and the contract address is
+always part of the derivation, so no contract can ever reach another
+contract's derived keys. Within one contract, distinct paths yield disjoint
+accounts. The vault uses exactly three derivations:
 
 | Account / key | Path | What it does |
 |---|---|---|
 | The user's deposit account (EVM) | `userCommitment(callerSecretKey)`, the caller's 32-byte identity commitment | Signs the deposit sweep `transfer(vault, amount)`. The user funds this address with the ERC20 being deposited plus gas ETH. One account per identity: the contract recomputes the commitment in-circuit from the secret-key witness, so the path is never a circuit argument and the MPC can only ever sign with THIS caller's account. |
-| The vault's own account (EVM) | The contract-fixed literal `"vault"` (`pad(32, "vault")`) | Holds the vault's ERC20 and stataToken balances and signs every withdrawal, approval, swap, supply, redeem and nonce replacement, at the nonce the flush assigns (a replacement names its nonce). It also pays their gas, so the fee envelope is the vault's own gas settings, which only the deployer may change (`setGasParams`) and which each request copies at its start. |
+| The vault's own account (EVM) | The contract-fixed literal `"vault"` (`pad(32, "vault")`) | Holds the vault's ERC20 and stataToken balances and signs every withdrawal, approval, swap, supply, redeem and nonce replacement, at the nonce the flush assigns (a replacement reuses the nonce of the sent request it replaces). It also pays their gas, so the fee envelope is the vault's own gas settings, which only the deployer may change (`setGasParams`) and which each request copies at its start. |
 | The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id, block height, output kind and serialised output (the event carries the digest and the signature, never the output). It never signs transactions: it is per-client-contract yet independent of any request's own path, and the queue circuits (`queueAttestation0`, `queueAttestation1`, `queueAttestation32`) verify every attestation against it in-circuit. |
 
 The identity secret behind the first row is the user's OWN random value, held
 by the application itself and never by a wallet: a Lace wallet cannot expose
 its seed, so the `callerSecretKey()` witness needs a value the app holds
-independently. The diagrams name it `MIDNIGHT_USER1_VAULT_SECRET`, and the
-integration tests take it from the `VAULT_USER_SECRET_KEY` environment variable.
+independently. The integration tests take it from the `VAULT_USER_SECRET_KEY`
+environment variable.
 
-Deposits and withdrawals therefore move between two MPC-derived accounts on
-the EVM chain, and neither key ever exists anywhere: the MPC network signs
-for them on the vault's request, and only through the vault's circuits.
+Deposits therefore move between two MPC-derived accounts on the EVM chain,
+and withdrawals pay out of one of them. Neither key ever exists anywhere: the
+MPC network signs for them on the vault's request, and only through the
+vault's circuits.
 
 Derivation happens off-chain with the `@sig-net/midnight` helpers:
 `deriveEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress, path)` for the two EVM
 accounts and `deriveMidnightResponseKey(mpcSecp256k1PublicKey, vaultContractAddress)`
 for the response key (the setup pipeline derives all three and prints them).
-The diagrams render both helpers as one abstract `keyDerivation(...)` note per
+The actor map renders both helpers as one abstract `keyDerivation(...)` note per
 derived value: a note reading `keyDerivation(v2.0.0, MPC_ROOT_PUBLIC_KEY,
 MIDNIGHT_VAULT_CONTRACT_ADDRESS, <path>)` is `deriveEvmAddress` for the two EVM
 accounts and `deriveMidnightResponseKey` for the response key, with `v2.0.0`
-the SDK's epsilon derivation version.
+the SDK's epsilon derivation version. `MPC_ROOT_PUBLIC_KEY` is the MPC root
+public key (`mpcRootKey` above, the helpers' `mpcSecp256k1PublicKey`), and
+`MIDNIGHT_VAULT_CONTRACT_ADDRESS` is the vault's contract address. The flow
+diagrams name the same two inputs in their footnote.
 
 The vault's own address and the response key both take the contract address
 as INPUT, so they cannot exist at construction time: the deployer-gated
@@ -192,7 +202,7 @@ own per-request **runtime** steps, documented flow by flow in the walkthrough
 pages listed under [The flows](#the-flows). Each Compact snippet is abridged
 from [`contract/src/erc20-vault.compact`](contract/src/erc20-vault.compact),
 which is laid out in banner sections: `Configuration`, the admin sections
-that send no EVM transaction (`Initialisation`, `Gas settings`), the
+that send no EVM transaction (`Initialisation`, `Gas settings`, `Allowed tokens`), the
 `Request queue` every action shares, the admin actions that do
 (`Replace nonce`, `Approve`), then the application's actions (`Deposit`,
 `Withdraw`, `Swap`, `Supply`, `Redeem`). Each snippet keeps the
@@ -222,7 +232,7 @@ module the contract imports, plus the TypeScript twins, state readers and
 derivation helpers used off-chain. `@sig-net/midnight-contract` supplies the
 Signet singleton's compiled artefacts, which the vault's cross-contract calls
 link against. The Midnight packages are what the generated module, the
-provider types and the SDK flush helpers
+provider types and the vault's flush helpers
 ([`contract/src/vault-queue.ts`](contract/src/vault-queue.ts)) import.
 
 ### Setup step 2: import the Signet module and compile
@@ -265,12 +275,20 @@ export ledger mpcResponseKey: Secp256k1Point;
 
 // ... then the vault's own configuration: the gas settings, initialised,
 //     vaultEvmAddress, evmChainId, mpcKeyVersion, the sealed deployer
-//     commitment and the pinned EVM contracts ...
+//     commitment, the pinned EVM contracts and allowedTokens ...
+
+constructor(deployerCommitment: Bytes<32>, signetContract: SignetSigner) {
+  deployer = disclose(deployerCommitment);
+  signetSigner = disclose(signetContract);
+}
 
 // ==== Request queue ====
-// The two cells every request shares, read and written only by flushQueue
-// (initialise sets globalLastSeen once).
+// The EVM height initialise() set, raised to the highest block height of any
+// attestation the flush has folded.
 export ledger globalLastSeen: Uint<64>;
+
+// The vault EVM account's next nonce. Starts at 0: each deployment derives a fresh
+// account from its own contract address.
 export ledger vaultAccountNonce: Uint<64>;
 
 export ledger inputRequestBuffer: Map<Uint<64>, RequestBufferEntry>;
@@ -288,11 +306,6 @@ export ledger depositArgsMap: Map<Uint<64>, DepositArgs>;
 
 // ... then every other action's section: its own event map, typed for its
 //     calldata width and output schema width, and its own args map ...
-
-constructor(deployerCommitment: Bytes<32>, signetContract: SignetSigner) {
-  deployer = disclose(deployerCommitment);
-  signetSigner = disclose(signetContract);
-}
 ```
 
 Each request carries one schema, the ABI field list the MPC decodes its EVM
@@ -318,8 +331,8 @@ cast to the `Uint<64>` the mint API takes, so an attested value at or above
 `2^64` fails the settle circuit under a valid signature. The simulator tests
 exercise those bounds and decode SDK-produced bytes with the compiled circuits.
 Failed and unviable outcomes carry an empty output, and so does an executed
-nonce replacement: its settle verifies at width 0 and routes on the verified
-output kind.
+nonce replacement: its settle verifies at width 0 and closes the request on
+every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
 repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.10/README.md#output-recovery-and-serialisation).
@@ -338,9 +351,9 @@ Three vault-specific points:
   `VAULT_APPROVE_REQUESTS_PATH`, `VAULT_REPLACE_NONCE_REQUESTS_PATH`,
   `VAULT_SWAP_REQUESTS_PATH`, `VAULT_SUPPLY_REQUESTS_PATH`,
   `VAULT_REDEEM_REQUESTS_PATH`) so off-chain readers cannot drift from them.
-  The vault has 34 ledger fields, past the 15-field flat limit, so the
-  compiler chunks the state tree: chunk 0 holds fields 0–3, chunk 1 holds
-  fields 4–18, chunk 2 holds fields 19–33, and every path is depth 2. The
+  The vault has 35 ledger fields, past the 15-field flat limit, so the
+  compiler chunks the state tree: chunk 0 holds fields 0–4, chunk 1 holds
+  fields 5–19, chunk 2 holds fields 20–34, and every path is depth 2. The
   deposit map has the path `[2, 5]`, and `sendDeposit` packs
   `requestsPathDepth` 2 + `requestsPath` [2, 5, 0, 0] into its notification.
   The compiler records the same paths as each field's "index" in the compiled
@@ -371,8 +384,8 @@ const mpcResponseKey = deriveMidnightResponseKey(mpcSecp256k1PublicKey, vaultCon
 ```
 
 and seal them with the deployer-gated one-shot `initialise` circuit, together
-with the one EVM chain this vault operates on, the EVM contracts it is allowed
-to transact with (the Uniswap router and the Aave stataToken pair), the MPC key
+with the one EVM chain this vault operates on, the swap and lending contracts
+it calls (the Uniswap router and the Aave stataToken pair), the MPC key
 version, and the EVM height every attestation the vault settles must exceed:
 
 ```compact
@@ -392,7 +405,8 @@ export circuit initialise(
   // ... the chain id and the pinned addresses must be nonzero ...
   initialised = true;
   vaultEvmAddress = disclose(vaultEvm);
-  // ... the router, the stataToken pair, the chain id and the MPC key ...
+  // ... the router, the stataToken pair (allowing its underlying in allowedTokens),
+  //     the chain id and the MPC key ...
   globalLastSeen = disclose(evmHeight);
   // ... then the default gas settings of the vault account's transactions ...
 }
@@ -403,8 +417,9 @@ signed transaction to one Ethereum network (mainnet, Sepolia or a local anvil),
 and it must name the network the MPC watches. Every request's `executionDest` is the
 SDK's fixed `ethereumCaip2Id()`, whichever Ethereum network that is.
 
-`evmHeight` seeds `globalLastSeen`, the bound every attestation must exceed
-(see [The last seen height](docs/contention-handling.md#the-last-seen-height)).
+`evmHeight` seeds `globalLastSeen`. Each request records `globalLastSeen` when
+the flush moves it, and every attestation for that request must exceed that
+recorded height (see [The last seen height](docs/contention-handling.md#the-last-seen-height)).
 The deploy tooling passes `EVM_START_HEIGHT` when set, otherwise the latest
 block `EVM_RPC_URL` reports, and zero when neither is set.
 
@@ -457,9 +472,9 @@ the deposit round trip, from funding the deposit account through
 
 | Package | What it is |
 |---|---|
-| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads, the SDK flush helpers and the EVM constants, all browser-safe. Plus simulator unit tests. Its runtime dependencies are the SDK (`@sig-net/midnight`, `@sig-net/midnight-contract`) plus the three Midnight packages the generated module, the provider types and the flush helpers import (`@midnight-ntwrk/compact-runtime`, `@midnight-ntwrk/midnight-js`, `@midnight-ntwrk/midnight-js-protocol`). |
+| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads, the vault's flush helpers and the EVM constants, all browser-safe. Plus simulator unit tests. Its runtime dependencies are the SDK (`@sig-net/midnight`, `@sig-net/midnight-contract`) plus the three Midnight packages the generated module, the provider types and the flush helpers import (`@midnight-ntwrk/compact-runtime`, `@midnight-ntwrk/midnight-js`, `@midnight-ntwrk/midnight-js-protocol`). |
 | [`deploy/`](deploy/) | Deploying and post-deploy initialisation: the split base-deploy-plus-maintenance-adds, the deployer-gated `initialise`, and the configuration those resolve, as typed functions taking an environment map plus thin CLI entrypoints over them, so a hand-run deploy and the e2e setup execute identical code. Also the Node half of the vault's client surface those flows and the integration tests share: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. Everything here needs Node, which is why it is not in the contract package. |
-| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and EURC for swaps) dealt to the derived accounts with anvil cheatcodes. |
+| [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and Aave's USDC for the lending flows) dealt to the derived accounts with anvil cheatcodes, and swaps buy real EURC. |
 
 ## Running it
 
@@ -483,7 +498,7 @@ corepack enable
 yarn install
 cp .env.example .env                # then set SEPOLIA_FORK_RPC_URL to an archive Sepolia RPC
 compact update 0.33.0-rc.2          # Exact version required.
-yarn compile:erc20-vault:zk         # ~10 min zk key generation, background it
+yarn compile:erc20-vault            # no zk keys: the first e2e run generates them itself (~10 min)
 docker compose up -d                # node, indexer, proof server, anvil forking
                                     # Sepolia (NOT the fakenet responder: it is
                                     # behind the `fakenet` profile, the test setup
@@ -496,14 +511,15 @@ environment for a client, or for hand-driving the flows), run the setup
 pipeline on its own after `docker compose up -d`:
 
 ```sh
-yarn setup-local:erc20-vault        # deploy signet + vault, initialise, persist to .env
+yarn setup-local:erc20-vault        # deploy signet + vault, initialise, allow EVM_ALLOWED_TOKENS, persist to .env
 ```
 
 It runs the suite's own setup steps in-process, then the deploy package's
-`initialise`, and appends every value it generated to `.env` under the names
-the suite reads: the role wallet seeds, `MPC_ROOT_KEY`, `MPC_SECP256K1_PUBKEY`,
-both contract addresses, `MPC_RESPONSE_KEY`, the derived EVM addresses,
-`EVM_CHAIN_ID`, `ERC20_ADDRESS`, `VAULT_DEPLOYER_SECRET_KEY` and
+`initialise`, then allows every ERC20 `EVM_ALLOWED_TOKENS` lists, and appends
+every value it generated to `.env` under the names the suite reads: the role
+wallet seeds, `MPC_ROOT_KEY`, `MPC_SECP256K1_PUBKEY`, both contract addresses,
+`MPC_RESPONSE_KEY`, the derived EVM addresses, `EVM_CHAIN_ID`,
+`ERC20_ADDRESS`, `EVM_ALLOWED_TOKENS`, `VAULT_DEPLOYER_SECRET_KEY` and
 `MAINTENANCE_SIGNING_KEY`. Append-only: a value already in `.env` is left
 alone, and one that differs from the run's is an error. A following
 `yarn test:erc20-vault:e2e` reuses the stack with every setup step skipping.
@@ -539,9 +555,9 @@ Minimal changes, all in `.env`:
 EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
 FAKENET_EVM_RPC_URL=https://sepolia.infura.io/v3/<your-key>
 
-# Required on any non-local chain: an existing ERC20 with code on Sepolia,
-# e.g. USDC.
-ERC20_ADDRESS=0x...
+# Optional: the token the deposit flow moves. Defaults to real Sepolia USDC
+# (0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238).
+#ERC20_ADDRESS=0x...
 ```
 
 Then recreate the responder so it re-reads `.env`
@@ -557,19 +573,19 @@ What does NOT happen automatically on a real chain, by design:
   vault account needs ETH for the gas of every transaction it signs). Fund them when printed, either
   across two runs (first run derives + prints, second run tests), or in one
   attended run with `STEP_THROUGH` (below).
-- **Bring your own token.** On the real Sepolia network you set
-  `ERC20_ADDRESS` to an existing ERC20 with code. The local anvil
-  already has real USDC from the fork.
+- **The token is real Sepolia USDC by default.** Set `ERC20_ADDRESS` only to
+  move a different ERC20 that has code on Sepolia. Nothing is dealt on a real
+  chain, so you fund the user account with the token yourself.
 - A redeploy of the vault contract derives **new** accounts, and any you already
   funded do not move with it.
 
 ### Running against the real MPC on a deployed network
 
-Point the Midnight side at a deployed network (stagenet, preview, preprod or
-mainnet) and drop the fakenet: the real Signature Network MPC listens to the
-signet singleton the SDK publishes for that network and answers requests from
-any vault sealed to it. The suite runs the same way on every deployed network.
-The minimal `.env`, with stagenet as the example network, is:
+Point the Midnight side at a deployed network the SDK publishes values for
+(today only stagenet) and drop the fakenet: the real Signature Network MPC
+listens to the signet singleton the SDK publishes for that network, and signs
+and attests the requests it admits from any vault sealed to it. The minimal
+`.env`, with stagenet as the example network, is:
 
 ```sh
 NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
@@ -598,8 +614,9 @@ What differs from the local loop:
   dealing either: the setup prints the derived accounts and what to fund by
   hand, and `STEP_THROUGH=1` (below) lets one attended run fund them and
   continue.
-- **A tracing RPC, as everywhere.** `EVM_RPC_URL` must serve
-  `debug_traceTransaction` on every network (the attestation polls recover
+- **A tracing RPC, unless you read the output cache.** Under the default
+  `evm-node` source, `EVM_RPC_URL` must serve `debug_traceTransaction` on
+  every network (the attestation polls recover
   each execution output by tracing the mined transaction, the method the MPC
   itself observes with), and under `evm-node` the setup refuses an endpoint
   without it before anything is deployed. The local anvil serves it, and
@@ -674,9 +691,10 @@ for circuits it does not register yet. Circuits can be added at any time.
 
 [`deploy/src/deploy-vault.ts`](deploy/src/deploy-vault.ts) performs both phases
 and is the only implementation. It is a typed function taking an environment
-map, so the commands below, the e2e setup pipeline and the flow tests all run
-that same function in-process: the multistage deploy a remote network needs is
-exercised on every local e2e run.
+map. `yarn deploy:erc20-vault`, `yarn deploy-initialise:erc20-vault` and the
+e2e setup pipeline all run it in-process, and `yarn resume-deploy:erc20-vault`
+runs its companion `resumeVaultDeploy`, so the multistage deploy a remote
+network needs is exercised on every local e2e run.
 
 ```sh
 # local, against the docker stack
@@ -697,8 +715,9 @@ yarn add-allowed-tokens:erc20-vault
 
 # install the circuits a split deploy left missing (recovers a run that died
 # after its base deploy landed, named by MIDNIGHT_VAULT_CONTRACT_ADDRESS, and
-# is a no-op on a vault with every circuit), then initialise as above. The
-# e2e setup runs this itself whenever the address is set.
+# is a no-op on a vault with every circuit). It does not initialise: run
+# `yarn initialise:erc20-vault` after it. The e2e setup runs this itself
+# whenever the address is set.
 yarn resume-deploy:erc20-vault
 ```
 
@@ -709,7 +728,9 @@ still supplies a network-scoped value (a signet address, an MPC key): those are
 sealed into the contract permanently, and a local-chain value on a remote network
 produces a vault that can never work.
 
-On a deployed network a deploy needs four variables:
+On a deployed network a deploy needs four variables, plus
+`VAULT_DEPLOYER_SECRET_KEY` (32 bytes of hex, kept) when `DEPLOYER_SEED` is
+not itself 32 bytes of hex:
 
 ```sh
 NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
@@ -742,7 +763,10 @@ REQUIRES it and fails fast when it is unset. On the local chain, which is
 throwaway, an unset key makes the deploy generate an ephemeral one and print it,
 so a `yarn resume-deploy:erc20-vault` after a failed maintenance add can export
 it. The e2e setup and `yarn setup-local:erc20-vault` generate it before the
-deploy, so their printout and the persisted `.env` carry it.
+deploy and print it. Only `setup-local` writes it to `.env`, and only when its
+whole run succeeds. If a run dies during the circuit installs, export the
+printed key as `MAINTENANCE_SIGNING_KEY` before the next run, or the resume
+refuses to start.
 
 ### Deploying from CI
 
@@ -758,7 +782,7 @@ failed after that point, the PR says to run it by hand before merging).
 
 ## The e2e suite
 
-Thirteen e2e specs run serially in a pinned order (`FILE_ORDER` in
+Fourteen e2e specs run serially in a pinned order (`FILE_ORDER` in
 [`integration-tests/vitest.config.ts`](integration-tests/vitest.config.ts)).
 `happy-day-e2e` runs first because it initialises the vault, and allows the
 ERC20s, that the later flows build on, and `approve-e2e` runs before the swap and lending specs
@@ -783,8 +807,8 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `admin-replace-nonce-e2e` | 12 | The deployer replaces an unbroadcast withdrawal's nonce with a self-transfer, and the withdrawal, attested unviable, re-mints its burned vault tokens | `REPLACE_NONCE_DEPOSIT_REQUEST_ID` / `REPLACE_NONCE_WITHDRAW_REQUEST_ID` / `REPLACE_NONCE_REPLACEMENT_REQUEST_ID` |
 | `concurrent-flush-e2e` | 10 | Two wallets race to flush the same items: the user's transactions never fail, the losing flush is retried, and a lone canary deposit afterwards shows the stack is healthy. Runs last, as its concurrent load is the most likely to strain the local stack | `CONCURRENT_FLUSH_DEPOSIT_REQUEST_ID` / `CONCURRENT_FLUSH_CANARY_REQUEST_ID` |
 
-134 tests total across these specs. The six offline specs (51 tests, no stack
-needed) are not pinned and run after them, so a full run reports 185. The
+134 tests total across these specs. The seven offline specs (56 tests, no stack
+needed) are not pinned and run after them, so a full run reports 190. The
 suite runs against a Sepolia fork, and the setup pipeline
 verifies that the Uniswap router and the stataUSDC wrapper are deployed on it
 before any spec runs, so a fork missing either fails the run at setup with an
@@ -797,16 +821,20 @@ VM 16 GB.
 ### Test run recovery
 
 The proof server being OOM-killed mid-run is routine on a 16 GB Docker VM and
-not a defect. It presents as a spec failing with
-`connect ECONNREFUSED 127.0.0.1:6300`, with `docker ps -a` showing
-`midnight-proof-server` as `Exited (137)` (confirm with
+not a defect. Docker restarts it by itself (`restart: 'unless-stopped'`), the
+client retries a refused proof connection twice (after 5 s, then 10 s), and
+every flow file restarts the proof server before it starts when it does not
+answer, and again after it ends, so a kill usually costs only seconds. When
+the retries run out, a spec fails with `connect ECONNREFUSED 127.0.0.1:6300`
+(confirm the kill with
 `docker inspect midnight-proof-server --format '{{.State.OOMKilled}}'`).
 You do not need to start over. Every on-chain step that already completed
 stays completed, and each spec prints its request ids in banners as it goes.
 
 To recover:
 
-1. `docker restart midnight-proof-server`
+1. `docker restart midnight-proof-server`, if Docker has not already
+   brought it back
 2. Rerun the same spec file, passing the request id it printed via the spec's
    resume env var (see the table above) so that it resumes the pending
    request, not a fresh deposit:
@@ -824,8 +852,9 @@ deposit. On the rerun the interrupted proof is the first one served by a
 fresh proof server, so the rest of the file fits in the remaining headroom.
 
 One corner case: if the proof server died while the fakenet responder was
-posting a response, that request strands unresponded (a signature poll then
-times out even though the responder logged the request). Recover with
+posting a response, that request strands unresponded (its signature or
+attestation poll then times out even though the responder logged the request).
+Recover with
 `docker compose --profile fakenet restart fakenet` (its startup backfill
 re-posts the missing responses), then rerun with the resume var as above.
 
@@ -898,9 +927,10 @@ package ships, which pins every artefact's size and sha256, is enough for a
 consumer to regenerate the keys and prove they are the published ones.
 
 Inside this workspace, `buildVaultProviders` reads the vault's keys from the
-contract package's own `managed/` output on every network, so a deploy or an
-e2e run against any network needs `yarn compile:erc20-vault:zk` first, and
-says so if the keys are missing.
+contract package's own `managed/` output on every network, so a hand-run
+deploy, or an e2e rerun against a kept vault address, needs
+`yarn compile:erc20-vault:zk` first, and says so if the keys are missing. A
+first e2e run generates the keys itself.
 
 ## Regenerating the zk assets
 

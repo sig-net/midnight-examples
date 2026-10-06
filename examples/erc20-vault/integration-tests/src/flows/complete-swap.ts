@@ -23,7 +23,7 @@ export interface SwapSettlement {
   /**
    * The input the executed swap spent: `completeSwap` minted `request.amountOut`
    * of the bought ERC20 and `request.amountInMaximum - amountIn` of the sold one.
-   * `undefined` when the swap never executed and `completeSwap` re-minted
+   * `undefined` when the swap failed or was unviable and `completeSwap` re-minted
    * `request.amountInMaximum` of the sold ERC20.
    */
   readonly amountIn: bigint | undefined;

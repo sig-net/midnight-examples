@@ -7,7 +7,7 @@ node-modules`), split between shared machinery and the examples integrators copy
   providers, tx build & submit). Kept ruthlessly small.
 - **`packages/test-harness`** — test-only machinery (stack bring-up/teardown,
   mpc-keys setup, wallet funding, env/session handling, subprocess helpers).
-  Test-only deps live here and never touch an example's manifests.
+  An example's `contract` and `deploy` source never import it.
 - **`examples/*/*`** — one directory per example, each holding up to three
   workspace packages: `contract` (required), then `deploy` and
   `integration-tests` as warranted. Each package holds exactly one kind of
@@ -24,8 +24,9 @@ node-modules`), split between shared machinery and the examples integrators copy
   - `integration-tests` — flows and specs.
   An example's flows are typed functions in `integration-tests/src/flows/`, run
   in-process by its tests, and its deploy / init flows are typed functions in
-  `deploy/src/`, run in-process by the setup pipeline. Both kinds get thin `tsx`
-  entrypoints over those SAME functions for hand-driving a live stack
+  `deploy/src/`: the setup pipeline runs the deploy in-process, and the e2e
+  specs and `setup-local` run the initialise in-process. Both kinds get thin
+  `tsx` entrypoints over those SAME functions for hand-driving a live stack
   (`integration-tests/scripts/` and `deploy/scripts/`) —
   never a subprocess call with its output scraped, which is how the two paths
   silently diverge.
@@ -63,8 +64,9 @@ any instinct carried in from product-repo conventions.
   example — readability of the example outranks DRY here. Keep `packages/lib`
   ruthlessly small: every import from it is plumbing an integrator copying an
   example can't see, and it ideally shrinks toward zero as pieces graduate into
-  the SDK. Test-only deps (vitest, hardhat, viem) live in
-  `packages/test-harness` and never appear in an example's manifests.
+  the SDK. Test-only machinery lives in `packages/test-harness` and is never
+  imported by an example's `contract` or `deploy` source (each package still
+  lists its own test runner, vitest, as a devDependency).
 - **No workspace package is published by default.** Every member is named
   `@sig-net/midnight-examples-*` and starts `"private": true`. That is the SAME
   npm scope the published SDK uses (`@sig-net/midnight`,
@@ -99,7 +101,8 @@ any instinct carried in from product-repo conventions.
 - **The published package's version moves in lockstep with its example's release
   tag.** A release is tagged `<example-dir>-vX.Y.Z` (or `-vX.Y.Z-rc.N`) and the
   publish workflow refuses to run unless the package it publishes is already at
-  exactly `X.Y.Z`. Bump it in the commit that precedes the tag.
+  exactly the tag's version (`X.Y.Z`, or `X.Y.Z-rc.N` for an rc tag). Bump it
+  in the commit that precedes the tag.
 
 Corollary: an example's `contract` package depends on the Signature Network SDK +
 compact tooling and **nothing else** — its dependency list is itself documentation
@@ -414,10 +417,11 @@ apply to all of them:
   layout), cut to the lines that make that point.
 - **One vocabulary, two renderings per flow, both on the page**: the step-list
   bullets (ordinal + the canonical string's tail) and the mermaid `Note over` lines
-  (the full canonical string). The strings are frozen per flow in the correspondence
-  contract, and a change to one rendering is a change to both in the same commit.
+  (the full canonical string). The strings are frozen per flow on its flow page
+  (see the Correspondence section of `docs/flow-pages.md`), and a change to one
+  rendering is a change to both in the same commit.
   The flow diagram carries NO step text: its numbered circles are exactly the frozen
-  strings' ordinals (a branch's arms share one ordinal, one circle per arm), and
+  strings' ordinals (a branch's arms share one ordinal and one circle), and
   every bit of text on or beside an arrow is an edge label under the diagramming
   style guide's golden rules — bold acting party, colon, verb-led body — never a
   free-standing caption.

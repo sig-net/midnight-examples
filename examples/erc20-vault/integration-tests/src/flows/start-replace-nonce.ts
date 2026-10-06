@@ -140,9 +140,10 @@ export async function startReplaceNonce(
   const result = await context.vault.callTx.sendReplaceNonce(outIndex);
   console.log(`replacement sent in tx ${result.public.txId}`);
 
-  // The bidirectionalReplaceNonceMap index IS the record's transientHash digest:
-  // recomputing it off-chain and finding it on the ledger proves both sides agree on
-  // every byte of the event.
+  // The bidirectionalReplaceNonceMap index is the request id, a hash of the event's seven
+  // execution fields (the transaction enters as a digest of its used entries): finding
+  // the recomputed id on the ledger proves both sides agree on those fields, not on the
+  // output schema, signatureDest or params.
   const after = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,

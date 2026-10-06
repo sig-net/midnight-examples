@@ -172,7 +172,7 @@ export function createResponseReader(
   return new SignetRequestResponseReader({
     requesterContractAddress: context.vaultContractAddress,
     // The requestsPath the vault's notifications pack (erc20-vault.compact).
-    // The vault's 34 ledger fields chunk the state tree, so every path is depth 2.
+    // The vault's 35 ledger fields chunk the state tree, so every path is depth 2.
     requesterRequestsPath: requestsPath,
     signetContractAddress: context.signetContractAddress,
     publicDataProvider: context.providers.publicDataProvider,

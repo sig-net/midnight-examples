@@ -3,7 +3,7 @@
 # full e2e suite is opt-in via workflow_dispatch. The weekly schedule runs
 # the same gate on the default branch: a pull_request run can restore caches
 # only from its own or the DEFAULT branch's scope, and nothing else runs on
-# dev — without it every fresh PR misses the zk-keys cache and pays ~5.5 min
+# dev — without it every fresh PR misses the zk-keys cache and pays ~10 min
 # of keygen. The weekly cadence also outlives GitHub's 7-day unused-cache
 # eviction, and workflow_dispatch on dev repopulates after a key change.
 

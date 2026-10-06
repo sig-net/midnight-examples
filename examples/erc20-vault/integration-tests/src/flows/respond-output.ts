@@ -403,8 +403,9 @@ export async function fetchAttestedRespondOutcome(
   ).mpcResponseKey;
   const mpcResponseKey = memo.mpcResponseKey;
 
-  // An attestation is posted, so the attested output exists at the source:
-  // the transaction is final and the MPC cached its bytes before posting.
+  // An attestation is posted, so the transaction is final. A node that keeps
+  // the MPC cache wrote its bytes before posting, but the object may not be
+  // readable yet.
   // UNTRUSTED until the signature check below.
   const candidates =
     memo.candidates ??

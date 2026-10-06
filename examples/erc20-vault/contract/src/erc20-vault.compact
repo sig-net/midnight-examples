@@ -7,10 +7,10 @@
 // executing the EVM side. See ../../README.md for the full integration walkthrough.
 //
 // Contention: apart from initialise setting globalLastSeen once, flushQueue is the ONLY
-// circuit that reads or writes globalLastSeen and vaultAccountNonce. Every other
-// circuit touches only entries keyed by its own request, so user calls never conflict
-// with each other or with a flush.
-// See ../docs/contention-handling.md.
+// circuit that reads or writes globalLastSeen and vaultAccountNonce. Every user circuit
+// writes only entries keyed by its own request and reads configuration only the deployer
+// changes, so user calls never conflict with each other or with a flush.
+// See ../../docs/contention-handling.md.
 //
 // Layout: configuration, the admin circuits that send no EVM transaction (initialisation,
 // gas settings and allowed tokens), the request queue every action shares, the admin
@@ -236,8 +236,9 @@ export struct GasParams {
 // own arguments live in its args map under inIndex, and argsHash commits to them.
 export struct RequestBufferEntry {
   action: Action;
-  // false: evmNonce is the nonce the caller names, taken verbatim. true: the vault's
-  // account signs, and the flush overwrites evmNonce with the vault's next nonce.
+  // false: evmNonce is set at start and taken verbatim (a deposit's caller-named nonce,
+  // or the vault nonce a nonce replacement reads from the request it replaces). true: the
+  // vault's account signs, and the flush overwrites evmNonce with the vault's next nonce.
   useNextVaultAccountNonce: Boolean;
   evmNonce: Uint<64>;
   // The index of the entry in inputRequestBuffer and of its args in the action's args
@@ -255,9 +256,10 @@ export struct OutputRequestEntry {
   lastSeen: Uint<64>;
 }
 
-// A verified attestation, stored under its request id. The complete circuit re-supplies
-// the serialised output and checks it against the digest, so the record holds no output
-// and serves every output width.
+// A verified attestation, stored under its request id. On an executed verdict the
+// complete circuit re-supplies the serialised output and checks it against the digest
+// (a nonce replacement checks the empty output on every verdict), so the record holds
+// no output and serves every output width.
 export struct AttestationRecord {
   blockHeight: Uint<64>;
   outputKind: OutputKind;
@@ -272,7 +274,8 @@ export struct FlushSlot {
   requestId: RequestId;    // read when channel == attestation
 }
 
-// The highest block height of any attestation the flush has folded.
+// The EVM height initialise() set, raised to the highest block height of any
+// attestation the flush has folded.
 export ledger globalLastSeen: Uint<64>;
 
 // The vault EVM account's next nonce. Starts at 0: each deployment derives a fresh
@@ -471,8 +474,9 @@ circuit settleRequest(
   return [out.entry, record];
 }
 
-// The outcomes for which the requested transaction never executed, so the
-// requester is refunded what they surrendered at start.
+// The outcomes after which the requested transaction moved nothing: it reverted
+// (failed) or can never be included (unviable), so the requester is refunded what they
+// surrendered at start.
 pure circuit outcomeRefunds(outputKind: OutputKind): Boolean {
   return outputKind == OutputKind.failed || outputKind == OutputKind.unviable;
 }
@@ -668,7 +672,7 @@ circuit approveArgsHash(args: ApproveArgs): Bytes<32> {
 }
 
 // The allowance every approval grants: 2^128-1, so one approval per token and spender
-// suffices forever.
+// lasts until 2^128-1 base units have moved through it.
 export pure circuit unlimitedAllowance(): Uint<128> {
   return 340282366920938463463374607431768211455;
 }
@@ -922,7 +926,7 @@ export circuit sendDeposit(outIndex: Bytes<32>): [] {
   );
 }
 
-// Settles a deposit on either verdict. Executed: checks the output against the
+// Settles a deposit on any verdict. Executed: checks the output against the
 // attestation, then mints the deposited amount when the transfer returned true. Failed
 // or unviable: nothing was surrendered, so it only closes the request, and
 // serializedOutput is ignored. Depositor-gated, one settle per request. mintNonce is
@@ -1092,7 +1096,7 @@ export circuit sendWithdraw(outIndex: Bytes<32>): [] {
   );
 }
 
-// Settles a withdrawal on either verdict. Executed: checks the output against the
+// Settles a withdrawal on any verdict. Executed: checks the output against the
 // attestation. A transfer that returned true moved the tokens, so the burn stands. One
 // that returned false, or a failed or unviable transaction, moved nothing, so the
 // surrendered amount is re-minted to the caller, and on a failure serializedOutput is
@@ -1290,7 +1294,7 @@ export pure circuit swapAmountIn(output: Bytes<32>): Uint<64> {
   return checkedTruncationU128(output) as Uint<64>;
 }
 
-// Settles a swap on either verdict. Executed: checks the output against the
+// Settles a swap on any verdict. Executed: checks the output against the
 // attestation, then mints exactly amountOut of erc20AddressOut and the unspent
 // amountInMaximum - amountIn of erc20AddressIn as change, a zero-value coin on an exact
 // spend. Failed or unviable: the swap spent nothing, so the surrendered amountInMaximum
@@ -1491,7 +1495,7 @@ export pure circuit supplyShares(output: Bytes<32>): Uint<64> {
   return checkedTruncationU128(output) as Uint<64>;
 }
 
-// Settles a supply on either verdict. Executed: checks the output against the
+// Settles a supply on any verdict. Executed: checks the output against the
 // attestation, then mints the attested shares as the stataToken vault coin. Failed or
 // unviable: the wrapper took nothing, so the surrendered stataUnderlying amount is
 // re-minted, and serializedOutput is ignored. Either mint goes to the caller.
@@ -1678,7 +1682,7 @@ export pure circuit redeemAssets(output: Bytes<32>): Uint<64> {
   return checkedTruncationU128(output) as Uint<64>;
 }
 
-// Settles a redeem on either verdict. Executed: checks the output against the
+// Settles a redeem on any verdict. Executed: checks the output against the
 // attestation, then mints the attested assets as the stataUnderlying vault coin. Failed
 // or unviable: the wrapper burned nothing, so the surrendered stataToken shares are
 // re-minted, and serializedOutput is ignored. Either mint goes to the caller.

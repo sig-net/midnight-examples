@@ -164,9 +164,10 @@ export async function startWithdraw(
   const result = await context.vault.callTx.sendWithdraw(outIndex);
   console.log(`withdraw sent in tx ${result.public.txId}`);
 
-  // The bidirectionalWithdrawMap index IS the record's transientHash digest:
-  // recomputing it off-chain and finding it on the ledger proves both sides agree
-  // on every byte of the event.
+  // The bidirectionalWithdrawMap index is the request id, a hash of the event's seven
+  // execution fields (the transaction enters as a digest of its used entries): finding
+  // the recomputed id on the ledger proves both sides agree on those fields, not on the
+  // output schema, signatureDest or params.
   const after = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
