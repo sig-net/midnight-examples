@@ -1,0 +1,266 @@
+%-----------------------------------------------------------------------------------------------------
+%Section: Cryptographic assuptions
+%-----------------------------------------------------------------------------------------------------
+\section{Cryptographic Assumptions}
+\label{sec:assumptions}
+
+Before presenting a formal security proof for the unlikability (\S~\ref{sec:proof}) and soundness (\S~\ref{sec:soundness})
+properties of the protocol described in Section~\ref{sec:instantiation},
+we define the cryptographic assumptions that we use in the proofs.
+Most of the cryptographic assumptions we list below are inherited from the Midnight shielded-circuit and shielded-coin layer..
+
+
+\vspace{5pt}
+\noindent
+\textbf{Notation}
+$\secpar$ is the security parameter; PPT means probabilistic polynomial time in $\secpar$;
+$\negl(\cdot)$ denotes a negligible function. $x \gets \mathcal{D}$ is sampling, $y \gets F(x)$ the output of a randomized algorithm, $\Adv^{\mathcal{O}}$ an adversary with access to the oracle set
+$\mathcal{O}$.
+Notation  $p_a\approx_{\negl}  p_b$ means that probability distribution $p_a$ is equal to $p_a$ up to a negligible factor.
+
+
+\subsection{(Multi-use)  Pseudorandom functions}
+\label{ssec:prf}
+
+Let $\PRFfam : \prfKeySp \times \prfDom \to \prfRng$ be a family of functions.
+
+\begin{definition}[PRF security]
+\label{def:prf}
+For a PPT adversary $\Adv$ define
+\[
+\AdvPRF_{\PRFfam}(\Adv,\secpar) \;=\;
+\Bigl|\ \Pr\bigl[\,\prfkey \gets \prfKeySp \ :\ \Adv^{\PRFfam(\prfkey,\cdot)}(1^{\secpar}) = 1\,\bigr]
+\;-\;
+\Pr\bigl[\,\RandFun \gets \mathsf{Funs}(\prfDom,\prfRng) \ :\ \Adv^{\RandFun(\cdot)}(1^{\secpar}) = 1\,\bigr]\ \Bigr|,
+\]
+where $\mathsf{Funs}(\prfDom,\prfRng)$ is the set of all functions from $\prfDom$ to $\prfRng$.
+$\PRFfam$ is a \emph{pseudorandom function} if $\AdvPRF_{\PRFfam}(\Adv,\secpar) \le \negl(\secpar)$
+for every PPT $\Adv$.
+\end{definition}
+
+
+\begin{definition}[Multi-user PRF Security~\cite{BBM00,BBT16}]
+\label{def:muprf}
+For $m = m(\secpar)$ users and a PPT adversary $\Adv$ with access to $m$ oracles, define
+\[
+\AdvMUPRF_{\PRFfam,m}(\Adv,\secpar) \;=\;
+\Bigl|\ \Pr\bigl[\,\prfkey_1,\dots,\prfkey_m \gets \prfKeySp \ :\
+\Adv^{\PRFfam(\prfkey_1,\cdot),\dots,\PRFfam(\prfkey_m,\cdot)}(1^{\secpar}) = 1\,\bigr]
+\]
+\[
+-\;
+\Pr\bigl[\,\RandFun_1,\dots,\RandFun_m \gets \mathsf{Funs}(\prfDom,\prfRng) \ :\
+\Adv^{\RandFun_1(\cdot),\dots,\RandFun_m(\cdot)}(1^{\secpar}) = 1\,\bigr]\ \Bigr|.
+\]
+$\PRFfam$ is \emph{multi-user secure} if $\AdvMUPRF_{\PRFfam,m}(\Adv,\secpar) \le \negl(\secpar)$
+for every PPT $\Adv$ and every polynomial $m$.
+\end{definition}
+
+\begin{remark}[On the need of multi-user PRF security]
+\label{rem:whymuprf}
+This property is not strictly needed, as any an hybrid over the $m$ users reduces any  multi-input secure PRF (Definition~\ref{def:muprf})  into a secure PRF (Definition~\ref{def:prf}) with a
+loss of a factor $m$. However,   the multi-user version  is preferred to avoid this loss.
+\end{remark}
+
+
+\subsection{Hash Functions}
+\begin{definition}[Collision-Resistant Hash Function~\cite{KatzLindell}]
+\label{def:crhf}
+A hash function family $\mathcal{H} = \{H_{pp} : \{0,1\}^* \to \{0,1\}^{\ell(\secpar)}\}_{pp \in \{0,1\}^{\secpar}}$ parameterized by public parameters $pp$ and security parameter $\secpar$ is \emph{collision-resistant} if for every PPT adversary $\mathcal{A}$, there exists a negligible function $\negl(\secpar)$ such that:
+
+    \[
+\Pr\left[
+  pp \leftarrow \mathrm{Gen}(1^{\secpar}), \, (x, x') \leftarrow \mathcal{A}(1^{\secpar}, pp) : x \neq x' \land H_{pp}(x) = H_{pp}(x')
+\right] \le \negl(\secpar)
+\]
+\end{definition}
+
+
+
+\subsection{Non-interactive zero-knowledge arguments}
+\label{ssec:nizkdef}
+The Midnight layer produces, for every circuit call, a non-interactive argument for the relation
+$\Rel_C$. We use the standard notion of a preprocessing non-interactive
+argument system in the common-reference-string model~\cite{BCCT12,Gro16}.
+
+\begin{definition}[Non-interactive argument system]
+\label{def:nizk}
+Let $\Rel$ be an NP relation with statements $\stmt$ and witnesses $\wit$. A triple
+$\NIZK = (\zkSetup, \zkProve, \zkVerify)$ of PPT algorithms, where
+$\crs \gets \zkSetup(1^{\secpar}, \Rel)$, $\zkproof \gets \zkProve(\crs, \stmt, \wit)$ and
+$\zkVerify(\crs, \stmt, \zkproof) \in \{0,1\}$, is a \emph{non-interactive argument system} for
+$\Rel$ if it satisfies completeness, computational soundness and zero knowledge as defined below.
+\end{definition}
+
+\begin{definition}[Completeness]
+\label{def:zkcomplete}
+For every $(\stmt,\wit) \in \Rel$,
+$\Pr[\crs \gets \zkSetup(1^{\secpar},\Rel);\ \zkproof \gets \zkProve(\crs,\stmt,\wit) :
+\zkVerify(\crs,\stmt,\zkproof) = 1] = 1$.
+\end{definition}
+
+\begin{definition}[Computational soundness]
+\label{def:zksound}
+For every PPT $\Adv$,
+\[
+\AdvSnd_{\NIZK}(\Adv,\secpar) \;=\;
+\Pr\bigl[\,\crs \gets \zkSetup(1^{\secpar},\Rel);\ (\stmt,\zkproof) \gets \Adv(\crs)\ :\
+\zkVerify(\crs,\stmt,\zkproof) = 1 \ \wedge\ \stmt \notin \mathcal{L}_{\Rel}\,\bigr]
+\;\le\; \negl(\secpar),
+\]
+where $\mathcal{L}_{\Rel} = \{\stmt : \exists \wit \text{ s.t. } \Rel(\stmt,\wit) = 1\}$.
+\end{definition}
+
+\begin{definition}[Knowledge soundness]
+\label{def:zkksound}
+$\NIZK$ is \emph{knowledge sound} if for every PPT $\Adv$ there is a PPT extractor $\mathcal{E}$
+such that
+\[
+\Pr\bigl[\,\crs \gets \zkSetup(1^{\secpar},\Rel);\ (\stmt,\zkproof) \gets \Adv(\crs);\
+\wit \gets \mathcal{E}^{\Adv}(\crs,\stmt)\ :\
+\zkVerify(\crs,\stmt,\zkproof) = 1 \ \wedge\ \Rel(\stmt,\wit) = 0\,\bigr] \le \negl(\secpar).
+\]
+Knowledge soundness implies Definition~\ref{def:zksound}.
+\end{definition}
+
+\begin{definition}[Zero knowledge]
+\label{def:zk}
+$\NIZK$ is \emph{(computationally) zero knowledge} if there is a PPT simulator
+$\zkSim = (\zkSim_1, \zkSim_2)$ such that for every PPT $\Adv$,
+\begin{align*}
+  \AdvZK_{\NIZK}(\Adv,\secpar) &\;=\; \biggl| \Pr\bigl[\crs \gets \zkSetup(1^{\secpar},\Rel) : \Adv^{\mathcal{P}(\crs,\cdot,\cdot)}(\crs) = 1\bigr] \\
+  &\qquad -\; \Pr\bigl[(\crs,\td) \gets \zkSim_1(1^{\secpar},\Rel) : \Adv^{\mathcal{S}(\crs,\td,\cdot,\cdot)}(\crs) = 1\bigr] \biggr|
+\end{align*}
+is negligible, where on a query $(\stmt,\wit)$ with $\Rel(\stmt,\wit)=1$ the oracle
+$\mathcal{P}$ returns $\zkProve(\crs,\stmt,\wit)$ and $\mathcal{S}$ returns
+$\zkSim_2(\crs,\td,\stmt)$,  that is, the simulated proof is produced \textbf{from the statement
+alone}, without the witness. Both oracles return $\bot$ when $\Rel(\stmt,\wit) = 0$.
+\end{definition}
+
+\subsection{Commitment schemes}
+\label{ssec:comdef}
+
+\begin{definition}[Commitment scheme]
+\label{def:commit}
+A \emph{commitment scheme} $\CS = (\csGen, \csCom)$ consists of  parameter-generation function $\ck \gets \csGen(1^{\secpar})$, taking the security parameter $\secpar$ and outputting a public key $\ck$ and
+a commitment function $\csCom(\ck, m; r)$ taking the parameters $\ck$ a message $m$ and randomness $r \gets \bits{\secpar}$, and outputting a commitment.
+\end{definition}
+
+\begin{definition}[Computational hiding]
+\label{def:hiding}
+$\CS$ is \emph{computationally hiding} if for every PPT $\Adv$,
+\[
+\AdvHide_{\CS}(\Adv,\secpar) =
+\Bigl|\ \Pr\bigl[\ck \gets \csGen(1^{\secpar});\ (m_0,m_1,\mathsf{st}) \gets \Adv(\ck);\
+r \gets \bits{\secpar}\ :\ \Adv(\mathsf{st}, \csCom(\ck,m_0;r)) = 1\bigr]
+\]
+\[
+-\ \Pr\bigl[\ck \gets \csGen(1^{\secpar});\ (m_0,m_1,\mathsf{st}) \gets \Adv(\ck);\
+r \gets \bits{\secpar}\ :\ \Adv(\mathsf{st}, \csCom(\ck,m_1;r)) = 1\bigr]\ \Bigr|
+\;\le\; \negl(\secpar).
+\]
+\end{definition}
+
+\begin{definition}[Computational binding]
+\label{def:binding}
+$\CS$ is \emph{computationally binding} if for every PPT $\Adv$,
+\begin{align*}
+  \AdvBind_{\CS}(\Adv,\secpar) &\;=\; \Pr\Bigl[\ck \gets \csGen(1^{\secpar});\ (m,r,m',r') \gets \Adv(\ck) : \\
+  &\qquad\qquad m \neq m' \ \wedge\ \csCom(\ck,m;r) = \csCom(\ck,m';r')\Bigr] \;\le\; \negl(\secpar).
+\end{align*}
+\end{definition}
+
+\noindent The coin commitment $\coinCommit$ of \S\ref{ssec:hashcomputation} is used as a commitment
+in this sense, with the coin nonce playing the role of $r$ and the tuple $(\colr, \mathsf{value}, \rcpt)$ the role of $m$.
+% In Midnight's instantiation $\ck$ are the parameters
+% used to instantiate hash function $\PersistantHash$.
+% Standard treatments of both properties are
+in~\cite{KatzLindell}.
+
+\subsection{Message authentication codes}
+\label{ssec:macdef}
+
+\begin{definition}[MAC and existential unforgeability]
+\label{def:mac}
+A \emph{message authentication code} is a pair $\MAC = (\macTag, \macVer)$ with
+$t \gets \macTag(\prfkey, m)$ and $\macVer(\prfkey, m, t) \in \{0,1\}$, correct in the usual sense.
+$\MAC$ is \emph{existentially unforgeable under chosen-message attack} if for every PPT $\Adv$,
+\[
+\AdvMAC_{\MAC}(\Adv,\secpar) =
+\Pr\bigl[\prfkey \gets \prfKeySp;\ (m^*,t^*) \gets \Adv^{\macTag(\prfkey,\cdot)}(1^{\secpar})\ :\
+\macVer(\prfkey,m^*,t^*) = 1 \ \wedge\ m^* \notin Q\bigr] \le \negl(\secpar),
+\]
+where $Q$ is the set of messages $\Adv$ queried. A pseudorandom function
+(Definition~\ref{def:prf}) with $\macTag(\prfkey,m) = \PRFfam(\prfkey,m)$ and verification by
+recomputation is such a MAC~\cite{KatzLindell}.
+\end{definition}
+
+
+
+\subsection{Key-Private Public Key Encryption}
+\begin{definition}\label{def:keyprivate}[Key-Private Encryption / IK-CPA~\cite{ASIACRYPT:BelBolDes01}]
+Let $\Pi = (\mathsf{KeyGen}, \mathsf{Enc}, \mathsf{Dec})$ be a public-key encryption scheme. We say $\Pi$ is key-private under chosen-plaintext attack (\textsf{IK-CPA}) if for all probabilistic polynomial-time (\textsf{PPT}) adversaries $\mathcal{A} = (\mathcal{A}_1, \mathcal{A}_2)$, the advantage
+\[
+\mathbf{Adv}_{\Pi, \mathcal{A}}^{\mathrm{ik\text{-}cpa}}(\lambda) = \left| \Pr\left[ \mathbf{Exp}_{\Pi, \mathcal{A}}^{\mathrm{ik\text{-}cpa}\text{-}1}(\lambda) = 1 \right] - \Pr\left[ \mathbf{Exp}_{\Pi, \mathcal{A}}^{\mathrm{ik\text{-}cpa}\text{-}0}(\lambda) = 1 \right] \right|
+\]
+is negligible in the security parameter $\lambda$, where the experiment is defined as follow:
+
+\vspace{7pt}
+
+
+\underline{$\mathbf{Exp}_{\Pi, \mathcal{A}}^{\mathrm{ik\text{-}cpa}\text{-}b}(\lambda)$ for $b \in \{0,1\}$}
+\begin{enumerate}
+    \item $(pk_0, sk_0) \gets \mathsf{KeyGen}(1^\lambda)$ and $(pk_1, sk_1) \gets \mathsf{KeyGen}(1^\lambda)$
+    \item $(m, \mathrm{st}) \gets \mathcal{A}_1(pk_0, pk_1)$
+    \item $c \gets \mathsf{Enc}(pk_b, m)$
+    \item $b' \gets \mathcal{A}_2(c, \mathrm{st})$
+    \item Return $b'$
+\end{enumerate}
+\end{definition}
+
+\subsection{Honest Verifier ZK Proofs}
+\begin{definition}\label{def:hvzk}[Honest-Verifier Zero-Knowledge~\cite{JC:GolOre94}]
+Let $(P, V)$ be an interactive proof system for a language $L$ associated with an $\mathbf{NP}$-relation $R(x, w)$. Let $\mathrm{View}_V\langle P(w), V \rangle(x)$ denote the random variable representing $V$'s view during an execution of $\langle P(w), V \rangle$ on input $x$ with witness $w$. We say $(P, V)$ is Computational Honest-Verifier Zero-Knowledge (\textsf{c-HVZK}) if there exists a \textsf{PPT} simulator $\mathcal{S}$ such that:
+\[
+\{ \mathcal{S}(x) \}_{x \in L} \stackrel{c}{\approx} \{ \mathrm{View}_V\langle P(w), V \rangle(x) \}_{(x,w) \in R}
+\]
+where $\stackrel{c}{\approx}$ denotes computational indistinguishability over sequences indexed by $x \in L$.
+\end{definition}
+
+
+
+
+
+\subsection{Signatures with key derivation and pre-signatures}
+\label{ssec:sigdef}
+
+\begin{definition}[EUF-CMA under additive key derivation and pre-signatures]
+\label{def:sig}
+Let $\SIG$ = $(\sigKG$, $\sigSign$, $\sigVer)$ be a signature scheme with a public key-derivation function
+$\Derive$ mapping a master public key and a derivation path to a derived public key. $\SIG$ is
+\emph{unforgeable under additive key derivation with pre-signatures} if for every PPT $\Adv$ that
+receives the master public key, may request signatures under any derived key on messages of its
+choice, and may additionally request pre-signatures (first-round signing material generated before
+the message is known),
+\begin{multline*}
+\AdvSIG(\Adv,\secpar) \;=\;
+\Pr\bigl[\ \Adv \text{ outputs } (\keyPath^*, m^*, \sigma^*) \text{ such that }\\
+\sigVer\bigl(\Derive(\mpcRootPk, \vaultAddr, \keyPath^*),\, m^*,\, \sigma^*\bigr) = 1
+\ \text{ and } m^* \text{ was never queried at path } \keyPath^*\ \bigr]
+\end{multline*}
+is negligible. The security of ECDSA in  this model -- additive key derivation together with
+pre-signatures,  is analyzed
+in~\cite{GrothShoup22}.
+\end{definition}
+
+
+
+
+
+
+
+
+% Reference Citation
+% Adapted from: Katz, J., & Lindell, Y. (2021). Introduction to Modern Cryptography (3rd ed.). CRC Press. (Chapter 5, Definition 5.2).
+%-----------------------------------------------------------------------------------------------------
+%-----------------------------------------------------------------------------------------------------

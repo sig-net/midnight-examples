@@ -22,5 +22,22 @@
   "search.exclude": {
     "**/src/managed": true,
     "**/.yarn": true
-  }
+  },
+
+  // The formal analysis builds through the .latexmkrc beside it (xelatex,
+  // then BibTeX), the same way CI and the README build it. The extension's
+  // stock recipes pass their own engine flags, and its magic-comment path
+  // runs a single engine pass with no bibliography, so both are bypassed.
+  // Builds run only on request (Cmd+Alt+B): the committed main.pdf must not
+  // be rewritten every time a dependency changes on disk.
+  "latex-workshop.latex.recipe.default": "latexmk (latexmkrc)",
+  "latex-workshop.latex.build.enableMagicComments": false,
+  "latex-workshop.latex.autoBuild.run": "never",
+
+  // ChkTeX lints the sources on save, reading the .chktexrc beside main.tex.
+  // The extension's stock arguments start with -wall, which turns on every
+  // warning class including "use \( instead of $" and buries the useful
+  // notes under thousands of those, so the arguments keep ChkTeX's defaults.
+  "latex-workshop.linting.chktex.enabled": true,
+  "latex-workshop.linting.chktex.exec.args": ["-e16", "-q"]
 }

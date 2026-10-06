@@ -1,14 +1,15 @@
 // Where an attestation poll obtains the serialised output the MPC attested.
-// A RespondBidirectionalEvent carries only the MPC's signature over
-// (requestId, serializedOutput), so the client must hold the exact bytes
-// before it can verify a post, and two places yield them.
+// A RespondBidirectionalEvent carries the request id, block height, output
+// kind, output width, digest and the MPC's signature, and the output itself
+// travels off chain, so the client must hold the exact bytes before it can
+// verify a post, and two places yield them.
 
 /** The sources the vault flows obtain an attested serialised output from. */
 export enum OutputSource {
   /**
    * Recompute the bytes from the EVM chain: trace the mined transaction on
-   * `EVM_RPC_URL` (`debug_traceTransaction`) and run the request's two schema
-   * conversions over its raw return data.
+   * `EVM_RPC_URL` (`debug_traceTransaction`), decode its raw return data per
+   * the request's output schema and Borsh-serialise it as the MPC does.
    */
   EVMNode = "evm-node",
   /**

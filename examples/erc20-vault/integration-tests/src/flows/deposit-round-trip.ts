@@ -11,6 +11,7 @@ import { broadcastEvm } from "./broadcast-evm.ts";
 import { settleDeposit, type ShieldedTokenRecipient } from "./complete-deposit.ts";
 import { pollRespondBidirectional } from "./poll-respond-bidirectional.ts";
 import { pollSignatureResponse } from "./poll-signature-response.ts";
+import { queueAndFlushAttestation } from "./queue-attestation.ts";
 import { startDeposit } from "./start-deposit.ts";
 
 /** Options for {@link runDepositRoundTrip}. */
@@ -35,8 +36,9 @@ export interface DepositRoundTripOptions {
    */
   readonly claimRecipient?: ShieldedTokenRecipient;
   /**
-   * Stop after the attestation poll instead of claiming, leaving the request
-   * on the ledger with its attestation posted — claimable by the depositor.
+   * Stop before the claim, leaving the request on the ledger with its
+   * attestation queued and flushed by the session wallet: claimable by the
+   * depositor, and settleable without paying for the queue or the flush.
    * For flows that own the claim step themselves (false-claimer); `claimed`
    * in the result is then always `false`.
    */
@@ -130,12 +132,6 @@ export async function runDepositRoundTrip(
     );
   }
 
-  let claimed = false;
-  if (opts.skipClaim) {
-    logSkip("completeDeposit", `skipClaim set: request ${requestId} left unclaimed on the ledger`);
-    return { requestId, claimed };
-  }
-
   // Rerun against a kept contract address: a prior run may have already
   // claimed this request (claiming consumes it from the ledger) — the minted
   // tokens are already in the wallet, so skip instead of failing.
@@ -143,10 +139,19 @@ export async function runDepositRoundTrip(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  if (!ledger.depositEventMap.member(requestIdBytes(requestId))) {
+  const open = ledger.bidirectionalDepositMap.member(requestIdBytes(requestId));
+
+  let claimed = false;
+  if (opts.skipClaim) {
+    if (open) await queueAndFlushAttestation(context, outcome);
+    logSkip("completeDeposit", `skipClaim set: request ${requestId} left unclaimed on the ledger`);
+    return { requestId, claimed };
+  }
+
+  if (!open) {
     logSkip("completeDeposit", `request ${requestId} already claimed (not in the deposit map)`);
   } else {
-    await settleDeposit(context, requestId, outcome, opts.claimRecipient);
+    await settleDeposit(context, outcome, opts.claimRecipient);
     claimed = true;
   }
 

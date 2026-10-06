@@ -1,0 +1,24 @@
+# LaTeX build intermediates. main.pdf is kept, matching the committed
+# .drawio.png renders elsewhere in docs/.
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.idx
+*.ilg
+*.ind
+*.lof
+*.log
+*.lot
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex
+*.synctex.gz
+*.synctex(busy)
+*.toc
+*.vrb
+*.xdv

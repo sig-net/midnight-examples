@@ -182,17 +182,11 @@ async function withConnectionRetry<T>(what: string, call: () => Promise<T>): Pro
  * circuit-name collisions across contracts. Pass one `ZKConfigProvider` per
  * compiled contract the call can reach (the caller plus every callee).
  *
- * Exists instead of midnight-js's own `httpClientProofProvider` because that
- * one (5.0.0-beta.3) builds a circuit-level `ProvingProvider` with only
- * `check`/`prove` — the ledger-v9 1.0.0-rc.2 shape it was released against —
- * while the ledger-v9 1.0.0-rc.3 WASM this workspace resolves (the version
- * the wallet-sdk betas pin) validates that `lookupKey` is also present and
- * throws "expected proving provider property 'lookupKey' to be a function"
- * on every circuit-call proof. This wrapper reuses midnight-js's proving
- * provider and grafts on a `lookupKey` backed by the same key-material
- * resolution its `check`/`prove` use. Delete in favor of
- * `httpClientProofProvider` once midnight-js ships a beta aligned with
- * ledger-v9 1.0.0-rc.3.
+ * Exists instead of midnight-js's own `httpClientProofProvider` because it
+ * adds a retry of connection-level failures on every /check and /prove and
+ * the per-attempt {@link ProofServerObserver}. Its `lookupKey` was first
+ * grafted on because midnight-js 5.0.0-beta.3 had none, which the ledger-v9
+ * 1.0.0-rc.3 WASM rejects; the 5.0.0-beta.6 this workspace pins provides one.
  *
  * @param proofServerUrl - The proof server's HTTP endpoint.
  * @param zkConfigProviders - One provider per compiled contract in the call tree; must be non-empty.

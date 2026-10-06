@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The ERC20 vault's deploy flows (the split base deploy plus per-circuit maintenance adds, and the deployer-gated initialise), their entrypoint environment, and the Node pieces those flows and the integration tests share: the compiled-contract binding over the contract package's managed/ output and the midnight-js provider set. Typed functions taking an env map, so the CLI entrypoints and the e2e setup run exactly the same code.",
+  "description": "The ERC20 vault's deploy flows (the split base deploy plus per-circuit maintenance adds, the deployer-gated initialise, and the deployer's allowed-ERC20 additions), their entrypoint environment, and the Node pieces those flows and the integration tests share: the compiled-contract binding over the contract package's managed/ output and the midnight-js provider set. Typed functions taking an env map, so the CLI entrypoints and the e2e setup run exactly the same code.",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -13,6 +13,7 @@
     "deploy": "tsx scripts/deploy.ts",
     "deploy-initialise": "tsx scripts/deploy-initialise.ts",
     "initialise": "tsx scripts/initialise.ts",
+    "add-allowed-tokens": "tsx scripts/add-allowed-tokens.ts",
     "resume-deploy": "tsx scripts/resume-deploy.ts",
     "record-contract-address": "tsx scripts/record-contract-address.ts"
   },
@@ -22,9 +23,9 @@
     "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.6",
     "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.6",
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
-    "@sig-net/midnight": "0.23.0",
-    "@sig-net/midnight-contract": "0.23.0",
-    "@sig-net/midnight-contract-deploy": "0.23.0",
+    "@sig-net/midnight": "0.24.0",
+    "@sig-net/midnight-contract": "0.24.0",
+    "@sig-net/midnight-contract-deploy": "0.24.0",
     "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
     "@sig-net/midnight-examples-lib": "workspace:*"
   },

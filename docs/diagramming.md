@@ -81,10 +81,10 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   riding that edge and follows the edge-label golden rules below, the strict format
   included. Free-standing text shapes beside an arrow are forbidden: a diagram
   identifies its steps by the phase colours and the numbered circles alone, and the
-  canonical step strings render only on the flow page (its step-list bullets and
-  mermaid notes). The diagram-to-page link is the ordinal set: the circles' numbers
-  are exactly the frozen strings' ordinals, a branch's arms sharing one ordinal with
-  one circle per arm. Every step arrow DESCRIBES itself: each logical arrow of a
+  canonical step strings render only on the flow page (its step-list bullets).
+  The diagram-to-page link is the ordinal set: the circles' numbers
+  are exactly the frozen strings' ordinals, a branch's arms sharing one ordinal and
+  one circle. Every step arrow DESCRIBES itself: each logical arrow of a
   step carries an acting-party label saying what happens along it (a run drawn as
   one edge carries one label, and a bundle segment that merely continues an
   already-labelled arrow of the same step adds nothing). A code label (whole text a
@@ -317,7 +317,7 @@ box tightens around the surviving members and the lanes close over the
 deleted actors. ONE value exemption exists: the MPC
 lane's `n-read` note names in its `From:` section the request event map(s)
 actually present in that diagram's contract box, each name bold. With one map
-the name shares the `From:` line (`From: signBidirectionalEventMap`), and
+the name shares the `From:` line (`From: bidirectionalDepositMap`), and
 with more than one the `From:` keyword takes its own line and each name
 follows on its own line.
 The actor map lists every request event map, and a flow's copy lists exactly
@@ -444,7 +444,7 @@ with enough space and clarity on its own.
 
 An overrun the binding rules force is accepted as it stands: the actor map's
 full-anatomy mandate (every circuit, witness and ledger field on one diagram) pushes
-the erc20-vault actor map to 1825 x 1648, and that size is sanctioned. An overrun
+the erc20-vault actor map to 1862 x 2468, and that size is sanctioned. An overrun
 nothing forces is slack, and slack has three exits: tighten the layout, split the
 content into more diagrams, or move sequencing to a mermaid diagram in the README.
 
@@ -525,3 +525,9 @@ pair so the PNG's embedded model carries the same state.
 3. Look at the rendered PNG before committing. Broken edge labels, escaped containment
    and missing icons are all visible at a glance and invisible in the XML.
 4. Commit the `.drawio` and `.drawio.png` together.
+
+### Flow diagrams: the sequence form
+
+The five flow diagrams use a sequence form: one lifeline per actor, tinted bands per
+phase, one row per arrow, a branch as one circle with two arms, the key derivations as
+a footnote. They carry no curation marker.

@@ -48,6 +48,8 @@ describe("assertInitialiseInputsPresent", () => {
       env: { NETWORK_ID: "stagenet", EVM_CHAIN_ID: "11155111" },
     },
     { name: "chain id 1", env: { ...VALID_INPUTS, EVM_CHAIN_ID: "1" } },
+    { name: "start height 0", env: { ...VALID_INPUTS, EVM_START_HEIGHT: "0" } },
+    { name: "start height 9401212", env: { ...VALID_INPUTS, EVM_START_HEIGHT: "9401212" } },
   ];
 
   it.each(ACCEPTED)("accepts $name", async ({ env }) => {
@@ -69,8 +71,17 @@ describe("assertInitialiseInputsPresent", () => {
     }),
   );
 
+  const REFUSED_START_HEIGHTS: readonly RefusedCase[] = ["01", "-1", "1.5", "abc"].map(
+    (height) => ({
+      name: `EVM_START_HEIGHT=${height}`,
+      env: { ...VALID_INPUTS, EVM_START_HEIGHT: height },
+      error: /EVM_START_HEIGHT/,
+    }),
+  );
+
   const REFUSED: readonly RefusedCase[] = [
     ...REFUSED_CHAIN_IDS,
+    ...REFUSED_START_HEIGHTS,
     {
       name: "an MPC key that is not a secp256k1 public key",
       env: { ...VALID_INPUTS, MPC_SECP256K1_PUBKEY: "0x04ab" },

@@ -1,10 +1,19 @@
 # Thin per-example caller: paths-filter + one `uses:` of the reusable
 # example-test workflow. PRs/pushes run the gate specs listed below, and the
-# full e2e suite is opt-in via workflow_dispatch.
+# full e2e suite is opt-in via workflow_dispatch. The weekly schedule runs
+# the same gate on the default branch: a pull_request run can restore caches
+# only from its own or the DEFAULT branch's scope, and nothing else runs on
+# dev — without it every fresh PR misses the zk-keys cache and pays ~10 min
+# of keygen. The weekly cadence also outlives GitHub's 7-day unused-cache
+# eviction, and workflow_dispatch on dev repopulates after a key change.
 
 name: erc20-vault-test
 
 on:
+  # Schedule trigger always runs on default branch (dev)
+  schedule:
+    # Weekly, Monday 04:17 UTC
+    - cron: "17 4 * * 1"
   push:
     branches: [main]
     paths:
@@ -58,10 +67,12 @@ jobs:
       SEPOLIA_FORK_RPC_URL: ${{ secrets.SEPOLIA_FORK_RPC_URL }}
     with:
       example-dir: erc20-vault
-      # PR/push gate: happy-day (deposit+withdraw), the swap success path (exactOutput
-      # mints tokenOut + change), and every refund branch (withdraw-failure, swap-failure,
-      # supply-failure, redeem-failure), plus the Aave lending round-trip (supply USDC ->
-      # stataUSDC -> redeem). One spec per refund circuit, so a broken refund branch
-      # fails the gate. The full suite stays opt-in via workflow_dispatch.
-      gate-spec: "tests/happy-day-e2e.test.ts tests/swap-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/swap-refund-e2e.test.ts tests/supply-redeem-e2e.test.ts tests/supply-refund-e2e.test.ts tests/redeem-refund-e2e.test.ts"
+      # PR/push gate, in FILE_ORDER: happy-day (deposit+withdraw), the withdraw refund,
+      # the two approvals (the allowances the swap and supply specs draw on), the swap
+      # success path, the Aave lending round trip (supply USDC -> stataUSDC -> redeem),
+      # the supply, swap and redeem refunds, and the nonce replacement, the only exercise
+      # of the circuit that unstalls the vault's EVM nonce sequence. One spec per refund
+      # branch, so a broken refund fails the gate. The full suite stays opt-in via
+      # workflow_dispatch.
+      gate-spec: "tests/happy-day-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/approve-e2e.test.ts tests/swap-e2e.test.ts tests/supply-redeem-e2e.test.ts tests/supply-refund-e2e.test.ts tests/swap-refund-e2e.test.ts tests/redeem-refund-e2e.test.ts tests/admin-replace-nonce-e2e.test.ts"
       full-suite: ${{ github.event_name == 'workflow_dispatch' && inputs.full-suite == true }}

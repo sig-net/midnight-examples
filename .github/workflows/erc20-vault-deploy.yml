@@ -1,14 +1,15 @@
 # Deploys the erc20-vault contract to one Midnight network at a chosen
 # release tag, then runs the deployer-gated one-shot initialise. The deploy
-# step is `yarn deploy-initialise:erc20-vault` from the tag's own checkout,
-# the same deployVault + initialiseVault functions every local e2e run
-# exercises. The record-address job then opens a PR recording the new
-# address in the contract package's vaultContractAddresses table. It runs
+# step is `yarn deploy-initialise:erc20-vault` from the tag's own checkout:
+# the same deployVault function, and the same initialiseVaultContract call
+# inside initialiseVault, that every local e2e run exercises. The
+# record-address job then opens a PR recording the new address in the
+# contract package's vaultContractAddresses table. It runs
 # whenever the deploy itself landed every circuit, an initialise failure
 # included: the address is final at that point, and the PR says when the
 # initialise is still to be run by hand.
 #
-# The 17 circuits do not fit one block: a base transaction registers one
+# The 29 circuits do not fit one block: a base transaction registers one
 # and a maintenance update adds each of the rest. A run that fails AFTER
 # printing "deployed erc20-vault base at ..." has a live contract (the
 # failure step below repeats that address in the step summary): do not
@@ -55,6 +56,10 @@
 # - EVM_ROUTER / EVM_STATA_UNDERLYING / EVM_STATA_TOKEN (optional)
 #   - EVM target overrides, defaulting to the Sepolia canonicals
 #   - example: 0x followed by 40 hex chars
+# - EVM_ALLOWED_TOKENS (optional)
+#   - comma-separated ERC20s the deployer allows after initialise, beyond
+#     the stata underlying. Unset, users can deposit only the stata underlying
+#   - example: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238,0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4
 # - MIDNIGHT_NODE_URL / MIDNIGHT_NODE_INDEXER_URL (optional)
 #   - endpoint overrides, defaulting to the committed per-network endpoints
 #   - example: https://rpc.stagenet.shielded.tools
@@ -99,7 +104,7 @@ jobs:
       # Set as soon as the deploy has installed every circuit, whether or not
       # the initialise that follows succeeds: the address is final then.
       contract-address: ${{ steps.deploy.outputs.contract-address }}
-      # "true" once the initialise finished too.
+      # "true" once the initialise and the allowed-token adds finished too.
       initialised: ${{ steps.deploy.outputs.initialised }}
     steps:
       - name: Refuse an input that is not a release tag
@@ -220,6 +225,9 @@ jobs:
           EVM_ROUTER: ${{ vars.EVM_ROUTER }}
           EVM_STATA_UNDERLYING: ${{ vars.EVM_STATA_UNDERLYING }}
           EVM_STATA_TOKEN: ${{ vars.EVM_STATA_TOKEN }}
+          # The ERC20s the deployer allows after initialise. Blank allows none
+          # beyond the stata underlying.
+          EVM_ALLOWED_TOKENS: ${{ vars.EVM_ALLOWED_TOKENS }}
           # Optional per-environment endpoint overrides. Every network has
           # committed defaults, and a blank var falls through to them.
           MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}

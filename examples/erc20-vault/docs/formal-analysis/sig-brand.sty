@@ -1,0 +1,113 @@
+% sig-brand.sty — Sig.Network document branding
+% Requires xelatex (fontspec). Fonts and the logo are vendored in fonts/
+% and logos/ and loaded by path relative to the document directory, so a
+% bare xelatex run from that directory builds without any environment.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{sig-brand}[2026/07/20 Sig.Network branding]
+
+\RequirePackage[a4paper,margin=2cm,top=2.2cm,bottom=2.4cm,footskip=1.1cm]{geometry}
+\RequirePackage{fontspec}
+\RequirePackage{microtype}
+\RequirePackage{xcolor}
+\RequirePackage{colortbl}
+\RequirePackage{titlesec}
+\RequirePackage{fancyhdr}
+\RequirePackage{enumitem}
+\RequirePackage{caption}
+
+% ---- Brand palette (brand-colors.txt / Product UI) ----
+\definecolor{SigCream}{HTML}{F6F4F1}   % pampas 500 — page background
+\definecolor{SigInk}{HTML}{4C4646}     % dark neutral 600 — body text
+\definecolor{SigInkSoft}{HTML}{786767} % dark neutral 400 — secondary text
+\definecolor{SigHeader}{HTML}{9C8686}  % tundora 50 — letterspaced caps headers
+\definecolor{SigDark}{HTML}{2E2C2C}    % dark neutral 800 — display text
+\definecolor{SigShell}{HTML}{CBB7AD}   % clam shell 500 — rules and borders
+\definecolor{SigBrand}{HTML}{EAEEC9}   % brand 950 — highlight fill
+\definecolor{SigLink}{HTML}{8E7777}    % dark neutral 300 — links
+
+% ---- Fonts: Archivo, vendored in fonts/ (SIL OFL 1.1) ----
+\defaultfontfeatures{Ligatures=TeX}
+\setmainfont{Archivo}[
+  Path=fonts/, Extension=.otf,
+  UprightFont=*-Regular, ItalicFont=*-Italic,
+  BoldFont=*-SemiBold, BoldItalicFont=*-SemiBoldItalic]
+\setsansfont{Archivo}[
+  Path=fonts/, Extension=.otf,
+  UprightFont=*-Regular, ItalicFont=*-Italic,
+  BoldFont=*-SemiBold, BoldItalicFont=*-SemiBoldItalic]
+% ---- Page ----
+\pagecolor{SigCream}
+\color{SigInk}
+\linespread{1.07}
+\setlength{\parskip}{0.7\baselineskip}
+\setlength{\parindent}{0pt}
+
+% ---- Lists: tighter, modern spacing ----
+\setlist{topsep=2pt, itemsep=3pt, parsep=0pt, leftmargin=1.2em}
+
+% ---- Captions and footnotes ----
+\captionsetup{font=footnotesize, labelfont={bf,color=SigHeader},
+  textfont={color=SigInkSoft}, skip=6pt}
+\renewcommand{\footnoterule}{%
+  \vspace{6pt}{\color{SigShell}\hrule width 0.3\linewidth height 0.6pt}\vspace{4pt}}
+
+% ---- Section headings: letterspaced caps, Product UI style ----
+% A heading too long for one line is set ragged right and never hyphenated:
+% justifying it shrinks the word spaces until the tracked capitals run
+% together, and a split word reads as two.
+\titleformat{\section}[block]
+  {\color{SigHeader}\normalsize\bfseries\addfontfeature{LetterSpace=15}%
+   \raggedright\hyphenpenalty=10000}
+  {\thesection}{0.6em}{\MakeUppercase}
+  [{\color{SigShell}\vspace{2pt}\titlerule[0.6pt]}]
+\titleformat{\subsection}
+  {\color{SigDark}\normalsize\bfseries}
+  {\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}
+  {\color{SigInkSoft}\normalsize\bfseries}
+  {\thesubsubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.6\baselineskip}{0.8\baselineskip}
+\titlespacing*{\subsection}{0pt}{1.2\baselineskip}{0.3\baselineskip}
+
+% ---- Title block ----
+% Swan mark top right of the title, first page only. Found via TEXINPUTS.
+\RequirePackage{graphicx}
+\providecommand{\SigLogo}{logos/signetwork-swan_neutral700-100px.png}
+\newlength{\SigLogoHeight}\setlength{\SigLogoHeight}{1.3cm}
+\makeatletter
+\renewcommand{\maketitle}{%
+  \noindent\begin{minipage}[t]{\dimexpr\linewidth-2.2cm\relax}\vspace{0pt}\raggedright
+   {\color{SigDark}\fontsize{26}{31}\selectfont\bfseries\@title\par}%
+   \vspace{6pt}%
+   {\color{SigHeader}\footnotesize\addfontfeature{LetterSpace=15}\MakeUppercase{\@date}\par}%
+  \end{minipage}\hfill
+  \begin{minipage}[t]{2cm}\vspace{0pt}\raggedleft
+   \IfFileExists{\SigLogo}{\includegraphics[height=\SigLogoHeight]{\SigLogo}}{}%
+  \end{minipage}\par\vspace{0.5\baselineskip}}
+\makeatother
+
+% ---- Footer ----
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[L]{\color{SigHeader}\footnotesize\addfontfeature{LetterSpace=20}SIG.NETWORK}
+\fancyfoot[R]{\color{SigInkSoft}\footnotesize\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+% ---- Details ----
+\renewcommand{\labelitemi}{\textcolor{SigShell}{\textbullet}}
+% ---- Tables: darker rules, more breathing room between rows ----
+\arrayrulecolor{SigHeader}
+\setlength{\arrayrulewidth}{0.6pt}
+\renewcommand{\arraystretch}{1.35}
+\hypersetup{colorlinks=true, linkcolor=SigLink, urlcolor=SigLink, citecolor=SigLink}
+
+% ---- Anchors for unnumbered sections ----
+% Org exports headlines as \section* under num:nil, which sets no hyperref
+% anchor, so internal links land on page 1. Drop an anchor before each one.
+\RequirePackage{etoolbox}
+\AtBeginDocument{%
+  \pretocmd{\section}{\phantomsection}{}{}%
+  \pretocmd{\subsection}{\phantomsection}{}{}%
+  \pretocmd{\subsubsection}{\phantomsection}{}{}}
+
+\endinput

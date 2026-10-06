@@ -1,0 +1,431 @@
+% Document-wide environments, theorem kinds and notation. Colours live in
+% palette.tex, packages and page layout in preamble.tex.
+
+% =====================================================================
+%  Boxes and lists
+% =====================================================================
+\newcommand{\code}[1]{\texttt{\small #1}}
+
+\newcounter{expfig}
+\newenvironment{ExpFig}[2]%
+ {\refstepcounter{expfig}\label{#1}%
+  \begin{mdframed}[linecolor=boxrule,linewidth=0.7pt,backgroundcolor=boxfill,
+    innertopmargin=7pt,innerbottommargin=7pt,innerleftmargin=9pt,innerrightmargin=9pt,
+    skipabove=9pt,skipbelow=3pt]\small
+  \begin{center}\textbf{#2}\end{center}\vspace{-2pt}\noindent}
+ {\end{mdframed}\vspace{-4pt}\begin{center}\footnotesize Fig.~\arabic{expfig}\end{center}\vspace{4pt}}
+
+\newenvironment{ProcBox}[1]%
+ {\begin{mdframed}[linecolor=boxrule,linewidth=0.8pt,backgroundcolor=boxbg,
+    innertopmargin=6pt,innerbottommargin=6pt,innerleftmargin=8pt,innerrightmargin=8pt,
+    frametitle={\normalsize\bfseries\color{boxtitle}#1},frametitlebackgroundcolor=boxfill,
+    frametitlerule=true,frametitlerulewidth=0.4pt,skipabove=8pt]\small}%
+ {\end{mdframed}}
+
+\newenvironment{PubBox}[1]%
+ {\begin{mdframed}[linecolor=pubrule,linewidth=0.9pt,backgroundcolor=pubbg,
+    innertopmargin=6pt,innerbottommargin=6pt,innerleftmargin=8pt,innerrightmargin=8pt,
+    skipabove=7pt,skipbelow=7pt]\small
+  \textbf{\textsf{#1}}\par\vspace{2pt}}
+ {\end{mdframed}}
+
+% A circuit box numbers itself C1, C2, ... through \ref.
+\newcounter{cktctr}
+\renewcommand{\thecktctr}{C\arabic{cktctr}}
+\newenvironment{CktBox}[2]%
+ {\refstepcounter{cktctr}\label{#1}%
+  \begin{mdframed}[linecolor=boxtitle,linewidth=0.8pt,backgroundcolor=boxbg,
+    innertopmargin=6pt,innerbottommargin=6pt,innerleftmargin=8pt,innerrightmargin=8pt,
+    frametitle={\color{boxtitle}Circuit~\thecktctr{} --- #2},
+    frametitlebackgroundcolor=boxfill,frametitlerule=true,frametitlerulewidth=0.4pt,
+    skipabove=9pt,skipbelow=9pt]\small\sloppy}%
+ {\end{mdframed}}
+
+\newenvironment{TxtBox}[2]%
+ {\label{#1}%
+  \begin{mdframed}[linecolor=boxtitle,linewidth=0.8pt,backgroundcolor=boxbg,
+    innertopmargin=6pt,innerbottommargin=6pt,innerleftmargin=8pt,innerrightmargin=8pt,
+    frametitle={\normalsize\bfseries\color{boxtitle} #2},
+    frametitlebackgroundcolor=boxfill,frametitlerule=true,frametitlerulewidth=0.4pt,
+    skipabove=9pt,skipbelow=9pt]\small\sloppy}%
+ {\end{mdframed}}
+
+\newcounter{stepctr}[subsection]
+\newenvironment{Steps}%
+ {\begin{list}{\footnotesize\textcolor{boxtitle}{Step \arabic{stepctr}.}}%
+   {\usecounter{stepctr}\setlength{\leftmargin}{3.6em}\setlength{\itemsep}{3pt}%
+    \setlength{\parsep}{0pt}\setlength{\topsep}{3pt}\setlength{\labelwidth}{3.2em}}}%
+ {\end{list}}
+
+\newenvironment{OutList}%
+ {\smallskip\noindent\textbf{\textit{Output.}}
+  \begin{list}{}{\setlength{\leftmargin}{3.0em}\setlength{\labelwidth}{2.6em}%
+   \setlength{\labelsep}{0.4em}\setlength{\itemsep}{2pt}\setlength{\parsep}{0pt}%
+   \setlength{\topsep}{2pt}\setlength{\itemindent}{0pt}}}%
+ {\end{list}}
+\newcommand{\oitem}[1]{\item[$#1$\,:]}
+\newcommand{\fld}[1]{\smallskip\noindent\textbf{\textit{#1}}\ }
+
+% Blue shading marks components Midnight provides.
+\newcommand{\mnhl}[1]{\colorbox{mntbg}{\small #1}}
+\newcommand{\MidNote}[1]{\par\smallskip\noindent
+  \fcolorbox{mntrule}{mntbg}{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{\small #1}}\par\smallskip}
+\newcommand{\MidNoteT}[1]{\fcolorbox{mntrule}{mntbg}{\small #1}}
+\newcommand{\bluedot}{\textcolor{mntrule}{$\blacksquare$}\,}
+
+\newcommand{\lnk}[2]{\hyperlink{#1}{\ensuremath{#2}}}
+\newcommand{\cktref}[1]{\hyperref[#1]{Circuit~\ref*{#1}}}
+
+% =====================================================================
+%  Theorem-like environments
+% =====================================================================
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+\newtheorem{assumption}{Usage assumption}
+\newtheorem{gap}{Gap}
+\newtheorem{obligation}{Proof obligation}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+
+% =====================================================================
+%  Editorial marks
+% =====================================================================
+% \DRAFTfalse silences the inline author notes for the build that goes out.
+\newif\ifDRAFT
+\DRAFTtrue
+\newcommand{\ale}[1]{\textcolor{red}{#1}}
+\ifDRAFT\else\renewcommand{\ale}[1]{}\fi
+\newcommand{\remove}[1]{}
+\newcommand{\upd}[1]{#1}
+\newcommand{\ADDEDINL}[1]{\textcolor{addrule}{#1}}
+\newcommand{\newversion}[1]{{\textcolor{boxtitle}{\textbf{Differences with the latest release (\latestTag):}} #1}}
+
+% Colour roles inside protocol text.
+\newcommand{\secret}[1]{\textcolor{bordo}{#1}}
+\newcommand{\freshrn}[1]{\textcolor{Mulberry}{#1}}
+
+% =====================================================================
+%  Notation
+% =====================================================================
+
+% --- the vault release this document analyses, and the latest release ---
+\newcommand{\analysedTag}{erc20-vault-v0.3.0}
+\newcommand{\latestTag}{erc20-vault-v0.4.0}
+\newcommand{\vaultRepoUrl}{https://github.com/sig-net/midnight-examples}
+\newcommand{\analysedContractUrl}{\vaultRepoUrl/blob/\analysedTag/examples/erc20-vault/contract/src/erc20-vault.compact}
+\newcommand{\analysedReadmeUrl}{\vaultRepoUrl/blob/\analysedTag/examples/erc20-vault/README.md}
+\newcommand{\latestContractUrl}{\vaultRepoUrl/blob/\latestTag/examples/erc20-vault/contract/src/erc20-vault.compact}
+
+% --- general ---
+\newcommand{\secpar}{\lambda}
+\newcommand{\negl}{\mu}
+\newcommand{\Adv}{\mathcal{A}}
+\newcommand{\Chal}{\mathcal{C}}
+\newcommand{\distprf}{\mathcal{B}}
+\newcommand{\numusers}{N}
+\newcommand{\bits}[1]{\{0,1\}^{#1}}
+\newcommand{\assert}{\textbf{assert}~}
+\newcommand{\concat}{\,\|\,}
+\newcommand{\bc}{,\penalty0\ }
+\newcommand{\Epsilon}{\varepsilon}
+\newcommand{\Payment}{Transaction}
+\newcommand{\payment}{transaction}
+\newcommand{\zkswap}{ZKSwap}
+\newcommand{\SigSys}{\mathsf{SigNet}}
+
+% --- pseudorandom functions ---
+\newcommand{\PRFfam}{\mathsf{F}}
+\newcommand{\prfkey}{\mathsf{k}}
+\newcommand{\prfKeySp}{\mathcal{K}}
+\newcommand{\prfDom}{\mathcal{X}}
+\newcommand{\prfRng}{\mathcal{Y}}
+\newcommand{\RandFun}{\mathsf{RF}}
+\newcommand{\AdvPRF}{\mathsf{Adv}^{\mathsf{prf}}}
+\newcommand{\AdvMUPRF}{\mathsf{Adv}^{\mathsf{mu\text{-}prf}}}
+\newcommand{\oracle}{\mathcal{O}}
+
+% --- cryptographic primitives ---
+\newcommand{\Hash}{\mathsf{HashK}}
+\newcommand{\PersistantHash}{\mathsf{PersistantHash}}
+\newcommand{\Kec}{\mathsf{HashP}}
+\newcommand{\SHA}{\mathsf{SHA\text{-}256}}
+\newcommand{\EcdsaVf}{\mathsf{EcdsaVerify}}
+\newcommand{\NIZK}{\Pi_{\mathsf{zk}}}
+\newcommand{\zkSetup}{\mathsf{ZK.Setup}}
+\newcommand{\zkProve}{\mathsf{ZK.Prove}}
+\newcommand{\zkVerify}{\mathsf{ZK.Verify}}
+\newcommand{\zkSim}{\mathsf{ZK.Sim}}
+\newcommand{\crs}{\mathsf{crs}}
+\newcommand{\td}{\mathsf{td}}
+\newcommand{\CS}{\mathsf{CS}}
+\newcommand{\csGen}{\mathsf{CS.Gen}}
+\newcommand{\csCom}{\mathsf{CS.Com}}
+\newcommand{\ck}{\mathsf{ck}}
+\newcommand{\MAC}{\mathsf{MAC}}
+\newcommand{\macTag}{\mathsf{Tag}}
+\newcommand{\macVer}{\mathsf{Vrfy}}
+\newcommand{\SIG}{\mathsf{SIG}}
+\newcommand{\sigKG}{\mathsf{SIG.KGen}}
+\newcommand{\sigSign}{\mathsf{SIG.Sign}}
+\newcommand{\sigVer}{\mathsf{SIG.Vrfy}}
+\newcommand{\AdvZK}{\mathsf{Adv}^{\mathsf{zk}}}
+\newcommand{\AdvSnd}{\mathsf{Adv}^{\mathsf{snd}}}
+\newcommand{\AdvHide}{\mathsf{Adv}^{\mathsf{hide}}}
+\newcommand{\AdvBind}{\mathsf{Adv}^{\mathsf{bind}}}
+\newcommand{\AdvMAC}{\mathsf{Adv}^{\mathsf{euf\text{-}cma}}}
+\newcommand{\AdvSIG}{\mathsf{Adv}^{\mathsf{euf\text{-}cma}}_{\mathsf{akd}}}
+
+% --- ledgers, transcripts and hybrids ---
+\newcommand{\Lpub}{\mathcal{L}_{\mathsf{pub}}}
+\newcommand{\Lshd}{\mathcal{L}_{\mathsf{shd}}}
+\newcommand{\LExecute}{\mathsf{Execute}}
+\newcommand{\LRead}{\mathsf{Read}}
+\newcommand{\Tpub}{T_{\mathsf{pub}}}
+\newcommand{\Tshd}{T_{\mathsf{shd}}}
+\newcommand{\Tall}{T}
+\newcommand{\hybrid}{\ensuremath{\mathsf{Hyb}}}
+\newcommand{\contract}{\ensuremath{\mathsf{contract}}}
+\newcommand{\contractinput}{\ensuremath{\mathsf{input}}}
+\newcommand{\blockheight}{\ensuremath{\mathsf{blockheight}}}
+\newcommand{\kind}{\ensuremath{\mathsf{kind}}}
+\newcommand{\outlt}{\ensuremath{\mathsf{length}}}
+
+% --- addresses, accounts, values ---
+\newcommand{\pubAddr}{\mathsf{pubAddr}}
+\newcommand{\shdAcct}{\mathsf{shdAcct}}
+\newcommand{\destAddr}{\mathsf{destAddr}}
+\newcommand{\srcAcct}{\shdAcct}
+\newcommand{\recvAcct}{\mathsf{recvAcct}}
+\newcommand{\setlAcct}{\mathsf{setlAcct}}
+\newcommand{\rcpt}{\mathsf{rcpt}}
+\newcommand{\usrTag}[1]{\mathsf{user}(#1)}
+\newcommand{\candZero}{\mathsf{shAcct}_0}
+\newcommand{\candOne}{\mathsf{shAcct}_1}
+\newcommand{\candB}{\mathsf{shAcct}_b}
+\newcommand{\callerZKey}{\shdAcct}
+\newcommand{\callerZKeySk}{\mathsf{shdAcctSKey}}
+\newcommand{\tokType}{\mathsf{tokType}}
+\newcommand{\tokTypeB}{\mathsf{tokType}'}
+\newcommand{\tokTypeIn}{\tokType_{\mathrm{in}}}
+\newcommand{\tokTypeOut}{\tokType_{\mathrm{out}}}
+\newcommand{\amt}{\mathsf{amt}}
+\newcommand{\amtB}{\mathsf{amt}'}
+\newcommand{\amtRem}{\mathsf{amtRemainder}}
+\newcommand{\amtIn}{\mathsf{amtSpent}}
+\newcommand{\amtSpent}{\mathsf{amtSpent}}
+\newcommand{\amtMax}{\mathsf{amtMax}}
+\newcommand{\amtOut}{\mathsf{amtOut}}
+\newcommand{\amtChg}{\mathsf{amtChange}}
+\newcommand{\amtShares}{\mathsf{amtShares}}
+\newcommand{\amtAssets}{\mathsf{amtAssets}}
+\newcommand{\bal}{\mathsf{vaultBal}}
+\newcommand{\ledgerBal}{\mathsf{ledgerBal}}
+\newcommand{\colr}{\mathsf{color}}
+\newcommand{\colrU}{\colr_{\mathsf{u}}}
+\newcommand{\colrW}{\colr_{\mathsf{w}}}
+
+% --- coins ---
+\newcommand{\coinClaim}{\mathsf{newMintedCoin}}
+\newcommand{\coinRem}{\mathsf{remainderCoin}}
+\newcommand{\coinIn}{\mathsf{surrCoin}}
+\newcommand{\coinMint}{\mathsf{newCoin}}
+\newcommand{\coinMintW}{\mathsf{newCoinShares}}
+\newcommand{\coinMintU}{\mathsf{newCoinAssets}}
+\newcommand{\coinChange}{\mathsf{changeCoin}}
+\newcommand{\coinBurnOut}{\mathsf{burnOutCoin}}
+\newcommand{\coinFund}{\mathsf{fundCoin}}
+\newcommand{\coinCommit}{\mathsf{coinCommit}}
+\newcommand{\coinNull}{\mathsf{coinNull}}
+\newcommand{\evolveNonce}{\mathsf{evolveNonce}}
+\newcommand{\tokenTypeOf}{\mathsf{tokenTypeOf}}
+
+% --- procedure interface ---
+\newcommand{\pp}{\mathsf{pp}}
+\newcommand{\Setup}{\mathsf{Setup}}
+\newcommand{\Deposit}{\mathsf{Deposit}}
+\newcommand{\Withdraw}{\mathsf{Withdraw}}
+\newcommand{\Swap}{\mathsf{Swap}}
+\newcommand{\Supply}{\mathsf{Supply}}
+\newcommand{\Redeem}{\mathsf{Redeem}}
+\newcommand{\act}{\mathsf{act}}
+\newcommand{\auxx}{\mathsf{aux}}
+\newcommand{\privIn}{\mathsf{privIn}}
+\newcommand{\prvOut}{\mathsf{privOut}}
+\newcommand{\outc}{\mathsf{outcome}}
+\newcommand{\stpub}{\mathsf{state}_{\mathsf{pub}}}
+\newcommand{\stshd}{\mathsf{state}_{\mathsf{shd}}}
+\newcommand{\trans}{\mathsf{transcript}}
+\newcommand{\succeeded}{\mathsf{succeeded}}
+\newcommand{\failed}{\mathsf{failed}}
+\newcommand{\pending}{\mathsf{pending}}
+\newcommand{\schemaIn}{\mathsf{schemaIn}}
+\newcommand{\schemaOut}{\mathsf{schemaOut}}
+\newcommand{\okbit}{\mathsf{ok}}
+\newcommand{\notif}{\mathsf{notify}}
+
+% --- oracles ---
+\newcommand{\ONewPub}{\mathcal{O}\mathsf{NewPubAcct}}
+\newcommand{\ONewShd}{\mathcal{O}\mathsf{NewShdAcct}}
+\newcommand{\OMint}{\mathcal{O}\mathsf{Mint}}
+\newcommand{\OTransPub}{\mathcal{O}\mathsf{TransferPub}}
+\newcommand{\OTransShd}{\mathcal{O}\mathsf{TransferShd}}
+\newcommand{\OShdTrans}{\mathcal{O}\mathsf{ShieldedTransfer}}
+\newcommand{\ODep}{\mathcal{O}\mathsf{Deposit}}
+\newcommand{\OWd}{\mathcal{O}\mathsf{Withdraw}}
+\newcommand{\OSw}{\mathcal{O}\mathsf{Swap}}
+\newcommand{\OSup}{\mathcal{O}\mathsf{Supply}}
+\newcommand{\ORed}{\mathcal{O}\mathsf{Redeem}}
+
+% --- games ---
+\newcommand{\unlinkgameG}{\mathsf{Exp\text{-}WithdrawUnlink}}
+\newcommand{\lendunlinkgame}{\mathsf{Exp\text{-}LendUnlink}}
+\newcommand{\unlinkgame}{\mathsf{Exp\text{-}Unlink}}
+
+% --- the general unlinkability experiment's parameters ---
+\newcommand{\colIn}{\tokTypeIn}
+\newcommand{\valIn}{\amt}
+\newcommand{\parm}{\auxx}
+
+% --- a circuit call's output components ---
+\newcommand{\Dvault}{\Delta_{\mathsf{vault}}}
+\newcommand{\Dshd}{\Delta_{\mathsf{coin}}}
+\newcommand{\stmt}{x}
+\newcommand{\wit}{w}
+\newcommand{\Rel}{R}
+\newcommand{\zkproof}{\pi}
+\newcommand{\zkproofs}{\mathsf{zk proofs}}
+\newcommand{\comIO}{\mathsf{comCallIO}}
+
+% --- circuits ---
+\newcommand{\cktInit}{\code{initialise}}
+\newcommand{\cktApprove}{\code{approveRouter}}
+\newcommand{\cktApproveStata}{\code{approveStata}}
+\newcommand{\cktApproveWrap}{\code{approveStata}}
+\newcommand{\cktStartDeposit}{\code{startDeposit}}
+\newcommand{\cktDeposit}{\cktStartDeposit}
+\newcommand{\cktCompleteDeposit}{\code{completeDeposit}}
+\newcommand{\cktStartWithdraw}{\code{startWithdraw}}
+\newcommand{\cktWithdraw}{\cktStartWithdraw}
+\newcommand{\cktCompleteWithdraw}{\code{completeWithdraw}}
+\newcommand{\cktRefundWithdraw}{\code{refundWithdraw}}
+\newcommand{\cktStartSwap}{\code{startSwap}}
+\newcommand{\cktSwap}{\cktStartSwap}
+\newcommand{\cktCompleteSwap}{\code{completeSwap}}
+\newcommand{\cktRefundSwap}{\code{refundSwap}}
+\newcommand{\cktStartSupply}{\code{startSupply}}
+\newcommand{\cktSupply}{\cktStartSupply}
+\newcommand{\cktCompleteSupply}{\code{completeSupply}}
+\newcommand{\cktRefundSupply}{\code{refundSupply}}
+\newcommand{\cktStartRedeem}{\code{startRedeem}}
+\newcommand{\cktRedeem}{\cktStartRedeem}
+\newcommand{\cktCompleteRedeem}{\code{completeRedeem}}
+\newcommand{\cktRefundRedeem}{\code{refundRedeem}}
+\newcommand{\cktFlush}{\code{flushQueue}}
+\newcommand{\cktSend}{\code{sendX}}
+\newcommand{\cktQueueAtt}{\code{queueAttestationN}}
+\newcommand{\cktFailGate}{\mathsf{failGate}}
+\newcommand{\opReceive}{\code{receiveShielded}}
+\newcommand{\opMint}{\code{mintShieldedToken}}
+\newcommand{\mintShieldedToken}{\ensuremath{\mathtt{mintShieldedToken}}}
+
+% --- on-chain objects ---
+\newcommand{\vaultAddr}{\mathsf{vaultAddr}}
+\newcommand{\vaultEvmAddr}{\mathsf{vaultEvmAddr}}
+\newcommand{\derivedAddr}{\mathsf{userDerivedAddr}}
+\newcommand{\burnAddr}{\mathsf{burnAddr}}
+\newcommand{\routerAddr}{\mathsf{routerAddr}}
+\newcommand{\underAddr}{\mathsf{underlyingAddr}}
+\newcommand{\wrapAddr}{\mathsf{wrapperAddr}}
+\newcommand{\wrapOf}[1]{\mathsf{wrap}(#1)}
+\newcommand{\mpcRootPk}{\mathsf{mpcRootPk}}
+\newcommand{\mpcRespKey}{\mathsf{mpcRespKey}}
+\newcommand{\Derive}{\mathsf{Derive}}
+\newcommand{\keyPath}{\mathsf{keyPath}}
+\newcommand{\keyPathLit}{\text{``vault''}}
+\newcommand{\keyVer}{\mathsf{keyVersion}}
+\newcommand{\chainId}{\mathsf{chainId}}
+\newcommand{\initFlag}{\mathsf{initialized}}
+\newcommand{\sigNonce}{\mathsf{reqCounter}}
+\newcommand{\req}{\mathsf{req}}
+\newcommand{\rid}{\mathsf{reqId}}
+\newcommand{\reqIdOf}{\Kec}
+\newcommand{\attSig}{\mathsf{attSig}}
+\newcommand{\attDigest}{\mathsf{attDigest}}
+\newcommand{\evmOut}{\mathsf{evmOut}}
+\newcommand{\evmTxOf}{\mathsf{evmTx}}
+\newcommand{\evmNonce}{\mathsf{evmNonce}}
+\newcommand{\gasEnv}{\mathsf{gasEnvelope}}
+\newcommand{\feeTier}{\mathsf{feeTier}}
+\newcommand{\domSep}{\mathsf{domSep}}
+\newcommand{\userComm}{\mathsf{userComm}}
+\newcommand{\refundComm}{\mathsf{refundComm}}
+\newcommand{\deplComm}{\mathsf{deployerComm}}
+
+% --- ledger maps and settle views ---
+\newcommand{\reqMap}{\mathsf{reqMap}}
+\newcommand{\depositMap}{\mathsf{depositMap}}
+\newcommand{\swapMap}{\mathsf{swapMap}}
+\newcommand{\supplyMap}{\mathsf{supplyMap}}
+\newcommand{\redeemMap}{\mathsf{redeemMap}}
+\newcommand{\depositView}{\mathsf{depositView}}
+\newcommand{\wdView}{\mathsf{wdView}}
+\newcommand{\swapView}{\mathsf{swapView}}
+\newcommand{\supplyView}{\mathsf{supplyView}}
+\newcommand{\redeemView}{\mathsf{redeemView}}
+\newcommand{\wdMarkerMap}{\wdView}
+\newcommand{\swapMarkerMap}{\swapView}
+\newcommand{\supplyMarkerMap}{\supplyView}
+\newcommand{\redeemMarkerMap}{\redeemView}
+\newcommand{\outputAttestationBuffer}{\ensuremath{\mathtt{outputAttestationBuffer}}}
+\newcommand{\inputAttestationBuffer}{\ensuremath{\mathtt{inputAttestationBuffer}}}
+\newcommand{\inputRequestBuffer}{\ensuremath{\mathtt{inputRequestBuffer}}}
+\newcommand{\outputRequestBuffer}{\ensuremath{\mathtt{outputRequestBuffer}}}
+\newcommand{\lastseen}{\ensuremath{\mathtt{globalLastSeen}}}
+\newcommand{\vaultNonce}{\ensuremath{\mathtt{vaultAccountNonce}}}
+\newcommand{\inIndex}{\mathsf{inIndex}}
+\newcommand{\ownComm}{\mathsf{ownComm}}
+
+% --- fields of a settle view ---
+\newcommand{\fComm}{\mathsf{comm}}
+\newcommand{\fErc}{\mathsf{erc20}}
+\newcommand{\fAmt}{\mathsf{amt}}
+\newcommand{\fTokIn}{\mathsf{tokenIn}}
+\newcommand{\fTokOut}{\mathsf{tokenOut}}
+\newcommand{\fAmtOut}{\mathsf{amtOut}}
+\newcommand{\fAmtMax}{\mathsf{amtMax}}
+\newcommand{\fShares}{\mathsf{shares}}
+
+% --- secrets, nonces, randomness ---
+\newcommand{\setupstate}{\rho}
+\newcommand{\seed}{\mathsf{seed}}
+\newcommand{\gen}{\mathsf{g}}
+\newcommand{\usersk}{\mathsf{userSk}}
+\newcommand{\coinsk}{\mathsf{coinSk}}
+\newcommand{\coinpk}{\mathsf{coinPk}}
+\newcommand{\encsk}{\mathsf{encSk}}
+\newcommand{\encpk}{\mathsf{encPk}}
+\newcommand{\mintNonce}{\mathsf{mintNonce}}
+\newcommand{\burnNonce}{\mathsf{burnCoinNonce}}
+\newcommand{\changeNonce}{\mathsf{changeNonce}}
+
+% --- identifiers exactly as they appear in the Compact and Solidity source ---
+\newcommand{\srcStartDeposit}{\code{startDeposit}}
+\newcommand{\srcStartSupply}{\code{startSupply}}
+\newcommand{\srcStartRedeem}{\code{startRedeem}}
+\newcommand{\srcFailGate}{\code{assertAttestedFailureOutput}}
+\newcommand{\srcReqMap}{\code{signBidirectionalEventMap}}
+\newcommand{\srcDepositMap}{\code{depositEventMap}}
+\newcommand{\srcSwapMap}{\code{swapEventMap}}
+\newcommand{\srcSupplyMap}{\code{supplyEventMap}}
+\newcommand{\srcRedeemMap}{\code{redeemEventMap}}
+\newcommand{\srcDepositView}{\code{depositSettleViews}}
+\newcommand{\srcWdView}{\code{withdrawSettleViews}}
+\newcommand{\srcSwapView}{\code{swapSettleViews}}
+\newcommand{\srcSupplyView}{\code{supplySettleViews}}
+\newcommand{\srcRedeemView}{\code{redeemSettleViews}}
+\newcommand{\srcInitFlag}{\code{initialised}}
+\newcommand{\srcUnderlying}{\code{stataUnderlying}}
+\newcommand{\srcWrapper}{\code{stataToken}}
+\newcommand{\srcDepositSel}{\code{deposit(uint256,address)}}
+\newcommand{\srcRedeemSel}{\code{redeem(uint256,address,address)}}

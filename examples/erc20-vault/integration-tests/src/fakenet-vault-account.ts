@@ -9,9 +9,12 @@ import {
   type ContractWriteMethod,
   requireEnv,
 } from "@sig-net/midnight-examples-test-harness";
-import { Contract, JsonRpcProvider, Wallet } from "ethers";
+import { Contract, JsonRpcProvider, toQuantity, Wallet } from "ethers";
 
 import { logTokenAmount } from "./evm-logging.ts";
+
+const DRAIN_TIMEOUT_MS = 60_000;
+const DRAIN_POLL_MS = 250;
 
 const ERC20_TRANSFER_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -20,7 +23,7 @@ const ERC20_TRANSFER_ABI = [
 
 /**
  * Drain the vault's derived EVM account of its FULL `ERC20_ADDRESS` balance,
- * transferring it to `to` and waiting for one confirmation. Fakenet ONLY: it
+ * transferring it to `to` and waiting until it mines. Fakenet ONLY: it
  * re-derives the vault account's private key from `MPC_ROOT_KEY` (epsilon
  * path {@link VAULT_PATH_HEX}, the private-key twin of signet-midnight's
  * `deriveEvmAddress`) and refuses to sign unless the derived address matches
@@ -28,20 +31,28 @@ const ERC20_TRANSFER_ABI = [
  *
  * This exists to force a DETERMINISTIC withdraw failure: with the vault's
  * ERC20 balance at zero, the next MPC-signed `transfer` from it must mine
- * and revert. The drain also consumes one vault-account nonce, so fetch the
- * withdraw request's `evmNonce` only AFTER this resolves.
+ * and revert. The drain's own transaction consumes a vault-account nonce the
+ * contract's counter never sees, so the nonce is put back with `anvil_setNonce`.
+ * That rewind makes a repeat drain of the same amount to the same recipient
+ * byte-identical to an earlier one, whose receipt its hash already carries:
+ * the drain waits for a receipt from a block after the one it sent at. Under
+ * interval mining the rewind can surface a block late, so the drain also waits
+ * for the rewound nonce to read back.
  *
  * @param env - The setup-populated env accumulator (`MPC_ROOT_KEY`,
  *   `EVM_RPC_URL`, `ERC20_ADDRESS`, `MIDNIGHT_VAULT_CONTRACT_ADDRESS`,
  *   `EVM_VAULT_ADDRESS`).
  * @param to - Recipient of the drained ERC20 (the suite sends it back to
  *   `EVM_USER_ADDRESS` so the funds keep cycling).
- * @param tokenAddress - The token to drain; defaults to `ERC20_ADDRESS` (the
- *   lending refund passes Aave USDC).
+ * @param tokenAddress - The token to drain, `ERC20_ADDRESS` by default. The
+ *   lending refunds pass the stataUnderlying, so the wrapper deposit's
+ *   `transferFrom` reverts, or the stataToken wrapper, so the redeem's burn
+ *   reverts.
  * @returns The drained amount in ERC20 base units — `0n` when the account
  *   held nothing and no transaction was sent.
  * @throws {Error} If the derived address does not match `EVM_VAULT_ADDRESS` (wrong
- *   root key or vault contract address), or the transfer fails to mine.
+ *   root key or vault contract address), or the transfer does not mine and
+ *   succeed, or the nonce does not read back, within {@link DRAIN_TIMEOUT_MS}.
  */
 export async function drainVaultErc20(
   env: NodeJS.ProcessEnv,
@@ -50,8 +61,6 @@ export async function drainVaultErc20(
 ): Promise<bigint> {
   const vaultContractAddress = requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
   const expectedAddress = requireEnv(env, "EVM_VAULT_ADDRESS");
-  // The token to drain; defaults to the suite's ERC20_ADDRESS. The lending refund passes Aave
-  // USDC so the vault holds none when the supply's transferFrom runs.
   const erc20Address = tokenAddress ?? requireEnv(env, "ERC20_ADDRESS");
 
   // The private-key side of the sig-net v2.0.0 epsilon scheme:
@@ -89,11 +98,35 @@ export async function drainVaultErc20(
       balance,
       `drain from ${wallet.address} to ${to}`,
     );
+    const nonceBefore = await provider.getTransactionCount(wallet.address);
+    const headAtSend = await provider.getBlockNumber();
     const transfer = erc20.getFunction<ContractWriteMethod>("transfer");
     const tx = await transfer(to, balance);
-    console.log(`drain tx:  ${tx.hash} — waiting for 1 confirmation…`);
-    await tx.wait(1);
-    console.log(`drained:   ${tx.hash}`);
+    console.log(`drain tx:  ${tx.hash}: waiting for it to mine…`);
+    const deadline = Date.now() + DRAIN_TIMEOUT_MS;
+    let receipt = await provider.getTransactionReceipt(tx.hash);
+    while (receipt === null || receipt.blockNumber <= headAtSend) {
+      if (Date.now() > deadline) {
+        throw new Error(`the drain ${tx.hash} did not mine within ${String(DRAIN_TIMEOUT_MS)}ms`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, DRAIN_POLL_MS));
+      receipt = await provider.getTransactionReceipt(tx.hash);
+    }
+    if (receipt.status !== 1) {
+      throw new Error(`the drain ${tx.hash} reverted in block ${String(receipt.blockNumber)}`);
+    }
+    await provider.send("anvil_setNonce", [wallet.address, toQuantity(nonceBefore)]);
+    let nonceAfter = await provider.getTransactionCount(wallet.address);
+    while (nonceAfter !== nonceBefore) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `the drain moved the vault account's nonce to ${String(nonceAfter)} and anvil_setNonce did not restore ${String(nonceBefore)}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, DRAIN_POLL_MS));
+      nonceAfter = await provider.getTransactionCount(wallet.address);
+    }
+    console.log(`drained:   ${tx.hash} (vault account nonce kept at ${String(nonceBefore)})`);
     return balance;
   } finally {
     provider.destroy();

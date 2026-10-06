@@ -62,8 +62,8 @@ services:
 
   evm:
     # anvil dev chain (id 31337, pre-funded dev-mnemonic accounts). State is
-    # in-memory: a restart wipes the chain (the test setup detects this and
-    # redeploys the token).
+    # in-memory: a restart wipes the chain (the test setup deals the derived
+    # accounts again on its next run).
     #
     # Set SEPOLIA_FORK_RPC_URL to fork Sepolia so the real Uniswap V3 deployment
     # + real USDC are present. The erc20-vault e2e suites run against this fork
@@ -80,8 +80,11 @@ services:
       # Forked: inherit Sepolia's chain id (11155111) so real-token semantics hold; the suites
       # deal ETH/USDC via anvil cheatcodes (a forked real token has no open mint). Bare:
       # anvil's default id 31337.
+      # The fakenet attests only once a transaction's block is `finalized`, which anvil
+      # places two epochs behind the head: one-second blocks and one-slot epochs finalise
+      # a block two seconds after it is mined.
       - >
-        anvil --host 0.0.0.0
+        anvil --host 0.0.0.0 --block-time 1 --slots-in-an-epoch 1
         ${SEPOLIA_FORK_RPC_URL:+--fork-url ${SEPOLIA_FORK_RPC_URL}}
         ${SEPOLIA_FORK_BLOCK:+--fork-block-number ${SEPOLIA_FORK_BLOCK}}
     ports:
@@ -90,7 +93,7 @@ services:
   fakenet:
     # The MPC fakenet responder (sig-net/solana-signet-program, fakenet-signer
     # workspace) in Midnight-only mode (DISABLE_SOLANA). Polls the signet contract's
-    # notification registry via the indexer, signs with keys derived from MPC_ROOT_KEY,
+    # notification events via the indexer, signs with keys derived from MPC_ROOT_KEY,
     # and posts responses through the proof server.
     #
     # Only runs with `--profile fakenet` as it needs MPC_ROOT_KEY and
@@ -101,7 +104,7 @@ services:
     # service. Manual equivalent (and the FAKENET_MANAGED=0 path):
     #   docker compose --profile fakenet up -d --force-recreate fakenet
     container_name: 'fakenet-responder'
-    image: 'ghcr.io/sig-net/fakenet:0.25.0'
+    image: 'ghcr.io/sig-net/fakenet:0.34.0'
     profiles: ['fakenet']
     depends_on:
       indexer:

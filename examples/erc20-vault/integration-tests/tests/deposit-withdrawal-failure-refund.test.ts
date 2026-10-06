@@ -1,36 +1,40 @@
-// The failure-refund e2e flow: a withdraw whose EVM transfer FAILS must end
-// with the MPC attesting its fixed failure output and the settle routing to
-// `refundWithdraw`, which re-mints the escrowed shielded vault tokens to the
-// caller and consumes the request + its pending-withdrawal marker.
+// The failure-refund e2e flow: a withdraw whose EVM transfer FAILS must end with
+// the MPC attesting it as failed over an empty output, and `completeWithdraw`'s
+// failure branch re-minting the burned shielded vault tokens to the caller and
+// consuming the request.
 //
 // Failure-injection strategy (deliberate, deterministic): make the withdraw
-// transfer MINE and REVERT by draining the vault's EVM ERC20 balance first.
-// The responder (fakenet compose service) attests an EVM outcome only from a
-// mined receipt (success or revert) or a consumed nonce — it never times out
-// a forever-pending tx — and a mined `status 0` receipt is exactly what its
-// failure attestation (the 0xdeadbeef error sentinel) is for. The drain
-// signs with the vault account's fakenet-derived key (test-support only, see
-// src/fakenet-vault-account.ts) and sends the balance back to
-// EVM_USER_ADDRESS, so the suite's EVM funds keep cycling. Amounts are
-// computed from live balances, never assumed.
+// transfer MINE and REVERT by draining the vault's EVM ERC20 balance first. The
+// responder (fakenet compose service) attests an EVM outcome only from a mined
+// receipt (success or revert) or a consumed nonce. It never times out a
+// forever-pending tx, and a mined `status 0` receipt is exactly what its `failed`
+// attestation is for. The drain signs with the vault account's fakenet-derived
+// key (test-support only, see src/fakenet-vault-account.ts), puts the vault
+// account's nonce back, and sends the balance back to EVM_USER_ADDRESS, so the
+// suite's EVM funds keep cycling. Amounts are computed from live balances, never
+// assumed.
 //
-// The arrange stage runs a full deposit round trip first (the caller must
-// hold shielded vault tokens to escrow) — that is what
+// The arrange stage runs a full deposit round trip first (the caller must hold
+// shielded vault tokens to surrender): that is what
 // src/flows/deposit-round-trip.ts's runDepositRoundTrip exists for. Run AFTER
 // tests/happy-day-e2e.test.ts (FILE_ORDER): initialise lives there. Recovery
 // from a run that died mid-flow (proof-server OOM): rerun this file with
-// FAILURE_REFUND_DEPOSIT_REQUEST_ID / FAILURE_REFUND_WITHDRAW_REQUEST_ID set
-// to the ids the failed run printed.
+// FAILURE_REFUND_DEPOSIT_REQUEST_ID / FAILURE_REFUND_WITHDRAW_REQUEST_ID set to
+// the ids the failed run printed.
 //
 // Tests drive the vault THROUGH the example's typed flow functions
-// (src/flows/) — in-process, never a subprocess.
-import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
-import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+// (src/flows/), in-process, never a subprocess.
+import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
+import {
+  readVaultLedger,
+  VAULT_WITHDRAW_REQUESTS_PATH,
+  vaultGasEnvelope,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { waitForFacadeState } from "@sig-net/midnight-examples-lib";
 import {
   banner,
   getErc20Balance,
   getEthBalance,
-  getTransactionNonce,
   logSkip,
   requireEnv as requireEnvOf,
 } from "@sig-net/midnight-examples-test-harness";
@@ -39,7 +43,6 @@ import { formatEther, parseEther, parseUnits, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { fundingSummary } from "../src/evm-logging.ts";
-import { ERC20_TRANSFER_GAS_LIMIT, ERC20_TRANSFER_MAX_FEE_PER_GAS } from "../src/evm-transfer.ts";
 import { drainVaultErc20 } from "../src/fakenet-vault-account.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { settleWithdraw } from "../src/flows/complete-withdraw.ts";
@@ -52,8 +55,9 @@ import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createVaultSession } from "../src/vault-session.ts";
+import { vaultTokenType } from "../src/vault-token.ts";
 
-// ethers types `hash` nullable for the unsigned case; a transaction that came
+// ethers types `hash` nullable for the unsigned case. A transaction that came
 // back from the MPC is signed, so a null here is a broken response, not a
 // formatting concern.
 const signedTxHash = (transaction: Transaction): string => {
@@ -68,7 +72,7 @@ const MINUTE = 60_000;
 /**
  * The setup-populated env accumulator: repo-root `.env` overlaid with the
  * real environment (which wins), plus every value the globalSetup pipeline
- * derived or deployed. Empty when RUN_INTEGRATION_TESTS is unset — the suite
+ * derived or deployed. Empty when RUN_INTEGRATION_TESTS is unset: the suite
  * below skips before reading it.
  */
 const env = injectE2eEnv();
@@ -77,12 +81,12 @@ const env = injectE2eEnv();
 const requireEnv = (name: string): string => requireEnvOf(env, name);
 
 // Wallet facade + vault context + MPC-style reader shared by every test in
-// this file (lazily built, so the offline path never touches the network);
+// this file (lazily built, so the offline path never touches the network),
 // stopped once in afterAll.
 const session = createVaultSession(env);
 
-// One deposit's worth of shielded vault tokens is arranged, escrowed by the
-// doomed withdraw, and refunded — 0.1 USDC, the funding preflight's minimum.
+// One deposit's worth of shielded vault tokens is arranged, burned by the doomed
+// withdraw, and re-minted: 0.1 USDC, the funding preflight's minimum.
 const DEPOSIT_AMOUNT = parseUnits("0.1", 6);
 const WITHDRAW_AMOUNT = DEPOSIT_AMOUNT;
 
@@ -122,11 +126,16 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         ).toBeGreaterThanOrEqual(DEPOSIT_AMOUNT);
 
         // The vault's derived account sends the doomed transfer itself (and the
-        // drain before it): require the fee-cap budget of one MPC-signed ERC20
-        // transfer, like the happy-day withdraw leg. Actual spend sits far
-        // below the cap — a reverted transfer burns ~35k gas and the drain
-        // rides the same margin.
-        const gasBudget = ERC20_TRANSFER_GAS_LIMIT * ERC20_TRANSFER_MAX_FEE_PER_GAS;
+        // drain before it): require the fee-cap budget the vault's gas settings
+        // stamp on a withdrawal, like the happy-day withdraw leg. Actual spend
+        // sits far below the cap: a reverted transfer burns ~35k gas and the
+        // drain rides the same margin.
+        const context = await session.vaultContext();
+        const { gasLimit, maxFeePerGas } = vaultGasEnvelope(
+          await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress),
+          "withdraw",
+        );
+        const gasBudget = gasLimit * maxFeePerGas;
         const vaultEth = await getEthBalance(rpcUrl, vaultAddress);
         console.log(
           `${vaultAddress}: ${fundingSummary(vaultEth, gasBudget, 18, "ETH")} (maximum gas fee)`,
@@ -136,7 +145,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `fund the vault's derived account ${vaultAddress} with >= ${formatEther(gasBudget)} ETH on EVM`,
         ).toBeGreaterThanOrEqual(gasBudget);
       },
-      MINUTE,
+      5 * MINUTE,
     );
 
     it(
@@ -150,13 +159,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(
           state.initialised,
           "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
-        ).toBe(1n);
+        ).toBe(true);
       },
       5 * MINUTE,
     );
 
     it(
-      "arrange: deposit round trip mints the shielded vault tokens the doomed withdraw will escrow",
+      "arrange: deposit round trip mints the shielded vault tokens the doomed withdraw will burn",
       async () => {
         const { requestId } = await runDepositRoundTrip(session, {
           amount: DEPOSIT_AMOUNT,
@@ -164,7 +173,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         banner([
-          `Arrange deposit ${requestId} complete — the caller holds ${String(DEPOSIT_AMOUNT)} base units of shielded vault tokens.`,
+          `Arrange deposit ${requestId} complete: the caller holds ${String(DEPOSIT_AMOUNT)} base units of shielded vault tokens.`,
           "",
           "If a later step dies (e.g. proof-server OOM), resume with",
           `  FAILURE_REFUND_DEPOSIT_REQUEST_ID=${requestId}`,
@@ -204,7 +213,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     let withdrawRequestId: RequestIdHex;
 
     it(
-      "withdraw: escrow shielded vault tokens for a transfer the vault cannot pay",
+      "withdraw: burn shielded vault tokens for a transfer the vault cannot pay",
       async () => {
         if (env.FAILURE_REFUND_WITHDRAW_REQUEST_ID) {
           withdrawRequestId = env.FAILURE_REFUND_WITHDRAW_REQUEST_ID as RequestIdHex;
@@ -217,17 +226,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const context = await session.vaultContext();
 
-        // Nonce fetched AFTER the drain mined (the drain consumed one), so the
-        // signed transfer is the vault account's next expected tx.
-        const evmNonce = await getTransactionNonce(
-          requireEnv("EVM_RPC_URL"),
-          requireEnv("EVM_VAULT_ADDRESS"),
-        );
-
+        // The drain put the vault account's nonce back, so the nonce the flush
+        // assigns is the account's next expected tx.
         withdrawRequestId = await startWithdraw(context, {
           amount: WITHDRAW_AMOUNT,
           destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
-          evmNonce,
         });
         expect(withdrawRequestId).toMatch(/^[0-9a-f]{64}$/);
 
@@ -236,7 +239,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           "",
           `  request id: ${withdrawRequestId}`,
           "",
-          "The caller's shielded vault tokens are escrowed. If a later step dies,",
+          "The caller's shielded vault tokens are burned. If a later step dies,",
           `resume with FAILURE_REFUND_WITHDRAW_REQUEST_ID=${withdrawRequestId}`,
         ]);
       },
@@ -258,6 +261,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           intervalMs: 1000,
           timeoutMs: POLL_TIMEOUT_MS,
           expectedSigner: requireEnv("EVM_VAULT_ADDRESS"),
+          requestsPath: VAULT_WITHDRAW_REQUESTS_PATH,
         });
 
         banner([
@@ -277,9 +281,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         // broadcastEvm cannot return normally here: the transfer exceeds the
         // vault's (zero) ERC20 balance, so it mines with `status 0` and
-        // broadcastEvm surfaces that as its reverted-on-chain error — also on
-        // reruns, where the already-mined reverted receipt short-circuits to
-        // the same throw. The mined receipt is what the responder attests from.
+        // broadcastEvm surfaces that as its reverted-on-chain error, also on
+        // reruns, where the already-mined reverted receipt short-circuits to the
+        // same throw. The mined receipt is what the responder attests from.
         await expect(
           broadcastEvm(context, { transaction: signedWithdrawTransaction }),
         ).rejects.toThrow(/reverted on-chain/);
@@ -288,8 +292,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Doomed transfer ${signedTxHash(signedWithdrawTransaction)} mined and reverted, as arranged.`,
           "",
           "The responder should observe the status-0 receipt and post its",
-          "failure attestation (the digest of the fixed 5-byte 0xdeadbeef01",
-          "failure output) on its next poll.",
+          "failed attestation (an empty output under OutputKind.failed) on",
+          "its next poll.",
         ]);
       },
       3 * MINUTE,
@@ -303,92 +307,101 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       async () => {
         expect(withdrawRequestId).toBeDefined();
 
-        // The event carries only the signature, so the poll traces the mined
-        // transaction and matches: a reverted receipt yields no output, so the
-        // ONLY matchable candidate is the protocol's fixed failure output.
+        // The event carries the MPC's verdict beside the signature, and a post
+        // declaring a failure is checked over the empty output the protocol
+        // attests: no trace is needed to match it.
         const context = await session.vaultContext();
         withdrawAttestation = await pollRespondBidirectional(context, {
           requestId: withdrawRequestId,
           intervalMs: 1000,
           timeoutMs: POLL_TIMEOUT_MS,
+          requestsPath: VAULT_WITHDRAW_REQUESTS_PATH,
         });
 
-        // The observable contract of the failure leg: the attested output must
-        // be the MPC's failure output (0xdeadbeef sentinel), never a success.
+        // The observable contract of the failure leg: the verified kind must be
+        // `failed` over an empty output, never an execution.
         expect(
           withdrawAttestation.succeeded,
           "the MPC must attest the reverted transfer as failed",
         ).toBe(false);
         expect(
-          withdrawAttestation.matchedFailureOutput,
-          "a mined revert must be attested as the fixed MPC failure output",
-        ).toBe(true);
+          withdrawAttestation.event.outputKind,
+          "a mined revert must be attested under OutputKind.failed",
+        ).toBe(OutputKind.failed);
+        expect(withdrawAttestation.serializedOutput, "a failure's output is empty").toHaveLength(0);
 
         banner([
           `Found failure attestation for doomed withdraw ${withdrawRequestId}:`,
           "",
-          `  succeeded:           false`,
-          `  MPC failure output:  true (signature-verified)`,
+          `  succeeded:    false`,
+          `  output kind:  ${OutputKind[withdrawAttestation.event.outputKind]} (signature-verified)`,
+          `  block height: ${String(withdrawAttestation.event.blockHeight)}`,
         ]);
       },
       POLL_TIMEOUT_MS + 5 * MINUTE,
     );
 
     it(
-      "refundWithdraw: the failure attestation routes here, consuming the request + refund marker",
+      "completeWithdraw: the failure attestation re-mints the burned tokens and consumes the request",
       async () => {
         // Final leg: the request is on the vault ledger and the MPC's FAILURE
-        // attestation is posted (previous steps). The settle flow routes the
-        // fixed 5-byte failure output to refundWithdraw, which
-        // re-verifies the attestation in-circuit (digest equality + ECDSA
-        // against the stored MPC response key), checks the sentinel bytes, and
-        // re-mints the surrendered shielded value to the withdrawer (this
-        // session's wallet, which proves the pinned refund commitment) instead
-        // of leaving it burned. The request + its pending-withdrawal marker
-        // are consumed (double-settle protection). The refunded shielded
-        // balance itself is not publicly observable; the marker consumption is
-        // (present before, absent after), and refundWithdraw is the only
-        // circuit a failure attestation can settle through.
+        // attestation is posted (previous steps). Settling queues it at width 0,
+        // flushes it, and completeWithdraw takes its failure branch: the
+        // transfer moved nothing, so it re-mints the surrendered shielded value
+        // to the withdrawer (this session's wallet, which proves the pinned
+        // ownership commitment) and consumes the request (double-settle
+        // protection).
         expect(withdrawRequestId).toBeDefined();
         expect(withdrawAttestation).toBeDefined();
 
         const context = await session.vaultContext();
-        const requestKey = requestIdBytes(withdrawRequestId);
-        const readLedger = () =>
-          readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
+        const requestIndex = requestIdBytes(withdrawRequestId);
+        const isRequestOnLedger = async () =>
+          (
+            await readVaultLedger(
+              context.providers.publicDataProvider,
+              context.vaultContractAddress,
+            )
+          ).bidirectionalWithdrawMap.member(requestIndex);
 
         // Rerun against a kept contract address: if a prior run already settled
-        // this request the pending-withdrawal marker is gone and
-        // refundWithdraw would reject with "Withdrawal not found" — skip
-        // cleanly instead.
-        const before = await readLedger();
-        if (!before.withdrawSettleViews.member(requestKey)) {
+        // this request the entry is gone and completeWithdraw would reject with
+        // "Request not sent", so skip cleanly instead.
+        if (!(await isRequestOnLedger())) {
           logSkip(
-            "refundWithdraw",
-            `withdrawal ${withdrawRequestId} already settled (no pending marker on the ledger)`,
+            "completeWithdraw",
+            `withdrawal ${withdrawRequestId} already settled (not on the ledger)`,
           );
           return;
         }
-        expect(before.signBidirectionalEventMap.member(requestKey)).toBe(true);
 
-        await settleWithdraw(context, withdrawRequestId, withdrawAttestation);
+        const color = vaultTokenType(
+          requireEnv("ERC20_ADDRESS"),
+          requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
+        );
+        const wallet = await session.wallet();
+        const balanceBefore =
+          (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
 
-        const after = await readLedger();
+        await settleWithdraw(context, withdrawAttestation);
+
         expect(
-          after.signBidirectionalEventMap.member(requestKey),
-          "refundWithdraw must consume the request from the ledger",
+          await isRequestOnLedger(),
+          "completeWithdraw must consume the request from the ledger",
         ).toBe(false);
-        expect(
-          after.withdrawSettleViews.member(requestKey),
-          "refundWithdraw must consume the pending-withdrawal marker",
-        ).toBe(false);
+        // The re-mint is a coin addressed to this wallet, so its balance shows it.
+        const reminted = await waitForFacadeState(
+          wallet.facade,
+          (state) => (state.shielded.balances[color] ?? 0n) >= balanceBefore + WITHDRAW_AMOUNT,
+        );
+        expect(reminted.shielded.balances[color] ?? 0n).toBe(balanceBefore + WITHDRAW_AMOUNT);
 
         banner([
-          `Withdraw ${withdrawRequestId} settled with a REFUND.`,
+          `Withdraw ${withdrawRequestId} settled with a RE-MINT.`,
           "",
-          "The vault verified the MPC's failure attestation in-circuit,",
-          "re-minted the escrowed shielded value to the withdrawer,",
-          "and removed the request and its refund marker from the ledger.",
+          "The vault verified the MPC's failure attestation, re-minted the",
+          "burned shielded value to the withdrawer, and removed the request",
+          "from its ledger.",
         ]);
       },
       15 * MINUTE,

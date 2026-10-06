@@ -12,8 +12,8 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-twelve-spec suite (106 tests: eleven e2e specs carrying 100, plus the offline
-`benchmark-tooling` spec carrying 6). The pipeline itself (globalSetup steps + flow test
+suite (190 tests: fourteen e2e specs carrying 134, plus seven offline
+specs carrying 56). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest
 globalSetup before ANY flow file (including single-file runs), and flow files
@@ -40,20 +40,24 @@ regardless and you pay keygen twice. Expect the whole first invocation to take
 ~20–25 minutes (keygen + fresh deploys + the flow tests).
 
 **Toolchain note:** the contracts declare `pragma language_version >= 0.25`,
-which needs the ledger-9 rc compiler (0.33.0-rc.2, part of the matched set
-pinned in `docker-compose.yaml`'s image-tag comment). A bare `compact update`
+which needs the ledger-9 rc compiler (0.33.0-rc.2, pinned in
+`.github/workflows/example-test.yaml` and `AGENTS.md`). A bare `compact update`
 installs latest STABLE (0.31.1, language 0.23), and DOWNGRADES the default if
 an rc is already active, after which the compile fails with
 `language version 0.23.0 mismatch`. If `compact` itself is missing, or the
 launcher's channel refuses the rc version, use the installer + direct-download
-recipe in `.github/workflows/example-test.yaml` (the `Install / update the
-compact toolchain` step).
+recipe in `.github/workflows/example-test.yaml` (the `Install the compact
+toolchain` step).
 
 One value MUST be in `.env` before the stack comes up: `SEPOLIA_FORK_RPC_URL`
-(any Sepolia RPC). The compose anvil forks Sepolia from it so the real Uniswap V3
-deployment and real USDC are present. Without it anvil is a bare chain and the
-suites fail dealing tokens. (`SEPOLIA_FORK_BLOCK` is optional: pin a block for
-determinism, needs an archive RPC.) Everything else the setup pipeline creates:
+(an ARCHIVE Sepolia RPC, e.g. `https://sepolia.gateway.tenderly.co`). The
+compose anvil forks Sepolia from it so the real Uniswap V3 deployment and real
+USDC are present. Without it anvil is a bare chain and the suites fail dealing
+tokens. Archive matters for `admin-replace-nonce-e2e`: the fakenet locates the
+block that consumed the replaced nonce by bisecting the account nonce over chain
+history, and a pruned RPC (publicnode) fails that read with "state at block #N
+is pruned", so the unviable attestation never posts and the spec times out.
+(`SEPOLIA_FORK_BLOCK` is optional: pin a block for determinism.) Everything else the setup pipeline creates:
 it appends the generated wallet seeds (root + the deployer/user/mpc
 responder/bearer roles, funded from root), the MPC public key it derives from
 the root key (`MPC_SECP256K1_PUBKEY`) and the fakenet hand-off values
@@ -64,15 +68,16 @@ environment is a hard error, not an overwrite. On the Sepolia-forked anvil
 (chain id 11155111) a fresh DEPLOY runs green in ONE pass: the derived accounts
 are dealt ETH + real USDC via anvil cheatcodes, and the setup starts the fakenet
 responder itself mid-run. The FLOW files are another matter: on a
-16 GB Docker VM expect the proof-server OOM (see "Reading failures") to
-interrupt the suite at some proving leg partway through the flow files:
-that is routine, not a defect. Recover per the playbook and the suite
-completes across two or three invocations.
+16 GB Docker VM expect the proof server to be OOM-killed at some proving leg
+partway through the flow files. Docker restarts it and the flows retry the
+proof, so the suite normally carries on. If the retries run out (see "Reading
+failures"), recover per the playbook.
 
-After the run, paste the setup's printed `.env` block into `.env` (the
-contract addresses in particular) so the next run is a fast rerun against
-kept contracts. `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already there: the setup
-appends it the moment the vault's base deploy is submitted, and a rerun with it
+After the run, add the lines of the setup's printed `.env` block that `.env`
+does not hold yet (the setup appends both contract addresses itself) so the
+next run is a fast rerun against kept contracts.
+`MIDNIGHT_VAULT_CONTRACT_ADDRESS` is already there: the setup appends it the
+moment the vault's base deploy is submitted, and a rerun with it
 set resumes the circuit installs the previous run left missing (a no-op on a
 vault with every circuit).
 
@@ -83,8 +88,7 @@ vault with every circuit).
 - **`/e2e redeploy`**: a circuit changed (any `.compact` edit that alters a
   circuit, struct layout, or the request-id hash domain): comment out
   `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
-  `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS` (and
-  `ERC20_ADDRESS` if the anvil container restarted, its chain is in-memory)
+  `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS`
   in `.env`, then rerun. `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS` and
   `EVM_USER_ADDRESS` all derive from the vault's contract address, so a stale
   one left set stops the run with a mismatch error rather than being used.
@@ -105,16 +109,19 @@ vault with every circuit).
 - **Background any run that may zk-compile or deploy** (fresh clone,
   redeploy): `> logfile 2>&1 &`, then watch the log. Never sit on a
   foreground call with a short timeout: keygen alone is ~10 minutes.
-- **Never set `STEP_THROUGH=1` in an unattended run**: it pauses for stdin
-  between tests and hangs forever.
+- **Never set `STEP_THROUGH=1` in an unattended run**: it waits for Enter on
+  the terminal (`/dev/tty`) between setup steps and between tests, so a
+  background run stops there and a run without a terminal fails.
 - The suite is `vitest --bail 1` and the spec files run serially in a pinned
   order: it stops at the first failure.
 - Expected per-spec test counts, in run order: `happy-day-e2e` **15**,
-  `deposit-withdrawal-failure-refund` **9**, `deposit-claimant-not-caller`
-  **6**, `benchmark` **43**, `false-claimer` **6**, `bearer-transfer` **11**,
-  `swap-e2e` **1**, `supply-redeem-e2e` **1**, `supply-refund-e2e` **1**,
-  `swap-refund-e2e` **1**, `redeem-refund-e2e` **1**, then the unpinned offline
-  `benchmark-tooling` **6** last. 101 total. The setup
+  `allowed-tokens-e2e` **4**, `deposit-withdrawal-failure-refund` **9**,
+  `deposit-claimant-not-caller` **6**, `false-claimer` **6**,
+  `bearer-transfer` **10**, `approve-e2e` **14**, `swap-e2e` **8**,
+  `supply-redeem-e2e` **13**, `supply-refund-e2e` **9**,
+  `swap-refund-e2e` **8**, `redeem-refund-e2e` **10**,
+  `admin-replace-nonce-e2e` **12**, `concurrent-flush-e2e` **10**,
+  then the seven unpinned offline specs (**56**) last. 190 total. The setup
   pipeline verifies Uniswap and the stataUSDC wrapper are deployed on the fork,
   so a fork missing either fails the run at setup rather than mid-spec.
 - **Wallets are role wallets funded from ROOT at setup.** The setup's
@@ -137,7 +144,7 @@ vault with every circuit).
 - On a 16 GB VM, **restarting the proof server between spec files is the
   DEFAULT cadence, not just OOM recovery**: the OOM consistently hits a
   proving leg once the same server instance has already served several
-  proofs (observed on completeDeposit legs and once on a benchmark startDeposit leg).
+  proofs (observed on completeDeposit legs).
   For an attended run: `yarn test:erc20-vault:e2e tests/<spec-file>` per
   file in the pinned order, `docker restart midnight-proof-server` between
   files (only while the responder log is quiet, see the responder-killed
@@ -194,21 +201,20 @@ non-anvil `EVM_RPC_URL` (fund the printed derived accounts by hand, `STEP_THROUG
 Execution outputs come from `debug_traceTransaction` on `EVM_RPC_URL` on every
 network, and under `RESPOND_OUTPUT_SOURCE=evm-node` (the default) the setup
 step "verify EVM_RPC_URL serves debug_traceTransaction" refuses an endpoint
-without it. The deposit and withdraw polls can instead download the attested
-bytes from the MPC's output cache, and the setup then skips that check (the
-swap, supply and redeem polls still trace, so their specs need a tracing
-endpoint):
+without it. Every attestation poll can instead download the attested
+bytes from the MPC's output cache, and the setup then skips that check:
 `RESPOND_OUTPUT_SOURCE=mpc-cache`, reading the cache the SDK publishes for the
 network (stagenet:
-`https://storage.googleapis.com/midnight-cache-storage-dev/v1/stagenet`) unless
+`https://storage.googleapis.com/midnight-cache-storage-testnet/v1/stagenet`) unless
 `MPC_OUTPUT_CACHE_URL` overrides it (the cache's URL down to the MPC's object
 prefix; the poll appends `/<network>/<signet address>/<request id>.bin`). On
 the local stack no cache is published, so set
 `MPC_OUTPUT_CACHE_URL=http://127.0.0.1:3040/v1/fakenet`, the compose fakenet's
-simulation. Only the specs that never
-sign as the vault can run there (`happy-day-e2e`, `bearer-transfer`,
-`swap-e2e`, `supply-redeem-e2e`, `swap-refund-e2e`); the rest re-derive the
-vault key from `MPC_ROOT_KEY` and stay fakenet-only. Start only the
+simulation. Five specs sign as the vault
+and are fakenet-only (`deposit-withdrawal-failure-refund`,
+`deposit-claimant-not-caller`, `false-claimer`, `supply-refund-e2e`,
+`redeem-refund-e2e`): they re-derive the vault key from `MPC_ROOT_KEY`. The
+other nine never sign as the vault. Start only the
 `proof-server` compose service for such a run, and start with one deposit
 round trip, not the whole spec:
 `STEP_THROUGH=1 yarn test:erc20-vault:e2e tests/happy-day-e2e.test.ts -t "initialise|[dD]eposit|sweep"`
@@ -217,12 +223,12 @@ keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
 
 ## Reading failures
 
-- **`connect ECONNREFUSED 127.0.0.1:6300` mid-settle**, with
-  `docker ps -a` showing `midnight-proof-server` `Exited (137)` (and
-  `docker inspect midnight-proof-server --format '{{.State.OOMKilled}}'`
-  printing `true`): the proof server was OOM-killed. The settle
-  proofs peak above 12 GiB, so a 16 GB Docker VM is marginal. Recover with
-  `docker restart midnight-proof-server`, then rerun the SAME spec file,
+- **`connect ECONNREFUSED 127.0.0.1:6300` mid-settle**, after
+  `proof server …: connection lost on attempt N, retrying` warnings: the proof
+  server was OOM-killed and was not back before the third attempt (Docker
+  restarts it on its own, `restart: 'unless-stopped'`). The settle
+  proofs peak above 12 GiB, so a 16 GB Docker VM is marginal. Once the
+  server answers again, rerun the SAME spec file,
   resuming its pending request via its resume var so it does not spend
   another deposit:
   `<RESUME_VAR>=<id> yarn test:erc20-vault:e2e tests/<spec-file>`.
@@ -232,32 +238,36 @@ keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
     `FAILURE_REFUND_DEPOSIT_REQUEST_ID` / `FAILURE_REFUND_WITHDRAW_REQUEST_ID`
   - `deposit-claimant-not-caller`:
     `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID`
-  - `benchmark`: `BENCHMARK_DEPOSIT_REQUEST_ID` / `BENCHMARK_WITHDRAW_REQUEST_ID` /
-    `BENCHMARK_SWAP_REQUEST_ID` / `BENCHMARK_SUPPLY_REQUEST_ID` /
-    `BENCHMARK_REDEEM_REQUEST_ID` /
-    `BENCHMARK_REFUND_DEPOSIT_REQUEST_ID` / `BENCHMARK_REFUND_WITHDRAW_REQUEST_ID`
   - `false-claimer`: `FALSE_CLAIMER_DEPOSIT_REQUEST_ID`
   - `bearer-transfer`: `BEARER_TRANSFER_DEPOSIT_REQUEST_ID` /
     `BEARER_TRANSFER_WITHDRAW_REQUEST_ID`
+  - `approve-e2e`: `APPROVE_ROUTER_REQUEST_ID` / `APPROVE_STATA_REQUEST_ID`
   - `swap-e2e`: `SWAP_E2E_DEPOSIT_REQUEST_ID` / `SWAP_E2E_SWAP_REQUEST_ID`
-  - `supply-redeem-e2e`: `SUPPLY_REDEEM_DEPOSIT_REQUEST_ID` /
-    `SUPPLY_REDEEM_SUPPLY_REQUEST_ID` / `SUPPLY_REDEEM_REDEEM_REQUEST_ID`
+  - `supply-redeem-e2e`: `SUPPLY_DEPOSIT_REQUEST_ID` / `SUPPLY_REQUEST_ID` /
+    `REDEEM_REQUEST_ID`
   - `supply-refund-e2e`: `SUPPLY_REFUND_DEPOSIT_REQUEST_ID` /
     `SUPPLY_REFUND_SUPPLY_REQUEST_ID`
   - `swap-refund-e2e`: `SWAP_REFUND_DEPOSIT_REQUEST_ID` / `SWAP_REFUND_SWAP_REQUEST_ID`
   - `redeem-refund-e2e`: `REDEEM_REFUND_DEPOSIT_REQUEST_ID` /
     `REDEEM_REFUND_SUPPLY_REQUEST_ID` / `REDEEM_REFUND_REDEEM_REQUEST_ID`
+  - `admin-replace-nonce-e2e`: `REPLACE_NONCE_DEPOSIT_REQUEST_ID` /
+    `REPLACE_NONCE_WITHDRAW_REQUEST_ID` / `REPLACE_NONCE_REPLACEMENT_REQUEST_ID`
+  - `concurrent-flush-e2e`: `CONCURRENT_FLUSH_DEPOSIT_REQUEST_ID` /
+    `CONCURRENT_FLUSH_CANARY_REQUEST_ID`
 
   `broadcastEvm` is idempotent, so already-mined transfers skip through, and
   every spec skips already-claimed/settled requests cleanly. Expect the OOM
   (when it comes) at a proving leg once the same server instance has served
   several proofs, most often the COMPLETE-DEPOSIT (by the time it proves, the
-  server has already done the startDeposit proof plus the responder's two posts),
-  but a file's first startDeposit prove can also be the victim when earlier spec
-  files exhausted the server. If the OOM killed the prove itself (the spec
-  failed at a `callTx.…` with `/prove … ECONNREFUSED` and printed NO
-  request-id banner), there is nothing to resume: rerun the spec plain (it
-  spends a fresh deposit). On the resumed/rerun invocation the interrupted
+  server has already done the startDeposit proof, the responder's two posts,
+  and the settle's queueAttestation and flush proofs),
+  but a file's first startDeposit prove can also be the victim when proofs
+  before the file exhausted the server (the setup's, or earlier spec files'
+  with `SKIP_PROOF_SERVER_RESTART` set, as the flow hooks otherwise restart
+  the server after every file). If the prove itself failed (all three attempts
+  lost the connection, the spec failed at a `callTx.…` with `/prove …
+  ECONNREFUSED` and printed NO request-id banner), there is nothing to
+  resume: rerun the spec plain (it spends a fresh deposit). On the resumed/rerun invocation the interrupted
   proof is the FIRST on a fresh server and the rest of the file fits in the
   remaining headroom.
 - **A signature poll timing out on a request the responder NEVER logged as
@@ -291,14 +301,13 @@ keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
   request"**, with `respond(0x…) … FAILED` + a proof-server
   transport error in `docker logs fakenet-responder`: the responder proves
   its posts through the SAME proof server (:6300), and a proof-server
-  restart during its post kills the post: the responder does not retry, so
-  the request strands unresponded. Recover with
-  `docker compose --profile fakenet restart fakenet` (a plain restart whose
-  startup backfill re-discovers unresponded requests and posts the missing
-  responses), then rerun the spec with its resume var. Corollary: restart
+  restart during its post kills the post. The responder retries: it finds
+  the failed request again on its next poll, signs it again and posts again.
+  Once the post lands, rerun the spec with its resume var. Corollary: restart
   the proof server only while the responder's log is quiet. "quiet" means
-  no in-flight post (every `post… started` line has its `took Ns`/`FAILED`
-  twin), NOT an unchanged log: the idle poll loop writes every few seconds.
+  no in-flight post (every `[timing] respond…(0x…) started...` line has its
+  `took Ns`/`FAILED after Ns` twin), NOT an unchanged log: the idle poll loop
+  writes every few seconds.
 - **`No test files found, exiting with code 1`** from vitest: usually a
   globalSetup THROW, not a test-discovery problem: the real error is the
   `Unhandled Error` block below it. Read that first.
@@ -310,16 +319,14 @@ keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
   at ≥ 2 variants (`TxParamType` carries a `reserved` padding variant for
   exactly this).
 - **Preflight `expected 0 to be greater than or equal to …`**: a derived EVM
-  account is unfunded. On the local stack that means the anvil container
-  restarted (its chain is in-memory) while `.env` still holds addresses from
-  the previous chain. Comment out the derived EVM address vars
-  (`EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS`) and rerun so setup re-derives and
-  re-deals ETH + real USDC to the accounts on the fork.
+  account is unfunded. On the local stack that usually means the anvil
+  container restarted (its chain is in-memory). Rerun: the setup deals ETH +
+  real USDC to the derived accounts on the fork on every run.
 - **`vault is already initialised`** on a kept address is informational: the
   test still asserts state and passes.
 - **`Insufficient funds: … Dust`** from a deploy/call: the wallet's NIGHT
-  has not generated spendable DUST yet, and the setup's own retry loop
-  (`retryDeployWhileDustGenerates`) normally absorbs this. If it surfaces in
+  has not generated spendable DUST yet, and the deploy plumbing's own retry of the
+  balancing step normally absorbs this. If it surfaces in
   a flow, rerun (dust accrues on its own).
 - **`1010: Invalid Transaction: Custom error: 170`** (`InvalidDustSpendProof`)
   on every submit, from every wallet: the "dust-poison" failure mode a

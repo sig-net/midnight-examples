@@ -6,39 +6,24 @@
 // The circuit gates the call on the deployer identity sealed at deploy time,
 // which is what stops anyone else pointing a fresh vault at their own address.
 
-import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
-// midnight-js reads a process-global network id (unlike compact-js, which
-// takes it explicitly), so joining a deployed contract needs it set.
-import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import {
   deriveMidnightResponseKey,
   formatSecp256k1PublicKey,
   parseSecp256k1PublicKey,
+  SIGNET_DEFAULT_KEY_VERSION,
 } from "@sig-net/midnight";
+import { envOrUndefined, resolveMpcRootPublicKey } from "@sig-net/midnight-contract-deploy";
 import {
-  deriveAccountKeys,
-  ensureFeeReady,
-  envOrUndefined,
-  getDeployConfig,
-  getFaucetUrl,
-  parseIdentitySecretKey,
-  resolveMpcRootPublicKey,
-  withSyncedWalletFacade,
-} from "@sig-net/midnight-contract-deploy";
-import {
-  createVaultPrivateState,
   type DeployedVaultContract,
   deriveVaultEvmAddress,
   evmAddressBytes,
   readVaultLedger,
-  VAULT_PRIVATE_STATE_ID,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { getEvmChainId } from "@sig-net/midnight-examples-lib";
+import { getEvmBlockNumber, getEvmChainId } from "@sig-net/midnight-examples-lib";
 
+import { resolveVaultContractAddress, withDeployerVault } from "./deployer-vault.ts";
 import { resolveEvmTargets, type VaultEvmTargets } from "./evm-targets.ts";
-import { vaultCompiledContract } from "./vault-contract-binding.ts";
-import { buildVaultProviders } from "./vault-providers.ts";
 
 /** What an {@link initialiseVaultContract} call did. */
 export enum InitialiseVaultOutcome {
@@ -61,22 +46,20 @@ export interface VaultInitialiseConfig {
   /** EIP-155 chain id of the Ethereum network the vault's transactions are signed for. */
   readonly evmChainId: bigint;
   /**
+   * The EVM block height the vault starts from: no attestation at or below it is
+   * accepted. `EVM_START_HEIGHT` when set, else the latest block `EVM_RPC_URL` reports,
+   * else zero.
+   */
+  readonly evmStartHeight: bigint;
+  /**
    * The MPC response key for THIS vault contract (SEC1 hex): `f(MPC root key,
-   * vault contract address, "midnight response key")`. The claim and
-   * completeWithdraw circuits accept only responses ECDSA-signed by it.
+   * vault contract address, "midnight response key")`. The queue circuits
+   * (`queueAttestation0`, `queueAttestation1`, `queueAttestation32`) accept only
+   * attestations ECDSA-signed by it.
    */
   readonly mpcResponseKey: string;
-}
-
-// A required environment value, with a message naming what produces it.
-function requireValue(
-  env: Record<string, string | undefined>,
-  name: string,
-  produces: string,
-): string {
-  const value = envOrUndefined(env, name);
-  if (!value) throw new Error(`${name} is required to initialise the vault: ${produces}`);
-  return value;
+  /** The MPC root key version the response key and every vault request are derived under. */
+  readonly mpcKeyVersion: bigint;
 }
 
 // Guard a value the caller may have pinned in the environment against the value
@@ -129,18 +112,41 @@ async function resolveEvmChainId(env: Record<string, string | undefined>): Promi
   return reported;
 }
 
+// EVM_START_HEIGHT when set, else the latest block EVM_RPC_URL reports, else zero.
+async function resolveEvmStartHeight(env: Record<string, string | undefined>): Promise<bigint> {
+  const preset = envOrUndefined(env, "EVM_START_HEIGHT");
+  if (preset !== undefined) {
+    if (!/^(0|[1-9]\d*)$/.test(preset)) {
+      throw new Error(`EVM_START_HEIGHT must be a non-negative integer, got "${preset}".`);
+    }
+    return BigInt(preset);
+  }
+  const rpcUrl = envOrUndefined(env, "EVM_RPC_URL");
+  if (rpcUrl === undefined) return 0n;
+  try {
+    return await getEvmBlockNumber(rpcUrl);
+  } catch (error) {
+    throw new Error(
+      `EVM_RPC_URL (${rpcUrl}) is not answering, so the start height cannot be read`,
+      { cause: error },
+    );
+  }
+}
+
 // Everything initialise needs that does NOT depend on the vault's own address,
 // fully validated. Split out so a caller can fail on a missing or malformed
 // value BEFORE deploying the contract those values would configure.
 async function resolveAddressFreeInputs(env: Record<string, string | undefined>): Promise<{
   mpcSecp256k1PublicKey: string;
   evmChainId: bigint;
+  evmStartHeight: bigint;
   targets: VaultEvmTargets;
 }> {
   // The SDK's published key for a deployed network, or MPC_SECP256K1_PUBKEY in
   // any spelling, canonicalised so the derivations below read one form.
   const mpcSecp256k1PublicKey = resolveMpcRootPublicKey(env).value;
   const evmChainId = await resolveEvmChainId(env);
+  const evmStartHeight = await resolveEvmStartHeight(env);
 
   // Parse the targets up front: a malformed override must fail before
   // anything is submitted, not mid-initialise.
@@ -149,7 +155,7 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
   evmAddressBytes(targets.stataUnderlyingAddress);
   evmAddressBytes(targets.stataTokenAddress);
 
-  return { mpcSecp256k1PublicKey, evmChainId, targets };
+  return { mpcSecp256k1PublicKey, evmChainId, evmStartHeight, targets };
 }
 
 /**
@@ -175,7 +181,8 @@ export async function resolveInitialiseConfig(
   env: Record<string, string | undefined>,
   vaultContractAddress: string,
 ): Promise<VaultInitialiseConfig> {
-  const { mpcSecp256k1PublicKey, evmChainId, targets } = await resolveAddressFreeInputs(env);
+  const { mpcSecp256k1PublicKey, evmChainId, evmStartHeight, targets } =
+    await resolveAddressFreeInputs(env);
 
   const vaultEvmAddress = deriveVaultEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress);
   assertDerivedMatch(
@@ -193,7 +200,9 @@ export async function resolveInitialiseConfig(
     vaultEvmAddress,
     ...targets,
     evmChainId,
+    evmStartHeight,
     mpcResponseKey,
+    mpcKeyVersion: SIGNET_DEFAULT_KEY_VERSION,
   };
 }
 
@@ -274,7 +283,9 @@ export async function initialiseVaultContract(
   console.log(`router:            ${config.routerAddress}`);
   console.log(`stata pair:        ${config.stataUnderlyingAddress} -> ${config.stataTokenAddress}`);
   console.log(`EVM chain id:      ${String(config.evmChainId)}`);
+  console.log(`EVM start height:  ${String(config.evmStartHeight)}`);
   console.log(`MPC response key:  ${config.mpcResponseKey}`);
+  console.log(`MPC key version:   ${String(config.mpcKeyVersion)}`);
 
   const result = await vault.callTx.initialise(
     evmAddressBytes(config.vaultEvmAddress),
@@ -283,6 +294,8 @@ export async function initialiseVaultContract(
     evmAddressBytes(config.stataTokenAddress),
     config.evmChainId,
     parseSecp256k1PublicKey(config.mpcResponseKey),
+    config.mpcKeyVersion,
+    config.evmStartHeight,
   );
   console.log(`initialise finalized in tx ${result.public.txId}`);
   return InitialiseVaultOutcome.Initialised;
@@ -291,13 +304,10 @@ export async function initialiseVaultContract(
 /**
  * Join a deployed vault as the deployer and initialise it: the standalone
  * counterpart of {@link initialiseVaultContract} for entrypoints that hold no
- * session. The deployer identity resolves exactly as the deploy resolves it
- * (`VAULT_DEPLOYER_SECRET_KEY`, falling back to the `DEPLOYER_SEED` bytes), so
- * the caller and the commitment sealed at deploy agree by construction.
+ * session.
  *
- * @param env - The environment: the deploy SDK's Midnight node configuration, `DEPLOYER_SEED`,
- *   `VAULT_DEPLOYER_SECRET_KEY`, and everything {@link resolveInitialiseConfig} reads.
- *   Defaults to `process.env`.
+ * @param env - The environment: everything {@link withDeployerVault} and
+ *   {@link resolveInitialiseConfig} read. Defaults to `process.env`.
  * @param contractAddress - The vault to initialise. Defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
  * @returns Whether this call initialised the vault or found it already initialised.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
@@ -310,53 +320,13 @@ export async function initialiseVault(
   env: Record<string, string | undefined> = process.env,
   contractAddress?: string,
 ): Promise<InitialiseVaultOutcome> {
-  // A blank explicit address is treated as absent, so a caller threading an
-  // unset value through still gets the environment's answer (or its error).
-  const explicitAddress = contractAddress?.trim();
-  const vaultContractAddress =
-    explicitAddress === undefined || explicitAddress === ""
-      ? requireValue(
-          env,
-          "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
-          "it names the vault to initialise (the deploy prints it)",
-        )
-      : explicitAddress;
-
-  const deployConfig = getDeployConfig(env);
-  const nodeConfig = deployConfig.midnightNodeConfig;
-  setNetworkId(nodeConfig.networkId);
+  const vaultContractAddress = resolveVaultContractAddress(env, contractAddress, "initialise");
 
   // Resolve the arguments before starting a wallet: a missing variable or a
   // preset contradicting the derivation should fail here, not after a sync.
   const config = await resolveInitialiseConfig(env, vaultContractAddress);
 
-  const secretKey = parseIdentitySecretKey(
-    "VAULT_DEPLOYER_SECRET_KEY",
-    env,
-    deployConfig.deployerSeed,
+  return withDeployerVault(env, vaultContractAddress, (vault, publicDataProvider) =>
+    initialiseVaultContract(vault, publicDataProvider, vaultContractAddress, config),
   );
-  const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, nodeConfig.networkId);
-
-  return withSyncedWalletFacade(accountKeys, nodeConfig, async (facade, state) => {
-    await ensureFeeReady(
-      facade,
-      accountKeys,
-      state,
-      nodeConfig.networkId,
-      getFaucetUrl(env, nodeConfig.networkId),
-    );
-    const providers = buildVaultProviders(facade, accountKeys, nodeConfig);
-    const vault = await findDeployedContract(providers, {
-      contractAddress: vaultContractAddress,
-      compiledContract: vaultCompiledContract,
-      privateStateId: VAULT_PRIVATE_STATE_ID,
-      initialPrivateState: createVaultPrivateState(secretKey),
-    });
-    return initialiseVaultContract(
-      vault,
-      providers.publicDataProvider,
-      vaultContractAddress,
-      config,
-    );
-  });
 }

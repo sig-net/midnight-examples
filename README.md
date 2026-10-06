@@ -41,17 +41,17 @@ The examples are what integrators read and copy. Shared repo-private plumbing li
 
 This Sig Network Protocol Flow brings foreign blockchain assets and functionality to contracts on Midnight. Contracts record signature requests that the Sig Network MPC signs. dApps relay signed transactions to foreign chains and the MPC attests their execution outcomes back to Midnight. Then contracts complete cross chain interactions with in-circuit validation of the MPC foreign execution attestation.
 
-Illustrated below, the protocol is best understood in 5 steps:
+The protocol is best understood in 5 steps:
 
 ![The sign bidirectional protocol flow: five steps between a dApp, contracts on Midnight, the Sig Network MPC and a foreign blockchain](./docs/sign-bidirectional-flow.drawio.png)
 
-1. A user interacts with a dApp, which starts a cross chain interaction by calling a circuit (`startCrossChain(...)` in the diagram) on a contract on Midnight that has integrated with Sig Network.
-2. The MPC network, watching for events on the Singleton contract, picks up the emitted **SignBidirectionalEventNotification** and honours the signature request it points to.
+1. A user interacts with a dApp, which starts a cross chain interaction by calling a circuit on a contract on Midnight that has integrated with Sig Network.
+2. The MPC network, watching for events on the Singleton contract, picks up the emitted **SignBidirectionalEvent** (which carries the **SignBidirectionalEventNotification**) and honours the signature request it points to.
 3. The integrating dApp, watching for events on the Singleton contract, picks up the emitted **SignatureRespondedEvent** and relays the fully signed transaction to the foreign chain.
-4. The MPC network observes execution of the signed transaction on the foreign blockchain and posts an attestation thereof back to Midnight.
+4. The MPC network observes the outcome of the signed transaction in final blocks of the foreign blockchain and posts an attestation thereof back to Midnight.
 5. The integrating dApp collects the execution output and its attestation and submits both back to the integrating contract, completing the cross chain interaction.
 
-Consult the [protocol documentation in the Midnight integration repository](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow) for a more detailed description of the protocol including:
+Consult the [protocol documentation in the Midnight integration repository](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-protocol-flow) for a more detailed description of the protocol including:
 
 - MPC key derivation and signing
 - MPC discovery and verification of the Sign Bidirectional Event signature requests
@@ -67,12 +67,12 @@ steps and 5 per-request runtime steps.
 Setup entails:
 1. Installing `@sig-net/midnight` into your project.
 2. Importing the Signet Compact module into your contract.
-3. Declaring the required protocol state in your ledger (the `SignBidirectionalEventMap` your requests live in and the `SignetSigner` singleton reference your circuits invoke via cross contract call to notify the MPC of requests).
+3. Declaring the required protocol state in your ledger: the `SignBidirectionalEventMapV1` your requests live in, the `SignetSigner` singleton reference your circuits invoke via cross contract call to notify the MPC of requests, the `mpcResponseKey` your circuits verify attestations against, and the highest target-chain height the contract has accepted (`lastSeen`) together with the height recorded for each request when it is made.
 4. Setting the contract's own `mpcResponseKey` with an initialisation circuit call after deploy (its derivation takes the contract's address as input, which exists only once the contract is deployed).
 
 At runtime you integrate the [Sign Bidirectional Protocol Flow above](#sign-bidirectional-protocol-flow):
 - **Steps 1** and **5** are circuits on your contract.
-- **Steps 2**, **3** and **4** are off-chain client/dApp/relayer code built on the readers and helpers in `@sig-net/midnight`.
+- **Steps 2** and **4** are performed by the MPC. **Step 3**, and the watching for the MPC's posts from steps 2 and 4, are off-chain client/dApp/relayer code built on the readers and helpers in `@sig-net/midnight`.
 
 Consult the [Integrator Guide documentation](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide) in the Midnight integration repository for a more detailed description of how to integrate.
 
@@ -136,8 +136,9 @@ yarn build:erc20-vault       # requires 'yarn compile:erc20-vault'
 # offline commands above, these need a full local stack running and a
 # populated .env: see the 'Integration Tests' section below for that setup.
 yarn deploy:erc20-vault             # deploy a vault, requires 'yarn compile:erc20-vault:zk'
-yarn deploy-initialise:erc20-vault  # deploy + the deployer-gated initialise (remote networks)
+yarn deploy-initialise:erc20-vault  # deploy + the deployer-gated initialise and allowed ERC20s (remote networks)
 yarn initialise:erc20-vault         # initialise an already-deployed vault (recovers a half-done run)
+yarn add-allowed-tokens:erc20-vault # allow the ERC20s EVM_ALLOWED_TOKENS lists on an initialised vault
 ```
 
 Scripts targeting a particular example carry that example's directory name in full (e.g. `compile:erc20-vault`), so every example gains the same family of scripts. The task prefix decides which of the example's packages run: `test:` and `build:` fan out over every package the example has, `compile:` reaches only its contract package, and `deploy:` or `deploy-initialise:` only its deploy package.
@@ -146,7 +147,7 @@ Scripts targeting a particular example carry that example's directory name in fu
 
 The e2e integration test suites need a local stack of services. To bring it up:
 
-1. Populate a minimal `.env` file at the root of the repository with at least the `SEPOLIA_FORK_RPC_URL` variable (see [`.env.example`](.env.example)).
+1. Populate a minimal `.env` file at the root of the repository with at least the `SEPOLIA_FORK_RPC_URL` variable, an archive-capable Sepolia RPC (see [`.env.example`](.env.example)).
 2. Run `docker compose up -d` from the root of the repository.
 
 With the stack running, each example's e2e suite runs from the root:

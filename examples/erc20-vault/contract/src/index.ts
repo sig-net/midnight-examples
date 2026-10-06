@@ -13,6 +13,7 @@ export * from "./evm.ts";
 export * from "./managed/erc20-vault/contract/index.js";
 export * from "./vault-addresses.ts";
 export * from "./vault-ledger.ts";
+export * from "./vault-queue.ts";
 export * from "./witnesses.ts";
 
 /**
@@ -47,48 +48,61 @@ export function deriveVaultEvmAddress(
   return deriveEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress, VAULT_PATH_HEX);
 }
 
-// THIS contract's signet ledger layout (declaration order in
-// erc20-vault.compact): each request kind owns a SignBidirectionalEventMap, and
-// `signetRequestNonce` keeps otherwise identical requests hashing apart. A
-// client contract is free to place its event maps at any field: every raw
-// reader takes the resolved ledger-tree path explicitly, and the path must
-// match the `requestsPath` the contract packs into its notifications. The
-// compiler records each field's path as its "index" in
-// managed/erc20-vault/compiler/contract-info.json.
-
-// The vault has 20 ledger fields, past the 15-field flat limit, so the compiler
-// chunks the state tree two levels deep. Every path below is therefore
-// [chunk, offset] (depth 2), and the request circuits pack the same as
-// requestsPathDepth 2. Chunk 0 holds fields 0–4, chunk 1 holds fields 5–19.
+// THIS contract's signet ledger layout: each action owns a
+// SignBidirectionalEventMapV1. A client contract is free to place its event maps
+// at any field: every raw reader takes the resolved ledger-tree path explicitly,
+// and the path must match the `requestsPath` the contract packs into its
+// notifications. The compiler records each field's path as its "index" in
+// managed/erc20-vault/compiler/contract-info.json. The vault has more than 15
+// ledger fields, so the compiler chunks the state tree two levels deep and every
+// path is [chunk, offset] (depth 2).
 
 /**
- * Resolved ledger-tree path of `signBidirectionalEventMap` (ledger field 0),
- * which holds the approve and withdraw requests. The same path `approveStata`,
- * `approveRouter` and `startWithdraw` pack as depth 2 + [0, 0, 0, 0].
+ * Resolved ledger-tree path of `bidirectionalDepositMap`, which holds the deposit
+ * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
+ * `requestsPath` [2, 5, 0, 0] the `sendDeposit` circuit packs.
  */
-export const VAULT_REQUESTS_PATH: readonly number[] = [0, 0];
-
-/** Resolved ledger-tree path of `signetRequestNonce` (ledger field 3). */
-export const VAULT_NONCE_PATH: readonly number[] = [0, 3];
+export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [2, 5];
 
 /**
- * Resolved ledger-tree path of `depositEventMap` (ledger field 8). Deposits
- * register their notification in this SEPARATE map, so the deposit flow reads
- * MPC responses from this path. Matches the depth 2 + `requestsPath`
- * [1, 3, 0, 0] the `startDeposit` circuit packs.
+ * Resolved ledger-tree path of `bidirectionalWithdrawMap`, which holds the withdraw
+ * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
+ * `requestsPath` [2, 7, 0, 0] the `sendWithdraw` circuit packs.
  */
-export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [1, 3];
+export const VAULT_WITHDRAW_REQUESTS_PATH: readonly number[] = [2, 7];
 
 /**
- * Resolved ledger-tree path of `swapEventMap` (ledger field 12). Swaps register
- * their notification in this SEPARATE map (sized for a 7-word exactOutputSingle),
- * so the swap flow reads MPC responses from this path. Matches the depth 2 +
- * `requestsPath` [1, 7, 0, 0] the `startSwap` circuit packs.
+ * Resolved ledger-tree path of `bidirectionalApproveMap`, which holds the approve
+ * requests of both spenders (the Uniswap router and the stataToken wrapper), as the
+ * compiled `contract-info.json` lists it. Matches the depth 2 + `requestsPath`
+ * [2, 3, 0, 0] the `sendApprove` circuit packs.
  */
-export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [1, 7];
+export const VAULT_APPROVE_REQUESTS_PATH: readonly number[] = [2, 3];
 
-/** Resolved ledger-tree path of `supplyEventMap` (ledger field 16). */
-export const VAULT_SUPPLY_REQUESTS_PATH: readonly number[] = [1, 11];
+/**
+ * Resolved ledger-tree path of `bidirectionalReplaceNonceMap`, which holds the nonce
+ * replacement requests, as the compiled `contract-info.json` lists it. Matches the
+ * depth 2 + `requestsPath` [2, 1, 0, 0] the `sendReplaceNonce` circuit packs.
+ */
+export const VAULT_REPLACE_NONCE_REQUESTS_PATH: readonly number[] = [2, 1];
 
-/** Resolved ledger-tree path of `redeemEventMap` (ledger field 18). */
-export const VAULT_REDEEM_REQUESTS_PATH: readonly number[] = [1, 13];
+/**
+ * Resolved ledger-tree path of `bidirectionalSwapMap`, which holds the swap requests,
+ * as the compiled `contract-info.json` lists it. Matches the depth 2 + `requestsPath`
+ * [2, 9, 0, 0] the `sendSwap` circuit packs.
+ */
+export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [2, 9];
+
+/**
+ * Resolved ledger-tree path of `bidirectionalSupplyMap`, which holds the supply
+ * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
+ * `requestsPath` [2, 11, 0, 0] the `sendSupply` circuit packs.
+ */
+export const VAULT_SUPPLY_REQUESTS_PATH: readonly number[] = [2, 11];
+
+/**
+ * Resolved ledger-tree path of `bidirectionalRedeemMap`, which holds the redeem
+ * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
+ * `requestsPath` [2, 13, 0, 0] the `sendRedeem` circuit packs.
+ */
+export const VAULT_REDEEM_REQUESTS_PATH: readonly number[] = [2, 13];

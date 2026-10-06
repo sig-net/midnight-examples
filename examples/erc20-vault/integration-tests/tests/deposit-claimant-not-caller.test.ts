@@ -172,7 +172,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         expect(
           state.initialised,
           "vault is not initialised: run tests/happy-day-e2e.test.ts first (or initialise the vault)",
-        ).toBe(1n);
+        ).toBe(true);
       },
       5 * MINUTE,
     );
@@ -227,7 +227,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(
-          ledger.depositEventMap.member(requestIdBytes(requestId)),
+          ledger.bidirectionalDepositMap.member(requestIdBytes(requestId)),
           "claim must consume the request from the ledger",
         ).toBe(false);
 
