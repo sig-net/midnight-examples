@@ -112,9 +112,7 @@ async function resolveEvmChainId(env: Record<string, string | undefined>): Promi
   return reported;
 }
 
-// Everything initialise needs that does NOT depend on the vault's own address,
-// fully validated. Split out so a caller can fail on a missing or malformed
-// value BEFORE deploying the contract those values would configure.
+// EVM_START_HEIGHT when set, else the latest block EVM_RPC_URL reports, else zero.
 async function resolveEvmStartHeight(env: Record<string, string | undefined>): Promise<bigint> {
   const preset = envOrUndefined(env, "EVM_START_HEIGHT");
   if (preset !== undefined) {
@@ -135,6 +133,9 @@ async function resolveEvmStartHeight(env: Record<string, string | undefined>): P
   }
 }
 
+// Everything initialise needs that does NOT depend on the vault's own address,
+// fully validated. Split out so a caller can fail on a missing or malformed
+// value BEFORE deploying the contract those values would configure.
 async function resolveAddressFreeInputs(env: Record<string, string | undefined>): Promise<{
   mpcSecp256k1PublicKey: string;
   evmChainId: bigint;

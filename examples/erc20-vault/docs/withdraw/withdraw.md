@@ -12,7 +12,7 @@ transfer.
 It is best to understand the
 [sign bidirectional flow](../../../../README.md#sign-bidirectional-protocol-flow) before
 you continue here. For more detail see the
-[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow)
+[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-protocol-flow)
 in the midnight integration repository.
 
 ## The integration
@@ -31,10 +31,11 @@ Midnight to the complete call that closes the request. There is no fund step:
 the ERC20 to move already sits in the vault's own EVM account, pinned at
 initialise as [`vaultEvmAddress`](../../contract/src/erc20-vault.compact).
 Every step runs as it does for a [deposit](../deposit/deposit.md), which
-describes the shared machinery in full, with two differences: the vault's own
-account signs the transfer, so the flush assigns its nonce, and the complete
-circuit re-mints the surrendered value whenever the transfer did not go
-through.
+describes the shared machinery in full, with three differences: the start burns
+the surrendered vault coin, the vault's own account signs the transfer, so the
+flush assigns its nonce, and the complete circuit re-mints the surrendered
+value when the MPC attests that the transfer failed, was unviable, or returned
+false.
 
 ![Withdraw flow](withdraw.drawio.png)
 
@@ -71,11 +72,12 @@ As illustrated, the flow comprises 9 steps:
     [`vaultAccountNonce`](../../contract/src/erc20-vault.compact) before it
     computes the request index, then moves the entry into `outputRequestBuffer`
     with `globalLastSeen` as its `lastSeen` and advances the nonce by one.
-    Each vault-signed request therefore carries a nonce no other request holds,
+    Each request whose nonce the flush assigns therefore carries a nonce no
+    other such request holds,
     so two otherwise identical withdrawals never wait on each other (see
     [Vault-signed requests](../contention-handling.md#vault-signed-requests)).
   - The request index covers the assigned nonce, so it exists only after the
-    flush: `start-withdraw.ts` flushes through the SDK's
+    flush: `start-withdraw.ts` flushes through the contract package's
     [`flushUntil`](../../contract/src/vault-queue.ts) until the entry leaves
     the input buffer, then reads the index with
     [`flushedRequestIndex`](../../contract/src/vault-queue.ts).
@@ -101,7 +103,7 @@ As illustrated, the flow comprises 9 steps:
     through the singleton's `respond(...)`.
   - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts)
     polls the singleton's emitted signature events through the SDK's
-    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0-rc.10/packages/signet-midnight/src/signet-request-response-reader.ts),
+    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
     recovers to the expected signer: for a withdrawal, the vault's own
     account, `evmVaultAddress`.
@@ -165,12 +167,11 @@ As illustrated, the flow comprises 9 steps:
 Every circuit call goes through the deployed vault, joined once with the
 caller's identity secret as private state (see
 [Runtime: joining the deployed vault](../../README.md#runtime-joining-the-deployed-vault)
-in the vault README). That secret is the user's own random value. The diagrams name it
-`MIDNIGHT_USER1_VAULT_SECRET`, and the integration tests take it from the
-`VAULT_USER_SECRET_KEY` environment variable, falling back to the `USER_SEED`
-bytes when it is unset.
+in the vault README). That secret is the user's own random value. The
+integration tests take it from the `VAULT_USER_SECRET_KEY` environment
+variable, falling back to the `USER_SEED` bytes when it is unset.
 
-The off-chain steps (4 to 6) each build a `SignetRequestResponseReader` over
+The two polling steps (4 and 6) each build a `SignetRequestResponseReader` over
 the vault and singleton pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts), passing
 the withdraw map's path. The withdraw-specific piece is the expected signer:
@@ -179,48 +180,14 @@ path is the contract-fixed `pad(32, "vault")`. The MPC renders a request's 32
 opaque path bytes as their full-width lowercase hex, padding included, and
 `deriveEvmAddress` takes the same rendering, so the vault's account derives
 from [`VAULT_PATH_HEX`](../../contract/src/index.ts).
-`deriveEvmAddress` is the concrete function behind the diagram's abstract
-`keyDerivation(...)` note, and `deriveMidnightResponseKey` is the one behind the
-response key's own note. The response key takes no path: it is per-contract and
-independent of any request's derivation path, and the queue circuits verify the
-MPC's attestation against it.
-
-## Sequence
-
-```mermaid
-sequenceDiagram
-    title Withdraw round trip
-    actor User
-    participant DApp as Vault dApp/Relayer
-    participant Vault as ERC20 Vault Contract
-    participant Singleton as Sig Network Singleton Contract
-    participant MPC as Sig Network Distributed MPC
-    participant EVM as EVM Blockchain
-
-    Note over User,Vault: Step 1: startWithdraw(...) burns the surrendered coin and queues the request
-    User->>Vault: startWithdraw(...) surrendering a shielded vault coin
-    Note over User,Vault: Step 2: flushQueue(...) assigns the vault nonce and moves the request into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Singleton: Step 3: sendWithdraw(...) records the request and notifies the MPC
-    User->>Vault: sendWithdraw(...)
-    Vault->>Singleton: signBidirectional(...)
-    Note over DApp,MPC: Step 4: poll for the MPC's signature
-    MPC->>Vault: reads the recorded request
-    MPC->>Singleton: respond(...) posts the signature
-    DApp->>Singleton: polls for the signature
-    Note over DApp,EVM: Step 5: broadcast the transfer to the EVM chain
-    DApp->>EVM: broadcasts the MPC-signed transfer(destEvmAddress, amount)
-    Note over DApp,EVM: Step 6: poll for the MPC's attestation
-    MPC->>EVM: watches for transaction execution
-    MPC->>Singleton: respondBidirectional(...) posts the attestation
-    DApp->>Singleton: polls for the attestation
-    Note over User,Vault: Step 7: queue the attestation at its output's width
-    User->>Vault: queueAttestation1(...) or queueAttestation0(...)
-    Note over User,Vault: Step 8: flushQueue(...) moves the attestation into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Vault: Step 9: completeWithdraw(...) settles on the attested output
-    User->>Vault: completeWithdraw(...)
-```
+`deriveEvmAddress` derives the vault's EVM account, and
+`deriveMidnightResponseKey` derives the response key: they are the concrete
+functions behind the abstract `keyDerivation(...)` notes on the
+[actor map](../../README.md#the-actors), and the diagram above names only
+their inputs, in its footnote. The response key does not use any request's
+derivation path: the MPC derives it for this contract under a
+reserved path that no request may name ("midnight response key" in the SDK),
+and the queue circuits verify the MPC's attestation against it.
 
 ---
 

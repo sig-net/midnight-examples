@@ -9,10 +9,13 @@ never conflict. Two transactions that both read a single shared cell and one of
 them writes it always can.
 
 Some vault state is genuinely shared by every request. The vault's rule is
-that such state has exactly one writer: `flushQueue`. Every other circuit works
-only on entries keyed by its own request, so the circuits users call (start,
-send, queue an attestation, complete) never conflict with the flush, and calls
-for different requests never conflict with each other. All contention is
+that, after `initialise`, such state has exactly one writer: `flushQueue`.
+Every other circuit works only on entries keyed by its own request, so the
+circuits users call (start, send, queue an attestation, complete) never
+conflict with the flush, and calls for different requests never conflict with
+each other. The one exception is the deployer's `setGasParams`: it rewrites
+the gas settings every vault-signed start reads, so a vault-signed start
+proven before it lands must be re-proven. Apart from that, all contention is
 concentrated in the flush, where it is cheap to
 handle: a flush carries no user funds or secrets, anyone may submit one, and a
 flush that loses a race is simply rebuilt from the new state and resubmitted.
@@ -22,7 +25,7 @@ The price of a lost race is the losing flush's fee.
 
 | Cell             | Read and written by              | Holds                                                            |
 | ---------------- | -------------------------------- | ---------------------------------------------------------------- |
-| `globalLastSeen` | `flushQueue` (and `initialise`)  | the highest block height of any attestation the flush has folded |
+| `globalLastSeen` | `flushQueue` (written once by `initialise`) | the highest block height of any attestation the flush has folded |
 | `vaultAccountNonce` | `flushQueue`                     | the vault EVM account's next nonce                               |
 
 `globalLastSeen` is the safety bound every settlement checks: an attestation
@@ -31,8 +34,8 @@ vault had seen when it accepted that request (see
 [The last seen height](#the-last-seen-height)). `initialise` sets it to the
 current EVM height.
 
-`vaultAccountNonce` hands each request the vault's own account signs a nonce no
-other request holds (see [Vault-signed requests](#vault-signed-requests)). It
+`vaultAccountNonce` hands each request the vault's own account signs a nonce the
+flush assigns to no other request (see [Vault-signed requests](#vault-signed-requests)). It
 starts at 0, as every deployment derives a fresh vault account from its own
 contract address.
 
@@ -55,7 +58,7 @@ A request entry (`RequestBufferEntry`) has one size for every action. It
 carries:
 
 - **The action.**
-- **The nonce.** `useNextVaultAccountNonce` is `false` when the caller names the nonce,
+- **The nonce.** `useNextVaultAccountNonce` is `false` when the start sets the nonce,
   which is taken verbatim: a deposit names the depositor's own account nonce,
   and a nonce replacement carries the vault account nonce of the sent request
   it replaces. It is
@@ -81,9 +84,10 @@ envelope at start), `supplyArgsMap` each supply's `SupplyArgs` (the
 `SupplyRequest`, naming the amount, and the vault's gas envelope at start),
 and `redeemArgsMap` each redeem's `RedeemArgs` (the `RedeemRequest`, naming
 the shares, and the vault's gas envelope at start).
-The start circuit writes them, the send and complete circuits read
-them, and the complete circuit removes them. The flush never touches them, so
-its cost does not grow with the actions the vault supports.
+The start circuit writes them, the send circuit reads them, and the
+complete circuit removes them (reading them first in the actions that can
+mint). The flush never touches them, so its cost does not grow with the
+actions the vault supports.
 The start circuit refuses an index that either the input buffer or its args
 map already holds.
 
@@ -102,7 +106,7 @@ writes to an output buffer. It records the request in the action's event map
 and the request id in `evictionMap` (request id to request index), which is how
 the queue and complete circuits find the entry from an attestation. A second
 send of the same entry builds the same request id, which the event map already
-holds, so each entry is sent exactly once.
+holds, so each entry is sent at most once.
 
 An attestation record (`AttestationRecord`) holds the block height, the output
 kind and the attestation digest, stored under its request id. It holds no
@@ -163,9 +167,11 @@ A slot whose index is not in its input buffer fails the whole flush, with
 `Request not queued` or `Attestation not queued`. So does a request slot whose
 twin (an entry with the same request index) is still open, with `Identical
 request open`: the twin stays in `inputRequestBuffer`, and a later flush moves
-it once the open request settles. The flush fails when it is built, so it
-commits nothing and takes no vault nonce. A flush fails only on the items its
-caller names, so what a user queues can never fail someone else's flush.
+it once the open request settles. A flush that fails commits nothing and takes
+no vault nonce: it fails when it is built, or, when another flush changed the
+state after it was built, it lands as a failed fallible section. A flush
+fails only on the items its caller names, so what a user queues can never
+fail someone else's flush.
 
 Slots run in order, so within one flush a request slot placed after an
 attestation slot sees that attestation's height in its `lastSeen`.
@@ -185,7 +191,7 @@ reads `vaultAccountNonce`. One of them lands, and the other is rebuilt and
 resubmitted. Only the flusher ever retries. Users' own transactions never fail
 because of a flush.
 
-The SDK's `flushPending` fills the slots from the ledger, up to 10 items: the
+The contract package's `flushPending` fills the slots from the ledger, up to 10 items: the
 items its caller names first, then queued attestations, then queued requests,
 each in ledger order. It leaves out a caller-signed request whose twin is open,
 or whose request index an earlier request in the batch already takes, as it would
@@ -196,7 +202,7 @@ its flush (`flushedRequestIndex` reads it). So another user's waiting repeats
 cannot fill a caller's flush, and `flushUntil` puts the items the caller waits
 for into every flush it submits.
 
-The SDK's `flushPending` submits every flush with its whole transcript in the
+The contract package's `flushPending` submits every flush with its whole transcript in the
 transaction's fallible section, which runs after the fee is paid. Before taking
 a fee, a node must be able to reject a transaction cheaply: it refuses one
 whose proof check plus guaranteed section takes longer than
@@ -235,23 +241,29 @@ The guarantee rests on three orderings the design enforces:
 A deposit shows why this matters. Its EVM transaction is determined by the
 depositor (their derived account, their nonce, their token and amount, and the
 gas they choose), so an identical second deposit can produce the identical
-request id. The MPC would observe the same finalised transaction and issue
-exactly the attestation that settled the first deposit. The `lastSeen` check
-rejects it. An identical repeat of a deposit therefore never settles: it shares
-the first deposit's nonce, which the first deposit's transaction consumed, so
-every attestation of it describes a block the vault has already folded.
+request id. The Signet protocol promises nothing for a request made again
+after its transaction ran. If the MPC attests it at all, the only attestation
+it can give is the one that settled the first deposit, at the same height. The
+`lastSeen` check rejects it. An identical repeat of a deposit therefore never
+settles: it shares the first deposit's nonce, which the first deposit's
+transaction consumed, so every attestation of it describes a block the vault
+has already folded.
 
 A real attestation for a new request passes: its transaction is signed only
 after the entry was flushed, so it lands in a block strictly above every height
 the flush had seen. One case does not pass. A deposit names the depositor's own
-nonce, and when another transaction consumed that nonce before the flush, the
-MPC attests the request unviable at that transaction's block, which can lie at
-or below the entry's `lastSeen`. Such a deposit stays open, with nothing lost,
-as a deposit surrenders nothing at start.
+nonce. When another request's transaction consumed that nonce before the
+flush, the MPC attests this deposit unviable only if the deposit was already
+sent when that other request was answered, and then at that transaction's
+block, which can lie at or below the entry's `lastSeen`. Otherwise the MPC
+never attests it. Either way such a deposit stays open, with nothing lost, as
+a deposit surrenders nothing at start.
 
-The vault trusts the MPC: it attests each request id once, at the height of
-the finalised block holding the transaction the attestation describes, as the
-Signet protocol defines it.
+The vault trusts the MPC to attest a request only at the height of the
+finalised block holding the transaction the attestation describes, as the
+Signet protocol defines it. The MPC may publish the same attestation more than
+once: the `lastSeen` check and the removals at complete stop a repeat from
+settling a second time.
 
 ## Why the queue takes the full output
 
@@ -465,10 +477,16 @@ nowhere.
   number of users.
 - **No gas bump.** A request's gas is fixed at start, so a deposit queued with
   too little gas to be mined stays pending until the network fee falls to meet
-  it. A vault-signed request is fixed to the vault's gas settings at its start,
-  and while its transaction waits, every later vault transaction waits behind
-  its nonce.
+  it, or until the depositor starts a new deposit at the same nonce with more
+  gas: when that one executes, the MPC attests the first one unviable and it
+  closes. A vault-signed request is fixed to the vault's gas settings at its
+  start, and while its transaction waits, every later vault transaction waits
+  behind its nonce, until the deployer replaces the nonce (see
+  [Nonce replacement](#nonce-replacement)).
 - **No cancel.** No circuit closes an open request without an attestation that
-  passes the bound. A request that is sent but never mined, or attested stale,
-  stays in `outputRequestBuffer`, and it keeps its identical repeats in
-  `inputRequestBuffer`.
+  passes the bound. A request that is sent but never mined stays in
+  `outputRequestBuffer`, and keeps its identical repeats in
+  `inputRequestBuffer`, until another request's transaction uses its nonce and
+  the MPC attests it unviable: a nonce replacement for a vault-signed request,
+  or a new deposit at the same nonce for a deposit. A request whose only
+  attestation is stale stays open for good.

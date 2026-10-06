@@ -1,0 +1,72 @@
+\section{Take Away from this document}
+\label{sec:conclusions}
+
+
+
+\subsection{Take away for a Midnight User}
+
+\begin{itemize}
+    \item \textbf{This  cross-chain system  involves a  public chain so all amounts are public!}.
+Even if you can call actions  such as Withdraw/Swap/Supply/Redeem anonymously on Midnight (i.e., without revealing your identity),  the amounts of those actions   must be executed on the public chain, so those amounts  are still public, even if your identity is not.
+\item Because amounts are public, \textbf{you have to be careful when you choose the amounts and timing when performing  Withdraw/Swap/Supply.}
+For instance,  if you Deposit  5 USD, and then immediately Withdraw 5 USD on a fresh, and therefore unlinkable to the address you used to deposit,  ethereum wallet, the amounts and timings still gives a way a link between the deposit and the withdraw.
+Similar arguments apply for Swap/Supply/Redeem.
+
+
+
+\item \textbf{Withdraw is unlikable to you,   only if you provide a fresh Ethereum account.}
+If you withdraw funds into an account that you previously used, then the withdraw is connected to your previous activity.
+In the worst case, if you withdraw to an Ethereum account that you used to fund your  derived address used in Deposit, then you have linked deposit and withdraw.
+
+\item \textbf{Keep your private coins consolidate in one coin. }
+The number of coins you need to collect in order to pay for a Withdraw/Swap/Supply
+leaks information about who you are.
+This is true regardless of whether you use our tool, or you simply operate on Midnight.
+You should always have your coins consolidated in one coin, and when you pay you should always have a change coin.
+
+
+
+\item  \textbf{Deposit requests are all linkable to you. }
+Our system assigns a fixed identity $\userComm(\usersk_i)$ to each user that is used for each deposit.
+This makes all deposits requested by the owner of  $\usersk_i$ linkable.
+(all other actions are not linkable since the authentication tag that we use, takes a one-time string $\rid$ that makes each tag unique.)
+
+
+\item For privacy,  \textbf{secret $\usersk_i$  must be kept secret at all times.}
+If someone learns $\usersk_i$, they can then link all your previous activities.
+
+\item On the bright side, if you leak $\usersk_i$,
+the adversary can at most steal one pending request.
+
+
+
+\item Your anonymity set  in Swap/Supply/Redeem is restricted to  the number of people of are transacting  on those particular coins.
+
+\end{itemize}
+
+
+
+
+
+\subsection{For the Developers}
+
+\begin{itemize}
+    \item \textbf{A fixed $\keyPath_i$ per user is only a design choice.} In our implementation,  the user's software picks a random application secret $\usersk_i$ as a permanent secret used across all deposits (and all calls). This design choice prioritizes user's convenience over stronger privacy. Convenience come from the fact that the user will only need to fund a single derived account (dictated by  $\userComm_i$).
+    This gives weaker privacy  because (1) all deposits to the user's account are strictly linkable  -- even if they came from different ethereum accounts.  (2) leakage of the application secret $\usersk_i$ deanonymize all user's past activities.
+\end{itemize}
+
+\subsection{For the Cryptographers}
+
+This treatment focuses on the erc20 vault contract,  it is not an attempt to analyze the entire system rigorously.
+As such, we made a few simplifications, and some arguments are  informal.
+
+
+\begin{itemize}
+    \item Unlinkability: in our systems the identities  of the caller are used in two layers: in our protocol messages and in Midnight's protocol messages.
+    In this proof, we identify which Midnight's items contributed to our security and we rely on them, but we do not prove formally that those objects achieve the property that are claimed.
+
+
+    \item Soundness: our definition of soundness could be  made more comprehensive using the UC framework. We defer it to the next iteration of the document.
+
+
+\end{itemize}

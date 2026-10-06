@@ -195,9 +195,10 @@ export async function startSwap(
   const result = await context.vault.callTx.sendSwap(outIndex);
   console.log(`swap sent in tx ${result.public.txId}`);
 
-  // The bidirectionalSwapMap index IS the record's transientHash digest:
-  // recomputing it off-chain and finding it on the ledger proves both sides agree
-  // on every byte of the event.
+  // The bidirectionalSwapMap index is the request id, a hash of the event's seven
+  // execution fields (the transaction enters as a digest of its used entries): finding
+  // the recomputed id on the ledger proves both sides agree on those fields, not on the
+  // output schema, signatureDest or params.
   const after = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,

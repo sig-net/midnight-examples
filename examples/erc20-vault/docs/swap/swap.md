@@ -12,7 +12,7 @@ the shielded supply stay equal per token.
 It is best to understand the
 [sign bidirectional flow](../../../../README.md#sign-bidirectional-protocol-flow) before
 you continue here. For more detail see the
-[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-flow)
+[sign bidirectional flow](https://github.com/sig-net/midnight-integration/blob/main/README.md#sign-bidirectional-protocol-flow)
 in the midnight integration repository.
 
 ## The integration
@@ -32,7 +32,7 @@ Midnight to the complete call that mints what the trade bought. It is the
 optimistic burn, the same vault-signed EVM transaction at a nonce the flush
 assigns, the same queued and flushed attestation, over the swap's own request
 map, [`bidirectionalSwapMap`](../../contract/src/erc20-vault.compact), typed
-for the seven-word `exactOutputSingle` call and the swap's own schemas. The
+for the seven-word `exactOutputSingle` call and the swap's own schema. The
 [deposit](../deposit/deposit.md) page describes the shared machinery in full.
 
 The router spends from the vault account under an allowance granted once per
@@ -162,9 +162,9 @@ As illustrated, the flow comprises 9 steps:
 Every circuit call goes through the deployed vault, joined once with the
 caller's identity secret as private state (see
 [Runtime: joining the deployed vault](../../README.md#runtime-joining-the-deployed-vault)
-in the vault README). That secret is the user's own random value, not a wallet
-seed. The diagrams name it `MIDNIGHT_USER1_VAULT_SECRET`, and the integration
-tests take it from the `VAULT_USER_SECRET_KEY` environment variable.
+in the vault README). That secret is the user's own random value. The
+integration tests take it from the `VAULT_USER_SECRET_KEY` environment
+variable, falling back to the `USER_SEED` bytes when it is unset.
 
 A swap starts from a shielded balance the swapper already holds, so a
 [deposit](../deposit/deposit.md) precedes it: the caller must hold
@@ -173,7 +173,7 @@ surrender it. The leg also needs a live Uniswap V3 deployment: the setup
 pipeline checks for the router with `uniswapAvailable` before any spec runs
 and fails the run on an EVM chain without it.
 
-The off-chain steps (4 to 6) each build a `SignetRequestResponseReader` over
+The two polling steps (4 and 6) each build a `SignetRequestResponseReader` over
 the vault and singleton pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts). The
 swap-specific piece is the path: a swap passes
@@ -184,48 +184,14 @@ renders a request's 32 opaque path bytes as their full-width lowercase hex,
 padding included, and `deriveEvmAddress` takes the same rendering, so the
 vault's account derives from
 [`VAULT_PATH_HEX`](../../contract/src/index.ts).
-`deriveEvmAddress` is the concrete function behind the diagram's abstract
-`keyDerivation(...)` note, and `deriveMidnightResponseKey` is the one behind the
-response key's own note. The response key takes no path: it is per-contract and
-independent of any request's derivation path, and the queue circuits verify the
-MPC's attestation against it.
-
-## Sequence
-
-```mermaid
-sequenceDiagram
-    title Swap round trip
-    actor User
-    participant DApp as Vault dApp/Relayer
-    participant Vault as ERC20 Vault Contract
-    participant Singleton as Sig Network Singleton Contract
-    participant MPC as Sig Network Distributed MPC
-    participant EVM as EVM Blockchain
-
-    Note over User,Vault: Step 1: startSwap(...) burns the surrendered coin and queues the request
-    User->>Vault: startSwap(...) surrendering a shielded erc20AddressIn vault coin
-    Note over User,Vault: Step 2: flushQueue(...) assigns the vault nonce and moves the request into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Singleton: Step 3: sendSwap(...) records the request and notifies the MPC
-    User->>Vault: sendSwap(...)
-    Vault->>Singleton: signBidirectional(...)
-    Note over DApp,MPC: Step 4: poll for the MPC's signature
-    MPC->>Vault: reads the recorded request
-    MPC->>Singleton: respond(...) posts the signature
-    DApp->>Singleton: polls for the signature
-    Note over DApp,EVM: Step 5: broadcast the swap to the EVM chain
-    DApp->>EVM: broadcasts the MPC-signed exactOutputSingle(...)
-    Note over DApp,EVM: Step 6: poll for the MPC's attestation
-    MPC->>EVM: watches for transaction execution
-    MPC->>Singleton: respondBidirectional(...) posts the attestation
-    DApp->>Singleton: polls for the attestation
-    Note over User,Vault: Step 7: queue the attestation at its output's width
-    User->>Vault: queueAttestation32(...) or queueAttestation0(...)
-    Note over User,Vault: Step 8: flushQueue(...) moves the attestation into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Vault: Step 9: completeSwap(...) mints amountOut of erc20AddressOut plus the unspent erc20AddressIn
-    User->>Vault: completeSwap(...)
-```
+`deriveEvmAddress` derives the vault's EVM account, and
+`deriveMidnightResponseKey` derives the response key: they are the concrete
+functions behind the abstract `keyDerivation(...)` notes on the
+[actor map](../../README.md#the-actors), and the diagram above names only
+their inputs, in its footnote. The response key does not use any request's
+derivation path: the MPC derives it for this contract under a
+reserved path that no request may name ("midnight response key" in the SDK),
+and the queue circuits verify the MPC's attestation against it.
 
 ---
 

@@ -89,8 +89,6 @@ export async function startDeposit(
 
   console.log(`caller commitment: ${context.identity.commitmentHex}`);
 
-  // Pre-call ledger read: the request nonce the contract will use, the sealed
-  // vault EVM address its calldata will pay to, and the pinned chain config.
   await logTokenAmount(
     context.evmRpcUrl,
     erc20Address,
@@ -100,7 +98,7 @@ export async function startDeposit(
   );
   // The sweep the MPC signs moves `amount` out of the user's derived account, so a request
   // that account cannot pay is refused here: once recorded, its sweep reverts only after a
-  // Midnight proof is paid and an EVM nonce burned, and the request strands on the ledger.
+  // Midnight proof is paid and an EVM nonce burned, and the request then settles as failed.
   const { balance, decimals } = await getErc20Balance(
     context.evmRpcUrl,
     erc20Address,
@@ -113,6 +111,8 @@ export async function startDeposit(
       `${context.evmUserAddress} cannot pay this deposit's sweep (${funding}): fund it on EVM and rerun`,
     );
   }
+  // Pre-call ledger read: the sealed vault EVM address the calldata pays to, and the
+  // pinned chain id.
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
@@ -190,9 +190,10 @@ export async function startDeposit(
   const result = await context.vault.callTx.sendDeposit(outIndex);
   console.log(`deposit sent in tx ${result.public.txId}`);
 
-  // The bidirectionalDepositMap index IS the record's transientHash digest: recomputing
-  // it off-chain and finding it on the ledger proves both sides agree on every
-  // byte of the event.
+  // The bidirectionalDepositMap index is the request id, a hash of the event's seven
+  // execution fields (the transaction enters as a digest of its used entries): finding
+  // the recomputed id on the ledger proves both sides agree on those fields, not on the
+  // output schema, signatureDest or params.
   const after = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,

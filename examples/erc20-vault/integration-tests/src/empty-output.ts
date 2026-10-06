@@ -1,5 +1,5 @@
-// The serialised output the MPC attests for a transaction that never
-// executed, and for an executed one whose output schema is empty. Under
+// The serialised output the MPC attests for a failed or unviable
+// transaction, and for an executed one whose output schema is empty. Under
 // OutputKind.failed (reverted) and OutputKind.unviable (its nonce taken by
 // another transaction) the attestation digest commits to zero output bytes,
 // so a client needs no observation to check a post declaring either kind. A

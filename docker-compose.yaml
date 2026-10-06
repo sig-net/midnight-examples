@@ -62,8 +62,8 @@ services:
 
   evm:
     # anvil dev chain (id 31337, pre-funded dev-mnemonic accounts). State is
-    # in-memory: a restart wipes the chain (the test setup detects this and
-    # redeploys the token).
+    # in-memory: a restart wipes the chain (the test setup deals the derived
+    # accounts again on its next run).
     #
     # Set SEPOLIA_FORK_RPC_URL to fork Sepolia so the real Uniswap V3 deployment
     # + real USDC are present. The erc20-vault e2e suites run against this fork
@@ -93,7 +93,7 @@ services:
   fakenet:
     # The MPC fakenet responder (sig-net/solana-signet-program, fakenet-signer
     # workspace) in Midnight-only mode (DISABLE_SOLANA). Polls the signet contract's
-    # notification registry via the indexer, signs with keys derived from MPC_ROOT_KEY,
+    # notification events via the indexer, signs with keys derived from MPC_ROOT_KEY,
     # and posts responses through the proof server.
     #
     # Only runs with `--profile fakenet` as it needs MPC_ROOT_KEY and

@@ -24,8 +24,8 @@ export interface SignetNotificationPoll {
   /** The caller contract a matching notification must name (any hex form). */
   callerAddress: string;
   /**
-   * The request-map path a matching notification must carry, e.g. `[0]` for
-   * the vault's flat field-0 map.
+   * The request-map path a matching notification must carry, e.g. `[2, 5]` for
+   * the vault's deposit map.
    */
   requestsPath: readonly number[];
   /** The stored request id a matching notification must declare. */

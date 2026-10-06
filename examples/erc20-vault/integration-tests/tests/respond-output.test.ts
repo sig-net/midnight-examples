@@ -47,7 +47,7 @@ const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
 // the empty schema of a nonce replacement, the uint256 of a swap.
 const OUTPUT_SCHEMA = ERC20_TRANSFER_OUTPUT_SCHEMA;
 const SWAP_OUTPUT_SCHEMA = schemaJson(SWAP_MPC_ROUTING.outputDeserializationSchema);
-// This suite plays the MPC, so the attested destination height is whatever
+// This suite plays the MPC, so the attested target-chain height is whatever
 // it claims: the check is that the height is signed, not that it is real.
 const BLOCK_HEIGHT = 77n;
 const TRANSFER_TRUE = new Uint8Array([0x01]);

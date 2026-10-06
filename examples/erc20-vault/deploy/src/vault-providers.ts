@@ -96,7 +96,7 @@ export function buildVaultProviders(
 
       // Returns the password (sync or async) used to encrypt BOTH stores.
       // Must pass validatePassword: ≥16 chars, ≥3 of {upper,lower,digit,
-      // special}, no 3+ repeated chars, no 4+ sequential runs, else
+      // special}, no 4+ repeated chars, no 4+ sequential runs, else
       // PasswordValidationError at runtime. A constant in source is
       // obfuscation, not secrecy, acceptable here only because nothing
       // sensitive is stored. (Kept constant: hex derived from the account id

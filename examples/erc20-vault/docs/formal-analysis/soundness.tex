@@ -1,0 +1,533 @@
+\section{Soundness}
+\label{sec:soundness}
+
+In this section we analyze the soundness of the system.
+When defining soundness, we identify the soundness requirement for each action, and then defined the soundness of the system as
+the conjunction of the soundness of each properties.
+An alternative approach would have been to define an ideal functionality for our cross-chain system payment, and proving UC security of it, and is intended for
+future analysis.
+
+This section is organized as follows: (1) Definition (Section~\ref{sec:soundnessdefinition}): we define soundness of the system; (2) Assumptions (Section~\ref{sec:soundnessassumptions}) we state the trust, model and cryptographic assumption we rely on to argue soundness (3) Proof (\S~\ref{subsec:soudnesscommon}-\S~\ref{susec:soundnessrest}) we prove that each action achieves soundness under the stated assumptions.
+
+
+\subsection{Definition of Soundness}
+\label{sec:soundnessdefinition}
+For simplicity,  in this first formal treatment, we define soundness  of each procedure : Deposit, Withdraw, Swap, Supply, Redeem individually.
+The soundness of the overall system is then defined as the soundness of all of its procedures.
+In the future, we will consider using the Universal Composability framework to have a more comprehensive approach.
+
+
+\begin{definition}
+\label{def:depositss}
+\emph{Deposit Soundness:} $\Pi.\Deposit^{\Lpub, \Lshd}\bigl(\pubAddr\bc \shdAcct\bc \tokType\bc \amt\bc
+      \auxx \,;\, \privIn\bigr)$ is \emph{sound} if no PPT algorithm $\Adv$ can  deposit  $\amt$, $\tokType$ on its own account $\shdAcct*$ on $\Lshd$  and have transferred $\leq v$ of the same token to the vault on $\Lpub$ from its own account $\pubAddr$ with non-negligible probability.
+ \end{definition}
+
+
+\begin{definition}
+\label{def:withdrawss}
+
+\emph{Withdraw Soundness:} $\Pi.\Withdraw^{\Lpub, \Lshd}\bigl(\cdot\bc \destAddr*\bc \tokType\bc \amt\bc
+      \auxx \,;\, \privIn\bigr)$ is \emph{sound} if
+      two conditions are satisfied:
+      (1) eligibility: no PPT algorithm $\Adv$ can  withdraw  $\amt$, $\tokType$ without controlling
+      an account $\shdAcct^*$  on Midnight  that  holds at least value ($\amt$, $\tokType$) with non-negligible probability.
+      (2) no double-spending: no PPT algorithm $\Adv$, owning a shielded account $\shdAcct^*$ with amount $v^*$  can successfully withdraw  $\amt$ of $\tokType$ from $\shdAcct^*$, and at its completion own
+      an amount $\geq v^*- \amt$.
+
+
+% \end{definition}
+\end{definition}
+
+\begin{definition}
+\label{def:swap} \emph{Swap Soundness:}
+$\Pi.\Swap^{\Lpub, \Lshd}\bigl(\cdot\bc \tokType\bc \amt\bc
+    \tokTypeB\bc \amtB\bc \auxx \,;\, \privIn\bigr)$ is \emph{sound}
+    if   two conditions are satisfied:
+      (1) eligibility: no PPT algorithm $\Adv$ can  swap $\amt$ of $\tokType$ unless $\Adv$ controls an account $\shdAcct^*$ that owns at least $\amt$ of $\tokType$, with more than non-negligible probability.
+      (2) no double-spending: no PPT algorithm $\Adv$,   owning a shielded account $\shdAcct^*$ with amount $v^*_A$  of
+      $\tokType_A$ and  $v^*_B$ of $\tokTypeB_B$ can successfully swap  $\amt$ of $\tokType_A$  for $\tokType_B$ and then, upon swap completion own $\geq v^*_A - \amt$  of $\tokType_A$, with non-negligible probability.
+\end{definition}
+
+\begin{definition}
+\label{def:supplysound}
+\emph{Supply soundness}
+$\Pi.\Supply^{\Lpub, \Lshd}\bigl(\shdAcct^*\bc \tokType\bc \amt\bc \auxx;\, \privIn\bigr)$
+is \emph{sound}  if   two conditions are satisfied: (1) eligibility: no PPT algorithm $\Adv$ can  supply $\amt$ of the underlying
+color $\colrU$ (a function of $\tokType$) without controlling an account $\shdAcct^*$ on Midnight that owns at least $\amt$ of
+$\colrU$, with more than non-negligible probability.  (2) no double-spending: no PPT algorithm $\Adv$,   owing a shielded account $\shdAcct^*$ with amount $v^*_U$  of   $\colrU$ can successfully supply  $\amt$ of $\colrU$ and, upon supply completion own $\geq v^*_U-\amt$ of $\colrU$ tokens,  with non-negligible probability.
+\end{definition}
+
+\begin{definition}
+\label{def:redeemsound}
+\emph{Redeem soundness.}
+$\Pi.\Redeem^{\Lpub, \Lshd}\bigl(\shdAcct\bc \tokType'\bc \amtShares\bc \auxx
+      \,;\, \privIn\bigr)$ is \emph{sound} if no PPT $\Adv$ can
+      redeem $\amtShares$ of coins of $\colrW$ (a function of $\tokTypeB$) without having supplied an $\amt$ of USD  through $\Supply$, such that
+      $\amtShares$ = $\amt+ \mathsf{interest}$ with non-negligible probability.
+
+ \end{definition}
+
+\begin{definition}[\textbf{Cross-Chain \Payment{} System  Soundness}]
+\label{def:totalsoundness}
+    A \emph{public-to-private cross-chain \Payment{} system} $\Pi$, relative to $\Lpub$ and $\Lshd$ is  \emph{sound} it achieves  Deposit, Withdraw, Swap, Supply and Redeem soundness.
+\end{definition}
+\subsection{Assumptions}
+\label{sec:soundnessassumptions}
+In this proof we use the following assumptions
+
+\vspace{5pt}
+\noindent
+\textbf{System Assumptions:}
+\begin{itemize}
+    \item Ethereum  and Midnight are secure and sound  instantiations of $\Lpub$ and $\Lshd$, respectively.
+
+    \item MPC $\SigSys$ is trusted. It satisfies:
+    \begin{enumerate}
+        \item  \textbf{MPC committee integrity:}  the committee signs only what the protocol authorises.
+        \item \textbf{Attestation faithfulness:}  MPC only provide attestations for events that have been executed on $\Lpub$ (Ethereum).
+        $\SigSys$ attests $\failed$ \emph{only} for a request that did \emph{not} execute on $\Lpub$.
+
+    \end{enumerate}
+\end{itemize}
+
+\vspace{5pt}
+\noindent
+\textbf{Network Assumptions:}  Communication Channels are authenticated.
+
+
+\vspace{5pt}
+\noindent
+\textbf{Cryptographic Assumptions:}
+\begin{itemize}
+    \item \textbf{ECDSA is EUF-CMA under additive key derivation and pre-signatures}
+    (Definition~\ref{def:sig}). In our proof we use this property as a guarantee that no adversary forges the MPC
+    attestation signature $\attSig$ that the settlement circuits verify against the pinned
+    $\mpcRespKey$. This assumption is also implictly used under the system assumption that  Ethereum  ($\Lpub$)  is sound,  so, no adversary forges a transaction signature under the vault's
+    derived EVM account, which would move pooled funds with no Midnight call at all. Additive
+    key derivation must be inside the game because the vault's account is a deterministic
+    function of $(\vaultAddr, \keyPath)$; pre-signatures must be inside it because the MPC
+     produces signatures using a pre-processing step.
+
+    \item \textbf{$\Kec$ is collision resistant} (Definition~\ref{def:crhf}). We use this property for the computation of
+    $\rid = \Kec(\req)$,  to claim that an attestation on $\rid$ for $\req$ cannot be re-used to settle a different request $\req'$ that collides with  $\rid$.
+    We also use in the computation, $\attDigest = \Kec(\rid \concat \evmOut)$, to avoid that a collision lets a signature issued for one attested output be replayed as a signature for another.
+
+
+    \item \textbf{$\Hash$ is a secure PRF} (Definition~\ref{def:prf}) \textbf{and therefore a MAC
+    on fixed-length inputs} (Definition~\ref{def:mac}). Soundness uses the MAC direction: the
+    caller gates accept only a witness $\usersk$ satisfying
+    $\refundComm(\usersk, \rid) = \swapMarkerMap[\rid]$, so an adversary not holding $\usersk$
+    cannot claim another user's refund, and the same assumption protects the depositor gate
+    $\userComm(\usersk)$.
+
+    \item \textbf{Midnight's shielded-circuit layer is sound} (Definition~\ref{def:zksound} and Definition~\ref{def:zkksound}).
+    No adversary produces an accepting $\zkproof$ for a transcript $\stmt$ that no honest
+    execution of the circuit could have produced. This is what makes every assertion in the
+    circuit boxes binding on the published state update, and what stops any authentication step to be skipped.
+
+    \item \textbf{Midnight's shielded-coin  and circuit-layer  achieves soundness and  zero-knowledge}
+    (Definitions~\ref{def:zksound} and~\ref{def:binding}). Soundness of the Zswap proofs gives
+    well-formedness and balance of the offer, so no transaction creates value except through a
+    declared mint. Binding of $\coinCommit$ gives that a published commitment opens to at most
+    one $(\mathsf{nonce}, \mathsf{color}, \mathsf{value})$, so a surrendered coin cannot be
+    re-opened at a larger value and a minted coin cannot be claimed at an amount other than the
+    one the circuit fixed. Zero-knowledge  allows us to claim that honest users' secret keys
+    used as witness in computing the proof are protected.
+
+% \item \textbf{$\Hash$ is collision-resistant.} We use  two properties implied by
+% collision-resistance.
+% {\bf One-Wayness}: we use the fact that $\gamma = \userComm(\usersk)$ or
+%     $\gamma = \refundComm(\usersk, \rid)$ published by an honest user, no adversary finds the pre-image
+%     $\usersk^*$.
+
+
+    \item \textbf{$\Hash$ and $\Kec$  are collision resistant}
+    (Definition~\ref{def:crhf}).
+    This property is vital in all authentication gates.
+    For instance, an adversary who can find collisions in the digest of the requestID signed by $\SigSys$, can easily re-use valid signatures, on requests that were never executed on $\Lpub$.
+
+Note that collision resistance implies one-wayness. We rely on the one-way property of $\Hash$ to prove that an authentication tag ($\gamma=\userComm(\usersk)$ or $\gamma=\refundComm(\usersk,\rid)$) published by an honest user cannot be used by an adversary to pass the authentication gate of the \code{complete} circuits.
+
+    % Used for
+    % $\domSep(\tokType)$ = $\Kec(\text{``erc20:vault:''} $ $\concat$ $\tokType)$: two ERC20 addresses that
+    % collided would receive the \emph{same} shielded color, so a coin of the cheap token would pass
+    % the color check of the expensive one.
+\end{itemize}
+
+\subsection{Proof}
+\label{sound:proof}
+
+\begin{theorem}
+\emph{If ECDSA is   EUF-CMA under additive key derivation and pre-signatures signature scheme (Definition~\ref{def:sig}),
+$\Kec$ is a collision-resistant hash function (Definition~\ref{def:crhf}), $\Hash$ is a secure PRF (Definition~\ref{def:prf}) and collision-resistant hash function, Midnight shielded-circuit layer achieves soundness (Definition~\ref{def:zksound}) , Midnight shielded-coin layer (proofs and coin-commitments) satisfies soundness (Definition~\ref{def:zksound}) and binding  (Definition~\ref{def:binding}),  then protocol $\Pi$ described in Section~\ref{sec:instantiation} satisfy Soundness (Definition~\ref{def:totalsoundness}).}
+\end{theorem}
+
+
+The proof of this theorem requires proving  soundness of each action, from $\Deposit$\S~\ref{def:depositss} to  Supply\S~\ref{def:redeemsound}.
+
+The main observation is that every action $\Deposit$, $\Withdraw$, $\Swap$, $\Supply$, $\Redeem$  share the same logic and implementation, with minor differences that reflect only in the color  of shielded transaction executed on $\Lshd$.
+
+Every procedure follows the same template:
+
+\begin{enumerate}
+    \item \textbf{Start Action:} Every action $X$ is started with the  $\mathtt{startX}$ circuit: $\cktStartDeposit,\cktWithdraw,$ etc.  Starting an action entails in the following steps
+    \begin{itemize}[label=\small$\blacksquare$]
+        \item \textbf{Create EVM request}  $\req$ and $\rid$: circuit  crafts the transaction/call that must be executed on $\Lpub$. $\rid=\reqIdOf(\req)$ is created.
+
+    \item \newversion{In the latest release, $\rid$ is not created in the Start Action and
+    there is no request counter $\sigNonce$. The Start Action queues the request, the
+    permissionless circuit $\cktFlush$ assigns its EVM nonce (the vault account's next nonce
+    $\vaultNonce$ for every action but Deposit, whose caller names the nonce of their own
+    derived account), and the permissionless circuit $\cktSend$ computes
+    $\rid=\reqIdOf(\req)$ over the completed request and notifies the MPC. Distinctness of
+    $\rid$ now follows from the EVM nonce, which the vault account never reuses, and a second
+    identical request is refused while the first is open.}
+
+        \item \textbf{Create authentication tag}: circuit creates $\userComm(\usersk_i)$ (for $\cktStartDeposit$) or $\refundComm(\usersk_i,\rid)$  for all other actions, is created.
+         \begin{itemize} [label=\small$\diamond$]
+        \item \textbf{* Private Coins on $\Lshd$ are burned}  (* Not present in $\cktStartDeposit$). In a          Widthdraw/Swap/Supply/Redeem request,  circuit privately sends their private coins to a burn       address through the calls $\mnhl{\code{receiveShielded}}$  and $\mnhl{\code{sendImmediateShielded}}$
+            \end{itemize}
+        \item \textbf{$\rid,\refundComm$ added to the map of pending requests for that action} At this point a pending action is identified by the pair $(\rid,\refundComm)$  ( or  $(\rid,\userComm)$ only for $\Deposit$).
+    \end{itemize}
+
+    \item \textbf{Complete Action:} Every action $X$ is completed with the  $\mathtt{completeX}$ circuit.
+    To complete an action identified by $\rid,\refundComm$, the user must possess a valid attestation
+    on $\rid$ and outcome $\evmOut$ that verifies under  $\SigSys$'s public key $\mpcRespKey$.
+    The outcome $\evmOut$ can be $\succeeded$ or $\failed$.
+    All complete circuits follows these steps:
+    \begin{itemize}[label=\small$\blacksquare$]
+        \item \textbf{Verify Attestation (i.e., ECDSA signature).} The circuit runs the ECDSA verification algorithm for attestation $\attSig$ for input $(\rid,\evmOut)$ under public key $\mpcRespKey$.
+
+    For this check we use the unforgeability of ECDSA (in the pre-signature and additive-key derivation  setting) and the collision-resistance properties of $\Kec$.
+        \item \textbf{Check that $\rid$ is pending.} The circuit check that $\rid$ is pending in the action-dependent map (e.g.,  $\depositView$, $\wdView$, etc).
+        % \item \newversion{In the new version we use $\rid$ and  the timing information $\lastseen$ to determine if a request is pending or resolved.}
+
+        \item \textbf{Perform Action: if transaction was successful $\evmOut$= $\succeeded$}
+        \begin{itemize}[label=\small$\square$]
+             \item \textbf{Verify authentication tag ($\userComm/\refundComm$).} The circuit recompute $\userComm(\usersk_i)$ or $\refundComm(\usersk_i,\rid)$ from the secret $\usersk_i$ and check if it is consistent with the one stored in the action-dependent map, keyed by $\rid$.
+
+             For this check we rely on the one-wayness property of $\Hash$, and the hiding properties of the  Midnight layer.
+             \item \textbf{Perform action.} For Deposit/Swap/Supply/Reedem the action is to  \textbf{mint new coins}. For Withdraw no action is required.
+       \end{itemize}
+ \item \textbf{Refund is performed: if transaction failed $\evmOut$= $\failed$.}
+      \begin{itemize}[label=\small$\square$]
+       \item \textbf{Verify authentication tag ($\userComm/\refundComm$).} The circuit recompute $\userComm$ $(\usersk_i)$ or $\refundComm$( $\usersk_i,\rid)$ from the secret $\usersk_i$ and check if it is consistent with the one stored in the action-dependent map, keyed by $\rid$.
+        For this check we rely on the one-wayness property of $\Hash$, and the hiding properties of the  Midnight layer.
+
+        \item \textbf{Refund.} For Withdraw/Swap/Supply/Reedem the action is to  \textbf{mint new coins}. For Deposit no action is required.
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+
+Between Step 1 (start request) and Step 2  (complete request)  the MPC system $\SigSys$ attempts to execute the
+request $\rid$ on $\Lpub$. When the request is executed, $\SigSys$ signs the outcome (attestation).
+%% Chainging point: here we change and add information about last seen block
+
+
+\vspace{5pt}
+Now, recall that at high-level, and $\Adv$  \emph{violates soundness} if it is able to get out of the system more value than what they contribute in.
+In complete Deposit, this means to obtain shielded coins  in $\Lshd$ for an amount $v^*$ higher than what $\Adv$ actually deposited on $\Lpub$; in complete Withdraw this means to cash-out an amount $v^*$ that is higher than what was burned in the request for withdrawing, etc.
+This also includes the case where $\Adv$ steals in-flight attestations that are intended for an honest user, and uses them to mint shielded transaction on its own account on $\Lshd$.
+
+$\Adv$  can successfully execute  \code{completeX}  if and only if it presents  (1) an  attestation $\attSig$, that verifiers under the $\SigSys$'s public key, on a pair $(\rid,\evmOut)$  (2)  the request id $\rid$  is in the map of pending requests,   and (3) a proof of knowledge of the pre-image of the authentication tag ($\userComm$ (for Deposit) or $\refundComm$ for any other call associated to the request id $\rid$).
+
+
+\subsection{Soundness Arguments Common to all Circuits}
+\label{subsec:soudnesscommon}
+
+Let $(\rid^*, \evmOut^*, \attSig^*)$ be what $\Adv$ presents to a \texttt{completeX} circuit, and suppose the circuit accepts.
+(Recall that in every  \code{complete}  action, the circuit will use $\rid^*$ to look up the request $\req^*$
+associated to it;   where $\rid=\Kec(\req)$, and  $\attSig$ is a signature over  $(\rid, \evmOut)$: i.e.,  $\attDigest(\rid, \evmOut) = \Kec(\rid \concat \evmOut)$.)
+
+
+% Two events we must rule out.
+% First,  that $\SigSys$ never signed $\attDigest(\rid^*, \evmOut^*)$, so the outcome $\Adv$ claims is not the outcome that occurred on
+% $\Lpub$ (Case~1).
+% Second, that $\SigSys$ did sign it, but for a request belonging to an honest user, so  $\Adv$ settles value it never surrendered (Case~2).
+
+We now enumerate the ways that adversary $\Adv$ could violate soundness of the authentication patter of  \code{complete}, and we rule them out, using  the cryptographic assumptions that we rely on.
+
+
+\vspace{8pt}
+\noindent
+\textbf{Case 1. $\Adv$ claims a false outcome  $\evmOut^*$ for her request $\req^*$.}
+
+In this case, we consider an adversary that performed the \texttt{start} step, and created a request $\req^*$ with id $\rid^*$ to be performed on $\Lpub$, and later it attempts to run a \texttt{completeX} circuit for a false outcome $\evmOut^*$. False means, it does not reflect what truly happened on the chain, e.g., $\Adv$ could claim that the transactions failed when in reality it succeeded, or the opposite.
+
+To pass the verification on a false  $\evmOut^*$ that was  not signed by the MPC (here we are using the \emph{attestation faithfulness assumption} --  $\SigSys$ only signs truth), $\Adv$ might have done one of the following:
+\begin{enumerate}
+
+     \item \textbf{Forge $\SigSys$'s  attestation on $\evmOut^*$ $\rightarrow$  forge ECDSA signatures.}  $\Adv$ could  forge an attestation $\sigma^*$  for the pair $\rid^*,\evmOut^*$ of her choice, such that
+    $$\assert \EcdsaVf\bigl(\lnk{fn:attDigest}{\attDigest(\rid^*, \evmOut^*)}\bc \sigma*\bc \mpcRespKey\bigr) \rightarrow 1$$
+ regardless of whether the request transaction  $\rid^*$ was actually executed on Ethereum.
+
+  Assuming that ECDSA unforgeability with pre-signatures and key-derivation, this event happens with   negligible probability.
+
+
+
+    \item \textbf{Re-use a valid signature on a previous input, by breaking the collision-resistance of $\attDigest(\cdot)$.}
+
+    Assume the MPC had signed an attestation for a pair $(\rid,\evmOut)$ at any point in time, and published  $\attSig$.
+    If the adversary can craft a pair  $\rid^*$, $\evmOut^*$ such that
+
+      $$\attDigest(\rid, \evmOut) =\attDigest(\rid*, \evmOut*) $$
+
+
+      the adversary, could   \emph{re-use}  the  valid signature $\attSig$ for  $(\rid*, \evmOut*)$.
+
+      Due to the collision-resistance property of $\Kec$, this event happens with negligible probability.
+
+     \item \textbf{Re-use a valid signature on a previous input by break collision-resistance of $\reqIdOf$.}
+       Similarly,  an adversary could attempt to  \emph{re-use} $\attSig$ emitted on   $\attDigest$, by crafting a request $\req^*$, such that $\reqIdOf(\req^*) = \reqIdOf(\req)$ for an honest pending request $\req$ published  on the chain.
+       The adversary would intercept the signature $\attSig$ and present it to the \code{completeX} function before the honest user.
+
+        Due to the collision-resistance property of $\Kec$, this event happens with negligible probability.
+
+
+\end{enumerate}
+
+
+\vspace{8pt}
+\noindent
+\textbf{Case 3.  $\Adv$ uses a valid attestation for action A, to complete  Action B.}
+   $\Adv$ uses an attestation for an action (e.g., Swap) to settle  a different action (e.g., Redeem).
+   Specifically, $\Adv$ use the valid attestation of $(\rid,\evmOut)$  for a request $\rid^*=\reqIdOf(\req^*)$ where $\req^*$ is a swap request, to pass the signature verification of $\cktCompleteSupply$.
+
+   First note that in the implementation each requestID $\rid$ lives in the data structure associated  to the action requested. So,
+   the $\rid$ of swap request lives in the map $\swapView$.
+    When $\Adv$ attempts to run the Redeem circuit on
+    $(\rid,\evmOut)$, the circuit check if $\rid$ is pending in the map $\redeemView$, which is not existing, and the circuit execution will fail -- unless the adversary managed to create a swap request $\req_{\mathsf{swap}}$ and a redeem request $\req_{\mathsf{redeem}}$ such that the hash $\reqIdOf(\req_{\mathsf{swap}})=\req_{\mathsf{redeem}}$.
+
+    By the \textbf{collision-resistance} property of $\reqIdOf$, the probability of this attack is negligible.
+
+
+ \vspace{8pt}
+\noindent
+ \textbf{Case 4. $\Adv$ mints more than it paid.}
+      $\amt$ and $\tokType$ are not chosen at settlement time: they are read from $\req$, which was
+      fixed at request time and whose digest is $\rid$. The same $\amt$ is the amount of the EVM
+      transfer the committee signed. Changing it means finding a second record with the same $\rid$, which violated  the  \textbf{collision-resistance}  property of $\reqIdOf()$.
+
+\vspace{8pt}
+\noindent
+\textbf{Case 5.  $\Adv$ attempt to complete the same request twice (Replay Attack).}
+   $\Adv$ replays a valid $(\rid, \evmOut, \attSig)$. Every complete circuit removes both the record
+   entry and the marker entry at $\rid$. A second call reads the
+   same entries, and at apply time the node re-executes the transcript against real state, where
+   they are gone. This replay attack is addressed at ledger level, and it does not rest on the protocol messages and cryptographic assumptions.
+   \vspace{5pt}
+  \newversion{The latest release keeps this ledger-level protection (completion removes the
+  request's queue entry, its attestation and its event) and adds an explicit mechanism that
+  relies on timing information. Time is defined as the relative order of processed
+  transactions on the public blockchain, and is tracked via the \emph{block-height} of the
+  \emph{last-seen} transaction attested by the MPC: $\cktFlush$ stamps every request with the
+  current $\lastseen$ and raises $\lastseen$ to the height of every attestation it folds, and
+  an attestation settles a request only if its block height is strictly greater than the
+  request's stamp.}
+
+\vspace{8pt}
+\noindent
+\textbf{Case 6.  $\Adv$ claims an honest user's request.}
+In this case, we consider the scenario where $\Adv$, observing the
+requests posted by honest users, and the attestations that
+the MPC posts back, attempts to use a valid attestation on behalf of the honest user.
+In other words, $\Adv$ tries  to cash-in, swap, redeem, refund to her account,   money that was deposited by an honest user.
+
+ An adversary could observe when a certain request $\rid$ associated to a certain tag
+     is executed on $\Lpub$;  obtain the attestation on it from $\SigSys$ (recall that $\SigSys$ answers to anyone who asks), and use it to  \texttt{completeX}  the request on their \emph{own} account on Midnight.
+
+To successful execute a \texttt{completeX} (or \texttt{refundX}) circuit  for requests posted by an honest user $U_i$, $\Adv$ should do one of the following:
+
+\begin{enumerate}
+    \item \textbf{Pass the authentication check for markers  $\userComm(\usersk_i, \cdot)$  (for $\cktCompleteDeposit)$  or  $\refundComm(\usersk_i,\cdot)$ (for all other complete circuits)}
+
+     To pass the authentication check present in any $\mathtt{complete}$ circuit, $\Adv$ must prove  \emph{knowledge of the pre-image } ($\usersk_i)$ of  the authentication tag:
+     $\userComm(\usersk_i, \cdot)$ or  $\refundComm(\usersk_i, \cdot)$.
+     We note that  secret  $\usersk_i$ is used  in several messages of the protocol: not only to compute the authentication tags  $\userComm(\usersk_i, \cdot)$  and
+     $\refundComm(\usersk_i,\rid)$, but also as witness in the zk proofs that honest user $U_i$ has  published over time.
+
+
+    Due to the \textbf{zero-knowledge property} (Definition~\ref{def:zk}) of the Midnight shielded-circuit layer,  $\Adv$ does not learn any information about $\usersk_i$ from the proofs generated by the user's honest circuit computation (with all but negligible probability).
+
+      \vspace{3pt}
+    Due to the \textbf{pre-image resistance} (Definition \ref{def:crhf}) of $\Hash$ used to computed  $\userComm$ and $\refundComm$,  the adversary cannot prove knowledge of the pre-image of those functions.
+
+    \vspace{3pt}
+    Due to the \textbf{knowledge soundness property}  (Definition~\ref{def:zkksound}), the $\Adv$ must know the witness ($\usersk_i$) in order to generate a proof that verifies.
+
+\end{enumerate}
+%Soundness Table -- Omitted
+% \begin{table}[t]
+% \centering\scriptsize
+% \setlength{\tabcolsep}{5pt}
+% \renewcommand{\arraystretch}{1.25}
+% \begin{tabular}{@{}
+%   >{\raggedright\arraybackslash}p{4cm}
+%   >{\raggedright\arraybackslash}p{1.9cm}
+%   >{\raggedright\arraybackslash}p{4cm}
+%   >{\raggedright\arraybackslash}p{2cm}
+%   >{\raggedright\arraybackslash}p{4.5cm}@{}}
+% \toprule
+% & \textbf{gate 1:} $\evmOut$ & \textbf{gate 2:} identity & \textbf{gate 3:} consumed & \textbf{gate 4:} the mint opens to \\
+% \midrule
+% $\cktCompleteDeposit$ & $\succeeded$ & $\userComm(\usersk) = \req.\keyPath$ & $\reqMap$ & $(\mintNonce, \colr(\tokType), \amt)$, both read from $\req$ \\
+% $\cktCompleteWithdraw$ & success bit, either value & \emph{none} if the bit is 1; $\refundComm(\usersk,\rid) = \wdMarkerMap[\rid]$ if 0 & $\reqMap$, $\wdMarkerMap$ & nothing if the bit is 1; else as $\cktRefundValue$ \\
+% $\cktCompleteSwap$ & gives $\amtSpent$ & $\refundComm(\usersk,\rid) = \swapMarkerMap[\rid]$ & $\swapMap$, $\swapMarkerMap$ & $(\mintNonce, \colr(\tokTypeB), \amtB)$ and $(\changeNonce, \colr(\tokType), \amtMax - \amtSpent)$ \\
+% $\cktCompleteSupply$ & gives $\amtShares$ & $\refundComm(\usersk,\rid) = \supplyMarkerMap[\rid]$ & $\supplyMap$, $\supplyMarkerMap$ & $(\mintNonce, \colrW, \amtShares)$ \\
+% $\cktCompleteRedeem$ & gives $\amtAssets$ & $\refundComm(\usersk,\rid) = \redeemMarkerMap[\rid]$ & $\redeemMap$, $\redeemMarkerMap$ & $(\mintNonce, \colrU, \amtAssets)$ \\
+% $\cktRefund$ & $= \failed$ & $\refundComm(\usersk,\rid) = $ the marker of the branch taken & the two maps of the branch taken & $(\mintNonce, \colr, v)$, $\colr$ and $v$ read from $\req$ \\
+% \bottomrule
+% \end{tabular}
+% \caption{ The conditions each complete circuit checks. Gate~1 is
+% $\EcdsaVf(\attDigest(\rid,\evmOut), \attSig, \mpcRespKey)$ in every row; the column says what else
+% is required of $\evmOut$. Gate~3 is enforced by ledger re-execution, the other three by $\zkproof$.
+% Here $\colr(a) = \tokenTypeOf(\domSep(a), \vaultAddr)$. Values read from $\req$ were fixed before
+% anything was burned; the others come from $\evmOut$.}
+% \label{tab:gates}
+% \end{table}
+
+% \begin{table}[t]
+% \centering\scriptsize
+% \setlength{\tabcolsep}{3.5pt}
+% \renewcommand{\arraystretch}{1.25}
+% \begin{tabular}{@{}
+%   >{\raggedright\arraybackslash}p{5.2cm}
+%   >{\raggedright\arraybackslash}p{4.3cm}
+%   >{\raggedright\arraybackslash}p{2.8cm}
+%   >{\raggedright\arraybackslash}p{2.0cm}@{}}
+% \toprule
+% \textbf{What $\Adv$ tries} & \textbf{What must break} & \textbf{Assumption} & \textbf{Argued in} \\
+% \midrule
+% Complete with an outcome $\SigSys$ never attested & forge ECDSA under $\mpcRespKey$ & Def.~\ref{def:sig} & Case~1.3 \\
+% Re-use one attestation for another $(\rid, \evmOut)$ & collision in $\Kec$ inside $\attDigest$ & Def.~\ref{def:crhf} & Case~1.1 \\
+% Point a valid $\rid$ at a different record & collision in $\Kec$ & Def.~\ref{def:crhf} & Case~1.2 \\
+% Pass an honest user's identity gate & invert $\Hash$ on a published tag & one-wayness of $\Hash$ & Case~2.1 \\
+% Learn $\usersk_i$ from honest proofs & zero-knowledge of the circuit layer & Def.~\ref{def:zk} & Case~2.1 \\
+% Skip a gate and still produce a proof & soundness of the argument system & Def.~\ref{def:zksound} & Case~2.2 \\
+% Settle one request twice & ledger re-execution & \emph{none (ledger)} & Case~2.3 \\
+% Settle a vault-path request as a deposit & invert $\Hash$ at the fixed target $\keyPathLit$ & one-wayness of $\Hash$ & Case~2.4 \\
+% Surrender a coin of the wrong color or value & binding of $\coinCommit$, circuit soundness & Def.~\ref{def:binding}, \ref{def:zksound} & \S\ref{susec:soundnessrest} \\
+% Make two ERC20s share one color & collision in $\Hash$ inside $\domSep$ & Def.~\ref{def:crhf} & \S\ref{susec:soundnessrest} \\
+% Get a settlement \emph{and} a refund & failure faithfulness of $\SigSys$ & system assumption & \S\ref{susec:soundnessrefund} \\
+% Inflate the amount minted by $\cktCompleteSupply$/$\cktCompleteRedeem$ & attestation faithfulness & system assumption & \S\ref{susec:soundnessrest} \\
+% \bottomrule
+% \end{tabular}
+% \caption{Every attack considered in this proof and the assumption that excludes it. The last two
+% rows are excluded by trust in $\SigSys$, not by cryptography.}
+% \label{tab:attackmap}
+% \end{table}
+
+
+Next we analyze the attack vector that is specific to each call.
+
+
+% \item {\bf Case 4. $\Adv$ settles twice, or settles a non-deposit request.}
+%       $\reqMap[\rid]$ is removed at settlement, so a replay fails at apply time. Withdraw, swap,
+%       supply, redeem and approve requests also live in $\reqMap$ but carry
+%       $\keyPath = \keyPathLit$; settling one needs $\userComm(\usersk^*) = \keyPathLit$. This is the
+%       only routing argument that rests on a cryptographic assumption rather than on disjoint maps.
+% \end{enumerate}
+
+
+\subsection{Soundness Argument Specific for Withdraw}
+\label{susec:soundnesswithdraw}
+
+In our protocol $\Withdraw$ (Procedure \ref{box:withdraw})  consists of two steps: withdraw's request (Circuit $\cktWithdraw$~\ref{ckt:startwithdraw}) and withdraw's complete (Circuit $\cktCompleteWithdraw$~\ref{ckt:completewithdraw}).
+In  withdraw's request, a Midnight user holding account $\shdAcct$ requesting to withdraw  $(\tokType\bc \amt)$ to address  $\destAddr*$  is required to  make a shielded payment to a \emph{burn} address of the value $(\tokType\bc \amt)$.
+This is the pre-requisite to claim a withdrawal.
+This payment is performed by calling Midnight circuits $\mnhl{\code{receiveShielded}}(\coinIn)$ and $\mnhl{\code{sendImmediateShielded}}(\coinIn, \burnAddr, \amtMax)$, where $(\coinIn)$ contains the secret nounce associated to the coins that the user want to spend, and  $\code{sendImmediateShielded}$ requires  knowledge of the secret  key $\coinsk$  associated to the $\shdAcct$ that is attempting to withdraw.
+If both $\mnhl{\code{receiveShielded}}(\coinIn)$  and $\mnhl{\code{sendImmediateShielded}}$  are  successful, then
+an authentication component $\refundComm$ is created for the request ID $\rid$ associated to the withdraw request.
+$\refundComm$ will be used only if the withdrawal request is not completed successfully
+and this is indicated by  an attestation $\attSig$ on a $\failed$ string. In such a case, the user executes and use $\attSig$  and the knowledge of the pre-image of $\refundComm$  as a proof
+of entitlement for a coin of value $(\tokType\bc \amt)$.
+
+
+A  malicious user $\Adv$ violates withdraw soundness if they are able to either withdraw money that they do not  own, or obtain a refund on withdrawal that was completed successfully.
+We analyze both cases, and show that they can only happen with negligible probability.
+\begin{enumerate}
+    \item \textbf{Case 1.  $\Adv$ attempts to withdraw money it does not own.}
+     Recall, the withdraw request ($\req \gets (\vaultAddr\bc \sigNonce\bc \keyVer\bc \keyPath\bc \evmTxOf\bc \chainId)$) is considered  by $\SigSys$ only if the user has successfully executed the circuit $\cktWithdraw$.
+     This implies that circuits
+     $\mnhl{\code{receiveShielded}}$ $(\coinIn)$ and $\mnhl{\code{sendImmediateShielded}}$ $(\coinIn, \burnAddr, \amtMax)$ have been successfully computed.
+     Consider the following two cases:
+            \begin{enumerate}
+                \item  \textbf{$\Adv$ owns a coin with amount $\leq\amtMax$ } but still manages to successfully run
+                  $\mnhl{\code{receiveShielded}}$ $(\coinIn)$ for the amount $\amt$ asserted in the circuit $\cktWithdraw$.
+
+
+                 Due to the \textbf{soundness} of the execution of the  Midnight circuit $\mnhl{\code{receiveShielded}}$, this case happens with  negligible probability.
+                 \item  \textbf{$\Adv$ burns  coins owned by an honest user.}
+                   An adversary $\Adv$ could observe  honest user's executions of  $\mnhl{\code{receiveShielded}}$  in multiple deposits/swaps/supply/redeem executions and attempt to use/manipulate the collected information into a successful execution of  $\mnhl{\code{receiveShielded}}$ $(\coinIn^H)$ with an honest coin $\coinIn^H$.
+
+                   Due to \textbf{the hiding, and zero-knowledge properties} of the primitives used   by Midnight's library, this event could only happen with negligible probability.
+
+           \end{enumerate}
+    \item \textbf{Case 2. $\Adv$'s withdraw request $\rid$ is successfully executed on Ethereum \emph{and} a refund on Midnight for $\rid$.}  This case corresponds to \textbf{Case 1} analyzed in \S~\ref{subsec:soudnesscommon}.
+\end{enumerate}
+
+
+\subsection{Soundness Arguments Specific to Swap/Supply/Redeem Circuits}
+\label{susec:soundnessrest}
+
+Swap/Supply/Redeem have the same logic.
+A user who owns $\amt$ coins of \emph{type A} requests to swap them
+for $\amtB$ coins of \emph{type B}.
+They differ in three respects: the \emph{admissible types}, how the returned amount is calculated,
+and how many coins the settlement mints; $\Swap$ mints two (the bought coin and the change),
+$\Supply$ and $\Redeem$ mint one.
+A fourth, smaller difference: $\cktCompleteSwap$ reads the stored
+request, while $\cktCompleteSupply$ and $\cktCompleteRedeem$ obtain the information from
+the attested outcome.
+
+In Swap,  user chooses the type \emph{type B}, that  she wants to swap to,  and there is additional input $\amtMax$,  chosen by the user, which  defines  the most she is willing to spend
+She surrenders $\amtMax$ up front, the router spends some
+$\amtSpent \leq \amtMax$, and $\cktCompleteSwap$ returns $\amtMax - \amtSpent$ as change. If the
+router would need more than $\amtMax$, the EVM call reverts and the flow goes to $\cktRefundSwap$.
+In Supply, and Redeem, the types are fixed and hardwired in the contract definitions, and the amounts  are chosen by the market.
+The types are defined in two addresses $\underAddr$ and $\wrapAddr$ written in the public state of the vault by $\cktInit$ and are  never chosen by the caller.
+In Supply,  \emph{Type A} is a fixed $\colrU$  and type B is the fixed $\colrW$, and result of the call, the user gets  $\amtShares$ of $\colrW$.
+In Redeem,  \emph{Type A} is $\colrW$  and the amount redeemed  is decided by the market and communicated to the circuit directly by the blockchain record.
+The Swap/Supply/Redeem   follow  the same authentication pattern of Widthdraw flow, for the refund path. As such, the  arguments of soundness for  Swap  follow very closely the arguments on Withdrawal. The additional attack vector a  malicious user can leverage in Swap/Supply/Redeem, is to initiate a request $\req$ for token types and amounts that do not correctly match the types and amounts of the coins it possesses.
+
+We identify the following cases:
+%
+
+\begin{enumerate}[leftmargin=1.8em,itemsep=5pt]
+    \item \textbf{$\Adv$ surrenders a coin that does not match the request it posted.} $\Adv$
+could attempt to burn a coin of a cheap color, or of a value below $\amt$, while filing a request
+for $\amt$ of an expensive $\tokType$, and so withdraw on $\Lpub$ more than it gave up on
+$\Lshd$.
+
+This attack is prevented by the checks performed in the circuit.
+$\assert \coinIn.\mathsf{color}$ = ${\tokenTypeOf}(\domSep(\tokType), \vaultAddr)$,   and $\coinIn.\mathsf{value} = \amtMax$.
+% Due to the soundness of the zk proofs generated by the execution of Midnight circuit layer,  an adversary cannot attempt to swap/supply/redeem  coins that  are not consistent with the request/ or with the colors allowed by the system.
+
+The surrendered coin's color and value are asserted \emph{equal}
+to the values that go into $\req$, and by binding of the coin commitment
+(Definition~\ref{def:binding}) the descriptor $\coinIn$ the circuit checks is the same coin whose
+commitment and nullifier are published. By the \textbf{soundness of the  zk argument system}
+(Definition~\ref{def:zksound}) a proof that passes verification cannot correspond to an execution in
+which those assertions failed. Hence the event happens with probability negligible in $\secpar$.
+
+\noindent The same  case applies to $\Supply$, with
+with $(\colrU, \amt)$, and to $\Redeem$ with $(\colrW, \amtShares)$. In all four the assertion is Step~2 of the request circuit and the argument
+is the same two-line appeal to binding and to circuit soundness.
+
+
+\item \textbf{$\Adv$ surrenders a coin of the wrong color or value.} Prevented by  Step~2 of
+      \cktref{ckt:startsupply} and \cktref{ckt:startredeem}. Note that the
+      two colors here are \emph{pinned}, not caller-supplied: $\colrU$ and $\colrW$ are functions
+      of $\underAddr$ and $\wrapAddr$ read from state, so unlike $\cktWithdraw$, where the caller
+      names $\tokType$, there is no color argument to get wrong.
+
+
+\item \textbf{$\Adv$ inflates the minted amount.} This is specific to Supply and Redeem only.
+      $\cktCompleteSupply$ and $\cktCompleteRedeem$ take the minted value from $\evmOut$ and read no
+      field of $\req$. The only thing binding that value is that
+      $\attSig$ verifies over $\attDigest(\rid, \evmOut)$, so an inflated mint requires a forged or
+      re-used attestation, excluded as above, \emph{or} a committee that attests a share count
+      the market did not return, which is excluded by assumption on the trustworthiness of the routing system and the chain,  and not by the protocol.
+\end{enumerate}
