@@ -3,7 +3,7 @@
 Step numbers follow examples/erc20-vault/docs/redeem/redeem.md (9 steps).
 """
 
-TITLE = 'redeem-sequence'
+TITLE = 'Redeem round trip'
 
 LANES = [
     dict(id='user',      title='User',                           icon='user', sub='Midnight wallet'),
@@ -21,14 +21,15 @@ GROUPS = [
 BANDS = [
     dict(title='Request', phase='request', rows=[
         dict(kind='arrow', step='1', phase='request', frm='user', to='vault',
-             label=['**User:**', 'Starts the redeem with a vault coin', '`startRedeem(...)`'],
+             label=['**User:**', 'Starts the redeem and queues it', '`startRedeem(...)`'],
              side=dict(lane='vault', lines=['**Reads:** the user\'s secret',
                                              '**Through:** the **callerSecretKey** witness',
-                                             '**Burns:** the surrendered share coin'])),
+                                             '**Burns:** the shielded share coin'])),
         dict(kind='arrow', step='2', phase='request', frm='user', to='vault',
              label=['**User:**', 'Flushes the request', '`flushQueue(...)`'],
              side=dict(lane='vault', lines=['**Assigns:** the next **vaultAccountNonce**',
-                                             'as the request\'s EVM nonce'])),
+                                             'as the request\'s EVM nonce',
+                                             '**Moves:** the request into the output buffer'])),
         dict(kind='arrow', step='3', phase='request', frm='user', to='vault',
              label=['**User:**', 'Sends the request', '`sendRedeem(...)`'],
              side=dict(lane='vault', lines=['**Records:** **bidirectionalRedeemMap**',
@@ -75,10 +76,12 @@ BANDS = [
         dict(kind='arrow', step=None, phase='attestation', frm='dapp', to='singleton',
              label=['**dApp/relayer:**', 'Picks up the attestation from', '**RespondBidirectionalEvent**']),
         dict(kind='fork', step='7', phase='settle', frm='user', to='vault',
-             arms=[['**User:**', 'Queues an executed verdict', '`queueAttestation32(...)`'],
-                   ['**User:**', 'Queues a failed or unviable verdict', '`queueAttestation0(...)`']]),
+             arms=[['**User:**', 'Queues executed (32 bytes)', '`queueAttestation32(...)`'],
+                   ['**User:**', 'Queues failed or unviable (0 bytes)', '`queueAttestation0(...)`']]),
         dict(kind='arrow', step='8', phase='settle', frm='user', to='vault',
-             label=['**User:**', 'Flushes the attestation', '`flushQueue(...)`']),
+             label=['**User:**', 'Flushes the attestation', '`flushQueue(...)`'],
+             side=dict(lane='vault', lines=['**Moves:** the attestation into',
+                                             'the output buffer'])),
         dict(kind='arrow', step='9', phase='settle', frm='user', to='vault',
              label=['**User:**', 'Completes the redeem', '`completeRedeem(...)`'],
              side=dict(lane='vault', lines=['**With:** the request id, the 32-byte',
@@ -90,7 +93,7 @@ BANDS = [
 
 OUTCOME_TITLE = 'After step 9'
 OUTCOME = [
-    '**Executed:** the user holds shielded vault tokens of the underlying for the attested assets (principal plus accrued interest), and the underlying sits in the vault\'s EVM account.',
+    '**Executed:** the user holds shielded **stataUnderlying** vault coins for the attested assets (principal plus accrued interest), and the underlying sits in the vault\'s EVM account.',
     '**Executed, assets at or above 2^64:** **redeemAssets** narrows the uint256 in-circuit (**checkedTruncationU128**, then Uint<64>), so **completeRedeem** fails under a valid signature: nothing mints.',
     '**Failed** (reverted) **or unviable** (another transaction took its nonce)**:** the wrapper burned nothing, so **completeRedeem** re-mints the surrendered shares.',
     '**Never mined:** the MPC attests nothing, and the coin stays burned until the deployer replaces the nonce.',

@@ -3,7 +3,7 @@
 Step numbers follow examples/erc20-vault/docs/deposit/deposit.md (10 steps).
 """
 
-TITLE = 'deposit-sequence'
+TITLE = 'Deposit round trip'
 
 LANES = [
     dict(id='user',      title='User',                           icon='user', sub='Midnight wallet, EVM wallet'),
@@ -32,11 +32,12 @@ BANDS = [
     ]),
     dict(title='Request', phase='request', rows=[
         dict(kind='arrow', step='2', phase='request', frm='user', to='vault',
-             label=['**User:**', 'Starts the deposit', '`startDeposit(...)`'],
+             label=['**User:**', 'Starts the deposit and queues it', '`startDeposit(...)`'],
              side=dict(lane='vault', lines=['**Reads:** the user\'s secret',
                                              '**Through:** the **callerSecretKey** witness'])),
         dict(kind='arrow', step='3', phase='request', frm='user', to='vault',
-             label=['**User:**', 'Flushes the request', '`flushQueue(...)`']),
+             label=['**User:**', 'Flushes the request', '`flushQueue(...)`'],
+             side=dict(lane='vault', lines=['**Moves:** the request into the output buffer'])),
         dict(kind='arrow', step='4', phase='request', frm='user', to='vault',
              label=['**User:**', 'Sends the request', '`sendDeposit(...)`'],
              side=dict(lane='vault', lines=['**Records:** **bidirectionalDepositMap**',
@@ -75,10 +76,12 @@ BANDS = [
         dict(kind='arrow', step=None, phase='attestation', frm='dapp', to='singleton',
              label=['**dApp/relayer:**', 'Picks up the attestation from', '**RespondBidirectionalEvent**']),
         dict(kind='fork', step='8', phase='settle', frm='user', to='vault',
-             arms=[['**User:**', 'Queues an executed verdict', '`queueAttestation1(...)`'],
-                   ['**User:**', 'Queues a failed or unviable verdict', '`queueAttestation0(...)`']]),
+             arms=[['**User:**', 'Queues executed (1 byte)', '`queueAttestation1(...)`'],
+                   ['**User:**', 'Queues failed or unviable (0 bytes)', '`queueAttestation0(...)`']]),
         dict(kind='arrow', step='9', phase='settle', frm='user', to='vault',
-             label=['**User:**', 'Flushes the attestation', '`flushQueue(...)`']),
+             label=['**User:**', 'Flushes the attestation', '`flushQueue(...)`'],
+             side=dict(lane='vault', lines=['**Moves:** the attestation into',
+                                             'the output buffer'])),
         dict(kind='arrow', step='10', phase='settle', frm='user', to='vault',
              label=['**User:**', 'Completes the deposit', '`completeDeposit(...)`'],
              side=dict(lane='vault', lines=['**With:** the request id, the output,',

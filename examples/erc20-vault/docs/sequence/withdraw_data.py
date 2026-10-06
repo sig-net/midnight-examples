@@ -5,7 +5,7 @@ No Fund band: the user already holds vault tokens, and the ERC20 already sits in
 vault's own EVM account.
 """
 
-TITLE = 'withdraw-sequence'
+TITLE = 'Withdraw round trip'
 
 LANES = [
     dict(id='user',      title='User',                           icon='user', sub='Midnight wallet'),
@@ -23,14 +23,15 @@ GROUPS = [
 BANDS = [
     dict(title='Request', phase='request', rows=[
         dict(kind='arrow', step='1', phase='request', frm='user', to='vault',
-             label=['**User:**', 'Starts the withdrawal', '`startWithdraw(...)`'],
+             label=['**User:**', 'Starts the withdrawal and queues it', '`startWithdraw(...)`'],
              side=dict(lane='vault', lines=['**Reads:** the user\'s secret',
                                              '**Through:** the **callerSecretKey** witness',
-                                             '**Burns:** the surrendered vault coin'])),
+                                             '**Burns:** the shielded vault coin'])),
         dict(kind='arrow', step='2', phase='request', frm='user', to='vault',
              label=['**User:**', 'Flushes the request', '`flushQueue(...)`'],
              side=dict(lane='vault', lines=['**Assigns:** the next **vaultAccountNonce**',
-                                             'as the request\'s EVM nonce'])),
+                                             'as the request\'s EVM nonce',
+                                             '**Moves:** the request into the output buffer'])),
         dict(kind='arrow', step='3', phase='request', frm='user', to='vault',
              label=['**User:**', 'Sends the request', '`sendWithdraw(...)`'],
              side=dict(lane='vault', lines=['**Records:** **bidirectionalWithdrawMap**',
@@ -69,14 +70,17 @@ BANDS = [
         dict(kind='arrow', step=None, phase='attestation', frm='dapp', to='singleton',
              label=['**dApp/relayer:**', 'Picks up the attestation from', '**RespondBidirectionalEvent**']),
         dict(kind='fork', step='7', phase='settle', frm='user', to='vault',
-             arms=[['**User:**', 'Queues an executed verdict', '`queueAttestation1(...)`'],
-                   ['**User:**', 'Queues a failed or unviable verdict', '`queueAttestation0(...)`']]),
+             arms=[['**User:**', 'Queues executed (1 byte)', '`queueAttestation1(...)`'],
+                   ['**User:**', 'Queues failed or unviable (0 bytes)', '`queueAttestation0(...)`']]),
         dict(kind='arrow', step='8', phase='settle', frm='user', to='vault',
-             label=['**User:**', 'Flushes the attestation', '`flushQueue(...)`']),
+             label=['**User:**', 'Flushes the attestation', '`flushQueue(...)`'],
+             side=dict(lane='vault', lines=['**Moves:** the attestation into',
+                                             'the output buffer'])),
         dict(kind='arrow', step='9', phase='settle', frm='user', to='vault',
              label=['**User:**', 'Completes the withdrawal', '`completeWithdraw(...)`'],
              side=dict(lane='vault', lines=['**With:** the request id, the output,',
-                                             'a random mint nonce'])),
+                                             'a random mint nonce',
+                                             '**Settles:** on the attested output'])),
         dict(kind='arrow', step=None, phase='settle', frm='vault', to='user',
              label=['**Vault:**', 'Mints nothing on a true transfer,', 'or re-mints the surrendered coin']),
     ]),

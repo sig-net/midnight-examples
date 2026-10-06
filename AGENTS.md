@@ -415,11 +415,11 @@ apply to all of them:
   the code and its comments through the page's links. A snippet earns its place only
   where prose cannot carry a specific point (argument order in a hash, a byte
   layout), cut to the lines that make that point.
-- **One vocabulary, two renderings per flow, both on the page**: the step-list
-  bullets (ordinal + the canonical string's tail) and the mermaid `Note over` lines
-  (the full canonical string). The strings are frozen per flow on its flow page
-  (see the Correspondence section of `docs/flow-pages.md`), and a change to one
-  rendering is a change to both in the same commit.
+- **One vocabulary per flow, on the page**: the step-list bullets (ordinal + the
+  canonical string's tail). The strings are frozen per flow on its flow page
+  (see the Correspondence section of `docs/flow-pages.md`), and the page's step
+  list and the diagram's numbered steps match: a change to one is a change to
+  both in the same commit.
   The flow diagram carries NO step text: its numbered circles are exactly the frozen
   strings' ordinals (a branch's arms share one ordinal and one circle), and
   every bit of text on or beside an arrow is an edge label under the diagramming

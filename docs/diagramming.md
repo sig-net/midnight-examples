@@ -81,8 +81,8 @@ Three visual channels carry meaning, and each is reserved for exactly that meani
   riding that edge and follows the edge-label golden rules below, the strict format
   included. Free-standing text shapes beside an arrow are forbidden: a diagram
   identifies its steps by the phase colours and the numbered circles alone, and the
-  canonical step strings render only on the flow page (its step-list bullets and
-  mermaid notes). The diagram-to-page link is the ordinal set: the circles' numbers
+  canonical step strings render only on the flow page (its step-list bullets).
+  The diagram-to-page link is the ordinal set: the circles' numbers
   are exactly the frozen strings' ordinals, a branch's arms sharing one ordinal and
   one circle. Every step arrow DESCRIBES itself: each logical arrow of a
   step carries an acting-party label saying what happens along it (a run drawn as

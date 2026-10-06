@@ -282,45 +282,6 @@ is computed with the vault's own compiled `userCommitment` circuit, never a
 TypeScript re-implementation (see
 [Derived keys and accounts](../../README.md#derived-keys-and-accounts)).
 
-## Sequence
-
-```mermaid
-sequenceDiagram
-    title Deposit round trip
-    actor User
-    participant DApp as Vault dApp/Relayer
-    participant Vault as ERC20 Vault Contract
-    participant Singleton as Sig Network Singleton Contract
-    participant MPC as Sig Network Distributed MPC
-    participant EVM as EVM Blockchain
-
-    Note over User,EVM: Step 1: fund the user's deposit account
-    User->>EVM: funds the deposit account with the ERC20 being deposited plus gas ETH
-    Note over User,Vault: Step 2: startDeposit(...) queues the request
-    User->>Vault: startDeposit(...)
-    Note over User,Vault: Step 3: flushQueue(...) moves the request into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Singleton: Step 4: sendDeposit(...) records the request and notifies the MPC
-    User->>Vault: sendDeposit(...)
-    Vault->>Singleton: signBidirectional(...)
-    Note over DApp,MPC: Step 5: poll for the MPC's signature
-    MPC->>Vault: reads the recorded request
-    MPC->>Singleton: respond(...) posts the signature
-    DApp->>Singleton: polls for the signature
-    Note over DApp,EVM: Step 6: broadcast the sweep to the EVM chain
-    DApp->>EVM: broadcasts the MPC-signed transfer(vaultEvmAddress, amount)
-    Note over DApp,EVM: Step 7: poll for the MPC's attestation
-    MPC->>EVM: watches for transaction execution
-    MPC->>Singleton: respondBidirectional(...) posts the attestation
-    DApp->>Singleton: polls for the attestation
-    Note over User,Vault: Step 8: queue the attestation at its output's width
-    User->>Vault: queueAttestation1(...) or queueAttestation0(...)
-    Note over User,Vault: Step 9: flushQueue(...) moves the attestation into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Vault: Step 10: completeDeposit(...) settles the request and mints
-    User->>Vault: completeDeposit(...)
-```
-
 ---
 
 Next: [Withdraw](../withdraw/withdraw.md) · Up: [ERC20 Vault](../../README.md) · Protocol: [Sign Bidirectional Flow](../../../../README.md#sign-bidirectional-protocol-flow)

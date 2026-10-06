@@ -167,43 +167,6 @@ means Sepolia or a fork of it. The setup pipeline probes for the wrapper's code
 with [`stataAvailable`](../../integration-tests/src/evm-stata.ts) before any
 spec runs and fails the run where it is absent.
 
-## Sequence
-
-```mermaid
-sequenceDiagram
-    title Redeem round trip
-    actor User
-    participant DApp as Vault dApp/Relayer
-    participant Vault as ERC20 Vault Contract
-    participant Singleton as Sig Network Singleton Contract
-    participant MPC as Sig Network Distributed MPC
-    participant EVM as EVM Blockchain
-
-    Note over User,Vault: Step 1: startRedeem(...) burns the surrendered coin and queues the request
-    User->>Vault: startRedeem(...) surrendering a shielded wrapper vault coin
-    Note over User,Vault: Step 2: flushQueue(...) assigns the vault nonce and moves the request into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Singleton: Step 3: sendRedeem(...) records the request and notifies the MPC
-    User->>Vault: sendRedeem(...)
-    Vault->>Singleton: signBidirectional(...)
-    Note over DApp,MPC: Step 4: poll for the MPC's signature
-    MPC->>Vault: reads the recorded request
-    MPC->>Singleton: respond(...) posts the signature
-    DApp->>Singleton: polls for the signature
-    Note over DApp,EVM: Step 5: broadcast the redeem to the EVM chain
-    DApp->>EVM: broadcasts the MPC-signed redeem(shares, vaultEvmAddress, vaultEvmAddress)
-    Note over DApp,EVM: Step 6: poll for the MPC's attestation
-    MPC->>EVM: watches for transaction execution
-    MPC->>Singleton: respondBidirectional(...) posts the attestation
-    DApp->>Singleton: polls for the attestation
-    Note over User,Vault: Step 7: queue the attestation at its output's width
-    User->>Vault: queueAttestation32(...) or queueAttestation0(...)
-    Note over User,Vault: Step 8: flushQueue(...) moves the attestation into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Vault: Step 9: completeRedeem(...) mints the attested assets as stataUnderlying vault coins
-    User->>Vault: completeRedeem(...)
-```
-
 ---
 
 Previous: [Supply](../supply/supply.md) · Up: [ERC20 Vault](../../README.md) · Protocol: [Sign Bidirectional Flow](../../../../README.md#sign-bidirectional-protocol-flow)

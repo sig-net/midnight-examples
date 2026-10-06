@@ -189,43 +189,6 @@ derivation path: the MPC derives it for this contract under a
 reserved path that no request may name ("midnight response key" in the SDK),
 and the queue circuits verify the MPC's attestation against it.
 
-## Sequence
-
-```mermaid
-sequenceDiagram
-    title Withdraw round trip
-    actor User
-    participant DApp as Vault dApp/Relayer
-    participant Vault as ERC20 Vault Contract
-    participant Singleton as Sig Network Singleton Contract
-    participant MPC as Sig Network Distributed MPC
-    participant EVM as EVM Blockchain
-
-    Note over User,Vault: Step 1: startWithdraw(...) burns the surrendered coin and queues the request
-    User->>Vault: startWithdraw(...) surrendering a shielded vault coin
-    Note over User,Vault: Step 2: flushQueue(...) assigns the vault nonce and moves the request into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Singleton: Step 3: sendWithdraw(...) records the request and notifies the MPC
-    User->>Vault: sendWithdraw(...)
-    Vault->>Singleton: signBidirectional(...)
-    Note over DApp,MPC: Step 4: poll for the MPC's signature
-    MPC->>Vault: reads the recorded request
-    MPC->>Singleton: respond(...) posts the signature
-    DApp->>Singleton: polls for the signature
-    Note over DApp,EVM: Step 5: broadcast the transfer to the EVM chain
-    DApp->>EVM: broadcasts the MPC-signed transfer(destEvmAddress, amount)
-    Note over DApp,EVM: Step 6: poll for the MPC's attestation
-    MPC->>EVM: watches for transaction execution
-    MPC->>Singleton: respondBidirectional(...) posts the attestation
-    DApp->>Singleton: polls for the attestation
-    Note over User,Vault: Step 7: queue the attestation at its output's width
-    User->>Vault: queueAttestation1(...) or queueAttestation0(...)
-    Note over User,Vault: Step 8: flushQueue(...) moves the attestation into the output buffer
-    User->>Vault: flushQueue(...)
-    Note over User,Vault: Step 9: completeWithdraw(...) settles on the attested output
-    User->>Vault: completeWithdraw(...)
-```
-
 ---
 
 Previous: [Deposit](../deposit/deposit.md) · Next: [Swap](../swap/swap.md) · Up: [ERC20 Vault](../../README.md) · Protocol: [Sign Bidirectional Flow](../../../../README.md#sign-bidirectional-protocol-flow)

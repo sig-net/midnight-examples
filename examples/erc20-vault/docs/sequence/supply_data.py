@@ -3,7 +3,7 @@
 Step numbers follow examples/erc20-vault/docs/supply/supply.md (9 steps).
 """
 
-TITLE = 'supply-sequence'
+TITLE = 'Supply round trip'
 
 LANES = [
     dict(id='user',      title='User',                           icon='user', sub='Midnight wallet'),
@@ -28,14 +28,15 @@ BANDS = [
                     '`approve(stataToken, unlimitedAllowance)`',
                     'on the **ERC20 Token** (the underlying)']),
         dict(kind='arrow', step='1', phase='request', frm='user', to='vault',
-             label=['**User:**', 'Starts the supply with a vault coin', '`startSupply(...)`'],
+             label=['**User:**', 'Starts the supply and queues it', '`startSupply(...)`'],
              side=dict(lane='vault', lines=['**Reads:** the user\'s secret',
                                              '**Through:** the **callerSecretKey** witness',
-                                             '**Burns:** the surrendered vault coin'])),
+                                             '**Burns:** the shielded underlying coin'])),
         dict(kind='arrow', step='2', phase='request', frm='user', to='vault',
              label=['**User:**', 'Flushes the request', '`flushQueue(...)`'],
              side=dict(lane='vault', lines=['**Assigns:** the next **vaultAccountNonce**',
-                                             'as the request\'s EVM nonce'])),
+                                             'as the request\'s EVM nonce',
+                                             '**Moves:** the request into the output buffer'])),
         dict(kind='arrow', step='3', phase='request', frm='user', to='vault',
              label=['**User:**', 'Sends the request', '`sendSupply(...)`'],
              side=dict(lane='vault', lines=['**Records:** **bidirectionalSupplyMap**',
@@ -75,10 +76,12 @@ BANDS = [
         dict(kind='arrow', step=None, phase='attestation', frm='dapp', to='singleton',
              label=['**dApp/relayer:**', 'Picks up the attestation from', '**RespondBidirectionalEvent**']),
         dict(kind='fork', step='7', phase='settle', frm='user', to='vault',
-             arms=[['**User:**', 'Queues an executed verdict', '`queueAttestation32(...)`'],
-                   ['**User:**', 'Queues a failed or unviable verdict', '`queueAttestation0(...)`']]),
+             arms=[['**User:**', 'Queues executed (32 bytes)', '`queueAttestation32(...)`'],
+                   ['**User:**', 'Queues failed or unviable (0 bytes)', '`queueAttestation0(...)`']]),
         dict(kind='arrow', step='8', phase='settle', frm='user', to='vault',
-             label=['**User:**', 'Flushes the attestation', '`flushQueue(...)`']),
+             label=['**User:**', 'Flushes the attestation', '`flushQueue(...)`'],
+             side=dict(lane='vault', lines=['**Moves:** the attestation into',
+                                             'the output buffer'])),
         dict(kind='arrow', step='9', phase='settle', frm='user', to='vault',
              label=['**User:**', 'Completes the supply', '`completeSupply(...)`'],
              side=dict(lane='vault', lines=['**With:** the request id, the 32-byte',

@@ -116,9 +116,8 @@ below for the vault's own code, step by step.
 
 ## The flows
 
-Each user flow has its own walkthrough page pairing the flow's diagram, its
-step-by-step description linking into the contract and the flow code, and its
-mermaid sequence diagram:
+Each user flow has its own walkthrough page pairing the flow's diagram with its
+step-by-step description linking into the contract and the flow code:
 
 - [Deposit](docs/deposit/deposit.md)
 - [Withdraw](docs/withdraw/withdraw.md)

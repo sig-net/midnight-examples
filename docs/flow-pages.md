@@ -18,8 +18,6 @@ Top to bottom:
 3. The embedded diagram: `![<Flow> flow](<flow>.drawio.png)`.
 4. The step list (next section).
 5. Any shared-setup notes the steps reference, kept short, links over code.
-6. A `## Sequence` section holding the mermaid sequence diagram whose
-   `Note over` lines carry the canonical step strings.
 
 ## The step list
 
@@ -60,11 +58,10 @@ lines that make that point.
 
 ## Correspondence
 
-Every canonical step string appears exactly twice on its flow page: once as
-its step-list bullet (`- **N.** <tail>` as above) and once on a `Note over`
-line inside the mermaid fence. The flow page is where the canonical strings
-render: the flow diagram carries no step text, and it links to the page by
-the ordinal set, its numbered circles being exactly the frozen strings'
-ordinals (a branch's arms share one ordinal and one circle). Text on
+Every canonical step string appears exactly once on its flow page, as its
+step-list bullet (`- **N.** <tail>` as above). The page's step list and the
+diagram's numbered steps match: the flow diagram carries no step text, and
+its numbered circles are exactly the frozen strings' ordinals (a branch's
+arms share one ordinal and one circle). Text on
 the diagram's arrows is edge labels under the diagramming style guide's
 golden rules, a separate vocabulary from the canonical strings.
