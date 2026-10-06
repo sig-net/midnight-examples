@@ -1,0 +1,49 @@
+\begingroup
+\setlength{\LTpre}{6pt}\setlength{\LTpost}{6pt}
+\begin{longtable}{@{}L{0.01cm}L{2.9cm}L{4.7cm}L{7.5cm}@{}}
+\toprule
+& \textbf{Here} & \textbf{Source name} & \textbf{Role} \\
+\midrule
+\endfirsthead
+\multicolumn{4}{@{}l}{\small\itshape\ldots continued from previous page}\\
+\toprule
+& \textbf{Here} & \textbf{Source name} & \textbf{Information Held} \\
+\midrule
+\endhead
+\midrule
+\multicolumn{4}{r@{}}{\small\itshape continued on next page \ldots}\\
+\endfoot
+\bottomrule
+\endlastfoot
+ & $\reqMap$ & \srcReqMap & withdraw and approve requests, keyed by $\rid$; the MPC reads
+  them here.  \\
+& $\depositMap$ & \srcDepositMap & deposit requests keyed by $\rid$ \\
+& $\swapMap$ & \srcSwapMap & swap requests keyed by $\rid$ \\
+& $\supplyMap$ & \srcSupplyMap & supply requests keyed by $\rid$\\
+& $\redeemMap$ & \srcRedeemMap & redeem requests  keyed by $\rid$\\
+\addlinespace[3pt]
+ & $\depositView$ & \srcDepositView & pending-\emph{deposit} record: the depositor
+  commitment, the ERC20 and the amount $\cktCompleteDeposit$ mints \\
+ & $\wdView$ & \srcWdView & pending-\emph{withdrawal} record: the refund commitment, the
+  ERC20 and the amount.  \\
+ & $\swapView$ & \srcSwapView & pending-\emph{swap} record: the refund commitment,
+  $\tokType$, $\tokTypeB$, $\amtOut$ and $\amtMax$.  \\
+& $\supplyView$ & \srcSupplyView & pending-\emph{supply} record: the refund commitment
+  and the amount.\\
+& $\redeemView$ & \srcRedeemView & pending-\emph{redeem} record: the refund commitment
+  and the share count.  \\
+\addlinespace[3pt]
+& $\mpcRespKey$ & \code{mpcResponseKey} & signature verification key for attestation \\
+& $\sigNonce$ & \code{signetRequestNonce} & a counter making otherwise identical requests distinct;
+  its value publicly orders every request the vault has made \\
+ & $\initFlag$ & \srcInitFlag & one-shot setup flag \\
+& $\vaultEvmAddr$ & \code{vaultEvmAddress} & the contract-enforced recipient of every deposit \\
+& $\routerAddr$ & \code{uniswapRouter} & the only spender $\cktApprove$ approves, and the only
+  destination a swap request sends to \\
+& $\underAddr$ & \srcUnderlying & the lent ERC20; gives $\cktStartSupply$ its burn color and
+  $\cktCompleteRedeem$ its mint color \\
+& $\wrapAddr$ & \srcWrapper & the interest-bearing wrapper; gives $\cktStartRedeem$ its burn color
+  and $\cktCompleteSupply$ its mint color. The only spender $\cktApproveStata$ approves, and the
+  only destination a supply or redeem request sends to \\
+\end{longtable}
+\endgroup
