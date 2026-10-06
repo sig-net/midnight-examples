@@ -528,8 +528,6 @@ pair so the PNG's embedded model carries the same state.
 
 ### Flow diagrams: the sequence form
 
-The five flow diagrams are generated from data tables in
-[examples/erc20-vault/docs/sequence](../examples/erc20-vault/docs/sequence/README.md):
-one lifeline per actor, tinted bands per phase, one row per arrow, a branch as one
-circle with two arms, the key derivations as a footnote. They carry no curation
-marker, and a change to a flow is a change to its data table.
+The five flow diagrams use a sequence form: one lifeline per actor, tinted bands per
+phase, one row per arrow, a branch as one circle with two arms, the key derivations as
+a footnote. They carry no curation marker.
