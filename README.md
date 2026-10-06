@@ -67,7 +67,7 @@ steps and 5 per-request runtime steps.
 Setup entails:
 1. Installing `@sig-net/midnight` into your project.
 2. Importing the Signet Compact module into your contract.
-3. Declaring the required protocol state in your ledger: the `SignBidirectionalEventMapV1` your requests live in, the `SignetSigner` singleton reference your circuits invoke via cross contract call to notify the MPC of requests, the `mpcResponseKey` your circuits verify attestations against, and the highest destination height the contract has accepted (`lastSeen`) together with the height recorded for each request when it is made.
+3. Declaring the required protocol state in your ledger: the `SignBidirectionalEventMapV1` your requests live in, the `SignetSigner` singleton reference your circuits invoke via cross contract call to notify the MPC of requests, the `mpcResponseKey` your circuits verify attestations against, and the highest target-chain height the contract has accepted (`lastSeen`) together with the height recorded for each request when it is made.
 4. Setting the contract's own `mpcResponseKey` with an initialisation circuit call after deploy (its derivation takes the contract's address as input, which exists only once the contract is deployed).
 
 At runtime you integrate the [Sign Bidirectional Protocol Flow above](#sign-bidirectional-protocol-flow):

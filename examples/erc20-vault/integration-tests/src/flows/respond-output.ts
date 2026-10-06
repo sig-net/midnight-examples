@@ -1,6 +1,6 @@
 // Respond-output resolution: the client half of the attestation protocol.
 // The MPC's RespondBidirectionalEvent carries the request id, the
-// destination block height, its verdict (the output kind), the output's
+// target-chain block height, its verdict (the output kind), the output's
 // width, the attestation digest and the ECDSA signature over that digest,
 // while the serialised output itself travels off chain, so the client obtains
 // the output bytes independently and checks the signature against them. A post's declared

@@ -10,7 +10,7 @@ for text that will not fit and for notes or cards that overlap; a clean build pr
 
 DATA FORMAT (one Python module per flow, e.g. deposit_data.py)
 --------------------------------------------------------------
-TITLE          str   diagram name, drawn above the header row.
+TITLE          str   diagram name.
 LANES          list of dict(id, title, icon, sub=None), left to right.
                      title may hold '\\n' (two lines; only without sub).
                      icon: user | contract | signet | server | mpc-cluster | chain.
@@ -56,8 +56,7 @@ PALETTE = os.path.join(HERE, '..', '..', '..', '..', 'docs', 'diagram-palette.dr
 # ---- grid ------------------------------------------------------------------------------
 W = 270          # lane pitch (lifeline to lifeline)
 X0 = 20          # left edge of the first lane
-TITLE_H = 36     # the title line above the header cards
-HDR_Y, HDR_H = 20 + TITLE_H, 72   # header cards (pushed down by RAIL when the data has GROUPS)
+HDR_Y, HDR_H = 20, 72   # header cards (pushed down by RAIL when the data has GROUPS)
 RAIL = 34        # height of the group rail above the header cards
 LINE = 15        # line pitch inside notes and cards
 P = 64           # row pitch
@@ -276,9 +275,6 @@ def build(data, out):
         bands.append((band, top, bottom, rows))
         y = bottom + BAND_GAP
     ll_top, ll_bot = hdr_y + HDR_H, bands[-1][2]
-
-    b.vertex('title', esc(data.TITLE), restyle(pstyle('title'), align='left', verticalAlign='middle', spacing=0),
-             X0, 20, FONTS['b'].getlength(data.TITLE) * 16 / 12 + 8, 24)
 
     # -- bands (back layer)
     for band, top, bottom, rows in bands:

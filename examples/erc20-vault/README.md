@@ -70,7 +70,7 @@ draws and describes its steps (see [The flows](#the-flows)).
   **ERC20 Vault Contract**, this example's contract, whose exported circuits
   appear on the map and are listed in
   [The vault's circuits](#the-vaults-circuits).
-- **EVM Blockchain (destination chain)** hosts what the vault transacts with:
+- **EVM Blockchain (target chain)** hosts what the vault transacts with:
   the ERC20 token contract being bridged, the Uniswap V3 router (swap) and
   the Aave stataToken wrapper (supply / redeem), the vault's own derived EVM
   account holding the pooled tokens, and the destination account a withdraw
