@@ -4,8 +4,8 @@
 // another transaction) the attestation digest commits to zero output bytes,
 // so a client needs no observation to check a post declaring either kind. A
 // nonce replacement's plain transfer returns nothing, so its executed
-// attestation commits to the same zero bytes. The vault's queueAttestation0
-// takes them as Bytes<0>.
+// attestation commits to the same zero bytes. The vault's complete circuits
+// check them against the attestation's width and hash as Bytes<0>.
 
 /** The zero-byte output every failure attestation, and an executed nonce replacement's, commits to. */
 export const EMPTY_OUTPUT: Uint8Array = new Uint8Array(0);

@@ -132,9 +132,9 @@ As illustrated, the flow comprises 9 steps:
 - **7.** queue the attestation at its output's width
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     submits the verified outcome to
-    [`queueAttestation1`](../../contract/src/erc20-vault.compact) for an
-    executed transfer or `queueAttestation0` for a failed or unviable one.
-    The circuit verifies the MPC's signature over the output, finds the open
+    [`queueAttestation`](../../contract/src/erc20-vault.compact), whatever its
+    verdict. The circuit verifies the MPC's signature over the output's width
+    and hash the event carries, finds the open
     withdrawal through `evictionMap`, requires a block height strictly above
     its `lastSeen`, and queues the
     [`AttestationRecord`](../../contract/src/erc20-vault.compact) in
@@ -150,7 +150,7 @@ As illustrated, the flow comprises 9 steps:
     `lastSeen` and the caller's ownership commitment, then removes the
     request's event, its arguments, its `evictionMap` entry, the attestation
     and the output entry, so the request settles once.
-  - An `executed` verdict requires the output to hash to the record's digest.
+  - An `executed` verdict requires the output to have the record's width and hash.
     A transfer that returned true moved the tokens, so the burn stands and the
     call only closes the request.
   - A transfer that returned false, or a `failed` or `unviable` one, moved

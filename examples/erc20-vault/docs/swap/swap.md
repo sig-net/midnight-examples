@@ -123,10 +123,10 @@ As illustrated, the flow comprises 9 steps:
     **`unviable`** is checked over the EMPTY output.
 - **7.** queue the attestation at its output's width
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
-    submits an executed swap to
-    [`queueAttestation32`](../../contract/src/erc20-vault.compact) and a failed
-    or unviable one to `queueAttestation0`. The circuit verifies the MPC's
-    signature over the output against
+    submits the outcome to
+    [`queueAttestation`](../../contract/src/erc20-vault.compact), whatever its
+    verdict. The circuit verifies the MPC's signature over the output's width
+    and hash the event carries against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), finds the open
     swap through `evictionMap`, requires a block height strictly above its
     `lastSeen`, and queues the attestation record.
@@ -140,7 +140,7 @@ As illustrated, the flow comprises 9 steps:
     the entry's `lastSeen` and the caller's ownership commitment, which makes
     every mint swapper-only, then removes the request's event, its arguments,
     its `evictionMap` entry, the attestation and the output entry.
-  - An `executed` verdict requires the output to hash to the record's digest,
+  - An `executed` verdict requires the output to have the record's width and hash,
     then mints the EXACT `amountOut` of `erc20AddressOut` the request asked
     for, a request input and never a result of the trade, and returns the
     unspent `erc20AddressIn` as change: `amountInMaximum` minus the attested

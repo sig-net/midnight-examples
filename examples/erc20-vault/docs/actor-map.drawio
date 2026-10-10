@@ -566,32 +566,8 @@
                 <mxCell id="code-queueatt0-icon" value="" style="shape=mxgraph.ios7.icons.settings;html=1;" parent="code-queueatt0" vertex="1">
                     <mxGeometry x="8" y="6" width="16" height="16" as="geometry"/>
                 </mxCell>
-                <mxCell id="code-queueatt0-text" value="&lt;div style=&quot;font-family: Menlo, Monaco, &amp;#39;Courier New&amp;#39;, monospace; font-size: 12px; line-height: 18px; white-space: pre;&quot;&gt;&lt;span style=&quot;color: rgb(175, 0, 219);&quot;&gt;circuit&lt;/span&gt;&lt;span style=&quot;color: rgb(32, 32, 32);&quot;&gt; &lt;b&gt;queueAttestation0&lt;/b&gt;(...)&lt;/span&gt;&lt;/div&gt;" style="text;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=0;spacingLeft=0;spacingRight=8;" parent="code-queueatt0" vertex="1">
+                <mxCell id="code-queueatt0-text" value="&lt;div style=&quot;font-family: Menlo, Monaco, &amp;#39;Courier New&amp;#39;, monospace; font-size: 12px; line-height: 18px; white-space: pre;&quot;&gt;&lt;span style=&quot;color: rgb(175, 0, 219);&quot;&gt;circuit&lt;/span&gt;&lt;span style=&quot;color: rgb(32, 32, 32);&quot;&gt; &lt;b&gt;queueAttestation&lt;/b&gt;(...)&lt;/span&gt;&lt;/div&gt;" style="text;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=0;spacingLeft=0;spacingRight=8;" parent="code-queueatt0" vertex="1">
                     <mxGeometry x="30" width="217" height="28" as="geometry"/>
-                </mxCell>
-                <mxCell id="code-queueatt1" value="" style="group" parent="vl" vertex="1" connectable="0">
-                    <mxGeometry x="20" y="1603" width="255" height="28" as="geometry"/>
-                </mxCell>
-                <mxCell id="code-queueatt1-box" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;dashed=1;dashPattern=1 2;strokeColor=default;" parent="code-queueatt1" vertex="1">
-                    <mxGeometry width="255" height="28" as="geometry"/>
-                </mxCell>
-                <mxCell id="code-queueatt1-icon" value="" style="shape=mxgraph.ios7.icons.settings;html=1;" parent="code-queueatt1" vertex="1">
-                    <mxGeometry x="8" y="6" width="16" height="16" as="geometry"/>
-                </mxCell>
-                <mxCell id="code-queueatt1-text" value="&lt;div style=&quot;font-family: Menlo, Monaco, &amp;#39;Courier New&amp;#39;, monospace; font-size: 12px; line-height: 18px; white-space: pre;&quot;&gt;&lt;span style=&quot;color: rgb(175, 0, 219);&quot;&gt;circuit&lt;/span&gt;&lt;span style=&quot;color: rgb(32, 32, 32);&quot;&gt; &lt;b&gt;queueAttestation1&lt;/b&gt;(...)&lt;/span&gt;&lt;/div&gt;" style="text;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=0;spacingLeft=0;spacingRight=8;" parent="code-queueatt1" vertex="1">
-                    <mxGeometry x="30" width="217" height="28" as="geometry"/>
-                </mxCell>
-                <mxCell id="code-queueatt32" value="" style="group" parent="vl" vertex="1" connectable="0">
-                    <mxGeometry x="20" y="1645" width="262" height="28" as="geometry"/>
-                </mxCell>
-                <mxCell id="code-queueatt32-box" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;dashed=1;dashPattern=1 2;strokeColor=default;" parent="code-queueatt32" vertex="1">
-                    <mxGeometry width="262" height="28" as="geometry"/>
-                </mxCell>
-                <mxCell id="code-queueatt32-icon" value="" style="shape=mxgraph.ios7.icons.settings;html=1;" parent="code-queueatt32" vertex="1">
-                    <mxGeometry x="8" y="6" width="16" height="16" as="geometry"/>
-                </mxCell>
-                <mxCell id="code-queueatt32-text" value="&lt;div style=&quot;font-family: Menlo, Monaco, &amp;#39;Courier New&amp;#39;, monospace; font-size: 12px; line-height: 18px; white-space: pre;&quot;&gt;&lt;span style=&quot;color: rgb(175, 0, 219);&quot;&gt;circuit&lt;/span&gt;&lt;span style=&quot;color: rgb(32, 32, 32);&quot;&gt; &lt;b&gt;queueAttestation32&lt;/b&gt;(...)&lt;/span&gt;&lt;/div&gt;" style="text;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=0;spacingLeft=0;spacingRight=8;" parent="code-queueatt32" vertex="1">
-                    <mxGeometry x="30" width="224" height="28" as="geometry"/>
                 </mxCell>
                 <mxCell id="code-sendapprove" value="" style="group" parent="vl" vertex="1" connectable="0">
                     <mxGeometry x="20" y="1785" width="211" height="28" as="geometry"/>

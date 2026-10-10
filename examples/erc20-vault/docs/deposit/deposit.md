@@ -168,9 +168,9 @@ As illustrated, the flow comprises 10 steps:
     [`respondBidirectional`](https://github.com/sig-net/midnight-integration/blob/v0.24.0/packages/signet-contract/src/signet-contract.compact).
     The emitted event carries the request id it answers, the finalised EVM
     block height, the MPC's verdict (`outputKind`: `executed`, `failed` or
-    `unviable`), the output's byte width, the attestation digest and the MPC's
-    ECDSA signature over it. The event does not carry the serialised output
-    itself.
+    `unviable`), the output's byte width and hash, the attestation digest and
+    the MPC's ECDSA signature over it. The event does not carry the serialised
+    output itself.
   - The client must therefore obtain the exact bytes the MPC hashed, from the
     source `RESPOND_OUTPUT_SOURCE` names. Under `evm-node`
     [`respond-output.ts`](../../integration-tests/src/flows/respond-output.ts)
@@ -199,27 +199,24 @@ As illustrated, the flow comprises 10 steps:
     UNTRUSTED: the respond events are open to anyone and the traced or cached
     output is unauthenticated, and the authoritative check is the in-circuit
     verification step 8 runs.
-- **8.** queue the attestation at its output's width
+- **8.** queue the attestation
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
-    hands the attested event and its output bytes to the queue circuit for the
-    output's width:
-    [`queueAttestation1`](../../contract/src/erc20-vault.compact) for an
-    executed sweep's 1-byte Borsh-encoded bool, `queueAttestation0` for a failed or
-    unviable sweep's empty output. Anyone may submit it.
-  - The circuit re-hashes the output, with the request id, block height and
-    output kind the event carries, into the attestation digest and verifies the
-    MPC's ECDSA signature over it against the initialise-pinned
+    hands the attested event to
+    [`queueAttestation`](../../contract/src/erc20-vault.compact), whatever its
+    verdict and output width. Anyone may submit it.
+  - The circuit recomputes the attestation digest from the request id, block
+    height, output kind, output width and output hash the event carries, and
+    verifies the MPC's ECDSA signature over it against the initialise-pinned
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact) with
-    [`verifyRespondBidirectionalEventV1`](https://github.com/sig-net/midnight-integration/blob/v0.24.0/packages/signet-midnight/src/Signet.compact).
-    The singleton emits MPC posts unverified, so this is the authentication
-    gate, and it needs the full output to prove which block height the MPC
-    signed (see
-    [Why the queue takes the full output](../contention-handling.md#why-the-queue-takes-the-full-output)).
+    `verifyRespondBidirectionalAttestationV1`. The singleton emits MPC posts
+    unverified, so this is the authentication gate, and it proves which block
+    height the MPC signed without the output (see
+    [Why the queue needs no output](../contention-handling.md#why-the-queue-needs-no-output)).
   - It then finds the open deposit through `evictionMap`, requires the
     attestation's block height to be strictly above the entry's `lastSeen`,
     refuses a request id already queued or flushed, and stores an
     [`AttestationRecord`](../../contract/src/erc20-vault.compact) (block
-    height, output kind and digest, no output) in `inputAttestationBuffer`
+    height, output kind, output width and hash, no output) in `inputAttestationBuffer`
     under the request id.
 - **9.** flushQueue(...) moves the attestation into the output buffer
   - An attestation slot of [`flushQueue`](../../contract/src/erc20-vault.compact)
@@ -240,7 +237,7 @@ As illustrated, the flow comprises 10 steps:
   - It removes the request's event, its arguments, its `evictionMap` entry,
     the flushed attestation and the output entry. A request id missing any of
     them fails, which is the double-settle protection.
-  - An `executed` verdict requires the output to hash to the record's digest.
+  - An `executed` verdict requires the output to have the record's width and hash.
     When the deserialised
     [`VaultResponse`](../../contract/src/erc20-vault.compact) reports the
     transfer returned true, the circuit mints the deposited amount of the
