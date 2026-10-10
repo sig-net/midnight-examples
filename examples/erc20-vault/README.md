@@ -678,7 +678,7 @@ an unattended/backgrounded run.
 
 ## Deploying
 
-The contract has 29 circuits and their verifier keys do not fit in one block, so
+The contract has 27 circuits and their verifier keys do not fit in one block, so
 a deploy is two phases:
 
 1. The base transaction registers the whole ledger state and ONE small circuit.
@@ -914,7 +914,7 @@ prefix. The tag carries the example name, the npm version does not:
 
 ## A note on package size
 
-The package ships the verifier keys of the vault's 29 circuits, which also go
+The package ships the verifier keys of the vault's 27 circuits, which also go
 on-chain, and publishes their prover keys nowhere: the package packs to well
 under a megabyte, and the workflow logs the packed and unpacked size before it
 publishes anything.
@@ -947,7 +947,7 @@ It compiles the shipped `src/erc20-vault.compact` with the pinned compiler
 manifest, and writes:
 
 ```
-public/keys/<circuit>.prover, <circuit>.verifier    the vault's 29 circuits
+public/keys/<circuit>.prover, <circuit>.verifier    the vault's 27 circuits
 public/zkir/<circuit>.bzkir
 public/compiler/contract-manifest.json, contract-info.json
 public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract

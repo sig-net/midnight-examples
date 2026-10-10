@@ -41,7 +41,7 @@ const ROOT: RoleWallet = { label: "root", envVar: "ROOT_SEED", shares: 1n };
  * pays its own withdraw fees). Receive-only test wallets (the fixed
  * `…42`/`…43` seeds) never pay anything and need no role here. The deployer
  * weighs three shares: the vault's split deploy costs it one transaction per
- * circuit (twenty-nine) where every other role pays one or two.
+ * circuit (twenty-seven) where every other role pays one or two.
  */
 const CHILDREN: readonly RoleWallet[] = [
   { label: "deployer", envVar: "DEPLOYER_SEED", shares: 3n },
