@@ -9,7 +9,7 @@
 # included: the address is final at that point, and the PR says when the
 # initialise is still to be run by hand.
 #
-# The 29 circuits do not fit one block: a base transaction registers one
+# The 27 circuits do not fit one block: a base transaction registers one
 # and a maintenance update adds each of the rest. A run that fails AFTER
 # printing "deployed erc20-vault base at ..." has a live contract (the
 # failure step below repeats that address in the step summary): do not

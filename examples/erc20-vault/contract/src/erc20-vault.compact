@@ -256,14 +256,16 @@ export struct OutputRequestEntry {
   lastSeen: Uint<64>;
 }
 
-// A verified attestation, stored under its request id. On an executed verdict the
-// complete circuit re-supplies the serialised output and checks it against the digest
-// (a nonce replacement checks the empty output on every verdict), so the record holds
-// no output and serves every output width.
+// A verified attestation, stored under its request id. The signature covers the output's
+// width and hash, so the record keeps those and no output: one queue circuit serves every
+// output width, and on an executed verdict the complete circuit re-supplies the serialised
+// output and checks it against them with verifyAttestedOutputV1 (a nonce replacement checks
+// the empty output on every verdict).
 export struct AttestationRecord {
   blockHeight: Uint<64>;
   outputKind: OutputKind;
-  digest: Bytes<32>;
+  serializedOutputLength: Uint<64>;
+  outputHash: Bytes<32>;
 }
 
 export enum FlushChannel { empty, request, attestation }
@@ -365,84 +367,32 @@ circuit flushAttestation(requestId: RequestId): [] {
   outputAttestationBuffer.insert(requestId, record);
 }
 
-circuit recordAttestation(
-  respondBidirectionalEvent: RespondBidirectionalEventV1,
-  digest: Bytes<32>
-): [] {
-  const requestId = respondBidirectionalEvent.requestId;
+// Queues an attestation for the flush once its signature verifies against the MPC
+// response key. The signed digest covers the request id, the height the flush folds, the
+// output kind and the output's width and hash, so the output itself is not needed here
+// and one circuit serves every output width. Anyone may submit one.
+export circuit queueAttestation(respondBidirectionalEvent: RespondBidirectionalEventV1): [] {
+  requireInitialised();
+  const attestation = disclose(respondBidirectionalEvent);
+  assert(
+    verifyRespondBidirectionalAttestationV1(attestation, mpcResponseKey),
+    "Invalid attestation signature"
+  );
+  const requestId = attestation.requestId;
   assert(evictionMap.member(requestId), "Request not sent");
   const outIndex = evictionMap.lookup(requestId);
   assert(outputRequestBuffer.member(outIndex), "Request not open");
   const out = outputRequestBuffer.lookup(outIndex);
   // TODO for audit v2, make this trigger a refund arm, even though this should be unreachable
-  assert(respondBidirectionalEvent.blockHeight > out.lastSeen, "Stale attestation");
+  assert(attestation.blockHeight > out.lastSeen, "Stale attestation");
   assert(!inputAttestationBuffer.member(requestId), "Attestation already queued");
   assert(!outputAttestationBuffer.member(requestId), "Attestation already flushed");
   inputAttestationBuffer.insert(requestId, AttestationRecord {
-    blockHeight: respondBidirectionalEvent.blockHeight,
-    outputKind: respondBidirectionalEvent.outputKind,
-    digest: digest,
+    blockHeight: attestation.blockHeight,
+    outputKind: attestation.outputKind,
+    serializedOutputLength: attestation.serializedOutputLength,
+    outputHash: attestation.outputHash,
   });
-}
-
-// Queues an attestation with an empty output.
-// The output is needed here, as the signed digest binds the
-// height to it and the flush trusts the height it folds.
-export circuit queueAttestation0(
-  respondBidirectionalEvent: RespondBidirectionalEventV1,
-  serializedOutput: Bytes<0>
-): [] {
-  requireInitialised();
-  const attestation = disclose(respondBidirectionalEvent);
-  const output = disclose(serializedOutput);
-  assert(
-    verifyRespondBidirectionalEventV1<0>(output, attestation, mpcResponseKey),
-    "Invalid attestation signature"
-  );
-  const digest = calculateSignetAttestationDigestV1<0>(
-    attestation.requestId, attestation.blockHeight, attestation.outputKind, output
-  );
-  recordAttestation(attestation, digest);
-}
-
-// Queues an attestation with a 1-byte output (the ERC20 transfer bool). The output is
-// needed here, as the signed digest binds the height to it and the flush trusts the
-// height it folds.
-export circuit queueAttestation1(
-  respondBidirectionalEvent: RespondBidirectionalEventV1,
-  serializedOutput: Bytes<1>
-): [] {
-  requireInitialised();
-  const attestation = disclose(respondBidirectionalEvent);
-  const output = disclose(serializedOutput);
-  assert(
-    verifyRespondBidirectionalEventV1<1>(output, attestation, mpcResponseKey),
-    "Invalid attestation signature"
-  );
-  const digest = calculateSignetAttestationDigestV1<1>(
-    attestation.requestId, attestation.blockHeight, attestation.outputKind, output
-  );
-  recordAttestation(attestation, digest);
-}
-
-// Queues an attestation with a 32-byte output (a uint256 return value, attested whole).
-// The output is needed here, as the signed digest binds the height to it and the flush
-// trusts the height it folds.
-export circuit queueAttestation32(
-  respondBidirectionalEvent: RespondBidirectionalEventV1,
-  serializedOutput: Bytes<32>
-): [] {
-  requireInitialised();
-  const attestation = disclose(respondBidirectionalEvent);
-  const output = disclose(serializedOutput);
-  assert(
-    verifyRespondBidirectionalEventV1<32>(output, attestation, mpcResponseKey),
-    "Invalid attestation signature"
-  );
-  const digest = calculateSignetAttestationDigestV1<32>(
-    attestation.requestId, attestation.blockHeight, attestation.outputKind, output
-  );
-  recordAttestation(attestation, digest);
 }
 
 // Consumes the open request and the flushed attestation that settles it, for the
@@ -622,7 +572,7 @@ export circuit sendReplaceNonce(outIndex: Bytes<32>): [] {
 
 // Settles a replacement on every verdict by closing it: it surrendered nothing. Every
 // verdict's attestation commits to the empty output, which is checked against the record's
-// digest. Deployer-gated through the ownership commitment, one settle per request.
+// width and hash. Deployer-gated through the ownership commitment, one settle per request.
 export circuit completeReplaceNonce(requestId: RequestId): [] {
   requireInitialised();
   const disclosedId = disclose(requestId);
@@ -634,9 +584,7 @@ export circuit completeReplaceNonce(requestId: RequestId): [] {
   bidirectionalReplaceNonceMap.remove(disclosedId);
 
   assert(
-    calculateSignetAttestationDigestV1<0>(
-      disclosedId, record.blockHeight, record.outputKind, default<Bytes<0>>
-    ) == record.digest,
+    verifyAttestedOutputV1<0>(default<Bytes<0>>, record.serializedOutputLength, record.outputHash),
     "Output does not match the attestation"
   );
 }
@@ -796,9 +744,9 @@ export circuit completeApprove(requestId: RequestId, serializedOutput: Bytes<1>)
 
   if (record.outputKind == OutputKind.executed) {
     assert(
-      calculateSignetAttestationDigestV1<1>(
-        disclosedId, record.blockHeight, record.outputKind, disclose(serializedOutput)
-      ) == record.digest,
+      verifyAttestedOutputV1<1>(
+        disclose(serializedOutput), record.serializedOutputLength, record.outputHash
+      ),
       "Output does not match the attestation"
     );
   }
@@ -950,9 +898,7 @@ export circuit completeDeposit(
   if (record.outputKind == OutputKind.executed) {
     const output = disclose(serializedOutput);
     assert(
-      calculateSignetAttestationDigestV1<1>(
-        disclosedId, record.blockHeight, record.outputKind, output
-      ) == record.digest,
+      verifyAttestedOutputV1<1>(output, record.serializedOutputLength, record.outputHash),
       "Output does not match the attestation"
     );
     if (deserialize<VaultResponse, 1>(output).success) {
@@ -1121,9 +1067,7 @@ export circuit completeWithdraw(
   const output = disclose(serializedOutput);
   if (executed) {
     assert(
-      calculateSignetAttestationDigestV1<1>(
-        disclosedId, record.blockHeight, record.outputKind, output
-      ) == record.digest,
+      verifyAttestedOutputV1<1>(output, record.serializedOutputLength, record.outputHash),
       "Output does not match the attestation"
     );
   }
@@ -1322,9 +1266,7 @@ export circuit completeSwap(
   if (record.outputKind == OutputKind.executed) {
     const output = disclose(serializedOutput);
     assert(
-      calculateSignetAttestationDigestV1<32>(
-        disclosedId, record.blockHeight, record.outputKind, output
-      ) == record.digest,
+      verifyAttestedOutputV1<32>(output, record.serializedOutputLength, record.outputHash),
       "Output does not match the attestation"
     );
     // changeNonce and mintNonce must be sampled independently and uniformly at random. No check
@@ -1520,9 +1462,7 @@ export circuit completeSupply(
   if (record.outputKind == OutputKind.executed) {
     const output = disclose(serializedOutput);
     assert(
-      calculateSignetAttestationDigestV1<32>(
-        disclosedId, record.blockHeight, record.outputKind, output
-      ) == record.digest,
+      verifyAttestedOutputV1<32>(output, record.serializedOutputLength, record.outputHash),
       "Output does not match the attestation"
     );
     mintShieldedToken(
@@ -1707,9 +1647,7 @@ export circuit completeRedeem(
   if (record.outputKind == OutputKind.executed) {
     const output = disclose(serializedOutput);
     assert(
-      calculateSignetAttestationDigestV1<32>(
-        disclosedId, record.blockHeight, record.outputKind, output
-      ) == record.digest,
+      verifyAttestedOutputV1<32>(output, record.serializedOutputLength, record.outputHash),
       "Output does not match the attestation"
     );
     mintShieldedToken(

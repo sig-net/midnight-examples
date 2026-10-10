@@ -121,12 +121,12 @@ As illustrated, the flow comprises 9 steps:
     and Borsh-serialised as the MPC does, the 32 little-endian bytes that carry
     the `amountIn` the router really spent. A post declaring **`failed`** or
     **`unviable`** is checked over the EMPTY output.
-- **7.** queue the attestation at its output's width
+- **7.** queue the attestation
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
-    submits an executed swap to
-    [`queueAttestation32`](../../contract/src/erc20-vault.compact) and a failed
-    or unviable one to `queueAttestation0`. The circuit verifies the MPC's
-    signature over the output against
+    submits the outcome to
+    [`queueAttestation`](../../contract/src/erc20-vault.compact), whatever its
+    verdict. The circuit verifies the MPC's signature over the output's width
+    and hash the event carries against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), finds the open
     swap through `evictionMap`, requires a block height strictly above its
     `lastSeen`, and queues the attestation record.
@@ -140,7 +140,7 @@ As illustrated, the flow comprises 9 steps:
     the entry's `lastSeen` and the caller's ownership commitment, which makes
     every mint swapper-only, then removes the request's event, its arguments,
     its `evictionMap` entry, the attestation and the output entry.
-  - An `executed` verdict requires the output to hash to the record's digest,
+  - An `executed` verdict requires the output to have the record's width and hash,
     then mints the EXACT `amountOut` of `erc20AddressOut` the request asked
     for, a request input and never a result of the trade, and returns the
     unspent `erc20AddressIn` as change: `amountInMaximum` minus the attested
@@ -191,7 +191,7 @@ functions behind the abstract `keyDerivation(...)` notes on the
 their inputs, in its footnote. The response key does not use any request's
 derivation path: the MPC derives it for this contract under a
 reserved path that no request may name ("midnight response key" in the SDK),
-and the queue circuits verify the MPC's attestation against it.
+and `queueAttestation` verifies the MPC's attestation against it.
 
 ---
 

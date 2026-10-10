@@ -246,8 +246,7 @@ const arrangeVault = async (arrangement: VaultArrangement) => {
         MPC_RESPONSE_SECRET,
       ),
     );
-    ctx = (await contract.circuits.queueAttestation1(ctx, attestation, new Uint8Array([1])))
-      .context;
+    ctx = (await contract.circuits.queueAttestation(ctx, attestation)).context;
   }
   ctx = (await sendDeposits(contract, ctx, arrangement.open)).ctx;
   for (const deposit of arrangement.queued) {
