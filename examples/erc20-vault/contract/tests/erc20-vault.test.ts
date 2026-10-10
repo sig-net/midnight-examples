@@ -1794,6 +1794,26 @@ describe("completeWithdraw settle", () => {
     ).rejects.toThrow(/Output does not match the attestation/);
   });
 
+  it("rejects an attestation over the output with a trailing zero", async () => {
+    // [1, 0] and [1] share an output hash: only the recorded width tells the
+    // 2-byte attestation apart from the 1-byte success the settle presents.
+    const { contract, ctx, requestId } = await withdrawRequested();
+    const attested = await attest(
+      contract,
+      ctx,
+      respond(
+        MPC_RESPONSE_SECRET,
+        requestId,
+        OutputKind.executed,
+        Uint8Array.of(1, 0),
+        ATTESTED_HEIGHT,
+      ),
+    );
+    await expect(
+      contract.circuits.completeWithdraw(attested, requestId, OUTPUT_SUCCESS, MINT_NONCE),
+    ).rejects.toThrow(/Output does not match the attestation/);
+  });
+
   it.each([
     {
       name: "queueAttestation over a 1-byte output",
@@ -2300,6 +2320,26 @@ describe("completeApprove settle", () => {
     );
     await expect(
       contract.circuits.completeApprove(attested, requestId, OUTPUT_FALSE),
+    ).rejects.toThrow(/Output does not match the attestation/);
+  });
+
+  it("rejects an attestation over the output with a trailing zero", async () => {
+    // [1, 0] and [1] share an output hash: only the recorded width tells the
+    // 2-byte attestation apart from the 1-byte success the settle presents.
+    const { contract, ctx, requestId } = await approveRequested();
+    const attested = await attest(
+      contract,
+      ctx,
+      respond(
+        MPC_RESPONSE_SECRET,
+        requestId,
+        OutputKind.executed,
+        Uint8Array.of(1, 0),
+        ATTESTED_HEIGHT,
+      ),
+    );
+    await expect(
+      contract.circuits.completeApprove(attested, requestId, OUTPUT_SUCCESS),
     ).rejects.toThrow(/Output does not match the attestation/);
   });
 
@@ -3607,6 +3647,26 @@ describe("completeSwap settle", () => {
     ).rejects.toThrow(/Output does not match the attestation/);
   });
 
+  it("rejects an attestation over the output with a trailing zero", async () => {
+    // A 33-byte output ending in zero shares the 32-byte output's hash: only the
+    // recorded width tells the attestation apart from the output the settle presents.
+    const { contract, ctx, requestId } = await swapRequested();
+    const attested = await attest(
+      contract,
+      ctx,
+      respond(
+        MPC_RESPONSE_SECRET,
+        requestId,
+        OutputKind.executed,
+        Uint8Array.of(...OUTPUT_SWAP, 0),
+        ATTESTED_HEIGHT,
+      ),
+    );
+    await expect(
+      contract.circuits.completeSwap(attested, requestId, OUTPUT_SWAP, MINT_NONCE, CHANGE_NONCE),
+    ).rejects.toThrow(/Output does not match the attestation/);
+  });
+
   it("rejects a changeNonce equal to mintNonce on an executed swap", async () => {
     const { contract, ctx, requestId } = await swapRequested();
     const attested = await attest(
@@ -4382,6 +4442,26 @@ describe("completeSupply settle", () => {
     ).rejects.toThrow(/Output does not match the attestation/);
   });
 
+  it("rejects an attestation over the output with a trailing zero", async () => {
+    // A 33-byte output ending in zero shares the 32-byte output's hash: only the
+    // recorded width tells the attestation apart from the output the settle presents.
+    const { contract, ctx, requestId } = await supplyRequested();
+    const attested = await attest(
+      contract,
+      ctx,
+      respond(
+        MPC_RESPONSE_SECRET,
+        requestId,
+        OutputKind.executed,
+        Uint8Array.of(...OUTPUT_SUPPLY, 0),
+        ATTESTED_HEIGHT,
+      ),
+    );
+    await expect(
+      contract.circuits.completeSupply(attested, requestId, OUTPUT_SUPPLY, MINT_NONCE),
+    ).rejects.toThrow(/Output does not match the attestation/);
+  });
+
   it.each([
     {
       name: "queueAttestation over a 32-byte output",
@@ -4974,6 +5054,26 @@ describe("completeRedeem settle", () => {
         redeemOutput(REDEEM_ASSETS + 1n),
         MINT_NONCE,
       ),
+    ).rejects.toThrow(/Output does not match the attestation/);
+  });
+
+  it("rejects an attestation over the output with a trailing zero", async () => {
+    // A 33-byte output ending in zero shares the 32-byte output's hash: only the
+    // recorded width tells the attestation apart from the output the settle presents.
+    const { contract, ctx, requestId } = await redeemRequested();
+    const attested = await attest(
+      contract,
+      ctx,
+      respond(
+        MPC_RESPONSE_SECRET,
+        requestId,
+        OutputKind.executed,
+        Uint8Array.of(...OUTPUT_REDEEM, 0),
+        ATTESTED_HEIGHT,
+      ),
+    );
+    await expect(
+      contract.circuits.completeRedeem(attested, requestId, OUTPUT_REDEEM, MINT_NONCE),
     ).rejects.toThrow(/Output does not match the attestation/);
   });
 
