@@ -103,7 +103,7 @@ As illustrated, the flow comprises 9 steps:
     through the singleton's `respond(...)`.
   - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts)
     polls the singleton's emitted signature events through the SDK's
-    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0/packages/signet-midnight/src/signet-request-response-reader.ts),
+    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.25.0-rc.1/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
     recovers to the expected signer: for a withdrawal, the vault's own
     account, `evmVaultAddress`.
