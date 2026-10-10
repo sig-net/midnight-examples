@@ -197,8 +197,9 @@ As illustrated, the flow comprises 10 steps:
   - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts)
     owns the loop, the timeout and the reporting. Everything resolved here stays
     UNTRUSTED: the respond events are open to anyone and the traced or cached
-    output is unauthenticated, and the authoritative check is the in-circuit
-    verification step 8 runs.
+    output is unauthenticated, and the authoritative checks are in-circuit:
+    step 8 verifies the signature and step 10 checks the output against the
+    attested width and hash.
 - **8.** queue the attestation
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     hands the attested event to
@@ -269,8 +270,8 @@ the vault and singleton pair through
 expected signer of the deposit sweep is the user's deposit account, derived with
 [`deriveEvmAddress`](https://github.com/sig-net/midnight-integration/blob/v0.25.0-rc.1/packages/signet-midnight/src/epsilon-derivation.ts)
 from the caller's identity commitment rendered as full-width lowercase hex, the
-MPC's rendering of every request's 32 opaque path bytes. The key the queue
-circuits verify against is derived with
+MPC's rendering of every request's 32 opaque path bytes. The key
+`queueAttestation` verifies against is derived with
 [`deriveMidnightResponseKey`](https://github.com/sig-net/midnight-integration/blob/v0.25.0-rc.1/packages/signet-midnight/src/epsilon-derivation.ts).
 Those two functions are the concrete work behind the abstract
 `keyDerivation(...)` notes on the [actor map](../../README.md#the-actors); the

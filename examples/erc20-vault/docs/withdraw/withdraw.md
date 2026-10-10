@@ -129,7 +129,7 @@ As illustrated, the flow comprises 9 steps:
   - Selection is by signature verification alone, against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), and everything
     resolved here stays UNTRUSTED until step 7 re-verifies it in-circuit.
-- **7.** queue the attestation at its output's width
+- **7.** queue the attestation
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     submits the verified outcome to
     [`queueAttestation`](../../contract/src/erc20-vault.compact), whatever its
@@ -187,7 +187,7 @@ functions behind the abstract `keyDerivation(...)` notes on the
 their inputs, in its footnote. The response key does not use any request's
 derivation path: the MPC derives it for this contract under a
 reserved path that no request may name ("midnight response key" in the SDK),
-and the queue circuits verify the MPC's attestation against it.
+and `queueAttestation` verifies the MPC's attestation against it.
 
 ---
 

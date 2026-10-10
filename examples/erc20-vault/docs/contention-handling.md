@@ -299,8 +299,8 @@ output width.
   output entry, the `evictionMap` entry and the attestation, and fails when
   any of them is absent. Attestations are public and stay validly signed
   forever, so anything less would let one be queued and settled again.
-- **Only attestations for sent, open requests are queued.** The queue circuits
-  find the entry through `evictionMap` and check its `lastSeen`, which keeps
+- **Only attestations for sent, open requests are queued.** `queueAttestation`
+  finds the entry through `evictionMap` and checks its `lastSeen`, which keeps
   junk and stale attestations out of the flush's slots.
 - **Queued attestations never overwrite each other.** Both attestation buffers
   are keyed by request id, and queueing refuses a request id either already

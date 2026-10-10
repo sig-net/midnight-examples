@@ -84,7 +84,7 @@ draws and describes its steps (see [The flows](#the-flows)).
   MPC-signed transaction to the EVM chain, then polls for the MPC's
   attestation and hands the attested output back for settling. The MPC never
   broadcasts: broadcasting is the relayer's responsibility. The permissionless
-  Midnight calls (`flushQueue`, the send circuits and the queue circuits) may
+  Midnight calls (`flushQueue`, the send circuits and `queueAttestation`) may
   come from any wallet: the integration flows submit them from the user's
   own.
 - **Users**: each user holds a Midnight wallet (calls the circuits and
