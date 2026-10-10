@@ -2,5 +2,37 @@
   "render": {
     "scale": 3,
     "border": 10
+  },
+  "lint": {
+    "labelFormat": "strict",
+    "verbs": [
+      "Interacts",
+      "Funds",
+      "Starts",
+      "Calls",
+      "Constructs",
+      "Reads",
+      "Picks",
+      "Posts",
+      "Signs",
+      "Attests",
+      "Extracts",
+      "Broadcasts",
+      "Submits"
+    ],
+    "subjects": [
+      "MPC",
+      "dApp/relayer",
+      "User",
+      "User's Midnight wallet",
+      "User's EVM wallet",
+      "startCrossChain circuit",
+      "startDeposit circuit",
+      "startRedeem circuit",
+      "startSupply circuit",
+      "startSwap circuit",
+      "startWithdraw circuit"
+    ],
+    "palette": "docs/diagram-palette.drawio"
   }
 }

@@ -357,47 +357,16 @@ apply to all of them:
 
 # Diagrams
 
-- **The style guide and workflow in [docs/diagramming.md](docs/diagramming.md) are
-  binding** for every draw.io diagram in this repo: the committed `.drawio` +
-  `.drawio.png` pair, the palette, the label styles, the shapes, the icon bank. Copy
-  styled cells from `docs/diagram-palette.drawio` rather than authoring styles by hand.
-- **Diagram labels are verbatim from source**: circuit names with parentheses
-  (`startDeposit(...)`), event and ledger field names exactly as exported. A label is correct
-  iff it greps in the source. When a term exists in several sources, truth priority is
-  code > README > diagram: take it from the leftmost source that has it. One exemption: the generic protocol diagram
-  (`docs/sign-bidirectional-flow.*`) depicts a hypothetical integrating contract, so its
-  placeholder circuits (`startCrossChain(...)`, `completeCrossChain(...)`) grep nowhere
-  by design. Every real name in it (events, singleton circuits, ledger fields) still
-  must grep.
-- **An example's actor map is the ONLY diagram carrying the contract's full
-  anatomy** (every exported circuit, every witness, every exported ledger field,
-  exported pure circuits omitted by default). A flow diagram's
-  contract box shows only the members (ledger fields, circuits, witnesses)
-  that flow interacts with, membership read from the
-  contract source and the flow's
-  `integration-tests/src/flows/` files. Kept cells are the actor map's own,
-  value and style byte-identical, only geometry free to adapt: the full rule is
-  the "Flow diagram membership" section of [docs/diagramming.md](docs/diagramming.md).
-- **NEVER:** hand-export from the draw.io UI, screenshot, pass ad hoc scale or border
-  overrides (resolution changes are edits to [drawio.config.json](drawio.config.json),
-  re-rendering every pair in the same change), commit a PNG not rendered from the
-  `.drawio` source beside it, leave an edge without `source` and `target` attachments,
-  or embed a draw.io SVG export in docs (it renders theme-mangled in dark-mode viewers).
-  Never draw a diagonal or almost-straight edge segment (edges are strict horizontal and
-  vertical runs, `strokeWidth=2`, coloured step edges turning their corners as arcs and
-  derivation edges keeping sharp right angles), never let an edge cut
-  through a shape when a route around exists, never let two edges of the same step
-  colour cross each other, and never scatter one step's edges across distant anchors
-  when they can share a base: the full routing rules are the "Edge routing" section of
-  [docs/diagramming.md](docs/diagramming.md).
-- **`drawio.config.json` lives ONCE at the repo root**, exactly as `eslint.config.js` and
-  `.prettierrc.json` do: it is found by upward search from each diagram, and one root file
-  is what reaches both `docs/` and every `examples/*/docs/`. A copy inside a docs directory
-  would govern only its siblings and drift from the rest.
-- **Eyeball every render before finishing**: downscale the PNG and read it as an image.
-  Broken edge labels, escaped containment, missing icons and dead bands of empty space
-  (area only a deleted or moved cell explains) are visible at a glance and invisible in
-  the XML. Ask of every render: does any region read as "something used to be here"?
+- **The style guide in [docs/diagramming.md](docs/diagramming.md) is binding** for
+  every draw.io diagram in this repo, and through it the drawio-cli style guide it links:
+  the committed `.drawio` + `.drawio.png` pair, the palette, the label rules, the routing
+  rules, the shapes, the icon bank and the curated-layout mandate. Copy styled cells
+  from `docs/diagram-palette.drawio` rather than authoring styles by hand, and run
+  `drawio-cli lint` (which applies the vocabulary in [drawio.config.json](drawio.config.json))
+  and `drawio-cli check-pair` before finishing.
+- **Diagram labels are verbatim from source**: a label is correct iff it greps in the
+  source, with the one exemption for the generic protocol diagram's placeholder circuits
+  that [docs/diagramming.md](docs/diagramming.md) records.
 
 # Flow pages
 
