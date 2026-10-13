@@ -46,7 +46,7 @@ import {
   type Secp256k1Point,
   serializeRespondOutput,
   type SignetRequestResponseReader,
-  verifyRespondBidirectionalSignature,
+  verifyRespondBidirectionalEvent,
 } from "@sig-net/midnight";
 import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
@@ -435,7 +435,7 @@ export async function fetchAttestedRespondOutcome(
       event.outputKind === OutputKind.executed ? candidates.executed : candidates.failure;
     if (
       serializedOutput !== undefined &&
-      verifyRespondBidirectionalSignature(serializedOutput, event, mpcResponseKey)
+      verifyRespondBidirectionalEvent(serializedOutput, event, mpcResponseKey)
     ) {
       return {
         event,

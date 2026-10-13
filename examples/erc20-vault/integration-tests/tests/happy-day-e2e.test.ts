@@ -21,7 +21,7 @@ import {
   type RequestIdHex,
   requestIdHex,
   stripHexPrefix,
-  verifyRespondBidirectionalSignature,
+  verifyRespondBidirectionalEvent,
 } from "@sig-net/midnight";
 import { calculateSignetAttestationDigest } from "@sig-net/midnight/testing";
 import {
@@ -367,11 +367,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         context.vaultContractAddress,
       );
       expect(
-        verifyRespondBidirectionalSignature(
-          outcome.serializedOutput,
-          outcome.event,
-          mpcResponseKey,
-        ),
+        verifyRespondBidirectionalEvent(outcome.serializedOutput, outcome.event, mpcResponseKey),
         "the attestation must verify over the recomputed output",
       ).toBe(true);
       expect(
