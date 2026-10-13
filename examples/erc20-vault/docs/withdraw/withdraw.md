@@ -103,7 +103,7 @@ As illustrated, the flow comprises 9 steps:
     through the singleton's `respond(...)`.
   - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts)
     polls the singleton's emitted signature events through the SDK's
-    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.24.0/packages/signet-midnight/src/signet-request-response-reader.ts),
+    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.25.0-rc.1/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
     recovers to the expected signer: for a withdrawal, the vault's own
     account, `evmVaultAddress`.
@@ -129,12 +129,12 @@ As illustrated, the flow comprises 9 steps:
   - Selection is by signature verification alone, against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), and everything
     resolved here stays UNTRUSTED until step 7 re-verifies it in-circuit.
-- **7.** queue the attestation at its output's width
+- **7.** queue the attestation
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     submits the verified outcome to
-    [`queueAttestation1`](../../contract/src/erc20-vault.compact) for an
-    executed transfer or `queueAttestation0` for a failed or unviable one.
-    The circuit verifies the MPC's signature over the output, finds the open
+    [`queueAttestation`](../../contract/src/erc20-vault.compact), whatever its
+    verdict. The circuit verifies the MPC's signature over the output's width
+    and hash the event carries, finds the open
     withdrawal through `evictionMap`, requires a block height strictly above
     its `lastSeen`, and queues the
     [`AttestationRecord`](../../contract/src/erc20-vault.compact) in
@@ -150,7 +150,7 @@ As illustrated, the flow comprises 9 steps:
     `lastSeen` and the caller's ownership commitment, then removes the
     request's event, its arguments, its `evictionMap` entry, the attestation
     and the output entry, so the request settles once.
-  - An `executed` verdict requires the output to hash to the record's digest.
+  - An `executed` verdict requires the output to have the record's width and hash.
     A transfer that returned true moved the tokens, so the burn stands and the
     call only closes the request.
   - A transfer that returned false, or a `failed` or `unviable` one, moved
@@ -187,7 +187,7 @@ functions behind the abstract `keyDerivation(...)` notes on the
 their inputs, in its footnote. The response key does not use any request's
 derivation path: the MPC derives it for this contract under a
 reserved path that no request may name ("midnight response key" in the SDK),
-and the queue circuits verify the MPC's attestation against it.
+and `queueAttestation` verifies the MPC's attestation against it.
 
 ---
 

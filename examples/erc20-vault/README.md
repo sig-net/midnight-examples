@@ -31,7 +31,7 @@ action.
 | `setGasParams` | The deployer resets the fee envelope and the per-action gas limits of the transactions the vault's own account signs. A request keeps the values it was started with. |
 | `addAllowedToken` | The deployer allows one more ERC20 into the vault. `startDeposit` accepts only an allowed ERC20, and `startSwap` buys only an allowed `erc20AddressOut`. `initialise` allows the stata underlying itself, and no circuit removes a token. |
 | [`flushQueue`](docs/contention-handling.md#the-flush) | The only writer of `globalLastSeen` after `initialise` and of `vaultAccountNonce`: moves up to 10 queued requests and attestations into the output buffers, assigning each vault-signed request the vault account's next EVM nonce. Anyone may submit it. |
-| [`queueAttestation0`](docs/contention-handling.md#why-the-queue-takes-the-full-output) / `queueAttestation1` / `queueAttestation32` | Verify an MPC attestation's signature over its full output, at the output's exact width, and queue it for the flush. Anyone may submit one. |
+| [`queueAttestation`](docs/contention-handling.md#why-the-queue-needs-no-output) | Verify an MPC attestation's signature over the output width and hash it carries, and queue it for the flush, whatever the output's width. Anyone may submit one. |
 | [`startDeposit`](docs/deposit/deposit.md) → [`sendDeposit`](docs/deposit/deposit.md) → [`completeDeposit`](docs/deposit/deposit.md) | **The reference flow, documented step by step in the [deposit walkthrough](docs/deposit/deposit.md).** The depositor's derived EVM account transfers the ERC20 to the vault's account, and `completeDeposit` mints the shielded vault token when the attested transfer returned true. |
 | [`startWithdraw`](docs/withdraw/withdraw.md) → [`sendWithdraw`](docs/withdraw/withdraw.md) → [`completeWithdraw`](docs/withdraw/withdraw.md) | The other direction, plus the coin-spend-as-authorisation pattern: `startWithdraw` burns the surrendered vault coin, the vault's account transfers the ERC20, and `completeWithdraw` re-mints the burned amount when the MPC attests the transfer failed or unviable, or that it returned false. |
 | `startApproveRouter` / `startApproveStata` → `sendApprove` → `completeApprove` | Deployer-gated: the vault's account grants the pinned Uniswap router, or the pinned stataToken wrapper, an unlimited allowance the later swaps and supplies draw on (see [Vault-signed requests](docs/contention-handling.md#vault-signed-requests)). |
@@ -84,7 +84,7 @@ draws and describes its steps (see [The flows](#the-flows)).
   MPC-signed transaction to the EVM chain, then polls for the MPC's
   attestation and hands the attested output back for settling. The MPC never
   broadcasts: broadcasting is the relayer's responsibility. The permissionless
-  Midnight calls (`flushQueue`, the send circuits and the queue circuits) may
+  Midnight calls (`flushQueue`, the send circuits and `queueAttestation`) may
   come from any wallet: the integration flows submit them from the user's
   own.
 - **Users**: each user holds a Midnight wallet (calls the circuits and
@@ -153,7 +153,7 @@ accounts. The vault uses exactly three derivations:
 |---|---|---|
 | The user's deposit account (EVM) | `userCommitment(callerSecretKey)`, the caller's 32-byte identity commitment | Signs the deposit sweep `transfer(vault, amount)`. The user funds this address with the ERC20 being deposited plus gas ETH. One account per identity: the contract recomputes the commitment in-circuit from the secret-key witness, so the path is never a circuit argument and the MPC can only ever sign with THIS caller's account. |
 | The vault's own account (EVM) | The contract-fixed literal `"vault"` (`pad(32, "vault")`) | Holds the vault's ERC20 and stataToken balances and signs every withdrawal, approval, swap, supply, redeem and nonce replacement, at the nonce the flush assigns (a replacement reuses the nonce of the sent request it replaces). It also pays their gas, so the fee envelope is the vault's own gas settings, which only the deployer may change (`setGasParams`) and which each request copies at its start. |
-| The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id, block height, output kind and serialised output (the event carries the digest and the signature, never the output). It never signs transactions: it is per-client-contract yet independent of any request's own path, and the queue circuits (`queueAttestation0`, `queueAttestation1`, `queueAttestation32`) verify every attestation against it in-circuit. |
+| The MPC RESPONSE key (secp256k1, not an account) | The fixed literal `"midnight response key"` | Signs every `RespondBidirectionalEvent` the MPC posts back for this contract, ECDSA over the attestation digest of the request id, block height, output kind, output width and output hash (the event carries all of them, the digest and the signature, never the output). It never signs transactions: it is per-client-contract yet independent of any request's own path, and the queue circuit (`queueAttestation`) verifies every attestation against it in-circuit. |
 
 The identity secret behind the first row is the user's OWN random value, held
 by the application itself and never by a wallet: a Lace wallet cannot expose
@@ -221,8 +221,8 @@ The contract package's dependency list is the minimal integration surface:
   "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
   "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
   "@midnight-ntwrk/midnight-js-protocol": "5.0.0-beta.6",
-  "@sig-net/midnight": "0.24.0",
-  "@sig-net/midnight-contract": "0.24.0"
+  "@sig-net/midnight": "0.25.0-rc.1",
+  "@sig-net/midnight-contract": "0.25.0-rc.1"
 }
 ```
 
@@ -334,7 +334,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.24.0/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.25.0-rc.1/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
@@ -678,7 +678,7 @@ an unattended/backgrounded run.
 
 ## Deploying
 
-The contract has 29 circuits and their verifier keys do not fit in one block, so
+The contract has 27 circuits and their verifier keys do not fit in one block, so
 a deploy is two phases:
 
 1. The base transaction registers the whole ledger state and ONE small circuit.
@@ -914,7 +914,7 @@ prefix. The tag carries the example name, the npm version does not:
 
 ## A note on package size
 
-The package ships the verifier keys of the vault's 29 circuits, which also go
+The package ships the verifier keys of the vault's 27 circuits, which also go
 on-chain, and publishes their prover keys nowhere: the package packs to well
 under a megabyte, and the workflow logs the packed and unpacked size before it
 publishes anything.
@@ -947,7 +947,7 @@ It compiles the shipped `src/erc20-vault.compact` with the pinned compiler
 manifest, and writes:
 
 ```
-public/keys/<circuit>.prover, <circuit>.verifier    the vault's 29 circuits
+public/keys/<circuit>.prover, <circuit>.verifier    the vault's 27 circuits
 public/zkir/<circuit>.bzkir
 public/compiler/contract-manifest.json, contract-info.json
 public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract

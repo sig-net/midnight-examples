@@ -42,8 +42,9 @@ export interface PollRespondBidirectionalOptions {
  * output, or downloaded from the MPC's output cache) and checks the posted
  * events' signatures against it (see `fetchAttestedRespondOutcome`): the
  * event log is unauthenticated, and that check is what makes a returned
- * record meaningful off-chain. The queue circuits run the same check
- * in-circuit, which is the actual authentication gate. The output schema the
+ * record meaningful off-chain. `queueAttestation` runs the same signature
+ * check in-circuit and the complete circuit checks the bytes against the
+ * attested width and hash, which are the actual authentication gate. The output schema the
  * recomputation runs is the request record's own, read once here: it is what
  * the MPC ran, and the reader, the pinned response key and the observed
  * output are likewise resolved once for the whole poll
