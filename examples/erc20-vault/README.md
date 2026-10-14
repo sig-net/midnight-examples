@@ -334,7 +334,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.25.0-rc.3/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.25.0/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
