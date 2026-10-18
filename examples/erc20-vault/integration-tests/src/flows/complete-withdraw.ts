@@ -1,7 +1,7 @@
 // Settle side of the withdraw flow: queue the MPC's attestation of the vault's
 // transfer, flush it, then settle through `completeWithdraw` with the request id,
-// the output bytes the attestation signs, and a fresh RANDOM mint nonce so a
-// re-minted coin cannot be linked back to the request.
+// the output bytes the attestation commits to, and a fresh RANDOM mint nonce so
+// a re-minted coin cannot be linked back to the request.
 import { OutputKind, type RequestIdHex, requestIdHex } from "@sig-net/midnight";
 import { VAULT_WITHDRAW_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 

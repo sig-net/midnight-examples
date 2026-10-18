@@ -1,7 +1,7 @@
 // Settle side of the swap flow: queue the MPC's attestation of the vault's swap,
 // flush it, then settle through `completeSwap` with the request id, the output
-// bytes the attestation signs, and two fresh RANDOM mint nonces so neither minted
-// coin can be linked back to the request or to the other.
+// bytes the attestation commits to, and two fresh RANDOM mint nonces so neither
+// minted coin can be linked back to the request or to the other.
 import { OutputKind, type RequestIdHex, requestIdHex } from "@sig-net/midnight";
 import {
   pureCircuits,

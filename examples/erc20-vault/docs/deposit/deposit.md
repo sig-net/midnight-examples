@@ -190,10 +190,11 @@ As illustrated, the flow comprises 10 steps:
     declaring `failed` (the transaction reverted) or `unviable` (another
     transaction took its nonce) is checked over the EMPTY output the protocol
     attests for a failed or unviable transaction, which needs no trace at
-    all. The first post whose signature verifies over its candidate, against
-    the [`mpcResponseKey`](../../contract/src/erc20-vault.compact) read from
-    the vault's own ledger, is the attested outcome: the kind is inside the
-    signed digest, so a post cannot present a failure as a success.
+    all. The first post whose signature verifies against the
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact) read from the
+    vault's own ledger, and whose attested width and hash match its candidate,
+    is the attested outcome: the kind is inside the signed digest, so a post
+    cannot present a failure as a success.
   - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts)
     owns the loop, the timeout and the reporting. Everything resolved here stays
     UNTRUSTED: the respond events are open to anyone and the traced or cached

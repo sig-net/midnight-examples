@@ -1,7 +1,8 @@
 // Settle side of the deposit flow: queue the MPC's attestation of the EVM sweep,
 // flush it, then settle through `completeDeposit` with the request id, the output
-// bytes the attestation signs, a fresh RANDOM mint nonce so the minted coin cannot
-// be linked back to the request, and the recipient wallet when the caller names one.
+// bytes the attestation commits to, a fresh RANDOM mint nonce so the minted coin
+// cannot be linked back to the request, and the recipient wallet when the caller
+// names one.
 
 import { type CoinPublicKey, encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
 import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
