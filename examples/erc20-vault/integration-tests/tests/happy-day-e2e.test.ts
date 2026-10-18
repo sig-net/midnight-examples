@@ -387,7 +387,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
 
       banner([
-        `Found deposit RespondBidirectionalEvent (signature-verified) on the signet contract: ` +
+        `Found deposit RespondBidirectionalEvent (verified) on the signet contract: ` +
           `success '${String(outcome.succeeded)}' ` +
           `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${String(outcome.serializedOutput.length)} byte(s), ` +
           `kind ${OutputKind[outcome.event.outputKind]}, block ${String(outcome.event.blockHeight)})`,
@@ -684,7 +684,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       ).toBe(true);
 
       banner([
-        `Found withdraw RespondBidirectionalEvent (signature-verified) on the signet contract: ` +
+        `Found withdraw RespondBidirectionalEvent (verified) on the signet contract: ` +
           `success '${String(withdrawRespondBidirectional.succeeded)}' ` +
           `(payload 0x${bytesToHex(withdrawRespondBidirectional.serializedOutput)})`,
       ]);

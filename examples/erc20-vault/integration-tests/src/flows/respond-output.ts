@@ -58,7 +58,7 @@ import type { PollProgress } from "../poll-progress.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import { warnOnce } from "../warn-once.ts";
 
-/** What the MPC attested for a request, resolved by signature verification. */
+/** What the MPC attested for a request, resolved by verifying its posts. */
 export interface RespondOutcome {
   /**
    * The attested event whose signature verified and whose attested width and
@@ -409,7 +409,7 @@ export async function fetchAttestedRespondOutcome(
   // An attestation is posted, so the transaction is final. A node that keeps
   // the MPC cache wrote its bytes before posting, but the object may not be
   // readable yet.
-  // UNTRUSTED until the signature check below.
+  // UNTRUSTED until the verification below.
   const candidates =
     memo.candidates ??
     (await candidatesFromSource(

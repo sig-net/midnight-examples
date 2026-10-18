@@ -61,7 +61,8 @@ const METHOD_UNAVAILABLE = /not (?:exist|available|supported|allowed)|unsupporte
 
 /**
  * Check that `evmRpcUrl` serves `debug_traceTransaction`, the method every
- * attestation poll recovers execution outputs with ({@link observeExecution}).
+ * `evm-node` attestation poll recovers execution outputs with
+ * ({@link observeExecution}). An `mpc-cache` poll never traces.
  * Anvil passes without a probe: it traces the transactions it mines itself,
  * and a forking anvil proxies a hash it does not hold to its upstream, whose
  * answer says nothing about anvil. Any other node is probed with the zero

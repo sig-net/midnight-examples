@@ -125,7 +125,8 @@ As illustrated, the flow comprises 9 steps:
     declaring **`executed`** is checked over the transfer's Borsh-encoded bool (`0x01`
     the transfer went through, `0x00` the ERC20 returned false), and a post
     declaring **`failed`** (reverted on chain) or **`unviable`** (another
-    transaction took its nonce) over the EMPTY output.
+    transaction took its nonce) over the EMPTY output. Under `mpc-cache`
+    every post is checked over the cached object instead.
   - Selection is by verification alone: the signature against
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact), the candidate
     against the attested width and hash. Everything resolved here stays

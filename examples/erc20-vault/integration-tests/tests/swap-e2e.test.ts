@@ -302,7 +302,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
       banner([
         `Found execution attestation for swap ${swapRequestId}:`,
         "",
-        `  amountIn:     ${String(amountIn)} (signature-verified)`,
+        `  amountIn:     ${String(amountIn)} (verified)`,
         `  block height: ${String(swapAttestation.event.blockHeight)}`,
       ]);
     },
