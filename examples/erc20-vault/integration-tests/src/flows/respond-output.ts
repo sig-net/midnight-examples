@@ -1,11 +1,11 @@
 // Respond-output resolution: the client half of the attestation protocol.
 // The MPC's RespondBidirectionalEvent carries the request id, the
 // target-chain block height, its verdict (the output kind), the output's
-// width, the attestation digest and the ECDSA signature over that digest,
-// while the serialised output itself travels off chain, so the client obtains
-// the output bytes independently and checks the signature against them. A post's declared
-// kind picks the bytes it is checked over, and the chosen OutputSource yields
-// them:
+// width and hash, the attestation digest and the ECDSA signature over that
+// digest, while the serialised output itself travels off chain, so the client
+// obtains the output bytes independently and checks them against the
+// attested width and hash. A post's declared kind picks the bytes it is
+// checked over, and the chosen OutputSource yields them:
 //
 //   OutputSource.EVMNode  -> a post declaring an executed transaction is
 //                            checked over the mined transaction's raw traced
@@ -22,10 +22,11 @@
 //                            SDK's MpcOutputCacheReader): the attested bytes
 //                            verbatim, empty for a failure.
 //
-// Candidate selection is by SIGNATURE VERIFICATION alone, against the
-// response key the vault pinned at initialise: a post's declared kind, the
-// observation's own success flag and the cache's contents are all
-// unauthenticated, they only decide which bytes get checked. The verified
+// Candidate selection is by VERIFICATION alone, of the signature against the
+// response key the vault pinned at initialise and of the bytes against the
+// attested width and hash: a post's declared kind, the observation's own
+// success flag and the cache's contents are all unauthenticated, they only
+// decide which bytes get checked. The verified
 // kind and bytes route settlement: the action's complete circuit branches on
 // the kind.
 // The fetched output is UNTRUSTED until that check, and stays untrusted on
@@ -57,18 +58,18 @@ import type { PollProgress } from "../poll-progress.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import { warnOnce } from "../warn-once.ts";
 
-/** What the MPC attested for a request, resolved by signature verification. */
+/** What the MPC attested for a request, resolved by verifying its posts. */
 export interface RespondOutcome {
   /**
-   * The attested event whose signature verified over `serializedOutput`. Its
-   * `outputKind` is the MPC's verified verdict and its `requestId` the
-   * request a settle circuit consumes.
+   * The attested event whose signature verified and whose attested width and
+   * hash match `serializedOutput`. Its `outputKind` is the MPC's verified
+   * verdict and its `requestId` the request a settle circuit consumes.
    */
   readonly event: RespondBidirectionalEvent;
   /**
-   * The output bytes the signature covers (a circuit argument): the MPC's Borsh
-   * serialisation of an executed transaction's decoded output (empty under an
-   * empty output schema), and empty under a failure kind.
+   * The output bytes the attestation commits to (a circuit argument): the
+   * MPC's Borsh serialisation of an executed transaction's decoded output
+   * (empty under an empty output schema), and empty under a failure kind.
    */
   readonly serializedOutput: Uint8Array;
   /**
@@ -346,17 +347,17 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 /**
  * Resolve the attested outcome for `requestId`: fetch the posted
  * RespondBidirectionalEvents, obtain the candidate serialised outputs from
- * `outputSource`, and return the first event whose signature verifies over
- * the candidate its declared kind selects, against the response key the
- * vault pinned at initialise.
+ * `outputSource`, and return the first event whose signature verifies
+ * against the response key the vault pinned at initialise and whose attested
+ * width and hash match the candidate its declared kind selects.
  *
  * Under {@link OutputSource.EVMNode} the executed candidate is recomputed
  * from the mined transaction's trace with the request's own output schema
  * and the failure candidate is the empty output; under
  * {@link OutputSource.MPCCache} every post is checked over the
  * object the MPC cached before it posted. The respond events are
- * unauthenticated (anyone may post), so the signature check is what selects
- * a trustworthy record here. `queueAttestation` runs the same signature check
+ * unauthenticated (anyone may post), so that check is what selects a
+ * trustworthy record here. `queueAttestation` runs the same signature check
  * in-circuit and the complete circuit checks the bytes against the attested
  * width and hash, which remain the actual authentication gate.
  *
@@ -408,7 +409,7 @@ export async function fetchAttestedRespondOutcome(
   // An attestation is posted, so the transaction is final. A node that keeps
   // the MPC cache wrote its bytes before posting, but the object may not be
   // readable yet.
-  // UNTRUSTED until the signature check below.
+  // UNTRUSTED until the verification below.
   const candidates =
     memo.candidates ??
     (await candidatesFromSource(

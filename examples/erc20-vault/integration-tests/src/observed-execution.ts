@@ -1,14 +1,15 @@
 // What the EVM did with an MPC-signed transaction, as a client obtains it on
-// its own: the output the MPC's attestation signs over travels off chain, so
-// the client recovers the raw execution output independently and checks the
-// signature against it. The
+// its own: the output the MPC's attestation commits to travels off chain, so
+// the client recovers the raw execution output independently, and the bytes
+// it serialises from that output are checked against the attested width and
+// hash. The
 // mined transaction is rebuilt from chain data alone (the request record plus
 // a posted signature, exactly as the broadcast did), then a contract call's
 // top frame is read with `debug_traceTransaction`, the RPC method the MPC
 // itself observes with. `EVM_RPC_URL` must serve that method on every
 // network: anvil does, and hosted endpoints often gate it behind a paid tier,
 // so the setup pipeline probes it before anything is deployed. An observation
-// is UNTRUSTED until the attestation signature check: it only gates which
+// is UNTRUSTED until the attestation check: it only gates which
 // candidate output is tried, never what is accepted.
 
 import {
@@ -60,7 +61,8 @@ const METHOD_UNAVAILABLE = /not (?:exist|available|supported|allowed)|unsupporte
 
 /**
  * Check that `evmRpcUrl` serves `debug_traceTransaction`, the method every
- * attestation poll recovers execution outputs with ({@link observeExecution}).
+ * `evm-node` attestation poll recovers execution outputs with
+ * ({@link observeExecution}). An `mpc-cache` poll never traces.
  * Anvil passes without a probe: it traces the transactions it mines itself,
  * and a forking anvil proxies a hash it does not hold to its upstream, whose
  * answer says nothing about anvil. Any other node is probed with the zero
@@ -176,7 +178,7 @@ async function traceTopCallFrame(
  * EVM chain: wait up to `timeoutMs` for a posted signature whose transaction
  * has a receipt, then report its status and, for a successful contract call,
  * the top frame's return data from `debug_traceTransaction`. UNTRUSTED: the
- * caller verifies the MPC's attestation signature over what this returns.
+ * caller verifies the MPC's attestation against what this returns.
  *
  * @param reader - The reader over the vault / signet pair the request lives in.
  * @param evmRpcUrl - The EVM JSON-RPC endpoint, which must serve `debug_traceTransaction`.
