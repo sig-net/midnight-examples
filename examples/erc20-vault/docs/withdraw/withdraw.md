@@ -125,10 +125,12 @@ As illustrated, the flow comprises 9 steps:
     declaring **`executed`** is checked over the transfer's Borsh-encoded bool (`0x01`
     the transfer went through, `0x00` the ERC20 returned false), and a post
     declaring **`failed`** (reverted on chain) or **`unviable`** (another
-    transaction took its nonce) over the EMPTY output.
-  - Selection is by signature verification alone, against
-    [`mpcResponseKey`](../../contract/src/erc20-vault.compact), and everything
-    resolved here stays UNTRUSTED until step 7 re-verifies it in-circuit.
+    transaction took its nonce) over the EMPTY output. Under `mpc-cache`
+    every post is checked over the cached object instead.
+  - Selection is by verification alone: the signature against
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact), the candidate
+    against the attested width and hash. Everything resolved here stays
+    UNTRUSTED until steps 7 and 9 re-verify it in-circuit.
 - **7.** queue the attestation
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     submits the verified outcome to

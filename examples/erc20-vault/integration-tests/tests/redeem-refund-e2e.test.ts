@@ -363,7 +363,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         banner([
           `Found failure attestation for doomed redeem ${redeemRequestId}:`,
           "",
-          `  output kind:  ${OutputKind[redeemAttestation.event.outputKind]} (signature-verified)`,
+          `  output kind:  ${OutputKind[redeemAttestation.event.outputKind]} (verified)`,
           `  block height: ${String(redeemAttestation.event.blockHeight)}`,
         ]);
       },

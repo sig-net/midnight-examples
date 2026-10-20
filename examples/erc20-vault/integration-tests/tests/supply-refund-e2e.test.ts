@@ -338,7 +338,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         banner([
           `Found failure attestation for doomed supply ${supplyRequestId}:`,
           "",
-          `  output kind:  ${OutputKind[supplyAttestation.event.outputKind]} (signature-verified)`,
+          `  output kind:  ${OutputKind[supplyAttestation.event.outputKind]} (verified)`,
           `  block height: ${String(supplyAttestation.event.blockHeight)}`,
         ]);
       },

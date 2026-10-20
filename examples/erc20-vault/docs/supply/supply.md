@@ -108,7 +108,8 @@ As illustrated, the flow comprises 9 steps:
     and Borsh-serialised as the MPC does, the 32 little-endian bytes that carry
     the shares minted. The exchange rate is live, so the shares come from the
     attestation and are never computed in advance. A post declaring
-    **`failed`** or **`unviable`** is checked over the EMPTY output.
+    **`failed`** or **`unviable`** is checked over the EMPTY output. Under
+    `mpc-cache` every post is checked over the cached object instead.
 - **7.** queue the attestation
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     submits the outcome to

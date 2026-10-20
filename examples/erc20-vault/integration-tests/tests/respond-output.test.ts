@@ -195,7 +195,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
       succeeded: false,
     },
   ])(
-    "resolves $name from the cached bytes the attestation signs",
+    "resolves $name from the cached bytes the attestation commits to",
     async ({ outputSchema, outputKind, cached, succeeded }) => {
       const paths: string[] = [];
       const baseUrl = await serveBucket({ status: 200, body: cached }, paths);
@@ -214,7 +214,7 @@ describe("fetchAttestedRespondOutcome under OutputSource.MPCCache", () => {
     },
   );
 
-  it("rejects a post whose signature covers other bytes than the cache holds", async () => {
+  it("rejects a post that attests other bytes than the cache holds", async () => {
     const baseUrl = await serveBucket({ status: 200, body: TRANSFER_TRUE }, []);
     stubChainReads([attest(OutputKind.executed, TRANSFER_FALSE)]);
     const progress = new PollProgress("test", 1000);
