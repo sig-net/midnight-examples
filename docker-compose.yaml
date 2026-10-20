@@ -9,11 +9,23 @@
 # still reads `l91r3-n2r3` (its build provenance: ledger-v9 1.0.0-rc.3 +
 # node 2.0.0-rc.3); stagenet pairs that same indexer build with node
 # 2.0.0-rc.4 and proof-server 9.0.0-rc.5_experimental, so we do too.
+
+# Every service keeps at most three 100 MB log files: Docker's json-file driver is otherwise
+# unbounded, and the proof server alone wrote 200 MB a minute under a test run.
+x-logging: &bounded-logs
+  driver: 'json-file'
+  options:
+    max-size: '100m'
+    max-file: '3'
+
 services:
   proof-server:
     container_name: 'midnight-proof-server'
     image: 'midnightntwrk/proof-server:9.0.0-rc.5_experimental'
-    command: ['midnight-proof-server -v']
+    # Without `-v` the server logs each call's method, status and duration at info, and verbose
+    # adds every request body at debug, the prover keys and ZKIR of each proof included.
+    command: ['midnight-proof-server']
+    logging: *bounded-logs
     # Proving is memory-hungry and a long e2e run has killed this server outright. Bring it back
     # on its own: paired with the prove retry in `createCrossContractProofServerProvider`, a death
     # costs seconds instead of the rest of the run. `docker stop` is still respected.
@@ -28,6 +40,7 @@ services:
     # MIP-0002 `Misc` events — no stable ledger-9 indexer release exists yet.
     container_name: 'midnight-indexer'
     image: 'midnightntwrk/indexer-standalone:4.4.0-pre-alpha.16-l91r3-n2r3-bridge-and-events-epics-contract-zswap-16c656df'
+    logging: *bounded-logs
     ports:
       - '127.0.0.1:8088:8088'
     # Committed dev-only values (local defaults, nothing sensitive):
@@ -50,6 +63,7 @@ services:
   node:
     container_name: 'midnight-node'
     image: 'midnightntwrk/midnight-node:2.0.0-rc.4'
+    logging: *bounded-logs
     ports:
       - '127.0.0.1:9944:9944'
     environment:
@@ -75,6 +89,7 @@ services:
     # forks but every state read returns empty).
     container_name: 'local-evm'
     image: 'ghcr.io/foundry-rs/foundry:v1.5.1'
+    logging: *bounded-logs
     entrypoint: ['sh', '-c']
     command:
       # Forked: inherit Sepolia's chain id (11155111) so real-token semantics hold; the suites
@@ -83,8 +98,9 @@ services:
       # The fakenet attests only once a transaction's block is `finalized`, which anvil
       # places two epochs behind the head: one-second blocks and one-slot epochs finalise
       # a block two seconds after it is mined.
+      # The persisted-states cap stops anvil's disk cache filling the Docker VM's disk.
       - >
-        anvil --host 0.0.0.0 --block-time 1 --slots-in-an-epoch 1
+        anvil --host 0.0.0.0 --block-time 1 --slots-in-an-epoch 1 --max-persisted-states 3600
         ${SEPOLIA_FORK_RPC_URL:+--fork-url ${SEPOLIA_FORK_RPC_URL}}
         ${SEPOLIA_FORK_BLOCK:+--fork-block-number ${SEPOLIA_FORK_BLOCK}}
     ports:
@@ -105,6 +121,7 @@ services:
     #   docker compose --profile fakenet up -d --force-recreate fakenet
     container_name: 'fakenet-responder'
     image: 'ghcr.io/sig-net/fakenet:0.35.0'
+    logging: *bounded-logs
     profiles: ['fakenet']
     depends_on:
       indexer:
