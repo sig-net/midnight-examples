@@ -334,7 +334,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           `Found failure attestation for doomed withdraw ${withdrawRequestId}:`,
           "",
           `  succeeded:    false`,
-          `  output kind:  ${OutputKind[withdrawAttestation.event.outputKind]} (signature-verified)`,
+          `  output kind:  ${OutputKind[withdrawAttestation.event.outputKind]} (verified)`,
           `  block height: ${String(withdrawAttestation.event.blockHeight)}`,
         ]);
       },

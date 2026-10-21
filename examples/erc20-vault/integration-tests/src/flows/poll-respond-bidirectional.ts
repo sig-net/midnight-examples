@@ -1,8 +1,10 @@
 // `pollRespondBidirectional`: stage 2 of the MPC round trip. Poll the Signet
 // singleton's emitted respond-bidirectional events by request id until an MPC
-// attestation appears whose signature VERIFIES over the independently
-// recomputed serialized output for the request, and return the resolved
-// outcome. There is deliberately no push/websocket alternative.
+// attestation appears that VERIFIES, its signature against the vault's
+// response key and its attested width and hash against the serialized output
+// obtained for the request (recomputed from the EVM trace or downloaded from
+// the MPC's output cache), and return the resolved outcome. There is
+// deliberately no push/websocket alternative.
 import { OutputKind, type RequestIdHex } from "@sig-net/midnight";
 
 import { PollProgress } from "../poll-progress.ts";
@@ -34,16 +36,19 @@ export interface PollRespondBidirectionalOptions {
 
 /**
  * Poll the signet contract until an MPC respond-bidirectional attestation
- * for `options.requestId` VERIFIES over the independently recomputed output,
- * and return the resolved outcome.
+ * for `options.requestId` VERIFIES against the output obtained for it, and
+ * return the resolved outcome.
  *
  * The serialized output travels off chain, so each tick obtains it from the
  * context's `respondOutputSource` (recomputed from the observed raw EVM
  * output, or downloaded from the MPC's output cache) and checks the posted
- * events' signatures against it (see `fetchAttestedRespondOutcome`): the
- * event log is unauthenticated, and that check is what makes a returned
- * record meaningful off-chain. The queue circuits run the same check
- * in-circuit, which is the actual authentication gate. The output schema the
+ * events against it, each signature against the vault's response key and
+ * each attested width and hash against the bytes (see
+ * `fetchAttestedRespondOutcome`): the event log is unauthenticated, and that
+ * check is what makes a returned record meaningful off-chain.
+ * `queueAttestation` runs the same signature check in-circuit and the
+ * complete circuit checks the bytes against the attested width and hash,
+ * which are the actual authentication gate. The output schema an `evm-node`
  * recomputation runs is the request record's own, read once here: it is what
  * the MPC ran, and the reader, the pinned response key and the observed
  * output are likewise resolved once for the whole poll

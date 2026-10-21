@@ -305,7 +305,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e
       banner([
         `Found failure attestation for doomed swap ${swapRequestId}:`,
         "",
-        `  output kind:  ${OutputKind[swapAttestation.event.outputKind]} (signature-verified)`,
+        `  output kind:  ${OutputKind[swapAttestation.event.outputKind]} (verified)`,
         `  block height: ${String(swapAttestation.event.blockHeight)}`,
       ]);
     },

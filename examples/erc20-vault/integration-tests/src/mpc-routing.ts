@@ -29,7 +29,7 @@ export const REPLACE_NONCE_OUTPUT_SCHEMA = schemaJson(vaultCircuits.replaceNonce
 export interface VaultMpcRouting {
   /** Signature algorithm: an `MPCSignatureAlgorithm` variant index (ecdsa). */
   readonly algo: number;
-  /** Execution destination: the MPC's Ethereum routing key (`ethereumCaip2Id()`), zero-padded to 32 bytes. */
+  /** Execution destination: the MPC's Ethereum routing key (`ethereumCaip2Id()`), zero-padded to 64 bytes. */
   readonly executionDest: Uint8Array;
   /** Signature destination: an `MPCDestination` variant index (unused, reserved). */
   readonly signatureDest: number;

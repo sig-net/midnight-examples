@@ -50,7 +50,7 @@ lives under its own index, so writes by different users never collide.
 | ------------------------- | ------------------------------------ | ------------------- | ------------------- |
 | `inputRequestBuffer`      | a caller-chosen random index         | the start circuit   | the flush           |
 | `outputRequestBuffer`     | the request index of the flushed entry | the flush          | the complete circuit |
-| `inputAttestationBuffer`  | the request id                       | `queueAttestation*` | the flush           |
+| `inputAttestationBuffer`  | the request id                       | `queueAttestation`  | the flush           |
 | `outputAttestationBuffer` | the request id                       | the flush           | the complete circuit |
 | `evictionMap`             | the request id                       | the send circuit    | the complete circuit |
 
@@ -109,10 +109,10 @@ send of the same entry builds the same request id, which the event map already
 holds, so each entry is sent at most once.
 
 An attestation record (`AttestationRecord`) holds the block height, the output
-kind and the attestation digest, stored under its request id. It holds no
+kind and the output's width and hash, stored under its request id. It holds no
 output: the complete circuit passes the serialised output again and checks it
-against the digest, so one record type and one pair of buffers serve every
-output width.
+against the width and hash, so one record type and one pair of buffers serve
+every output width.
 
 ## The deposit lifecycle
 
@@ -129,8 +129,7 @@ flushes touch shared state.
    sign bidirectional request from the entry and its arguments, records it in
    `bidirectionalDepositMap`, writes `evictionMap`, and notifies the MPC.
 4. **Queue the attestation.** Once the MPC has attested the EVM outcome,
-   anyone calls the queue circuit for the output's width (`queueAttestation1`
-   for an executed transfer, `queueAttestation0` for a failed or unviable one).
+   anyone calls `queueAttestation` with the attestation, whatever its verdict.
    It verifies the MPC's signature, finds the entry through `evictionMap`,
    checks that the attestation's block height is above the entry's
    `lastSeen`, and writes the record into `inputAttestationBuffer` under the
@@ -144,7 +143,7 @@ flushes touch shared state.
    the caller owns the entry, then removes the request's event, its arguments,
    its `evictionMap` entry, the attestation and the output entry. It then
    branches on the verdict:
-   - **Executed:** it checks that the output hashes to the record's digest,
+   - **Executed:** it checks that the output has the record's width and hash,
      and mints the deposited amount when the attested transfer returned true.
      A transfer that returned false only closes the request.
    - **Failed or unviable:** nothing was surrendered, so it only closes the
@@ -265,21 +264,23 @@ Signet protocol defines it. The MPC may publish the same attestation more than
 once: the `lastSeen` check and the removals at complete stop a repeat from
 settling a second time.
 
-## Why the queue takes the full output
+## Why the queue needs no output
 
 The MPC signs one digest over the request id, block height, output kind,
-output length and the raw serialised output together
-(`calculateSignetAttestationDigestV1` in `@sig-net/midnight`). A signature
-check against the digest alone proves the MPC signed something, but not which
-block height it signed: recovering that needs the output. Without it, anyone
-could pair a real digest and signature with an arbitrary height, and the flush
-would fold that height into `globalLastSeen`. A height of `2^64 - 1` would stop
-every later request from ever settling.
+output length and a hash of the serialised output
+(`calculateSignetAttestationDigestV1` in `@sig-net/midnight`), and the
+attestation carries every one of them. The queue recomputes the digest from
+those fields and verifies the signature over it
+(`verifyRespondBidirectionalAttestationV1`) before recording anything, so the
+block height the flush folds into `globalLastSeen` is one the MPC signed: a
+forged height, such as `2^64 - 1`, which would stop every later request from
+ever settling, fails the check.
 
-So each queue circuit takes the output at its exact width and recomputes the
-digest before recording anything. Compact cannot export a width-generic
-circuit, so there is one queue circuit per output width the vault uses. Only
-the record's storage is width-independent.
+The output itself is checked where it is consumed: the complete circuit takes
+it at its exact width and compares its width and hash with the record. The hash
+alone does not commit to the width (outputs that differ only in trailing zero
+bytes share a hash), so both are compared. One queue circuit serves every
+output width.
 
 ## Invariants the circuits keep
 
@@ -298,8 +299,8 @@ the record's storage is width-independent.
   output entry, the `evictionMap` entry and the attestation, and fails when
   any of them is absent. Attestations are public and stay validly signed
   forever, so anything less would let one be queued and settled again.
-- **Only attestations for sent, open requests are queued.** The queue circuits
-  find the entry through `evictionMap` and check its `lastSeen`, which keeps
+- **Only attestations for sent, open requests are queued.** `queueAttestation`
+  finds the entry through `evictionMap` and checks its `lastSeen`, which keeps
   junk and stale attestations out of the flush's slots.
 - **Queued attestations never overwrite each other.** Both attestation buffers
   are keyed by request id, and queueing refuses a request id either already
@@ -376,7 +377,7 @@ the allowance a router approval granted:
    in `bidirectionalSwapMap`.
 3. **Queue the attestation.** The MPC decodes the router's `uint256` return,
    the input the swap spent, and attests it whole as 32 little-endian bytes,
-   so an executed swap is queued with `queueAttestation32`.
+   and the swap's attestation is queued with `queueAttestation`.
 4. **Complete.** `completeSwap` settles every verdict. An executed swap mints
    exactly `amountOut` of `erc20AddressOut` and the unspent
    `amountInMaximum - amountIn` of `erc20AddressIn` as change, a zero-value
@@ -397,9 +398,8 @@ tokenised vault) for shares, drawing on the allowance the stata approval grants:
    `stataToken` with the derivation path `"vault"` and the nonce the flush
    assigned, and records it in `bidirectionalSupplyMap`.
 3. **Queue the attestation.** The MPC decodes the wrapper's uint256 share
-   count and attests it whole as 32 little-endian bytes, so an executed supply
-   is queued with `queueAttestation32`, and a failed or unviable one with
-   `queueAttestation0`.
+   count and attests it whole as 32 little-endian bytes. Every verdict is
+   queued with `queueAttestation`.
 4. **Complete.** `completeSupply` settles every verdict. An executed deposit
    minted shares to the vault account, so it mints the attested share count
    as the `stataToken` vault coin to the supplier. A failed or unviable one
@@ -419,9 +419,8 @@ burns, so no approval is involved:
    vaultEvmAddress)` on `stataToken` with the derivation path `"vault"` and the
    nonce the flush assigned, and records it in `bidirectionalRedeemMap`.
 3. **Queue the attestation.** The MPC decodes the wrapper's uint256 asset
-   amount and attests it whole as 32 little-endian bytes, so an executed
-   redeem is queued with `queueAttestation32`, and a failed or unviable one
-   with `queueAttestation0`.
+   amount and attests it whole as 32 little-endian bytes. Every verdict is
+   queued with `queueAttestation`.
 4. **Complete.** `completeRedeem` settles every verdict. An executed redeem
    paid the vault account the underlying, so it mints the attested asset
    amount as the `stataUnderlying` vault coin to the redeemer. A failed or
@@ -450,8 +449,8 @@ section of the contract. It runs the same six steps with these differences:
 3. **Queue the attestation.** A plain transfer returns no data, so the
    replacement's output schema is empty and the MPC attests an executed
    replacement over the EMPTY output, exactly as it attests a failed or
-   unviable one: every verdict on a replacement is queued with
-   `queueAttestation0`.
+   unviable one, and every verdict on a replacement is queued with
+   `queueAttestation`.
 4. **Complete.** `completeReplaceNonce` closes the request on every verdict,
    as the replacement surrendered nothing.
 
