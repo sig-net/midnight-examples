@@ -185,15 +185,18 @@ As illustrated, the flow comprises 10 steps:
     ([`MpcOutputCacheReader`](https://github.com/sig-net/midnight-integration/blob/v0.25.0/packages/signet-midnight/src/mpc-output-cache.ts)),
     one object per request id, under `MPC_OUTPUT_CACHE_URL` (or the SDK's
     published cache for the network when unset).
-  - A post's declared `outputKind` picks the bytes it is checked over. A post
-    declaring `executed` is checked over the Borsh-encoded output above, and a post
-    declaring `failed` (the transaction reverted) or `unviable` (another
-    transaction took its nonce) is checked over the EMPTY output the protocol
-    attests for a failed or unviable transaction, which needs no trace at
-    all. The first post whose signature verifies over its candidate, against
-    the [`mpcResponseKey`](../../contract/src/erc20-vault.compact) read from
-    the vault's own ledger, is the attested outcome: the kind is inside the
-    signed digest, so a post cannot present a failure as a success.
+  - Under `evm-node` a post's declared `outputKind` picks the bytes it is
+    checked over. A post declaring `executed` is checked over the
+    Borsh-encoded output above, and a post declaring `failed` (the transaction
+    reverted) or `unviable` (another transaction took its nonce) is checked
+    over the EMPTY output the protocol attests for a failed or unviable
+    transaction, which needs no trace at all. Under `mpc-cache` every post is
+    checked over the one cached object, which is empty for a failure. The
+    first post whose signature verifies against the
+    [`mpcResponseKey`](../../contract/src/erc20-vault.compact) read from the
+    vault's own ledger, and whose attested width and hash match its candidate,
+    is the attested outcome: the kind is inside the signed digest, so a post
+    cannot present a failure as a success.
   - [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts)
     owns the loop, the timeout and the reporting. Everything resolved here stays
     UNTRUSTED: the respond events are open to anyone and the traced or cached

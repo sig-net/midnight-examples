@@ -320,10 +320,7 @@ async function verifyTraceRpc(env: NodeJS.ProcessEnv): Promise<void> {
   if (parseOutputSource(requireEnv(env, "RESPOND_OUTPUT_SOURCE")) === OutputSource.MPCCache) {
     logSkip(
       "verify EVM_RPC_URL serves debug_traceTransaction",
-      `RESPOND_OUTPUT_SOURCE=${OutputSource.MPCCache}: the deposit and withdraw polls read the MPC's output cache`,
-    );
-    console.log(
-      " ➜ the swap, supply and redeem polls still trace, so their specs need a tracing EVM_RPC_URL",
+      `RESPOND_OUTPUT_SOURCE=${OutputSource.MPCCache}: every attestation poll reads the MPC's output cache`,
     );
     return;
   }

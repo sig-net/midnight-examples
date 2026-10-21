@@ -1,7 +1,7 @@
 // Settle side of the redeem flow: queue the MPC's attestation of the vault's
 // stataToken redeem, flush it, then settle through `completeRedeem` with the
-// request id, the output bytes the attestation signs, and a fresh RANDOM mint nonce
-// so the minted coin cannot be linked back to the request.
+// request id, the output bytes the attestation commits to, and a fresh RANDOM mint
+// nonce so the minted coin cannot be linked back to the request.
 import { OutputKind, type RequestIdHex, requestIdHex } from "@sig-net/midnight";
 import {
   pureCircuits,

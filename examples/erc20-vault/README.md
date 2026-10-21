@@ -627,8 +627,10 @@ What differs from the local loop:
   publishes for the network (`getMpcOutputCacheUrl`), or from
   `MPC_OUTPUT_CACHE_URL` when set (the cache's URL down to the MPC's object
   prefix, the poll appending `/<network>/<signet address>/<request id>.bin`),
-  instead of recomputing them from the trace. The same signature check then
-  selects them, and the setup accepts a non-tracing `EVM_RPC_URL`.
+  instead of recomputing them from the trace. The same check (the bytes
+  against the attested width and hash, the signature against the vault's
+  response key) selects them, and the setup accepts a non-tracing
+  `EVM_RPC_URL`.
 - **Five specs sign as the vault and are fakenet-only:**
   `deposit-withdrawal-failure-refund`, `deposit-claimant-not-caller`,
   `false-claimer`, `supply-refund-e2e` and `redeem-refund-e2e` drain the

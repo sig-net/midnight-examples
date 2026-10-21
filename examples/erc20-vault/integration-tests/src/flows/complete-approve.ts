@@ -1,7 +1,7 @@
 // Settle side of the approve flow: queue the MPC's attestation of the vault's
 // approve, flush it, then close the request through `completeApprove` with the
-// request id and the output bytes the attestation signs. An approval surrendered
-// nothing, so no verdict mints.
+// request id and the output bytes the attestation commits to. An approval
+// surrendered nothing, so no verdict mints.
 import { OutputKind, type RequestIdHex, requestIdHex } from "@sig-net/midnight";
 import { VAULT_APPROVE_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
 

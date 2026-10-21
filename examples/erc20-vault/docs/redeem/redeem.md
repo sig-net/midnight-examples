@@ -102,7 +102,8 @@ As illustrated, the flow comprises 9 steps:
     checked over the wrapper's return decoded per the `uint256` output schema
     and Borsh-serialised as the MPC does, the 32 little-endian bytes that carry
     the assets paid out, principal plus accrued interest. A post declaring
-    **`failed`** or **`unviable`** is checked over the EMPTY output.
+    **`failed`** or **`unviable`** is checked over the EMPTY output. Under
+    `mpc-cache` every post is checked over the cached object instead.
 - **7.** queue the attestation
   - [`queue-attestation.ts`](../../integration-tests/src/flows/queue-attestation.ts)
     submits the outcome to
