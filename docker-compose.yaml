@@ -98,9 +98,11 @@ services:
       # The fakenet attests only once a transaction's block is `finalized`, which anvil
       # places two epochs behind the head: one-second blocks and one-slot epochs finalise
       # a block two seconds after it is mined.
-      # The persisted-states cap stops anvil's disk cache filling the Docker VM's disk.
+      # The persisted-states cap bounds anvil's on-disk state cache: one file per block, about
+      # 18 MB each on a Sepolia fork, so 900 one-second blocks hold 15 minutes of history in
+      # about 16 GB, within the Docker VM's disk. The suites read only recent blocks.
       - >
-        anvil --host 0.0.0.0 --block-time 1 --slots-in-an-epoch 1 --max-persisted-states 3600
+        anvil --host 0.0.0.0 --block-time 1 --slots-in-an-epoch 1 --max-persisted-states 900
         ${SEPOLIA_FORK_RPC_URL:+--fork-url ${SEPOLIA_FORK_RPC_URL}}
         ${SEPOLIA_FORK_BLOCK:+--fork-block-number ${SEPOLIA_FORK_BLOCK}}
     ports:
