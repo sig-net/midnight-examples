@@ -37,7 +37,9 @@ import {
   InitialiseVaultOutcome,
   resolveAllowedTokens,
   resolveInitialiseConfig,
+  resolveTokenFees,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { waitForFacadeState } from "@sig-net/midnight-examples-lib";
 import {
   banner,
   getErc20Balance,
@@ -66,7 +68,9 @@ import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startDeposit } from "../src/flows/start-deposit.ts";
 import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
+import { vaultFeesOf } from "../src/vault-fees.ts";
 import { createVaultSession } from "../src/vault-session.ts";
+import { vaultTokenType } from "../src/vault-token.ts";
 
 const MINUTE = 60_000;
 
@@ -96,11 +100,22 @@ const calldataWordAt = (words: readonly Uint8Array[], index: number): Uint8Array
 // stopped once in afterAll.
 const session = createVaultSession(env);
 
+// The fee recipient's session: the deployer wallet, which the local initialise
+// names as the recipient of every fee coin. Only its wallet is read, to see the
+// withdraw fee arrive. Read leniently at module scope: offline the injected env
+// is empty and the suite skips before any test touches it.
+const feeRecipientSession = createVaultSession({ ...env, USER_SEED: env.DEPLOYER_SEED ?? "" });
+
+// The withdraw leg drives 0.1 USDC back OUT of the vault: the deposit leg funds
+// that principal plus the withdraw fee the start takes on top of it.
+const WITHDRAW_AMOUNT = parseUnits("0.1", 6);
+
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e", () => {
   installFlowHooks();
 
   afterAll(async () => {
     await session.stop();
+    await feeRecipientSession.stop();
   });
 
   it(
@@ -118,10 +133,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         logSkip("initialise", "vault is already initialised (rerun against a kept contract)");
       }
 
-      // Every later spec deposits or swaps into these. A rerun adds only the missing ones.
+      // Every later spec deposits or swaps into these, each stamped with the fees the
+      // env resolves. A rerun adds only the missing ones.
       const allowedTokens = resolveAllowedTokens(env);
       expect(allowedTokens, "setup defaults EVM_ALLOWED_TOKENS").not.toHaveLength(0);
-      const added = await addAllowedTokens(context, allowedTokens);
+      const fees = resolveTokenFees(env);
+      const added = await addAllowedTokens(context, allowedTokens, fees);
       console.log(`allowed ${String(added.length)} new ERC20(s)`);
 
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
@@ -135,11 +152,24 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // The stored MPC response key, verbatim: the sender-scoped key claim and
       // completeWithdraw verify responses against.
       expect(state.mpcResponseKey).toEqual(parseSecp256k1PublicKey(config.mpcResponseKey));
-      // initialise allows the stata underlying itself, the deployer every listed ERC20.
-      expect(state.allowedTokens.member(state.stataUnderlying)).toBe(true);
+      // initialise allows the stata pair itself, the deployer every listed ERC20, each
+      // with its fees, and names the fee recipient.
+      expect(state.allowedTokens.lookup(state.stataUnderlying).fees).toEqual(
+        config.stataUnderlyingFees,
+      );
+      expect(state.allowedTokens.lookup(state.stataToken).fees).toEqual(config.stataTokenFees);
       for (const token of allowedTokens) {
         expect(state.allowedTokens.member(evmAddressBytes(token)), `${token} allowed`).toBe(true);
+        expect(state.allowedTokens.lookup(evmAddressBytes(token)).fees, `${token} fees`).toEqual(
+          fees,
+        );
       }
+      expect(bytesToHex(state.feeRecipientCoinPublicKey.bytes)).toBe(
+        config.feeRecipient.coinPublicKey,
+      );
+      expect(bytesToHex(state.feeRecipientEncryptionPublicKey)).toBe(
+        config.feeRecipient.encryptionPublicKey,
+      );
     },
     15 * MINUTE,
   );
@@ -197,7 +227,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         requireEnv("EVM_RPC_URL"),
         requireEnv("EVM_USER_ADDRESS"),
       );
-      const amount = parseUnits("0.1", 6); // 0.1 USDC — the funding preflight's minimum
+      // 0.1 USDC, the funding preflight's minimum, plus the fee the withdraw leg's
+      // start takes on top of that principal.
+      const amount =
+        WITHDRAW_AMOUNT + (await vaultFeesOf(context, requireEnv("ERC20_ADDRESS"))).withdraw;
 
       depositTransactionSignatureRequestId = await startDeposit(context, { amount, evmNonce });
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
@@ -459,7 +492,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
   // ── Withdraw leg: drive the deposited 0.1 USDC back OUT of the vault to the
   // user's derived EVM account, spending the shielded tokens completeDeposit minted.
-  const WITHDRAW_AMOUNT = parseUnits("0.1", 6);
 
   it(
     "withdraw funding preflight: check vault EVM account for the withdraw gas budget and ERC20 balance.",
@@ -526,6 +558,16 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress)
       ).vaultAccountNonce;
 
+      // The fee recipient's balance of the vault token before the start, so the
+      // fee coin shows as a delta.
+      const erc20Address = requireEnv("ERC20_ADDRESS");
+      const withdrawFee = (await vaultFeesOf(context, erc20Address)).withdraw;
+      expect(withdrawFee, "the local initialise sets a non-zero withdraw fee").toBeGreaterThan(0n);
+      const color = vaultTokenType(erc20Address, context.vaultContractAddress);
+      const recipientWallet = await feeRecipientSession.wallet();
+      const recipientBefore =
+        (await recipientWallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
+
       withdrawTransactionSignatureRequestId = await startWithdraw(context, {
         amount: WITHDRAW_AMOUNT,
         destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
@@ -533,6 +575,18 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
 
       expect(withdrawTransactionSignatureRequestId).toMatch(/^[0-9a-f]{64}$/);
+
+      // The fee coin landed in the recipient's wallet: the start minted it to the
+      // ledger's fee recipient and encrypted it to the recipient's key, so the
+      // wallet discovers it unaided.
+      await waitForFacadeState(
+        recipientWallet.facade,
+        (synced) => (synced.shielded.balances[color] ?? 0n) >= recipientBefore + withdrawFee,
+      );
+      expect(
+        (await recipientWallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n,
+        "the fee recipient's wallet must hold the withdraw fee",
+      ).toBe(recipientBefore + withdrawFee);
 
       // MPC-convention verification: the request resolves from RAW vault state
       // through the same reader the response server uses, recorded under the

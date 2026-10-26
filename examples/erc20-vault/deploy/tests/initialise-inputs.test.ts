@@ -18,12 +18,17 @@ const MPC_KEY_CANONICAL =
   "0x047dd8ecafa5d9c921485b6ac33476870e98c3378e395f3c8fae92ce4943d8432847f591ab25ca454effb522ec2eaf04b7e1c83ba65ae731ea98dd52eb7d458dd4";
 const MPC_KEY_COMPRESSED = "0x027dd8ecafa5d9c921485b6ac33476870e98c3378e395f3c8fae92ce4943d84328";
 
+// The genesis mint seed, the deployer the local stack funds, whose shielded keys
+// the fee recipient defaults to.
+const DEPLOYER_SEED = "0000000000000000000000000000000000000000000000000000000000000001";
+
 // The smallest environment initialise accepts without an address on the local
 // stack (which publishes no MPC key): the EVM targets default to their Sepolia
-// canonicals.
+// canonicals, the fees to their defaults and the fee recipient to the deployer.
 const VALID_INPUTS = {
   MPC_SECP256K1_PUBKEY: MPC_KEY_CANONICAL,
   EVM_CHAIN_ID: "11155111",
+  DEPLOYER_SEED,
 } as const;
 
 describe("assertInitialiseInputsPresent", () => {
@@ -45,7 +50,22 @@ describe("assertInitialiseInputsPresent", () => {
     },
     {
       name: "no MPC key on a deployed network the SDK publishes one for",
-      env: { NETWORK_ID: "stagenet", EVM_CHAIN_ID: "11155111" },
+      // The genesis mint seed holds funds on the local chain alone, so a deployed
+      // network takes a seed of its own.
+      env: { NETWORK_ID: "stagenet", EVM_CHAIN_ID: "11155111", DEPLOYER_SEED: "ab".repeat(32) },
+    },
+    {
+      name: "an explicit fee recipient and no deployer seed",
+      env: {
+        MPC_SECP256K1_PUBKEY: MPC_KEY_CANONICAL,
+        EVM_CHAIN_ID: "11155111",
+        VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY: "ab".repeat(32),
+        VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY: "cd".repeat(32),
+      },
+    },
+    {
+      name: "every fee set",
+      env: { ...VALID_INPUTS, VAULT_FEE_WITHDRAW: "0", VAULT_FEE_SWAP: "5" },
     },
     { name: "chain id 1", env: { ...VALID_INPUTS, EVM_CHAIN_ID: "1" } },
     { name: "start height 0", env: { ...VALID_INPUTS, EVM_START_HEIGHT: "0" } },
@@ -104,8 +124,23 @@ describe("assertInitialiseInputsPresent", () => {
     },
     {
       name: "neither a chain id nor an RPC to read it from",
-      env: { MPC_SECP256K1_PUBKEY: MPC_KEY_CANONICAL },
+      env: { MPC_SECP256K1_PUBKEY: MPC_KEY_CANONICAL, DEPLOYER_SEED },
       error: /EVM_CHAIN_ID or EVM_RPC_URL is required/,
+    },
+    {
+      name: "a malformed fee",
+      env: { ...VALID_INPUTS, VAULT_FEE_REDEEM: "-1" },
+      error: /VAULT_FEE_REDEEM/,
+    },
+    {
+      name: "half a fee recipient",
+      env: { ...VALID_INPUTS, VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY: "ab".repeat(32) },
+      error: /set both or neither/,
+    },
+    {
+      name: "no fee recipient and no deployer seed on a deployed network",
+      env: { NETWORK_ID: "stagenet", EVM_CHAIN_ID: "11155111" },
+      error: /DEPLOYER_SEED is required/,
     },
   ];
 

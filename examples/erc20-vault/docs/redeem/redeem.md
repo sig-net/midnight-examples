@@ -42,13 +42,18 @@ the redeem's own request map,
 As illustrated, the flow comprises 9 steps:
 
 - **1.** startRedeem(...) burns the surrendered coin and queues the request
-  - The caller surrenders a shielded **vault coin** of exactly the shares being
-    redeemed. [`startRedeem`](../../contract/src/erc20-vault.compact) checks
+  - The caller surrenders a shielded **vault coin** worth the shares being
+    redeemed plus the wrapper's redeem fee, read from
+    [`allowedTokens`](../../contract/src/erc20-vault.compact). [`startRedeem`](../../contract/src/erc20-vault.compact) checks
     the coin's colour is the wrapper's vault token
     ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact)
     over the pinned [`stataToken`](../../contract/src/erc20-vault.compact))
-    and that its value equals the shares, then burns it with the same pair of
-    calls a [withdrawal](../withdraw/withdraw.md) uses. The coin spend IS the
+    and that its value equals the shares plus the fee, then
+    [`takeFee`](../../contract/src/erc20-vault.compact) burns it with the same pair of calls a
+    [withdrawal](../withdraw/withdraw.md) uses and mints the fee to
+    [`feeRecipientCoinPublicKey`](../../contract/src/erc20-vault.compact) under the public nonce
+    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the input index, recorded as `fee` in
+    [`RedeemArgs`](../../contract/src/erc20-vault.compact). The coin spend IS the
     authorisation, so anyone holding wrapper vault tokens may redeem.
   - Both tokens are contract-fixed, so the
     [`RedeemRequest`](../../contract/src/erc20-vault.compact) names only the
@@ -59,9 +64,13 @@ As illustrated, the flow comprises 9 steps:
     request, and queues the entry with `useNextVaultAccountNonce` set and the redeemer's
     [`ownershipCommitment`](../../contract/src/erc20-vault.compact).
   - Off chain, [`start-redeem.ts`](../../integration-tests/src/flows/start-redeem.ts)
-    funds the coin of the wrapper's colour from the caller's shielded balance
-    and calls the circuit. The caller must already HOLD those shares, so a
-    [supply](../supply/supply.md) comes first.
+    reads the fee from the ledger, funds the coin of the wrapper's colour from
+    the caller's shielded balance and calls the circuit, passing the fee
+    recipient's
+    [`feeRecipientEncryptionPublicKey`](../../contract/src/erc20-vault.compact)
+    so the recipient's wallet discovers the fee coin. The caller must already
+    HOLD those shares plus the fee, so a [supply](../supply/supply.md) comes
+    first.
 - **2.** flushQueue(...) assigns the vault nonce and moves the request into the output buffer
   - The flush gives the entry the vault account's next EVM nonce
     ([`vaultAccountNonce`](../../contract/src/erc20-vault.compact)) and moves it
@@ -131,7 +140,8 @@ As illustrated, the flow comprises 9 steps:
   - A `failed` or `unviable` verdict means the wrapper burned nothing, so the
     circuit re-mints the surrendered `stataToken` shares, and the output it is
     passed is ignored. Either mint goes to the caller under a caller-chosen
-    random `mintNonce`, which ties it to nothing.
+    random `mintNonce`, which ties it to nothing. The fee stays with its
+    recipient on every verdict.
   - [`complete-redeem.ts`](../../integration-tests/src/flows/complete-redeem.ts)
     queues and flushes the attestation, then calls the circuit with a fresh
     random mint nonce on every verdict.

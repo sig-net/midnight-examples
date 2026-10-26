@@ -60,6 +60,14 @@
 #   - comma-separated ERC20s the deployer allows after initialise, beyond
 #     the stata underlying. Unset, users can deposit only the stata underlying
 #   - example: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238,0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4
+# - VAULT_FEE_WITHDRAW / VAULT_FEE_SWAP / VAULT_FEE_SUPPLY / VAULT_FEE_REDEEM (optional)
+#   - the flat fee each action takes, in the token's base units, stamped on
+#     the stata pair and every allowed ERC20. Unset, 1000 each
+#   - example: 1000
+# - VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY / VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY (optional)
+#   - the wallet the fee coins are minted to, set both or neither. Unset,
+#     the deployer wallet's own shielded keys
+#   - example: 64 hex chars each
 # - MIDNIGHT_NODE_URL / MIDNIGHT_NODE_INDEXER_URL (optional)
 #   - endpoint overrides, defaulting to the committed per-network endpoints
 #   - example: https://rpc.stagenet.shielded.tools
@@ -228,6 +236,14 @@ jobs:
           # The ERC20s the deployer allows after initialise. Blank allows none
           # beyond the stata underlying.
           EVM_ALLOWED_TOKENS: ${{ vars.EVM_ALLOWED_TOKENS }}
+          # The fees stamped on every token and the wallet the fee coins go
+          # to. Blank falls through to 1000 per action and the deployer wallet.
+          VAULT_FEE_WITHDRAW: ${{ vars.VAULT_FEE_WITHDRAW }}
+          VAULT_FEE_SWAP: ${{ vars.VAULT_FEE_SWAP }}
+          VAULT_FEE_SUPPLY: ${{ vars.VAULT_FEE_SUPPLY }}
+          VAULT_FEE_REDEEM: ${{ vars.VAULT_FEE_REDEEM }}
+          VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY: ${{ vars.VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY }}
+          VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY: ${{ vars.VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY }}
           # Optional per-environment endpoint overrides. Every network has
           # committed defaults, and a blank var falls through to them.
           MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}

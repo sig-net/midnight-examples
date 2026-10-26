@@ -13,7 +13,7 @@
 // See ../../docs/contention-handling.md.
 //
 // Layout: configuration, the admin circuits that send no EVM transaction (initialisation,
-// gas settings and allowed tokens), the request queue every action shares, the admin
+// gas settings, allowed tokens and fees), the request queue every action shares, the admin
 // actions that do (nonce replacement and approvals), then the application's actions.
 // Each action's section holds its request types, its ledger fields and its circuits.
 
@@ -64,14 +64,70 @@ export ledger uniswapRouter: Bytes<20>;
 export ledger stataUnderlying: Bytes<20>;
 export ledger stataToken: Bytes<20>;
 
-// The ERC20s startDeposit may move in and startSwap may buy: stataUnderlying, allowed by
-// initialise(), and every ERC20 addAllowedToken() adds. Every other mint re-mints a
-// surrendered coin's ERC20 or one of the pinned stata pair, so the actions that spend a
-// vault coin need no check. An action minting any other ERC20 must check this set.
-export ledger allowedTokens: Set<Bytes<20>>;
+// The flat fee, in the token's base units, a start circuit takes on top of the
+// surrendered principal for each action the vault's own account pays gas for. Zero
+// disables charging for that action.
+export struct TokenFees {
+  withdraw: Uint<64>;
+  swap: Uint<64>;
+  supply: Uint<64>;
+  redeem: Uint<64>;
+}
+
+export struct AllowedTokenConfig {
+  fees: TokenFees;
+}
+
+// Keyed by every ERC20 a vault coin can exist for.
+export ledger allowedTokens: Map<Bytes<20>, AllowedTokenConfig>;
+
+// Details of the fee recipient, used in fee coin minting.
+// The encryption key is for clients to attach the ciphertext that lets
+// the recipient's wallet find the coin.
+export ledger feeRecipientCoinPublicKey: ZswapCoinPublicKey;
+export ledger feeRecipientEncryptionPublicKey: Bytes<32>;
 
 circuit requireInitialised(): [] {
   assert(initialised, "Not initialised");
+}
+
+circuit requireDeployer(): [] {
+  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+}
+
+circuit requireTokenAllowed(erc20Address: Bytes<20>): [] {
+  assert(allowedTokens.member(disclose(erc20Address)), "ERC20 not allowed");
+}
+
+circuit tokenFees(erc20Address: Bytes<20>): TokenFees {
+  requireTokenAllowed(erc20Address);
+  return allowedTokens.lookup(disclose(erc20Address)).fees;
+}
+
+// The fee coin's nonce, public and unique: inIndex is disclosed by every start and
+// refused while any request holds it, so every fee coin is recomputable from the chain.
+export pure circuit feeMintNonce(inIndex: Uint<64>): Bytes<32> {
+  return evolveNonce(inIndex as Uint<128>, pad(32, "erc20:vault:fee"));
+}
+
+// Burns the surrendered coin whole and mints the fee of the same colour to the fee
+// recipient, so principal + fee leaves the caller and only the fee leaves the burn.
+circuit takeFee(
+  inIndex: Uint<64>,
+  erc20Address: Bytes<20>,
+  coin: ShieldedCoinInfo,
+  fee: Uint<64>
+): [] {
+  receiveShielded(disclose(coin));
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
+  if (fee > 0 as Uint<64>) {
+    mintShieldedToken(
+      vaultTokenDomainSeparator(disclose(erc20Address)),
+      fee,
+      feeMintNonce(disclose(inIndex)),
+      left<ZswapCoinPublicKey, ContractAddress>(feeRecipientCoinPublicKey)
+    );
+  }
 }
 
 // Exported pure circuits exist so off-chain code reads these values from the compiled
@@ -134,11 +190,15 @@ export circuit initialise(
   chainId: Uint<64>,
   responseKey: Secp256k1Point,
   responseKeyVersion: Uint<8>,
-  evmHeight: Uint<64>
+  evmHeight: Uint<64>,
+  stataUnderlyingFees: TokenFees,
+  stataTokenFees: TokenFees,
+  feeRecipientCoinKey: ZswapCoinPublicKey,
+  feeRecipientEncryptionKey: Bytes<32>
 ): [] {
   assert(!initialised, "Already initialised");
   assert(responseKeyVersion >= 1, "keyVersion must be >= 1");
-  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+  requireDeployer();
   assert(chainId > 0 as Uint<64>, "Chain ID must be positive");
   assert(swapRouter as Field != 0 as Field, "Router cannot be zero");
   assert(stataUnderlyingAddr as Field != 0 as Field, "stataUnderlying cannot be zero");
@@ -148,8 +208,14 @@ export circuit initialise(
   uniswapRouter = disclose(swapRouter);
   stataUnderlying = disclose(stataUnderlyingAddr);
   stataToken = disclose(stataTokenAddr);
-  // Otherwise no stataUnderlying vault coin could ever be minted to start a supply.
-  allowedTokens.insert(disclose(stataUnderlyingAddr));
+  // Every vault coin a supply or redeem surrenders must be a key, for its fee.
+  allowedTokens.insert(
+    disclose(stataUnderlyingAddr),
+    disclose(AllowedTokenConfig { fees: stataUnderlyingFees })
+  );
+  allowedTokens.insert(disclose(stataTokenAddr), disclose(AllowedTokenConfig { fees: stataTokenFees }));
+  feeRecipientCoinPublicKey = disclose(feeRecipientCoinKey);
+  feeRecipientEncryptionPublicKey = disclose(feeRecipientEncryptionKey);
   evmChainId = disclose(chainId);
   mpcResponseKey = disclose(responseKey);
   mpcKeyVersion = disclose(responseKeyVersion);
@@ -181,7 +247,7 @@ export circuit setGasParams(
   newRedeemGasLimit: Uint<64>
 ): [] {
   requireInitialised();
-  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+  requireDeployer();
 
   assert(newMaxFeePerGas > 0 as Uint<128>, "maxFeePerGas must be positive");
   assert(
@@ -205,14 +271,30 @@ export circuit setGasParams(
   };
 }
 
-// ==== Allowed tokens =================================================================
-// The deployer grows allowedTokens. The set only grows: no circuit removes a token.
+// ==== Allowed tokens and fees ========================================================
+// The deployer grows allowedTokens and reprices its fees. The map only grows: no
+// circuit removes a token.
 
-export circuit addAllowedToken(erc20Address: Bytes<20>): [] {
+export circuit addAllowedToken(erc20Address: Bytes<20>, fees: TokenFees): [] {
   requireInitialised();
-  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+  requireDeployer();
   assert(erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
-  allowedTokens.insert(disclose(erc20Address));
+  allowedTokens.insert(disclose(erc20Address), disclose(AllowedTokenConfig { fees: fees }));
+}
+
+// A request keeps the fee it was started with.
+export circuit setTokenFees(erc20Address: Bytes<20>, fees: TokenFees): [] {
+  requireInitialised();
+  requireDeployer();
+  requireTokenAllowed(erc20Address);
+  allowedTokens.insert(disclose(erc20Address), disclose(AllowedTokenConfig { fees: fees }));
+}
+
+export circuit setFeeRecipient(coinPublicKey: ZswapCoinPublicKey, encryptionPublicKey: Bytes<32>): [] {
+  requireInitialised();
+  requireDeployer();
+  feeRecipientCoinPublicKey = disclose(coinPublicKey);
+  feeRecipientEncryptionPublicKey = disclose(encryptionPublicKey);
 }
 
 // ==== Request queue ==================================================================
@@ -502,7 +584,7 @@ circuit sentVaultNonce(requestId: RequestId, action: Action): Uint<64> {
 // at the start may stay burned.
 export circuit startReplaceNonce(inIndex: Uint<64>, requestId: RequestId, action: Action): [] {
   requireInitialised();
-  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+  requireDeployer();
 
   const evmNonce = sentVaultNonce(disclose(requestId), disclose(action));
   const disclosedIndex = disclose(inIndex);
@@ -629,7 +711,7 @@ export pure circuit unlimitedAllowance(): Uint<128> {
 // own validation. The vault's account signs and pays, so the gas is the vault's own
 // setting at start.
 circuit queueApprove(inIndex: Uint<64>, approveRequest: ApproveRequest): [] {
-  assert(userCommitment(callerSecretKey()) == deployer, "Not the deployer");
+  requireDeployer();
 
   const disclosedIndex = disclose(inIndex);
   assert(
@@ -796,7 +878,7 @@ export circuit startDeposit(
   depositRequest: DepositRequest
 ): [] {
   requireInitialised();
-  assert(allowedTokens.member(disclose(depositRequest.erc20Address)), "ERC20 not allowed");
+  requireTokenAllowed(depositRequest.erc20Address);
   assert(depositRequest.amount > 0 as Uint<128>, "Amount must be positive");
   // completeDeposit mints via a Uint<64> API, so reject unclaimable amounts.
   assert(depositRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
@@ -928,6 +1010,7 @@ export struct WithdrawRequest {
 export struct WithdrawArgs {
   request: WithdrawRequest;
   gas: GasParams;
+  fee: Uint<64>;
 }
 
 // Withdraw requests (2-word ERC20 transfer, 34-byte output schema).
@@ -945,9 +1028,9 @@ circuit withdrawArgsHash(args: WithdrawArgs): Bytes<32> {
 }
 
 // Queues the withdrawal under inIndex, a caller-chosen random index (must be fresh, else no
-// unlinkability is guaranteed), and burns the
-// surrendered vault coin: the coin spend is the authorisation. The vault's account
-// signs and pays, so the gas is the vault's own setting at start.
+// unlinkability is guaranteed), burns the surrendered vault coin and takes the withdraw
+// fee: the coin spend is the authorisation. The vault's account signs and pays, so the
+// gas is the vault's own setting at start.
 export circuit startWithdraw(
   inIndex: Uint<64>,
   withdrawRequest: WithdrawRequest,
@@ -960,19 +1043,22 @@ export circuit startWithdraw(
   // completeWithdraw re-mints via a Uint<64> API, so reject unrefundable amounts.
   assert(withdrawRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
 
-  assert(
-    coin.color == tokenType(vaultTokenDomainSeparator(withdrawRequest.erc20Address), kernel.self()),
-    "Coin is not the vault token for this ERC20"
-  );
-  assert(coin.value == withdrawRequest.amount, "Coin value must equal the withdraw amount");
-  receiveShielded(disclose(coin));
-  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
-
   const disclosedIndex = disclose(inIndex);
   assert(
     !inputRequestBuffer.member(disclosedIndex) && !withdrawArgsMap.member(disclosedIndex),
     "Index already in use"
   );
+
+  assert(
+    coin.color == tokenType(vaultTokenDomainSeparator(withdrawRequest.erc20Address), kernel.self()),
+    "Coin is not the vault token for this ERC20"
+  );
+  const fee = tokenFees(withdrawRequest.erc20Address).withdraw;
+  assert(
+    coin.value == (withdrawRequest.amount + fee) as Uint<128>,
+    "Coin value must equal the withdraw amount plus fee"
+  );
+  takeFee(inIndex, withdrawRequest.erc20Address, coin, fee);
 
   const args = disclose(WithdrawArgs {
     request: withdrawRequest,
@@ -981,6 +1067,7 @@ export circuit startWithdraw(
       maxFeePerGas: vaultMaxFeePerGas,
       maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     },
+    fee: fee,
   });
   withdrawArgsMap.insert(disclosedIndex, args);
   inputRequestBuffer.insert(disclosedIndex, disclose(RequestBufferEntry {
@@ -1071,6 +1158,7 @@ export circuit completeWithdraw(
       "Output does not match the attestation"
     );
   }
+  // A refund of the fee on an unviable verdict is perhaps wanted but not yet implemented.
   if (outcomeRefunds(record.outputKind) || !deserialize<VaultResponse, 1>(output).success) {
     mintShieldedToken(
       vaultTokenDomainSeparator(args.request.erc20Address),
@@ -1098,6 +1186,7 @@ export struct SwapRequest {
 export struct SwapArgs {
   request: SwapRequest;
   gas: GasParams;
+  fee: Uint<64>;
 }
 
 // The MPC decodes exactOutputSingle's uint256 return with the output schema and attests
@@ -1121,11 +1210,11 @@ circuit swapArgsHash(args: SwapArgs): Bytes<32> {
 }
 
 // Queues the swap under inIndex, a caller-chosen random index (must be fresh, else no
-// unlinkability is guaranteed), and burns the
-// surrendered amountInMaximum of erc20AddressIn: the coin spend is the authorisation.
-// exactOutput fixes the amount completeSwap mints here, where it is checked to fit a
-// Uint<64> mint, so no swap result can strand the burned coin. The vault's account
-// signs and pays, so the gas is the vault's own setting at start.
+// unlinkability is guaranteed), burns the surrendered amountInMaximum of erc20AddressIn
+// and takes the swap fee: the coin spend is the authorisation. exactOutput fixes the
+// amount completeSwap mints here, where it is checked to fit a Uint<64> mint, so no
+// swap result can strand the burned coin. The vault's account signs and pays, so the
+// gas is the vault's own setting at start.
 export circuit startSwap(
   inIndex: Uint<64>,
   swapRequest: SwapRequest,
@@ -1143,19 +1232,22 @@ export circuit startSwap(
     "amountInMaximum exceeds Uint<64> max"
   );
 
-  assert(
-    coin.color == tokenType(vaultTokenDomainSeparator(swapRequest.erc20AddressIn), kernel.self()),
-    "Coin is not the vault token for erc20AddressIn"
-  );
-  assert(coin.value == swapRequest.amountInMaximum, "Coin value must equal amountInMaximum");
-  receiveShielded(disclose(coin));
-  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
-
   const disclosedIndex = disclose(inIndex);
   assert(
     !inputRequestBuffer.member(disclosedIndex) && !swapArgsMap.member(disclosedIndex),
     "Index already in use"
   );
+
+  assert(
+    coin.color == tokenType(vaultTokenDomainSeparator(swapRequest.erc20AddressIn), kernel.self()),
+    "Coin is not the vault token for erc20AddressIn"
+  );
+  const fee = tokenFees(swapRequest.erc20AddressIn).swap;
+  assert(
+    coin.value == (swapRequest.amountInMaximum + fee) as Uint<128>,
+    "Coin value must equal amountInMaximum plus fee"
+  );
+  takeFee(inIndex, swapRequest.erc20AddressIn, coin, fee);
 
   const args = disclose(SwapArgs {
     request: swapRequest,
@@ -1164,6 +1256,7 @@ export circuit startSwap(
       maxFeePerGas: vaultMaxFeePerGas,
       maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     },
+    fee: fee,
   });
   swapArgsMap.insert(disclosedIndex, args);
   inputRequestBuffer.insert(disclosedIndex, disclose(RequestBufferEntry {
@@ -1289,6 +1382,7 @@ export circuit completeSwap(
       recipient
     );
   }
+  // A refund of the fee on an unviable verdict is perhaps wanted but not yet implemented.
   if (outcomeRefunds(record.outputKind)) {
     mintShieldedToken(
       vaultTokenDomainSeparator(args.request.erc20AddressIn),
@@ -1319,6 +1413,7 @@ export struct SupplyRequest {
 export struct SupplyArgs {
   request: SupplyRequest;
   gas: GasParams;
+  fee: Uint<64>;
 }
 
 // Supply requests (2-word ERC-4626 deposit, 36-byte output schema).
@@ -1336,9 +1431,9 @@ circuit supplyArgsHash(args: SupplyArgs): Bytes<32> {
 }
 
 // Queues the supply under inIndex, a caller-chosen random index (must be fresh, else no
-// unlinkability is guaranteed), and burns the
-// surrendered stataUnderlying vault coin: the coin spend is the authorisation. The
-// vault's account signs and pays, so the gas is the vault's own setting at start.
+// unlinkability is guaranteed), burns the surrendered stataUnderlying vault coin and
+// takes the supply fee: the coin spend is the authorisation. The vault's account signs
+// and pays, so the gas is the vault's own setting at start.
 export circuit startSupply(
   inIndex: Uint<64>,
   supplyRequest: SupplyRequest,
@@ -1349,19 +1444,22 @@ export circuit startSupply(
   // completeSupply re-mints via a Uint<64> API, so reject unrefundable amounts.
   assert(supplyRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
 
-  assert(
-    coin.color == tokenType(vaultTokenDomainSeparator(stataUnderlying), kernel.self()),
-    "Coin is not the vault token for the underlying"
-  );
-  assert(coin.value == supplyRequest.amount, "Coin value must equal the supply amount");
-  receiveShielded(disclose(coin));
-  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
-
   const disclosedIndex = disclose(inIndex);
   assert(
     !inputRequestBuffer.member(disclosedIndex) && !supplyArgsMap.member(disclosedIndex),
     "Index already in use"
   );
+
+  assert(
+    coin.color == tokenType(vaultTokenDomainSeparator(stataUnderlying), kernel.self()),
+    "Coin is not the vault token for the underlying"
+  );
+  const fee = tokenFees(stataUnderlying).supply;
+  assert(
+    coin.value == (supplyRequest.amount + fee) as Uint<128>,
+    "Coin value must equal the supply amount plus fee"
+  );
+  takeFee(inIndex, stataUnderlying, coin, fee);
 
   const args = disclose(SupplyArgs {
     request: supplyRequest,
@@ -1370,6 +1468,7 @@ export circuit startSupply(
       maxFeePerGas: vaultMaxFeePerGas,
       maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     },
+    fee: fee,
   });
   supplyArgsMap.insert(disclosedIndex, args);
   inputRequestBuffer.insert(disclosedIndex, disclose(RequestBufferEntry {
@@ -1472,6 +1571,7 @@ export circuit completeSupply(
       caller
     );
   }
+  // A refund of the fee on an unviable verdict is perhaps wanted but not yet implemented.
   if (outcomeRefunds(record.outputKind)) {
     mintShieldedToken(
       vaultTokenDomainSeparator(stataUnderlying),
@@ -1502,6 +1602,7 @@ export struct RedeemRequest {
 export struct RedeemArgs {
   request: RedeemRequest;
   gas: GasParams;
+  fee: Uint<64>;
 }
 
 // Redeem requests (3-word ERC-4626 redeem, 36-byte output schema).
@@ -1519,9 +1620,9 @@ circuit redeemArgsHash(args: RedeemArgs): Bytes<32> {
 }
 
 // Queues the redeem under inIndex, a caller-chosen random index (must be fresh, else no
-// unlinkability is guaranteed), and burns the
-// surrendered stataToken vault coin: the coin spend is the authorisation. The vault's
-// account signs and pays, so the gas is the vault's own setting at start.
+// unlinkability is guaranteed), burns the surrendered stataToken vault coin and takes
+// the redeem fee: the coin spend is the authorisation. The vault's account signs and
+// pays, so the gas is the vault's own setting at start.
 export circuit startRedeem(
   inIndex: Uint<64>,
   redeemRequest: RedeemRequest,
@@ -1532,19 +1633,22 @@ export circuit startRedeem(
   // completeRedeem re-mints via a Uint<64> API, so reject unrefundable shares.
   assert(redeemRequest.shares <= 18446744073709551615 as Uint<128>, "shares exceeds Uint<64> max");
 
-  assert(
-    coin.color == tokenType(vaultTokenDomainSeparator(stataToken), kernel.self()),
-    "Coin is not the vault token for the wrapper"
-  );
-  assert(coin.value == redeemRequest.shares, "Coin value must equal shares");
-  receiveShielded(disclose(coin));
-  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
-
   const disclosedIndex = disclose(inIndex);
   assert(
     !inputRequestBuffer.member(disclosedIndex) && !redeemArgsMap.member(disclosedIndex),
     "Index already in use"
   );
+
+  assert(
+    coin.color == tokenType(vaultTokenDomainSeparator(stataToken), kernel.self()),
+    "Coin is not the vault token for the wrapper"
+  );
+  const fee = tokenFees(stataToken).redeem;
+  assert(
+    coin.value == (redeemRequest.shares + fee) as Uint<128>,
+    "Coin value must equal shares plus fee"
+  );
+  takeFee(inIndex, stataToken, coin, fee);
 
   const args = disclose(RedeemArgs {
     request: redeemRequest,
@@ -1553,6 +1657,7 @@ export circuit startRedeem(
       maxFeePerGas: vaultMaxFeePerGas,
       maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
     },
+    fee: fee,
   });
   redeemArgsMap.insert(disclosedIndex, args);
   inputRequestBuffer.insert(disclosedIndex, disclose(RequestBufferEntry {
@@ -1657,6 +1762,7 @@ export circuit completeRedeem(
       caller
     );
   }
+  // A refund of the fee on an unviable verdict is perhaps wanted but not yet implemented.
   if (outcomeRefunds(record.outputKind)) {
     mintShieldedToken(
       vaultTokenDomainSeparator(stataToken),

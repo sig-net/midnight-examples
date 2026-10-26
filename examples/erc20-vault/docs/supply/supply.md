@@ -47,13 +47,18 @@ which the `approve-e2e` spec runs before the lending specs.
 As illustrated, the flow comprises 9 steps:
 
 - **1.** startSupply(...) burns the surrendered coin and queues the request
-  - The caller surrenders a shielded **vault coin** of exactly the supply
-    amount. [`startSupply`](../../contract/src/erc20-vault.compact) checks the
+  - The caller surrenders a shielded **vault coin** worth the supply amount
+    plus the underlying's supply fee, read from
+    [`allowedTokens`](../../contract/src/erc20-vault.compact). [`startSupply`](../../contract/src/erc20-vault.compact) checks the
     coin's colour is the underlying's vault token
     ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact)
     over the pinned [`stataUnderlying`](../../contract/src/erc20-vault.compact))
-    and that its value equals the amount, then burns it with the same pair of
-    calls a [withdrawal](../withdraw/withdraw.md) uses. The coin spend IS the
+    and that its value equals the amount plus the fee, then
+    [`takeFee`](../../contract/src/erc20-vault.compact) burns it with the same pair of calls a
+    [withdrawal](../withdraw/withdraw.md) uses and mints the fee to
+    [`feeRecipientCoinPublicKey`](../../contract/src/erc20-vault.compact) under the public nonce
+    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the input index, recorded as `fee` in
+    [`SupplyArgs`](../../contract/src/erc20-vault.compact). The coin spend IS the
     authorisation, so anyone holding underlying vault tokens may supply.
   - Both tokens are contract-fixed, so the
     [`SupplyRequest`](../../contract/src/erc20-vault.compact) names only the
@@ -64,9 +69,13 @@ As illustrated, the flow comprises 9 steps:
     request, and queues the entry with `useNextVaultAccountNonce` set and the supplier's
     [`ownershipCommitment`](../../contract/src/erc20-vault.compact).
   - Off chain, [`start-supply.ts`](../../integration-tests/src/flows/start-supply.ts)
-    funds the coin of the underlying's colour from the caller's shielded
-    balance and calls the circuit. The caller must already HOLD that much of
-    the underlying vault token, so a deposit of the underlying comes first.
+    reads the fee from the ledger, funds the coin of the underlying's colour
+    from the caller's shielded balance and calls the circuit, passing the fee
+    recipient's
+    [`feeRecipientEncryptionPublicKey`](../../contract/src/erc20-vault.compact)
+    so the recipient's wallet discovers the fee coin. The caller must already
+    HOLD the amount plus the fee of the underlying vault token, so a deposit of
+    the underlying comes first.
 - **2.** flushQueue(...) assigns the vault nonce and moves the request into the output buffer
   - The flush gives the entry the vault account's next EVM nonce
     ([`vaultAccountNonce`](../../contract/src/erc20-vault.compact)) and moves it
@@ -137,7 +146,8 @@ As illustrated, the flow comprises 9 steps:
   - A `failed` or `unviable` verdict means the wrapper took nothing, so the
     circuit re-mints the surrendered `stataUnderlying` amount, and the output
     it is passed is ignored. Either mint goes to the caller under a
-    caller-chosen random `mintNonce`, which ties it to nothing.
+    caller-chosen random `mintNonce`, which ties it to nothing. The fee stays
+    with its recipient on every verdict.
   - [`complete-supply.ts`](../../integration-tests/src/flows/complete-supply.ts)
     queues and flushes the attestation, then calls the circuit with a fresh
     random mint nonce on every verdict.

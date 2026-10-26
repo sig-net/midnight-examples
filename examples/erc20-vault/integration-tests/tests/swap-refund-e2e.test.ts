@@ -49,6 +49,7 @@ import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startSwap } from "../src/flows/start-swap.ts";
 import { SEPOLIA_EURC } from "../src/fork-funding.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
+import { vaultFeesOf } from "../src/vault-fees.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -175,8 +176,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e
     "arrange: deposit round trip mints the shielded USDC the doomed swap will surrender",
     async () => {
       amountInMaximum = await doomedCap(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"));
+      // The swap surrenders the cap plus the swap fee: fund both.
+      const swapFee = (await vaultFeesOf(await session.vaultContext(), requireEnv("ERC20_ADDRESS")))
+        .swap;
       const { requestId } = await runDepositRoundTrip(session, {
-        amount: amountInMaximum,
+        amount: amountInMaximum + swapFee,
         reuseRequestId: env.SWAP_REFUND_DEPOSIT_REQUEST_ID as RequestIdHex | undefined,
       });
 

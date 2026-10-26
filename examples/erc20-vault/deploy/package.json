@@ -14,6 +14,7 @@
     "deploy-initialise": "tsx scripts/deploy-initialise.ts",
     "initialise": "tsx scripts/initialise.ts",
     "add-allowed-tokens": "tsx scripts/add-allowed-tokens.ts",
+    "set-token-fees": "tsx scripts/set-token-fees.ts",
     "resume-deploy": "tsx scripts/resume-deploy.ts",
     "record-contract-address": "tsx scripts/record-contract-address.ts"
   },

@@ -123,11 +123,33 @@ The operator therefore treats the collection address as a public mailbox. To mov
 
 The caller passes one coin worth `amountInMaximum + fee`. The circuit receives it and burns it whole, as today, then mints a new coin worth exactly the fee to the fee recipient. Supply stays balanced: `amountInMaximum + fee` is burnt, `fee` is minted now, and the `complete*` circuit mints at most `amountInMaximum` later, exactly as it does today.
 
-The mint nonce is derived from `inIndex`, which the circuit already discloses, so it is public and unique: the index-in-use check refuses a second request under the same `inIndex`, and the coin's colour already binds it to this contract. A public nonce is what makes every fee coin recomputable from the chain (see Fee Discovery).
+The mint nonce is derived from `inIndex`, which the circuit already discloses, so it is public and unique: the index-in-use check refuses a second request under the same `inIndex`, and the coin's colour already binds it to this contract. A public nonce is what makes every fee coin recomputable from the chain (see Fee Discovery). The burn and the mint are one helper the four start circuits share:
 
 ```compact
-circuit feeMintNonce(inIndex: Uint<64>): Bytes<32> {
+// The fee coin's nonce, public and unique: inIndex is disclosed by every start and
+// refused while any request holds it, so every fee coin is recomputable from the chain.
+export pure circuit feeMintNonce(inIndex: Uint<64>): Bytes<32> {
   return evolveNonce(inIndex as Uint<128>, pad(32, "erc20:vault:fee"));
+}
+
+// Burns the surrendered coin whole and mints the fee of the same colour to the fee
+// recipient, so principal + fee leaves the caller and only the fee leaves the burn.
+circuit takeFee(
+  inIndex: Uint<64>,
+  erc20Address: Bytes<20>,
+  coin: ShieldedCoinInfo,
+  fee: Uint<64>
+): [] {
+  receiveShielded(disclose(coin));
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
+  if (fee > 0 as Uint<64>) {
+    mintShieldedToken(
+      vaultTokenDomainSeparator(disclose(erc20Address)),
+      fee,
+      feeMintNonce(disclose(inIndex)),
+      left<ZswapCoinPublicKey, ContractAddress>(feeRecipientCoinPublicKey)
+    );
+  }
 }
 ```
 
@@ -141,29 +163,34 @@ export circuit startSwap(
 ): [] {
   requireInitialised();
   // ...the existing request checks...
+
   const disclosedIndex = disclose(inIndex);
   assert(
     !inputRequestBuffer.member(disclosedIndex) && !swapArgsMap.member(disclosedIndex),
     "Index already in use"
   );
 
+  assert(
+    coin.color == tokenType(vaultTokenDomainSeparator(swapRequest.erc20AddressIn), kernel.self()),
+    "Coin is not the vault token for erc20AddressIn"
+  );
   const fee = tokenFees(swapRequest.erc20AddressIn).swap;
   assert(
-    coin.value == swapRequest.amountInMaximum + fee,
+    coin.value == (swapRequest.amountInMaximum + fee) as Uint<128>,
     "Coin value must equal amountInMaximum plus fee"
   );
-  receiveShielded(disclose(coin));
-  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
-  if (fee > 0 as Uint<64>) {
-    mintShieldedToken(
-      vaultTokenDomainSeparator(swapRequest.erc20AddressIn),
-      fee,
-      feeMintNonce(disclosedIndex),
-      left<ZswapCoinPublicKey, ContractAddress>(feeRecipientCoinPublicKey)
-    );
-  }
+  takeFee(inIndex, swapRequest.erc20AddressIn, coin, fee);
 
-  // ...queue the request exactly as today, with `fee` recorded in SwapArgs...
+  const args = disclose(SwapArgs {
+    request: swapRequest,
+    gas: GasParams {
+      gasLimit: vaultGasLimits.swap,
+      maxFeePerGas: vaultMaxFeePerGas,
+      maxPriorityFeePerGas: vaultMaxPriorityFeePerGas,
+    },
+    fee: fee,
+  });
+  // ...queue the request exactly as today...
 }
 ```
 

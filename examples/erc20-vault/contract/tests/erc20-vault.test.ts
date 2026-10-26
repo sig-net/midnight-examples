@@ -166,6 +166,16 @@ const ZERO_ADDRESS = new Uint8Array(20);
 const AMOUNT = 1_000_000n;
 const UINT64_MAX = 18446744073709551615n;
 
+// The fees initialise() stamps on the stata pair and addAllowedToken() on every ERC20
+// the tests allow, distinct per action so a start reading the wrong one shows.
+const TOKEN_FEES = { withdraw: 11n, swap: 13n, supply: 17n, redeem: 19n };
+// A fee of zero for every action: a start then burns the principal alone and mints nothing.
+const NO_FEES = { withdraw: 0n, swap: 0n, supply: 0n, redeem: 0n };
+// The fee recipient's keys, a wallet of its own, so a fee mint is told apart from a
+// mint to the caller (CPK) and from the all-zero burn address.
+const FEE_RECIPIENT_CPK = bytes(32, 0xfe);
+const FEE_RECIPIENT_EPK = bytes(32, 0xef);
+
 // Attested uint256 values the vault's Uint<64> readers (swapAmountIn, supplyShares,
 // redeemAssets) refuse, each with the abort it ends in: the Uint<64> cast up to the
 // Uint<128> maximum, the SDK's checkedTruncationU128 above it.
@@ -311,10 +321,16 @@ const deployInitialised = async (evmStartHeight: bigint = EVM_START_HEIGHT) => {
       MPC_RESPONSE_KEY,
       MPC_KEY_VERSION,
       evmStartHeight,
+      TOKEN_FEES,
+      TOKEN_FEES,
+      { bytes: FEE_RECIPIENT_CPK },
+      FEE_RECIPIENT_EPK,
     )
   ).context;
-  const erc20Allowed = (await contract.circuits.addAllowedToken(initialised, ERC20)).context;
-  const next = (await contract.circuits.addAllowedToken(erc20Allowed, ERC20_OUT)).context;
+  const erc20Allowed = (await contract.circuits.addAllowedToken(initialised, ERC20, TOKEN_FEES))
+    .context;
+  const next = (await contract.circuits.addAllowedToken(erc20Allowed, ERC20_OUT, TOKEN_FEES))
+    .context;
   return { contract, ctx: next };
 };
 
@@ -427,6 +443,10 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TOKEN_FEES,
+        TOKEN_FEES,
+        { bytes: FEE_RECIPIENT_CPK },
+        FEE_RECIPIENT_EPK,
       ),
     ).rejects.toThrow(/Not the deployer/);
   });
@@ -444,6 +464,10 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         0n,
         EVM_START_HEIGHT,
+        TOKEN_FEES,
+        TOKEN_FEES,
+        { bytes: FEE_RECIPIENT_CPK },
+        FEE_RECIPIENT_EPK,
       ),
     ).rejects.toThrow(/keyVersion must be >= 1/);
   });
@@ -461,6 +485,10 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TOKEN_FEES,
+        TOKEN_FEES,
+        { bytes: FEE_RECIPIENT_CPK },
+        FEE_RECIPIENT_EPK,
       ),
     ).rejects.toThrow(/Already initialised/);
   });
@@ -478,6 +506,10 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TOKEN_FEES,
+        TOKEN_FEES,
+        { bytes: FEE_RECIPIENT_CPK },
+        FEE_RECIPIENT_EPK,
       ),
     ).rejects.toThrow(/Chain ID must be positive/);
   });
@@ -517,6 +549,10 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TOKEN_FEES,
+        TOKEN_FEES,
+        { bytes: FEE_RECIPIENT_CPK },
+        FEE_RECIPIENT_EPK,
       ),
     ).rejects.toThrow(throws);
   });
@@ -531,7 +567,7 @@ describe("initialise", () => {
     expect(state.mpcResponseKey).toEqual(MPC_RESPONSE_KEY);
   });
 
-  it("allows stataUnderlying and nothing else", async () => {
+  it("allows the stata pair with their fees and nothing else", async () => {
     const { contract, ctx } = await deployContract();
     const initialised = (
       await contract.circuits.initialise(
@@ -544,10 +580,23 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TOKEN_FEES,
+        TOKEN_FEES,
+        { bytes: FEE_RECIPIENT_CPK },
+        FEE_RECIPIENT_EPK,
       )
     ).context;
     const state = ledgerOf(initialised);
-    expect([...state.allowedTokens]).toEqual([STATA_UNDERLYING]);
+    expect(state.allowedTokens.size()).toBe(2n);
+    expect(state.allowedTokens.lookup(STATA_UNDERLYING)).toEqual({ fees: TOKEN_FEES });
+    expect(state.allowedTokens.lookup(STATA_TOKEN)).toEqual({ fees: TOKEN_FEES });
+  });
+
+  it("stores the fee recipient's keys", async () => {
+    const { ctx } = await deployInitialised();
+    const state = ledgerOf(ctx);
+    expect(state.feeRecipientCoinPublicKey).toEqual({ bytes: FEE_RECIPIENT_CPK });
+    expect(state.feeRecipientEncryptionPublicKey).toEqual(FEE_RECIPIENT_EPK);
   });
 });
 
@@ -560,7 +609,8 @@ describe("addAllowedToken", () => {
     };
     await expect(queueDeposit(contract, ctx, unlisted)).rejects.toThrow(/ERC20 not allowed/);
 
-    const allowed = (await contract.circuits.addAllowedToken(ctx, UNLISTED_ERC20)).context;
+    const allowed = (await contract.circuits.addAllowedToken(ctx, UNLISTED_ERC20, TOKEN_FEES))
+      .context;
     expect(ledgerOf(allowed).allowedTokens.member(UNLISTED_ERC20)).toBe(true);
     const queued = (await queueDeposit(contract, allowed, unlisted)).context;
     expect(ledgerOf(queued).depositArgsMap.member(unlisted.inIndex)).toBe(true);
@@ -569,7 +619,7 @@ describe("addAllowedToken", () => {
   it("leaves the set unchanged when the ERC20 is already allowed", async () => {
     const { contract, ctx } = await deployInitialised();
     const before = ledgerOf(ctx).allowedTokens.size();
-    const readded = (await contract.circuits.addAllowedToken(ctx, ERC20)).context;
+    const readded = (await contract.circuits.addAllowedToken(ctx, ERC20, TOKEN_FEES)).context;
     expect(ledgerOf(readded).allowedTokens.size()).toBe(before);
     expect(ledgerOf(readded).allowedTokens.member(ERC20)).toBe(true);
   });
@@ -580,13 +630,14 @@ describe("addAllowedToken", () => {
       contract.circuits.addAllowedToken(
         await strangerContext("addAllowedToken", ctx),
         UNLISTED_ERC20,
+        TOKEN_FEES,
       ),
     ).rejects.toThrow(/Not the deployer/);
   });
 
   it("rejects the zero address", async () => {
     const { contract, ctx } = await deployInitialised();
-    await expect(contract.circuits.addAllowedToken(ctx, ZERO_ADDRESS)).rejects.toThrow(
+    await expect(contract.circuits.addAllowedToken(ctx, ZERO_ADDRESS, TOKEN_FEES)).rejects.toThrow(
       /ERC20 address cannot be zero/,
     );
   });
@@ -1225,6 +1276,26 @@ const vaultCoin = (value: bigint, color: Uint8Array = VAULT_TOKEN_COLOR) => ({
   value,
 });
 
+/** A start's burn output: the one addressed to the all-zero burn key. */
+const burnOutputOf = (zswap: EncodedZswapLocalState) =>
+  first(
+    zswap.outputs.filter(
+      (output) => output.recipient.is_left && output.recipient.left.bytes.every((b) => b === 0),
+    ),
+    "burn output",
+  );
+
+/** A start's fee output: the one addressed to the fee recipient's coin public key. */
+const feeOutputOf = (zswap: EncodedZswapLocalState) =>
+  first(
+    zswap.outputs.filter(
+      (output) =>
+        output.recipient.is_left &&
+        bytesToHex(output.recipient.left.bytes) === bytesToHex(FEE_RECIPIENT_CPK),
+    ),
+    "fee output",
+  );
+
 /**
  * A withdrawal's `startWithdraw` arguments: the input index, the
  * `WithdrawRequest` and the surrendered coin. The nonce and gas are the
@@ -1244,7 +1315,7 @@ interface WithdrawCallArgs {
 const VALID_WITHDRAW: WithdrawCallArgs = {
   inIndex: 11n,
   withdraw: { erc20Address: ERC20, amount: AMOUNT, destEvmAddress: DEST_EVM },
-  coin: vaultCoin(AMOUNT),
+  coin: vaultCoin(AMOUNT + TOKEN_FEES.withdraw),
 };
 
 // The vault's gas settings initialise() stores, which every withdrawal copies at start.
@@ -1354,13 +1425,14 @@ describe("withdraw round-trip", () => {
     expect(ledger(state).withdrawArgsMap.lookup(VALID_WITHDRAW.inIndex)).toEqual({
       request: VALID_WITHDRAW.withdraw,
       gas: DEFAULT_VAULT_GAS,
+      fee: TOKEN_FEES.withdraw,
     });
     expect(ledger(state).evictionMap.lookup(requestIdBytes(idHex))).toEqual(outIndex);
     expect(ledger(state).inputRequestBuffer.isEmpty()).toBe(true);
     expect(ledger(state).vaultAccountNonce).toBe(1n);
   });
 
-  it("start burns the surrendered coin: received by the vault, then paid in full to the burn address", async () => {
+  it("start burns the surrendered coin, principal plus fee, and mints the fee to the recipient", async () => {
     const { contract, ctx } = await deployInitialised();
 
     const started = (await queueWithdraw(contract, ctx, VALID_WITHDRAW)).context;
@@ -1372,9 +1444,9 @@ describe("withdraw round-trip", () => {
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
     expect(consumed.color).toEqual(VAULT_TOKEN_COLOR);
-    expect(consumed.value).toBe(AMOUNT);
+    expect(consumed.value).toBe(AMOUNT + TOKEN_FEES.withdraw);
 
-    expect(zswap.outputs).toHaveLength(2);
+    expect(zswap.outputs).toHaveLength(3);
     const received = first(
       zswap.outputs.filter((output) => !output.recipient.is_left),
       "contract-owned receive output",
@@ -1385,13 +1457,19 @@ describe("withdraw round-trip", () => {
       color: consumed.color,
       value: consumed.value,
     });
-    const burnOutput = first(
-      zswap.outputs.filter((output) => output.recipient.is_left),
-      "burn output",
-    );
+    const burnOutput = burnOutputOf(zswap);
     expect(burnOutput.coinInfo.color).toEqual(VAULT_TOKEN_COLOR);
-    expect(burnOutput.coinInfo.value).toBe(AMOUNT);
+    expect(burnOutput.coinInfo.value).toBe(AMOUNT + TOKEN_FEES.withdraw);
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
+
+    // The fee: the same colour, minted to the fee recipient under the public nonce
+    // the index derives.
+    const feeOutput = feeOutputOf(zswap);
+    expect(feeOutput.coinInfo).toEqual({
+      nonce: pureCircuits.feeMintNonce(VALID_WITHDRAW.inIndex),
+      color: VAULT_TOKEN_COLOR,
+      value: TOKEN_FEES.withdraw,
+    });
   });
 
   it("withdrawals across DIFFERENT ERC20 colours both land, at consecutive vault nonces", async () => {
@@ -1401,12 +1479,15 @@ describe("withdraw round-trip", () => {
       rawTokenType(pureCircuits.vaultTokenDomainSeparator(otherErc20), VAULT_ADDRESS),
     );
 
-    const afterFirst = (await withdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const otherAllowed = (await contract.circuits.addAllowedToken(ctx, otherErc20, TOKEN_FEES))
+      .context;
+
+    const afterFirst = (await withdraw(contract, otherAllowed, VALID_WITHDRAW)).context;
     const afterSecond = (
       await withdraw(contract, afterFirst, {
         inIndex: VALID_WITHDRAW.inIndex + 1n,
         withdraw: { erc20Address: otherErc20, amount: AMOUNT, destEvmAddress: DEST_EVM },
-        coin: vaultCoin(AMOUNT, otherColor),
+        coin: vaultCoin(AMOUNT + TOKEN_FEES.withdraw, otherColor),
       })
     ).context;
 
@@ -1654,10 +1735,21 @@ const withdrawRequested = async () => {
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
 
-/** The shielded mints a circuit run requested, as [token, amount] pairs. */
-const shieldedMintsOf = (ctx: CircuitContext<VaultPrivateState>): [string, bigint][] => [
-  ...ctx.callContext.currentQueryContext.effects.shieldedMints.entries(),
-];
+/**
+ * The shielded mints a settle requested, as [token, amount] pairs: each token's total in
+ * `settled`'s effects map beyond `before`'s, as a threaded context accumulates every
+ * circuit run's mints before it (the fee a start minted included). A zero-value mint
+ * leaves the totals unchanged, so only the output list shows it.
+ */
+const shieldedMintsSince = (
+  before: CircuitContext<VaultPrivateState>,
+  settled: CircuitContext<VaultPrivateState>,
+): [string, bigint][] => {
+  const earlier = before.callContext.currentQueryContext.effects.shieldedMints;
+  return [...settled.callContext.currentQueryContext.effects.shieldedMints.entries()]
+    .map(([token, amount]): [string, bigint] => [token, amount - (earlier.get(token) ?? 0n)])
+    .filter(([, amount]) => amount !== 0n);
+};
 
 // The mint key completeWithdraw re-mints the surrendered ERC20's vault token under.
 const VAULT_TOKEN_MINT_KEY = bytesToHex(pureCircuits.vaultTokenDomainSeparator(ERC20));
@@ -1746,7 +1838,7 @@ describe("completeWithdraw settle", () => {
         await contract.circuits.completeWithdraw(attested, requestId, presentedOutput, MINT_NONCE)
       ).context;
 
-      expect(shieldedMintsOf(next)).toEqual(mints);
+      expect(shieldedMintsSince(attested, next)).toEqual(mints);
       expect(coinsMinted(attested, next)).toEqual(coins);
       const state = ledgerOf(next);
       expect(state.bidirectionalWithdrawMap.isEmpty()).toBe(true);
@@ -2278,7 +2370,7 @@ describe("completeApprove settle", () => {
       const next = (await contract.circuits.completeApprove(attested, requestId, presentedOutput))
         .context;
 
-      expect(shieldedMintsOf(next)).toEqual([]);
+      expect(shieldedMintsSince(attested, next)).toEqual([]);
       const state = ledgerOf(next);
       expect(state.bidirectionalApproveMap.isEmpty()).toBe(true);
       expect(state.approveArgsMap.isEmpty()).toBe(true);
@@ -2851,7 +2943,7 @@ describe("completeReplaceNonce settle", () => {
 
       const next = (await contract.circuits.completeReplaceNonce(attested, requestId)).context;
 
-      expect(shieldedMintsOf(next)).toEqual([]);
+      expect(shieldedMintsSince(attested, next)).toEqual([]);
       const state = ledgerOf(next);
       expect(state.bidirectionalReplaceNonceMap.isEmpty()).toBe(true);
       expect(state.replaceNonceArgsMap.isEmpty()).toBe(true);
@@ -2979,7 +3071,7 @@ describe("completeReplaceNonce settle", () => {
       )
     ).context;
 
-    expect(shieldedMintsOf(settled)).toEqual([[VAULT_TOKEN_MINT_KEY, AMOUNT]]);
+    expect(shieldedMintsSince(withdrawUnviable, settled)).toEqual([[VAULT_TOKEN_MINT_KEY, AMOUNT]]);
     expect(coinsMinted(withdrawUnviable, settled)).toEqual([
       {
         coinInfo: { nonce: MINT_NONCE, color: VAULT_TOKEN_COLOR, value: AMOUNT },
@@ -3088,7 +3180,7 @@ const VALID_SWAP: SwapCallArgs = {
     amountOut: SWAP_AMOUNT_OUT,
     amountInMaximum: SWAP_AMOUNT_IN_MAX,
   },
-  coin: vaultCoin(SWAP_AMOUNT_IN_MAX),
+  coin: vaultCoin(SWAP_AMOUNT_IN_MAX + TOKEN_FEES.swap),
 };
 
 // The gas every swap copies at start: the vault's default fees at its swap gas limit.
@@ -3198,13 +3290,14 @@ describe("swap round-trip", () => {
     expect(ledger(state).swapArgsMap.lookup(VALID_SWAP.inIndex)).toEqual({
       request: VALID_SWAP.swap,
       gas: DEFAULT_SWAP_GAS,
+      fee: TOKEN_FEES.swap,
     });
     expect(ledger(state).evictionMap.lookup(requestIdBytes(idHex))).toEqual(outIndex);
     expect(ledger(state).inputRequestBuffer.isEmpty()).toBe(true);
     expect(ledger(state).vaultAccountNonce).toBe(1n);
   });
 
-  it("start burns the surrendered coin: received by the vault, then paid in full to the burn address", async () => {
+  it("start burns the surrendered coin, principal plus fee, and mints the fee to the recipient", async () => {
     const { contract, ctx } = await deployInitialised();
 
     const started = (await queueSwap(contract, ctx, VALID_SWAP)).context;
@@ -3213,9 +3306,9 @@ describe("swap round-trip", () => {
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
     expect(consumed.color).toEqual(VAULT_TOKEN_COLOR);
-    expect(consumed.value).toBe(SWAP_AMOUNT_IN_MAX);
+    expect(consumed.value).toBe(SWAP_AMOUNT_IN_MAX + TOKEN_FEES.swap);
 
-    expect(zswap.outputs).toHaveLength(2);
+    expect(zswap.outputs).toHaveLength(3);
     const received = first(
       zswap.outputs.filter((output) => !output.recipient.is_left),
       "contract-owned receive output",
@@ -3226,13 +3319,19 @@ describe("swap round-trip", () => {
       color: consumed.color,
       value: consumed.value,
     });
-    const burnOutput = first(
-      zswap.outputs.filter((output) => output.recipient.is_left),
-      "burn output",
-    );
+    const burnOutput = burnOutputOf(zswap);
     expect(burnOutput.coinInfo.color).toEqual(VAULT_TOKEN_COLOR);
-    expect(burnOutput.coinInfo.value).toBe(SWAP_AMOUNT_IN_MAX);
+    expect(burnOutput.coinInfo.value).toBe(SWAP_AMOUNT_IN_MAX + TOKEN_FEES.swap);
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
+
+    // The fee: the same colour, minted to the fee recipient under the public nonce
+    // the index derives.
+    const feeOutput = feeOutputOf(zswap);
+    expect(feeOutput.coinInfo).toEqual({
+      nonce: pureCircuits.feeMintNonce(VALID_SWAP.inIndex),
+      color: VAULT_TOKEN_COLOR,
+      value: TOKEN_FEES.swap,
+    });
   });
 
   it("a swap and a withdrawal flushed together take consecutive vault nonces in slot order", async () => {
@@ -3341,7 +3440,8 @@ describe("swap validation", () => {
     };
     await expect(queueSwap(contract, ctx, unlisted)).rejects.toThrow(/erc20AddressOut not allowed/);
 
-    const allowed = (await contract.circuits.addAllowedToken(ctx, UNLISTED_ERC20)).context;
+    const allowed = (await contract.circuits.addAllowedToken(ctx, UNLISTED_ERC20, TOKEN_FEES))
+      .context;
     const queued = (await queueSwap(contract, allowed, unlisted)).context;
     expect(ledgerOf(queued).swapArgsMap.member(unlisted.inIndex)).toBe(true);
   });
@@ -3513,10 +3613,9 @@ const SWAP_VERDICT_CASES: SwapVerdictCase[] = [
     outputKind: OutputKind.executed,
     signedOutput: swapOutput(SWAP_AMOUNT_IN_MAX),
     presentedOutput: swapOutput(SWAP_AMOUNT_IN_MAX),
-    mints: [
-      [VAULT_TOKEN_OUT_MINT_KEY, SWAP_AMOUNT_OUT],
-      [VAULT_TOKEN_MINT_KEY, 0n],
-    ],
+    // The zero-value change mint leaves the per-token totals unchanged: the coin list
+    // below is what shows it.
+    mints: [[VAULT_TOKEN_OUT_MINT_KEY, SWAP_AMOUNT_OUT]],
     coins: [
       {
         coinInfo: { nonce: MINT_NONCE, color: VAULT_TOKEN_COLOR_OUT, value: SWAP_AMOUNT_OUT },
@@ -3598,7 +3697,7 @@ describe("completeSwap settle", () => {
       ).context;
 
       // The effects map indexes the mints by token, not in the order the circuit minted them.
-      expect(new Map(shieldedMintsOf(next))).toEqual(new Map(mints));
+      expect(new Map(shieldedMintsSince(attested, next))).toEqual(new Map(mints));
       expect(coinsMinted(attested, next)).toEqual(coins);
       const state = ledgerOf(next);
       expect(state.bidirectionalSwapMap.isEmpty()).toBe(true);
@@ -3695,7 +3794,9 @@ describe("completeSwap settle", () => {
         MINT_NONCE,
       )
     ).context;
-    expect(shieldedMintsOf(next)).toEqual([[VAULT_TOKEN_MINT_KEY, SWAP_AMOUNT_IN_MAX]]);
+    expect(shieldedMintsSince(attested, next)).toEqual([
+      [VAULT_TOKEN_MINT_KEY, SWAP_AMOUNT_IN_MAX],
+    ]);
     expect(coinsMinted(attested, next)).toEqual([
       {
         coinInfo: { nonce: MINT_NONCE, color: VAULT_TOKEN_COLOR, value: SWAP_AMOUNT_IN_MAX },
@@ -3908,7 +4009,7 @@ interface SupplyCallArgs {
 const VALID_SUPPLY: SupplyCallArgs = {
   inIndex: 51n,
   supply: { amount: AMOUNT },
-  coin: vaultCoin(AMOUNT, STATA_UNDERLYING_COLOR),
+  coin: vaultCoin(AMOUNT + TOKEN_FEES.supply, STATA_UNDERLYING_COLOR),
 };
 
 // The gas every supply copies at start: the vault's default fees at its supply limit.
@@ -4011,13 +4112,14 @@ describe("supply round-trip", () => {
     expect(ledger(state).supplyArgsMap.lookup(VALID_SUPPLY.inIndex)).toEqual({
       request: VALID_SUPPLY.supply,
       gas: DEFAULT_SUPPLY_GAS,
+      fee: TOKEN_FEES.supply,
     });
     expect(ledger(state).evictionMap.lookup(requestIdBytes(idHex))).toEqual(outIndex);
     expect(ledger(state).inputRequestBuffer.isEmpty()).toBe(true);
     expect(ledger(state).vaultAccountNonce).toBe(1n);
   });
 
-  it("start burns the surrendered underlying coin: received by the vault, then paid in full to the burn address", async () => {
+  it("start burns the surrendered underlying coin, principal plus fee, and mints the fee to the recipient", async () => {
     const { contract, ctx } = await deployInitialised();
 
     const started = (await queueSupply(contract, ctx, VALID_SUPPLY)).context;
@@ -4026,9 +4128,9 @@ describe("supply round-trip", () => {
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
     expect(consumed.color).toEqual(STATA_UNDERLYING_COLOR);
-    expect(consumed.value).toBe(AMOUNT);
+    expect(consumed.value).toBe(AMOUNT + TOKEN_FEES.supply);
 
-    expect(zswap.outputs).toHaveLength(2);
+    expect(zswap.outputs).toHaveLength(3);
     const received = first(
       zswap.outputs.filter((output) => !output.recipient.is_left),
       "contract-owned receive output",
@@ -4039,13 +4141,19 @@ describe("supply round-trip", () => {
       color: consumed.color,
       value: consumed.value,
     });
-    const burnOutput = first(
-      zswap.outputs.filter((output) => output.recipient.is_left),
-      "burn output",
-    );
+    const burnOutput = burnOutputOf(zswap);
     expect(burnOutput.coinInfo.color).toEqual(STATA_UNDERLYING_COLOR);
-    expect(burnOutput.coinInfo.value).toBe(AMOUNT);
+    expect(burnOutput.coinInfo.value).toBe(AMOUNT + TOKEN_FEES.supply);
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
+
+    // The fee: the same colour, minted to the fee recipient under the public nonce
+    // the index derives.
+    const feeOutput = feeOutputOf(zswap);
+    expect(feeOutput.coinInfo).toEqual({
+      nonce: pureCircuits.feeMintNonce(VALID_SUPPLY.inIndex),
+      color: STATA_UNDERLYING_COLOR,
+      value: TOKEN_FEES.supply,
+    });
   });
 
   it("a supply flushed behind a withdrawal takes the next vault nonce", async () => {
@@ -4389,7 +4497,7 @@ describe("completeSupply settle", () => {
         await contract.circuits.completeSupply(attested, requestId, presentedOutput, MINT_NONCE)
       ).context;
 
-      expect(shieldedMintsOf(next)).toEqual(mints);
+      expect(shieldedMintsSince(attested, next)).toEqual(mints);
       expect(coinsMinted(attested, next)).toEqual(coins);
       const state = ledgerOf(next);
       expect(state.bidirectionalSupplyMap.isEmpty()).toBe(true);
@@ -4588,7 +4696,7 @@ interface RedeemCallArgs {
 const VALID_REDEEM: RedeemCallArgs = {
   inIndex: 61n,
   redeem: { shares: REDEEM_SHARES },
-  coin: vaultCoin(REDEEM_SHARES, STATA_TOKEN_COLOR),
+  coin: vaultCoin(REDEEM_SHARES + TOKEN_FEES.redeem, STATA_TOKEN_COLOR),
 };
 
 // The gas every redeem copies at start: the vault's default fees at its redeem limit.
@@ -4692,13 +4800,14 @@ describe("redeem round-trip", () => {
     expect(ledger(state).redeemArgsMap.lookup(VALID_REDEEM.inIndex)).toEqual({
       request: VALID_REDEEM.redeem,
       gas: DEFAULT_REDEEM_GAS,
+      fee: TOKEN_FEES.redeem,
     });
     expect(ledger(state).evictionMap.lookup(requestIdBytes(idHex))).toEqual(outIndex);
     expect(ledger(state).inputRequestBuffer.isEmpty()).toBe(true);
     expect(ledger(state).vaultAccountNonce).toBe(1n);
   });
 
-  it("start burns the surrendered wrapper coin: received by the vault, then paid in full to the burn address", async () => {
+  it("start burns the surrendered wrapper coin, principal plus fee, and mints the fee to the recipient", async () => {
     const { contract, ctx } = await deployInitialised();
 
     const started = (await queueRedeem(contract, ctx, VALID_REDEEM)).context;
@@ -4707,9 +4816,9 @@ describe("redeem round-trip", () => {
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
     expect(consumed.color).toEqual(STATA_TOKEN_COLOR);
-    expect(consumed.value).toBe(REDEEM_SHARES);
+    expect(consumed.value).toBe(REDEEM_SHARES + TOKEN_FEES.redeem);
 
-    expect(zswap.outputs).toHaveLength(2);
+    expect(zswap.outputs).toHaveLength(3);
     const received = first(
       zswap.outputs.filter((output) => !output.recipient.is_left),
       "contract-owned receive output",
@@ -4720,13 +4829,19 @@ describe("redeem round-trip", () => {
       color: consumed.color,
       value: consumed.value,
     });
-    const burnOutput = first(
-      zswap.outputs.filter((output) => output.recipient.is_left),
-      "burn output",
-    );
+    const burnOutput = burnOutputOf(zswap);
     expect(burnOutput.coinInfo.color).toEqual(STATA_TOKEN_COLOR);
-    expect(burnOutput.coinInfo.value).toBe(REDEEM_SHARES);
+    expect(burnOutput.coinInfo.value).toBe(REDEEM_SHARES + TOKEN_FEES.redeem);
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
+
+    // The fee: the same colour, minted to the fee recipient under the public nonce
+    // the index derives.
+    const feeOutput = feeOutputOf(zswap);
+    expect(feeOutput.coinInfo).toEqual({
+      nonce: pureCircuits.feeMintNonce(VALID_REDEEM.inIndex),
+      color: STATA_TOKEN_COLOR,
+      value: TOKEN_FEES.redeem,
+    });
   });
 
   it("a redeem flushed behind a supply takes the next vault nonce, and its send signs at it", async () => {
@@ -5004,7 +5119,7 @@ describe("completeRedeem settle", () => {
         await contract.circuits.completeRedeem(attested, requestId, presentedOutput, MINT_NONCE)
       ).context;
 
-      expect(shieldedMintsOf(next)).toEqual(mints);
+      expect(shieldedMintsSince(attested, next)).toEqual(mints);
       expect(coinsMinted(attested, next)).toEqual(coins);
       const state = ledgerOf(next);
       expect(state.bidirectionalRedeemMap.isEmpty()).toBe(true);
@@ -6308,6 +6423,199 @@ const envelopeOf = (
   };
 };
 
+// ---- Fee fixtures ----
+
+// New fees for the stata underlying, distinct from TOKEN_FEES so a repricing shows.
+const REPRICED_FEES = { withdraw: 101n, swap: 103n, supply: 107n, redeem: 109n };
+// A second fee recipient, distinct from FEE_RECIPIENT_CPK / FEE_RECIPIENT_EPK.
+const OTHER_RECIPIENT_CPK = bytes(32, 0xfd);
+const OTHER_RECIPIENT_EPK = bytes(32, 0xdf);
+
+/** Deploy, initialise and allow ERC20 and ERC20_OUT, then zero every fee of ERC20. */
+const deployWithFreeErc20 = async () => {
+  const { contract, ctx } = await deployInitialised();
+  const next = (await contract.circuits.setTokenFees(ctx, ERC20, NO_FEES)).context;
+  return { contract, ctx: next };
+};
+
+describe("setTokenFees", () => {
+  it("the deployer reprices an allowed token, and a later start reads the new fee", async () => {
+    const { contract, ctx } = await deployInitialised();
+
+    const repriced = (await contract.circuits.setTokenFees(ctx, ERC20, REPRICED_FEES)).context;
+    expect(ledgerOf(repriced).allowedTokens.lookup(ERC20)).toEqual({ fees: REPRICED_FEES });
+
+    await expect(queueWithdraw(contract, repriced, VALID_WITHDRAW)).rejects.toThrow(
+      /Coin value must equal the withdraw amount plus fee/,
+    );
+    const queued = (
+      await queueWithdraw(contract, repriced, {
+        ...VALID_WITHDRAW,
+        coin: vaultCoin(AMOUNT + REPRICED_FEES.withdraw),
+      })
+    ).context;
+    expect(ledgerOf(queued).withdrawArgsMap.lookup(VALID_WITHDRAW.inIndex).fee).toBe(
+      REPRICED_FEES.withdraw,
+    );
+    expect(feeOutputOf(zswapState(queued)).coinInfo.value).toBe(REPRICED_FEES.withdraw);
+  });
+
+  it("a queued request keeps the fee it was started with", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const queued = (await queueWithdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const repriced = (await contract.circuits.setTokenFees(queued, ERC20, REPRICED_FEES)).context;
+    expect(ledgerOf(repriced).withdrawArgsMap.lookup(VALID_WITHDRAW.inIndex).fee).toBe(
+      TOKEN_FEES.withdraw,
+    );
+  });
+
+  it("refuses a token the vault does not allow", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(
+      contract.circuits.setTokenFees(ctx, UNLISTED_ERC20, REPRICED_FEES),
+    ).rejects.toThrow(/ERC20 not allowed/);
+  });
+
+  it("is deployer-gated", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(
+      contract.circuits.setTokenFees(
+        await strangerContext("setTokenFees", ctx),
+        ERC20,
+        REPRICED_FEES,
+      ),
+    ).rejects.toThrow(/Not the deployer/);
+  });
+});
+
+describe("setFeeRecipient", () => {
+  it("the deployer moves the fee recipient, and a later start mints the fee there", async () => {
+    const { contract, ctx } = await deployInitialised();
+
+    const moved = (
+      await contract.circuits.setFeeRecipient(
+        ctx,
+        { bytes: OTHER_RECIPIENT_CPK },
+        OTHER_RECIPIENT_EPK,
+      )
+    ).context;
+    const state = ledgerOf(moved);
+    expect(state.feeRecipientCoinPublicKey).toEqual({ bytes: OTHER_RECIPIENT_CPK });
+    expect(state.feeRecipientEncryptionPublicKey).toEqual(OTHER_RECIPIENT_EPK);
+
+    const queued = (await queueWithdraw(contract, moved, VALID_WITHDRAW)).context;
+    const recipients = zswapState(queued)
+      .outputs.filter((output) => output.recipient.is_left)
+      .map((output) => bytesToHex(output.recipient.left.bytes));
+    expect(recipients).toContain(bytesToHex(OTHER_RECIPIENT_CPK));
+    expect(recipients).not.toContain(bytesToHex(FEE_RECIPIENT_CPK));
+  });
+
+  it("is deployer-gated", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(
+      contract.circuits.setFeeRecipient(
+        await strangerContext("setFeeRecipient", ctx),
+        { bytes: OTHER_RECIPIENT_CPK },
+        OTHER_RECIPIENT_EPK,
+      ),
+    ).rejects.toThrow(/Not the deployer/);
+  });
+});
+
+describe("fee arithmetic at start", () => {
+  /** One row: the surrendered coin's value against the principal and fee it must equal. */
+  interface CoinValueCase {
+    /** Test name, completing the sentence "rejects a coin worth <name>". */
+    name: string;
+    /** The coin's value. */
+    value: bigint;
+  }
+
+  const WRONG_WITHDRAW_COIN_VALUES: CoinValueCase[] = [
+    { name: "the principal alone", value: AMOUNT },
+    { name: "the fee alone", value: TOKEN_FEES.withdraw },
+    { name: "one base unit short of principal plus fee", value: AMOUNT + TOKEN_FEES.withdraw - 1n },
+    { name: "one base unit over principal plus fee", value: AMOUNT + TOKEN_FEES.withdraw + 1n },
+  ];
+
+  it.each(WRONG_WITHDRAW_COIN_VALUES)("rejects a coin worth $name", async ({ value }) => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(
+      queueWithdraw(contract, ctx, { ...VALID_WITHDRAW, coin: vaultCoin(value) }),
+    ).rejects.toThrow(/Coin value must equal the withdraw amount plus fee/);
+  });
+
+  it("a zero fee takes the principal alone and mints nothing", async () => {
+    const { contract, ctx } = await deployWithFreeErc20();
+    const queued = (
+      await queueWithdraw(contract, ctx, { ...VALID_WITHDRAW, coin: vaultCoin(AMOUNT) })
+    ).context;
+    const zswap = zswapState(queued);
+    expect(zswap.outputs).toHaveLength(2);
+    expect(burnOutputOf(zswap).coinInfo.value).toBe(AMOUNT);
+    expect(() => feeOutputOf(zswap)).toThrow(/expected at least one fee output/);
+    expect(shieldedMintsSince(ctx, queued)).toEqual([]);
+    expect(ledgerOf(queued).withdrawArgsMap.lookup(VALID_WITHDRAW.inIndex).fee).toBe(0n);
+  });
+
+  it("a zero fee still refuses a coin carrying one", async () => {
+    const { contract, ctx } = await deployWithFreeErc20();
+    await expect(queueWithdraw(contract, ctx, VALID_WITHDRAW)).rejects.toThrow(
+      /Coin value must equal the withdraw amount plus fee/,
+    );
+  });
+
+  it("each action reads its own fee from the surrendered coin's token", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const swapQueued = (await queueSwap(contract, ctx, VALID_SWAP)).context;
+    const supplyQueued = (await queueSupply(contract, swapQueued, VALID_SUPPLY)).context;
+    const redeemQueued = (await queueRedeem(contract, supplyQueued, VALID_REDEEM)).context;
+    const state = ledgerOf(redeemQueued);
+    expect(state.swapArgsMap.lookup(VALID_SWAP.inIndex).fee).toBe(TOKEN_FEES.swap);
+    expect(state.supplyArgsMap.lookup(VALID_SUPPLY.inIndex).fee).toBe(TOKEN_FEES.supply);
+    expect(state.redeemArgsMap.lookup(VALID_REDEEM.inIndex).fee).toBe(TOKEN_FEES.redeem);
+    expect(new Map(shieldedMintsSince(ctx, redeemQueued))).toEqual(
+      new Map([
+        [VAULT_TOKEN_MINT_KEY, TOKEN_FEES.swap],
+        [bytesToHex(pureCircuits.vaultTokenDomainSeparator(STATA_UNDERLYING)), TOKEN_FEES.supply],
+        [bytesToHex(pureCircuits.vaultTokenDomainSeparator(STATA_TOKEN)), TOKEN_FEES.redeem],
+      ]),
+    );
+  });
+
+  it("the fee is kept on a failed withdrawal: only the principal is re-minted", async () => {
+    const { contract, ctx, requestId } = await withdrawRequested();
+    const attested = await attest(
+      contract,
+      ctx,
+      respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_EMPTY, ATTESTED_HEIGHT),
+    );
+    const settled = (
+      await contract.circuits.completeWithdraw(attested, requestId, OUTPUT_IGNORED, MINT_NONCE)
+    ).context;
+    expect(shieldedMintsSince(attested, settled)).toEqual([[VAULT_TOKEN_MINT_KEY, AMOUNT]]);
+  });
+});
+
+describe("feeMintNonce", () => {
+  it("is a 32-byte function of the index alone", () => {
+    const nonce = pureCircuits.feeMintNonce(VALID_WITHDRAW.inIndex);
+    expect(nonce).toHaveLength(32);
+    expect(nonce).toEqual(pureCircuits.feeMintNonce(VALID_WITHDRAW.inIndex));
+    expect(nonce).not.toEqual(pureCircuits.feeMintNonce(VALID_WITHDRAW.inIndex + 1n));
+    expect(nonce).not.toEqual(new Uint8Array(32));
+  });
+
+  it("names the fee coin a start minted, so the coin is recomputable from the chain", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const queued = (await queueSwap(contract, ctx, VALID_SWAP)).context;
+    expect(feeOutputOf(zswapState(queued)).coinInfo.nonce).toEqual(
+      pureCircuits.feeMintNonce(VALID_SWAP.inIndex),
+    );
+  });
+});
+
 describe("gas parameters: initialise defaults", () => {
   it("stores a fee ceiling and a gas limit per kind", async () => {
     const { ctx } = await deployInitialised();
@@ -6820,7 +7128,17 @@ describe("before initialise", () => {
     {
       name: "addAllowedToken",
       call: (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
-        contract.circuits.addAllowedToken(ctx, ERC20),
+        contract.circuits.addAllowedToken(ctx, ERC20, TOKEN_FEES),
+    },
+    {
+      name: "setTokenFees",
+      call: (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.setTokenFees(ctx, ERC20, TOKEN_FEES),
+    },
+    {
+      name: "setFeeRecipient",
+      call: (contract: Contract<VaultPrivateState>, ctx: CircuitContext<VaultPrivateState>) =>
+        contract.circuits.setFeeRecipient(ctx, { bytes: FEE_RECIPIENT_CPK }, FEE_RECIPIENT_EPK),
     },
     {
       name: "flushQueue",

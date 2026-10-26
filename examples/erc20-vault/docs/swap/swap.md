@@ -47,15 +47,18 @@ As illustrated, the flow comprises 9 steps:
 
 - **1.** startSwap(...) burns the surrendered coin and queues the request
   - The caller surrenders a shielded **vault coin** of `erc20AddressIn` worth
-    exactly `amountInMaximum`, the worst-case spend.
+    exactly `amountInMaximum`, the worst-case spend, plus that ERC20's swap
+    fee, read from [`allowedTokens`](../../contract/src/erc20-vault.compact).
     [`startSwap`](../../contract/src/erc20-vault.compact) checks the coin's
     colour is that ERC20's vault token
     ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact))
-    and burns it with the same pair of calls a
-    [withdraw](../withdraw/withdraw.md) uses. The coin spend IS the
+    and [`takeFee`](../../contract/src/erc20-vault.compact) burns it with the same pair of calls a
+    [withdraw](../withdraw/withdraw.md) uses, then mints the fee to
+    [`feeRecipientCoinPublicKey`](../../contract/src/erc20-vault.compact) under the public nonce
+    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the input index, recorded as `fee` in
+    [`SwapArgs`](../../contract/src/erc20-vault.compact). The coin spend IS the
     authorisation. `erc20AddressOut` must be one the deployer allowed
-    ([`allowedTokens`](../../contract/src/erc20-vault.compact)), as the
-    complete mints its vault token.
+    (a key of `allowedTokens`), as the complete mints its vault token.
   - The trade is EXACT-OUTPUT, and that is what makes the optimistic burn
     safe: `amountOut` is an input of the
     [`SwapRequest`](../../contract/src/erc20-vault.compact), asserted to fit
@@ -67,7 +70,10 @@ As illustrated, the flow comprises 9 steps:
     and queues the entry with `useNextVaultAccountNonce` set and the swapper's
     [`ownershipCommitment`](../../contract/src/erc20-vault.compact).
   - Off chain, [`start-swap.ts`](../../integration-tests/src/flows/start-swap.ts)
-    funds the coin from the caller's shielded balance and calls the circuit.
+    reads the fee from the ledger, funds the coin from the caller's shielded
+    balance and calls the circuit, passing the fee recipient's
+    [`feeRecipientEncryptionPublicKey`](../../contract/src/erc20-vault.compact)
+    so the recipient's wallet discovers the fee coin.
     The specs choose `amountInMaximum` from a live Uniswap quote
     ([`quoteExactOutputSingle`](../../integration-tests/src/evm-swap.ts)).
 - **2.** flushQueue(...) assigns the vault nonce and moves the request into the output buffer
@@ -153,6 +159,7 @@ As illustrated, the flow comprises 9 steps:
   - A `failed` or `unviable` verdict means the router pulled nothing, so the
     circuit re-mints the whole surrendered `amountInMaximum` of
     `erc20AddressIn` under `mintNonce`, and the output it is passed is ignored.
+    The fee stays with its recipient on every verdict.
   - [`settleSwap`](../../integration-tests/src/flows/complete-swap.ts) reads
     the swap's arguments off the ledger before the complete removes them,
     queues and flushes the attestation, then calls the circuit with fresh
@@ -169,8 +176,8 @@ variable, falling back to the `USER_SEED` bytes when it is unset.
 
 A swap starts from a shielded balance the swapper already holds, so a
 [deposit](../deposit/deposit.md) precedes it: the caller must hold
-`amountInMaximum` of the `erc20AddressIn` vault coin before step 1 can
-surrender it. The leg also needs a live Uniswap V3 deployment: the setup
+`amountInMaximum` plus the swap fee of the `erc20AddressIn` vault coin before
+step 1 can surrender it. The leg also needs a live Uniswap V3 deployment: the setup
 pipeline checks for the router with `uniswapAvailable` before any spec runs
 and fails the run on an EVM chain without it.
 

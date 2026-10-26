@@ -1,11 +1,13 @@
 // `startSupply` then `sendSupply`: surrender a shielded vault coin of the pinned
-// stataUnderlying (burned by the contract), flush the queued supply, which assigns it
+// stataUnderlying worth the amount plus the supply fee (the contract burns it and
+// mints the fee to the fee recipient), flush the queued supply, which assigns it
 // the vault account's next EVM nonce, and record its SignBidirectionalEvent in the
 // vault's bidirectionalSupplyMap. It asks the MPC to sign an EVM `deposit(amount,
 // vault)` on the pinned stataToken wrapper, sent from the VAULT's derived address
 // (path "vault"). The request id is recomputed off-chain with the library's TS twin
 // of the request-id circuit and asserted against the ledger map index before it is
 // returned. The settle side lives in complete-supply.ts.
+import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
 import {
   bytesToHex,
   calculateRequestId,
@@ -22,10 +24,12 @@ import {
 } from "@sig-net/midnight";
 import {
   Action,
+  feeRecipientEncryptionMapping,
   flushedRequestIndex,
   newInputIndex,
   readVaultLedger,
   VAULT_PATH_BYTES,
+  vaultTokenFees,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
@@ -46,11 +50,12 @@ export interface StartSupplyOptions {
  * the output buffer, send it with `sendSupply`, and return the resulting
  * request id.
  *
- * Surrenders a shielded vault coin of exactly `amount` of the vault's pinned
- * stataUnderlying: its colour comes from the compiled
- * `vaultTokenDomainSeparator` circuit plus the runtime's `rawTokenType`, and
- * midnight-js funds its value from the caller's shielded balance when it
- * balances the call. The entry pins an ownership commitment of this wallet's
+ * Surrenders a shielded vault coin of exactly `amount` plus the underlying's
+ * supply fee read from the ledger, of the vault's pinned stataUnderlying: its
+ * colour comes from the compiled `vaultTokenDomainSeparator` circuit plus the
+ * runtime's `rawTokenType`, and midnight-js funds its value from the caller's
+ * shielded balance when it balances the call. The call carries the fee
+ * recipient's encryption key, so the recipient's wallet discovers the fee coin. The entry pins an ownership commitment of this wallet's
  * identity secret, so only this caller can complete the supply and take its
  * shares or its re-mint. The caller chooses only the amount: the contract pins
  * both tokens, the vault's account signs, so the contract copies the vault's
@@ -63,8 +68,8 @@ export interface StartSupplyOptions {
  * @param options - The supply arguments.
  * @returns The request id as 64-char lowercase hex.
  * @throws {Error} If the amount is not positive, the vault is uninitialised,
- *   the caller's shielded balance cannot cover `options.amount`, or the
- *   recomputed id does not appear on the ledger.
+ *   the caller's shielded balance cannot cover `options.amount` plus the fee, or
+ *   the recomputed id does not appear on the ledger.
  */
 export async function startSupply(
   context: VaultContext,
@@ -93,15 +98,23 @@ export async function startSupply(
   );
 
   // The surrendered coin: the vault token for the pinned underlying, of exactly
-  // `amount`, under a fresh random nonce.
+  // `amount` plus the supply fee, under a fresh random nonce.
+  const supplyFee = vaultTokenFees(before, before.stataUnderlying).supply;
+  console.log(`supply fee:     ${String(supplyFee)} base units`);
   const coin = {
     nonce: crypto.getRandomValues(new Uint8Array(32)),
     color: hexToBytes(vaultTokenType(underlying, context.vaultContractAddress)),
-    value: options.amount,
+    value: options.amount + supplyFee,
   };
 
   const inIndex = newInputIndex();
-  const queued = await context.vault.callTx.startSupply(inIndex, { amount: options.amount }, coin);
+  const queued = await withContractScopedTransaction(
+    context.providers,
+    async (txCtx) => {
+      await context.vault.callTx.startSupply(txCtx, inIndex, { amount: options.amount }, coin);
+    },
+    { additionalCoinEncPublicKeyMappings: feeRecipientEncryptionMapping(before) },
+  );
   console.log(`supply queued in tx ${queued.public.txId}`);
   const flushed = await flushUntil(context, (state) => !state.inputRequestBuffer.member(inIndex), {
     inIndexes: [inIndex],

@@ -57,6 +57,7 @@ import {
 import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
+import { vaultFeesOf } from "../src/vault-fees.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -217,7 +218,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           requireEnv("ERC20_ADDRESS"),
           requireEnv("EVM_VAULT_ADDRESS"),
         );
-        const alreadyArranged = aBalance >= WITHDRAW_AMOUNT && vaultErc20 >= WITHDRAW_AMOUNT;
+        // B's withdraw surrenders the principal plus the withdraw fee, so A must hand
+        // over that much: the deposit funds both.
+        const withdrawFee = (
+          await vaultFeesOf(await session.vaultContext(), requireEnv("ERC20_ADDRESS"))
+        ).withdraw;
+        const needed = WITHDRAW_AMOUNT + withdrawFee;
+        const alreadyArranged = aBalance >= needed && vaultErc20 >= WITHDRAW_AMOUNT;
         let requestId: RequestIdHex | undefined;
         if (alreadyArranged) {
           logSkip(
@@ -226,12 +233,12 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           );
         } else {
           ({ requestId } = await runDepositRoundTrip(session, {
-            amount: DEPOSIT_AMOUNT,
+            amount: needed,
             reuseRequestId: env.BEARER_TRANSFER_DEPOSIT_REQUEST_ID as RequestIdHex | undefined,
           }));
 
           banner([
-            `Arrange deposit ${String(requestId)} complete: wallet A holds ${String(DEPOSIT_AMOUNT)} base units of shielded vault tokens.`,
+            `Arrange deposit ${String(requestId)} complete: wallet A holds ${String(needed)} base units of shielded vault tokens.`,
             "",
             "If a later step dies (e.g. proof-server OOM), resume with",
             `  BEARER_TRANSFER_DEPOSIT_REQUEST_ID=${String(requestId)}`,
@@ -302,10 +309,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
 
         const bBalanceAfter =
           (await walletB.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
+        const withdrawFee = (
+          await vaultFeesOf(await session.vaultContext(), requireEnv("ERC20_ADDRESS"))
+        ).withdraw;
         expect(
           bBalanceAfter,
-          "wallet B must hold at least the withdraw amount after the handoff",
-        ).toBeGreaterThanOrEqual(WITHDRAW_AMOUNT);
+          "wallet B must hold at least the withdraw amount plus its fee after the handoff",
+        ).toBeGreaterThanOrEqual(WITHDRAW_AMOUNT + withdrawFee);
 
         banner([
           "Bearer handoff complete: the vault-token balance moved A → B:",

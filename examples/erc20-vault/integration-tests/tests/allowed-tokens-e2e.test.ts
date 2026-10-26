@@ -1,7 +1,7 @@
 // The allowed-tokens e2e flow: the vault's ERC20 allow list on a live stack.
 // startDeposit and startSwap (for the ERC20 it buys) refuse an ERC20 the vault
-// does not allow, only the deployer can add one, and once added the ledger
-// allows it. The token is a fresh random address each run, so the vault can
+// does not allow, only the deployer can add one, once added the ledger
+// allows it, and only the deployer reprices the fees the allowed tokens carry. The token is a fresh random address each run, so the vault can
 // never have allowed it before, and the list only grows, so every run adds one.
 //
 // The refused calls fail in the circuit during local transaction building,
@@ -18,6 +18,7 @@ import {
   newInputIndex,
   readVaultLedger,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { resolveTokenFees } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -27,6 +28,7 @@ import {
   ERC20_TRANSFER_MAX_PRIORITY_FEE_PER_GAS,
 } from "../src/evm-transfer.ts";
 import { addAllowedTokens } from "../src/flows/add-allowed-tokens.ts";
+import { setTokenFees } from "../src/flows/set-token-fees.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -115,9 +117,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "addAllowedToken refuses a caller who is not the deployer",
       async () => {
         const stranger = await strangerSession.vaultContext();
-        await expect(addAllowedTokens(stranger, [UNLISTED_ERC20])).rejects.toThrow(
-          /Not the deployer/,
-        );
+        await expect(
+          addAllowedTokens(stranger, [UNLISTED_ERC20], resolveTokenFees(env)),
+        ).rejects.toThrow(/Not the deployer/);
       },
       10 * MINUTE,
     );
@@ -126,7 +128,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "addAllowedToken, called by the deployer, allows the ERC20",
       async () => {
         const context = await session.vaultContext();
-        const added = await addAllowedTokens(context, [UNLISTED_ERC20]);
+        const added = await addAllowedTokens(context, [UNLISTED_ERC20], resolveTokenFees(env));
         expect(added).toEqual([UNLISTED_ERC20]);
 
         const state = await readVaultLedger(
@@ -134,11 +136,61 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           context.vaultContractAddress,
         );
         expect(state.allowedTokens.member(evmAddressBytes(UNLISTED_ERC20))).toBe(true);
+        expect(state.allowedTokens.lookup(evmAddressBytes(UNLISTED_ERC20)).fees).toEqual(
+          resolveTokenFees(env),
+        );
 
         // A rerun submits nothing: the ledger already allows it.
-        expect(await addAllowedTokens(context, [UNLISTED_ERC20])).toEqual([]);
+        expect(await addAllowedTokens(context, [UNLISTED_ERC20], resolveTokenFees(env))).toEqual(
+          [],
+        );
       },
       10 * MINUTE,
+    );
+
+    // The fees the repricing leg moves every allowed token to: each action's fee
+    // one base unit above what the env set, so every token differs from them.
+    const repricedFees = () => {
+      const current = resolveTokenFees(env);
+      return {
+        withdraw: current.withdraw + 1n,
+        swap: current.swap + 1n,
+        supply: current.supply + 1n,
+        redeem: current.redeem + 1n,
+      };
+    };
+
+    it(
+      "setTokenFees refuses a caller who is not the deployer",
+      async () => {
+        const stranger = await strangerSession.vaultContext();
+        await expect(setTokenFees(stranger, repricedFees())).rejects.toThrow(/Not the deployer/);
+      },
+      10 * MINUTE,
+    );
+
+    it(
+      "setTokenFees, called by the deployer, reprices every allowed token and skips them on a rerun",
+      async () => {
+        const context = await session.vaultContext();
+        const fees = repricedFees();
+        const repriced = await setTokenFees(context, fees);
+        expect(repriced).toContain(UNLISTED_ERC20.toLowerCase());
+
+        const state = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        for (const [, config] of state.allowedTokens) {
+          expect(config.fees).toEqual(fees);
+        }
+
+        // A rerun submits nothing: every token already charges these fees. The
+        // later specs read their fees from the ledger, so they run at the new
+        // figures unchanged.
+        expect(await setTokenFees(context, fees)).toEqual([]);
+      },
+      15 * MINUTE,
     );
   },
 );
