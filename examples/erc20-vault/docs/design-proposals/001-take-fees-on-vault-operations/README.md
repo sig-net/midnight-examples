@@ -16,17 +16,19 @@ The vault will charge a small, non-refundable fee on every vault operation that 
 
 The fee's denomination, its amount, where it accrues, how it is sized against gas prices, and how it is collected are design questions for the sections that follow.
 
-The vault operator will be allowed to withdraw these fees to eventually withdraw and sell to pay for gas for the vault.
+Each fee is minted straight to a collection address the operator controls, who sells the proceeds to fund the vault's EVM gas.
 
 ## Which Operations Pay
 
 Only the operations whose EVM transaction the vault's own account signs and pays: `startWithdraw`, `startSwap`, `startSupply`, `startRedeem`. `startDeposit` is excluded since the depositor's own EVM account signs and pays that transaction. `startApprove*` and `startReplaceNonce` are deployer-gated, so the deployer is only griefing themself.
 
-Every one of the four already takes a surrendered vault coin, so the fee is charged in that same vault token: `erc20AddressIn` for a swap, `erc20Address` for a withdraw, `stataUnderlying` for a supply, `stataToken` for a redeem. The user pays one coin of one colour and never needs a second token to transact.
+Every one of the four already takes a surrendered vault coin, so the fee is charged in that same vault token: `erc20AddressIn` for a swap, `erc20Address` for a withdraw, `stataUnderlying` for a supply, `stataToken` for a redeem.
+
+The fee is kept on every verdict, including unviable. Unviable only follows the deployer replacing the request's nonce, so refunding it there is perhaps desirable, but that needs a different architecture, one where the fee is held back and only released to the operator once the request has settled. The implementation should carry a comment saying a refund on unviable verdicts is perhaps wanted but not yet implemented.
 
 ## Fee Configuration Stored Per Allowed Token
 
-Each allowed token carries a flat fee in that token's base units, set by the deployer.
+Each allowed token carries one flat fee per action, in that token's base units, set by the deployer. Gas limits range from 100k for a withdraw to 700k for a swap, so one fee per token would either overcharge withdraws sevenfold or underprice swaps.
 
 ### State Update
 
@@ -36,35 +38,46 @@ The contract currently stores allowed assets as a set of ERC20 token addresses:
 export ledger allowedTokens: Set<Bytes<20>>;
 ```
 
-This becomes a map from token to its flat fee, keeping the name since the keys are still exactly the allowed tokens:
+This becomes a map from token to a struct, keeping the name since the keys are still exactly the allowed tokens. A struct rather than a bare number so an integrator can add fields without changing the map's shape:
 
 ```compact
-export ledger allowedTokens: Map<Bytes<20>, Uint<64>>;
+export struct TokenFees {
+  withdraw: Uint<64>;
+  swap: Uint<64>;
+  supply: Uint<64>;
+  redeem: Uint<64>;
+}
+
+export struct AllowedTokenConfig {
+  fees: TokenFees;
+}
+
+export ledger allowedTokens: Map<Bytes<20>, AllowedTokenConfig>;
 ```
 
-Two consequences. `startSwap` currently checks only `erc20AddressOut` against the set, so charging a fee in `erc20AddressIn` requires that token to be allowed too, which is a tightening the audit also asks for. `stataToken` is not in the set today but a redeem surrenders it, so `initialise()` gains a fee parameter for each of `stataUnderlying` and `stataToken` and inserts both. That makes `stataToken` depositable and swappable-to, which is harmless: it is an ERC20 the vault already custodies.
+`stataToken` is not in the set today but a redeem surrenders it, so `initialise()` gains a `TokenFees` parameter for each of `stataUnderlying` and `stataToken` and inserts both. With that, every vault coin that can exist is a key in the map, so a start circuit looks its fee up directly: the coin colour check already ties the coin to the token, and no further allowed-token check is needed on the surrendered side.
 
 ### Configuration Circuits
 
-`addAllowedToken()` takes the fee alongside the address, and a second deployer circuit updates it later without re-adding the token:
+`addAllowedToken()` takes the fees alongside the address, and a second deployer circuit updates them later without re-adding the token:
 
 ```compact
-export circuit addAllowedToken(erc20Address: Bytes<20>, flatFee: Uint<64>): [] {
+export circuit addAllowedToken(erc20Address: Bytes<20>, fees: TokenFees): [] {
   requireInitialised();
   requireDeployer();
   assert(erc20Address as Field != 0 as Field, "ERC20 address cannot be zero");
-  allowedTokens.insert(disclose(erc20Address), disclose(flatFee));
+  allowedTokens.insert(disclose(erc20Address), disclose(AllowedTokenConfig { fees: fees }));
 }
 
-export circuit setTokenFee(erc20Address: Bytes<20>, flatFee: Uint<64>): [] {
+export circuit setTokenFees(erc20Address: Bytes<20>, fees: TokenFees): [] {
   requireInitialised();
   requireDeployer();
   requireTokenAllowed(erc20Address);
-  allowedTokens.insert(disclose(erc20Address), disclose(flatFee));
+  allowedTokens.insert(disclose(erc20Address), disclose(AllowedTokenConfig { fees: fees }));
 }
 ```
 
-A zero fee is allowed and simply disables charging for that token, which keeps the local stack and tests working unchanged where wanted.
+A zero fee is allowed and simply disables charging for that action, which keeps the local stack and tests working unchanged where wanted.
 
 ### Helper Circuits
 
@@ -79,27 +92,44 @@ circuit requireTokenAllowed(erc20Address: Bytes<20>): [] {
   assert(allowedTokens.member(disclose(erc20Address)), "ERC20 not allowed");
 }
 
-circuit tokenFee(erc20Address: Bytes<20>): Uint<64> {
+circuit tokenFees(erc20Address: Bytes<20>): TokenFees {
   requireTokenAllowed(erc20Address);
-  return allowedTokens.lookup(disclose(erc20Address));
+  return allowedTokens.lookup(disclose(erc20Address)).fees;
 }
 ```
 
-## Fee Pot: Where Collected Fees Live
+## Fee Recipient
 
-Midnight has no account balance for shielded value a contract holds. A contract keeps a coin by recording the whole coin, as a `QualifiedShieldedCoinInfo`, in its own public ledger, and spends it later with `sendShielded`. The standard library supplies `insertCoin` on a `Map<K, QualifiedShieldedCoinInfo>`, which fills in the coin's Merkle index as the transaction lands. This is the pattern [Midnight's private tip jar tutorial](https://docs.midnight.network/tutorials/private-tip-jar/smart-contract) uses, and it is what this document means by the fee pot.
+Fees are minted directly to a collection address the operator controls. The contract holds no fee state and has no withdrawal circuit: the operator spends fee coins with a normal wallet, exactly like any vault coin.
 
 ```compact
-export ledger feePot: Map<Uint<64>, QualifiedShieldedCoinInfo>;
+// The address every fee is minted to. The encryption key is for clients, which need
+// it to attach the ciphertext that lets the recipient's wallet find the coin.
+export ledger feeRecipientCoinPublicKey: ZswapCoinPublicKey;
+export ledger feeRecipientEncryptionPublicKey: Bytes<32>;
 ```
 
-Keyed by the request's `inIndex`, the caller-chosen index every start circuit already discloses, one entry per fee taken. Fee values are public, as every pot coin is, which is fine: they are a known flat amount.
+Both are set in `initialise()` and changed by a deployer-gated `setFeeRecipient(coinPublicKey, encryptionPublicKey)`.
 
-> **Note:** the pot cannot be one merged coin per token. Merging means every start spends the current pot coin and writes the merged one, so two starts of the same token in one block would spend the same nullifier and the second would fail. One coin per request keeps starts independent.
+### What the Collection Address Reveals
 
-### Taking the Fee in a Start Circuit
+The collection address is public, and so is every fee coin minted to it (colour, value and nonce), so anyone can tally the vault's fee income coin by coin. Fee amounts are a public flat rate anyway. What stays hidden is spending: a coin's nullifier is a hash over the coin and the spender's secret key, so nobody can tell when a fee coin is spent or where it went.
 
-The caller passes one coin worth `amountInMaximum + fee`. Today the circuit burns the whole coin. `sendImmediateShielded(coin, recipient, value)` sends only `value` of the coin to `recipient` and returns the remainder as a new change coin owned by the contract, so burning exactly `amountInMaximum` leaves a change coin worth exactly the fee. That change coin was created in this transaction, which is what `insertCoin` needs to record it in the pot.
+The operator therefore treats the collection address as a public mailbox. To move the funds somewhere private they make one ordinary shielded wallet transfer to another address of theirs. That transfer publishes nullifiers nobody can link to the fee coins and an output whose nonce and ciphertext only the operator knows, so after one hop the funds are as private as any shielded balance. Wallet coin selection sweeps as many fee coins as it likes in that one transaction.
+
+> **Note:** the alternative of holding each fee as a contract-owned coin in a ledger map, as [Midnight's private tip jar tutorial](https://docs.midnight.network/tutorials/private-tip-jar/smart-contract) does, was dropped. It keeps the operator's address off the ledger and leaves a refund on unviable feasible, but it needs a pot map, a `withdrawFee` circuit that burns and re-mints under a withdrawer-chosen nonce (a plain `sendShielded` payout derives its nonce from the public pot nonce, which lets a candidate address be tested against the output), a batch variant, and a key-collision check on every start. Its only privacy gain is the address, which the hop above recovers in one transaction.
+
+## Taking the Fee in a Start Circuit
+
+The caller passes one coin worth `amountInMaximum + fee`. The circuit receives it and burns it whole, as today, then mints a new coin worth exactly the fee to the fee recipient. Supply stays balanced: `amountInMaximum + fee` is burnt, `fee` is minted now, and the `complete*` circuit mints at most `amountInMaximum` later, exactly as it does today.
+
+The mint nonce is derived from `inIndex`, which the circuit already discloses, so it is public and unique: the index-in-use check refuses a second request under the same `inIndex`, and the coin's colour already binds it to this contract. A public nonce is what makes every fee coin recomputable from the chain (see Fee Discovery).
+
+```compact
+circuit feeMintNonce(inIndex: Uint<64>): Bytes<32> {
+  return evolveNonce(inIndex as Uint<128>, pad(32, "erc20:vault:fee"));
+}
+```
 
 The circuit's signature is unchanged: the caller still passes `inIndex`, the request and one coin. Only the coin's required value changes.
 
@@ -117,37 +147,31 @@ export circuit startSwap(
     "Index already in use"
   );
 
-  const fee = tokenFee(swapRequest.erc20AddressIn);
+  const fee = tokenFees(swapRequest.erc20AddressIn).swap;
   assert(
     coin.value == swapRequest.amountInMaximum + fee,
     "Coin value must equal amountInMaximum plus fee"
   );
   receiveShielded(disclose(coin));
-  // Burns amountInMaximum of the coin. The remainder, the fee, comes back as a change
-  // coin the contract owns.
-  const burnResult = sendImmediateShielded(
-    disclose(coin),
-    shieldedBurnAddress(),
-    disclose(swapRequest.amountInMaximum)
-  );
+  sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
   if (fee > 0 as Uint<64>) {
-    const feeCoin = burnResult.change.value;
-    feePot.insertCoin(
-      disclosedIndex,
-      disclose(feeCoin),
-      right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+    mintShieldedToken(
+      vaultTokenDomainSeparator(swapRequest.erc20AddressIn),
+      fee,
+      feeMintNonce(disclosedIndex),
+      left<ZswapCoinPublicKey, ContractAddress>(feeRecipientCoinPublicKey)
     );
   }
 
-  // ...queue the request exactly as today...
+  // ...queue the request exactly as today, with `fee` recorded in SwapArgs...
 }
 ```
 
-The complete circuits are untouched: a failure still re-mints `amountInMaximum`, never the fee.
+The fee charged is recorded in the request's args struct (`SwapArgs` and its siblings gain a `fee` field) so the fee coin can be recomputed later. The complete circuits are untouched: a failure still re-mints `amountInMaximum`, never the fee.
 
 ### How the Coins Flow
 
-Three coins exist by the end of a start, and every one has a different nonce. The standard library derives each output nonce from the input nonce with a fixed domain separator, so no two coins in the flow can collide, and nothing in the circuit chooses a nonce by hand.
+Three coins exist by the end of a start, and every one has a different nonce. The burn output's nonce is derived by the standard library from the input nonce with a fixed domain separator, and the fee coin's nonce is derived by the circuit from the public `inIndex`, so no two coins in the flow can collide.
 
 ```text
 caller's wallet                       contract                              burn address
@@ -160,52 +184,33 @@ caller's wallet                       contract                              burn
         ▼
                               { color, nonce0, amountInMaximum + fee }
                                               │
-                                              │  sendImmediateShielded(coin, burn, amountInMaximum)
+                                              │  sendImmediateShielded(coin, burn, coin.value)
                                               │  spends nonce0 (publishes its nullifier)
-                                              │  and creates two new coins:
+                                              │  and creates the burn output:
                                               │
-                               ┌──────────────┴───────────────────────────┐
-                               │                                          │
-                               ▼                                          ▼
-             change = { color, nonce2, fee }                { color, nonce1, amountInMaximum }
-             nonce2 = evolve("…nonce_evolve/2", nonce0)     nonce1 = evolve("…nonce_evolve", nonce0)
-             owner: the contract                            owner: the burn address, gone for good
-                               │
-                               │  feePot.insertCoin(inIndex, change, self)
-                               ▼
-                    feePot[inIndex] = { color, nonce2, fee, mt_index }
+                                              └──────────────────────────────────────────┐
+                                                                                         ▼
+                                                                { color, nonce1, amountInMaximum + fee }
+                                                                nonce1 = evolve("…nonce_evolve", nonce0)
+                                                                owner: the burn address, gone for good
+
+                              mintShieldedToken(domainSep, fee, nonceF, feeRecipient)
+                                              │
+                                              ▼
+                              { color, nonceF, fee }                       ──▶  collection address
+                              nonceF = evolveNonce(inIndex, "erc20:vault:fee")
 ```
 
-Later, `withdrawFee` spends `nonce2` (publishing its nullifier) and creates a fourth coin, `nonce3 = evolve("…nonce_evolve", nonce2)`, owned by the recipient. A nonce is spent at most once on the whole chain, so the pot coin cannot be withdrawn twice even if the ledger entry were somehow left behind.
+## Fee Discovery by the Operator
 
-## Operator Withdrawal
+A shielded output on Midnight is only a commitment and a nullifier: nothing on the chain names the recipient. A wallet discovers a coin sent to it by scanning every output for a ciphertext it can decrypt. That ciphertext is the coin's details encrypted to the recipient's encryption public key, a separate key from the coin public key the circuit's recipient carries. The circuit therefore knows where to commit the coin but cannot encrypt it, and the ciphertext has to be attached by the client building the transaction.
 
-One deployer-gated circuit pays a pot coin out in full and removes it:
+Midnight.js attaches it from a resolver mapping coin public keys to encryption keys. It knows the caller's own wallet and the burn address, and a third party only when given the mapping explicitly (`additionalCoinEncPublicKeyMappings` on the call). An honest client reads `feeRecipientEncryptionPublicKey` from the ledger and passes that mapping, and the fee shows up in the collection wallet at once.
 
-```compact
-export circuit withdrawFee(
-  inIndex: Uint<64>,
-  recipient: Maybe<Either<ZswapCoinPublicKey, ContractAddress>>
-): [] {
-  requireInitialised();
-  requireDeployer();
-  const key = disclose(inIndex);
-  assert(feePot.member(key), "No such fee coin");
-  const coin = feePot.lookup(key);
-  const to = recipient.is_some
-    ? recipient.value
-    : left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-  sendShielded(coin, disclose(to), coin.value);
-  feePot.remove(key);
-}
-```
+Discovery is a wallet concern, not a contract one, so the contract does nothing more. For clients that omit the mapping, every fee coin is recomputable from public data: colour from the token, value from the `fee` recorded in the request's args, nonce from `feeMintNonce(inIndex)`. A small operator tool walks the args maps, rebuilds each fee coin, and registers any the wallet has not seen with `watchFor`, which lets the wallet notice a commitment without a ciphertext.
 
-The deployer withdraws one coin per call, reads the pot keys from the ledger, and sells the proceeds for gas off-chain. If the pot grows large, a later deployer-gated `mergeFees(a, b)` over `mergeCoin` can consolidate pairs without changing anything above.
+## Residual Risk
 
-### Why the Recipient Defaults to the Caller
+This does not fully close SNA-01, and the answer to the auditor should say so. The fee is a fixed token amount set by hand, so it drifts against the token's price, ETH's price and every `setGasParams` change, and the protection is only as strong as the cheapest fee across all allowed tokens and actions, since an attacker picks that one. When a fee has drifted low the vault can still pay more gas than it collects.
 
-A shielded output on Midnight is only a commitment and a nullifier: nothing on the chain names the recipient. A wallet discovers a coin sent to it by scanning every output for a ciphertext it can decrypt. That ciphertext is the coin's details encrypted to the recipient's encryption public key, which is a separate key from the coin public key a circuit's `Either<ZswapCoinPublicKey, ContractAddress>` carries. The circuit therefore only ever knows where to commit the coin, never how to encrypt it for the recipient, and the ciphertext has to be attached by the client when it builds the transaction.
-
-Midnight.js attaches that ciphertext from a resolver that maps coin public keys to encryption keys. The resolver knows the caller's own wallet and the burn address, and a third party only if the client is given the mapping explicitly (`additionalCoinEncPublicKeyMappings` on the call). An output to an unknown recipient is refused before the transaction is built, since a wrongly encrypted output is a coin the recipient owns and can never find. A contract recipient needs no ciphertext at all: a contract discovers its coins from its own ledger, which is why the pot works.
-
-So the `none` default pays `ownPublicKey()`, the deployer's wallet, which always resolves. The explicit `some` form is for a contract recipient, or for a third-party wallet whose encryption key the deployer's client has been given. A wallet that knows the exact coin ahead of time can also register it with `watchFor` and notice the commitment without any ciphertext, which is the fallback if a mapping is ever missed.
+What the fee does guarantee is that every attempt costs the attacker real value for no gain, where today it costs nothing. The operator's duty is to set each fee with a margin above the action's worst-case gas at the current prices, and to revisit the fees whenever gas parameters or prices move.
