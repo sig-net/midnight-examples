@@ -58,12 +58,13 @@ describe("resolveAllowedTokens", () => {
 });
 
 describe("defaultAllowedTokens", () => {
-  it("allows Circle's USDC and EURC, WETH and LINK on Sepolia", () => {
+  it("allows Circle's USDC and EURC, WETH, LINK and stataUSDC on Sepolia", () => {
     expect(defaultAllowedTokens(11155111n)).toEqual([
       USDC,
       EURC,
       "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",
       "0x779877A7B0D9E8603169DdbD7836e478b4624789",
+      "0x8A88124522dbBF1E56352ba3DE1d9F78C143751e",
     ]);
   });
 

@@ -21,13 +21,16 @@ import {
   type WalletRegistry,
 } from "@sig-net/midnight-contract-deploy";
 import {
-  CIRCLE_EURC,
   CIRCLE_USDC,
   deriveVaultEvmAddress,
   STATA_USDC,
   UNISWAP_SWAP_ROUTER_02,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { deployVault, resumeVaultDeploy } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import {
+  defaultAllowedTokens,
+  deployVault,
+  resumeVaultDeploy,
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
 import {
   appendRepoDotEnv,
   assertEnvironment,
@@ -351,18 +354,23 @@ function ensureErc20Address(env: NodeJS.ProcessEnv): void {
 }
 
 /**
- * Default `EVM_ALLOWED_TOKENS` to the ERC20s the suites deposit and swap into beyond the
- * stata underlying `initialise` allows: `ERC20_ADDRESS` and Sepolia EURC. The happy-day
- * initialise spec allows them, and every later spec relies on it.
+ * Default `EVM_ALLOWED_TOKENS` to `ERC20_ADDRESS` plus the deploy package's defaults for the
+ * vault's EVM chain, beyond the stata underlying `initialise` allows. The happy-day initialise
+ * spec allows them, every later spec relies on it, and the persisted list is what a vault
+ * brought up by hand lets its users deposit and swap into.
  *
- * @param env - The suite's env accumulator (reads `ERC20_ADDRESS`).
+ * @param env - The suite's env accumulator (reads `ERC20_ADDRESS` and `EVM_CHAIN_ID`).
  */
 function ensureAllowedTokens(env: NodeJS.ProcessEnv): void {
   if (env.EVM_ALLOWED_TOKENS) {
     logSkip("default EVM_ALLOWED_TOKENS", `EVM_ALLOWED_TOKENS is set (${env.EVM_ALLOWED_TOKENS})`);
     return;
   }
-  env.EVM_ALLOWED_TOKENS = `${requireEnv(env, "ERC20_ADDRESS")},${CIRCLE_EURC}`;
+  const erc20Address = requireEnv(env, "ERC20_ADDRESS");
+  const defaults = defaultAllowedTokens(BigInt(requireEnv(env, "EVM_CHAIN_ID"))).filter(
+    (token) => token.toLowerCase() !== erc20Address.toLowerCase(),
+  );
+  env.EVM_ALLOWED_TOKENS = [erc20Address, ...defaults].join(",");
   console.log(`defaulted EVM_ALLOWED_TOKENS=${env.EVM_ALLOWED_TOKENS}`);
 }
 
@@ -411,7 +419,10 @@ const STEPS: readonly SetupStep[] = [
   ["setup: default RESPOND_OUTPUT_SOURCE to the EVM node's trace", ensureRespondOutputSource],
   ["setup: verify EVM_RPC_URL serves debug_traceTransaction", verifyTraceRpc],
   ["setup: default ERC20_ADDRESS to real Sepolia USDC", ensureErc20Address],
-  ["setup: default EVM_ALLOWED_TOKENS to the ERC20s the suites move", ensureAllowedTokens],
+  [
+    "setup: default EVM_ALLOWED_TOKENS to ERC20_ADDRESS plus the chain's defaults",
+    ensureAllowedTokens,
+  ],
   ["setup: check/derive MPC root key", ensureMpcRootKey],
   [
     "setup: check/derive MPC_SECP256K1_PUBKEY public key",

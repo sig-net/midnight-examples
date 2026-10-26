@@ -26,16 +26,16 @@ import {
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   banner,
-  type ContractReadMethod,
   getEthBalance,
   logSkip,
   requireEnv as requireEnvOf,
 } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
-import { ethers, formatEther, type Transaction } from "ethers";
+import { formatEther, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { fundingSummary } from "../src/evm-logging.ts";
+import { type Allowance, erc20Allowance } from "../src/flows/approve-round-trip.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { settleApprove } from "../src/flows/complete-approve.ts";
 import {
@@ -76,12 +76,6 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // stopped once in afterAll.
 const session = createVaultSession(env);
 
-/** The ERC20 an approval is sent to and the spender it grants, as 0x hex. */
-interface Allowance {
-  readonly token: string;
-  readonly spender: string;
-}
-
 /** One approval the spec runs through the six steps. */
 interface ApprovalStage {
   /** The approval, as the stage names read. */
@@ -114,21 +108,6 @@ const APPROVAL_STAGES: readonly ApprovalStage[] = [
     }),
   },
 ];
-
-/**
- * Read an ERC20 allowance on the EVM side.
- *
- * @param rpcUrl - The EVM JSON-RPC endpoint.
- * @param owner - The account that granted the allowance.
- * @param allowance - The ERC20 and the spender.
- * @returns What `spender` may still spend of `owner`'s balance.
- */
-const erc20Allowance = (rpcUrl: string, owner: string, allowance: Allowance): Promise<bigint> =>
-  new ethers.Contract(
-    allowance.token,
-    ["function allowance(address,address) view returns (uint256)"],
-    new ethers.JsonRpcProvider(rpcUrl),
-  ).getFunction<ContractReadMethod<bigint>>("allowance")(owner, allowance.spender);
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
   "erc20-vault approve e2e: the vault account approves the router and stataToken",

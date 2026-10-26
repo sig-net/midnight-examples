@@ -510,12 +510,18 @@ environment for a client, or for hand-driving the flows), run the setup
 pipeline on its own after `docker compose up -d`:
 
 ```sh
-yarn setup-local:erc20-vault        # deploy signet + vault, initialise, allow EVM_ALLOWED_TOKENS, persist to .env
+yarn setup-local:erc20-vault        # deploy signet + vault, initialise, allow EVM_ALLOWED_TOKENS, approve, persist to .env
 ```
 
 It runs the suite's own setup steps in-process, then the deploy package's
-`initialise`, then allows every ERC20 `EVM_ALLOWED_TOKENS` lists, and appends
-every value it generated to `.env` under the names the suite reads: the role
+`initialise`, then allows every ERC20 `EVM_ALLOWED_TOKENS` lists (unset, the
+setup fills it with `ERC20_ADDRESS` plus the chain's defaults: on Sepolia
+Circle's USDC and EURC, WETH, LINK and the stataUSDC wrapper), then runs the
+approve round trips the vault's swaps and supplies spend under (the Uniswap
+router on every allowed ERC20 and the stataUSDC wrapper on its underlying,
+each one MPC round trip, skipped where the EVM side already holds the
+allowance), and appends every value it generated to `.env` under the names the
+suite reads: the role
 wallet seeds, `MPC_ROOT_KEY`, `MPC_SECP256K1_PUBKEY`, both contract addresses,
 `MPC_RESPONSE_KEY`, the derived EVM addresses, `EVM_CHAIN_ID`,
 `ERC20_ADDRESS`, `EVM_ALLOWED_TOKENS`, `VAULT_DEPLOYER_SECRET_KEY` and
@@ -701,7 +707,7 @@ yarn deploy:erc20-vault
 
 # a remote network (stagenet): deploy, run the deployer-gated initialise,
 # then allow the ERC20s EVM_ALLOWED_TOKENS lists. With none listed, a vault on
-# Sepolia gets Circle's USDC and EURC, WETH and LINK, and one on any other
+# Sepolia gets Circle's USDC and EURC, WETH, LINK and stataUSDC, and one on any other
 # chain gets nothing.
 yarn deploy-initialise:erc20-vault
 

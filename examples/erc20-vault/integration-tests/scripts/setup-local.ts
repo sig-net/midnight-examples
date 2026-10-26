@@ -6,9 +6,12 @@
 // setup step skipping. The steps are the suite's own `vaultSetupSteps()`, run
 // in-process exactly as vitest's globalSetup runs them, followed by the
 // deploy package's `initialiseVault` and `addAllowedTokensToVault`, the same
-// functions the remote `deploy-initialise` entrypoint runs. Rerunnable: a kept address resumes or
-// skips, an initialised vault is left untouched, and a value already in
-// `.env` with the run's value is not appended again.
+// functions the remote `deploy-initialise` entrypoint runs, and the approve
+// round trips that give the router and the stata wrapper the allowances the
+// swap and supply circuits spend under. Rerunnable: a kept address resumes or
+// skips, an initialised vault is left untouched, an allowance the EVM side
+// holds is not granted again, and a value already in `.env` with the run's
+// value is not appended again.
 
 import {
   addAllowedTokensToVault,
@@ -22,19 +25,34 @@ import {
   testHeader,
 } from "@sig-net/midnight-examples-test-harness";
 
+import { ensureVaultAllowances } from "../src/flows/approve-round-trip.ts";
 import { VAULT_PIPELINE_KEYS, vaultSetupSteps } from "../src/setup.ts";
+import { createVaultSession } from "../src/vault-session.ts";
 
 const env = await runSetupSteps(buildBaseEnv(), vaultSetupSteps());
 
-testHeader(1, 3, "initialise: seal the vault's EVM address, chain and MPC response key");
+testHeader(1, 4, "initialise: seal the vault's EVM address, chain and MPC response key");
 const outcome = await initialiseVault(env);
 console.log(`initialise outcome: ${outcome}`);
 
-testHeader(2, 3, "allow: add the ERC20s EVM_ALLOWED_TOKENS lists");
+testHeader(2, 4, "allow: add the ERC20s EVM_ALLOWED_TOKENS lists");
 const added = await addAllowedTokensToVault(env);
 console.log(`allowed ${String(added.length)} new ERC20(s)`);
 
-testHeader(3, 3, "persist: append the generated values to .env");
+testHeader(
+  3,
+  4,
+  "approve: the vault account grants the router and the stata wrapper their allowances",
+);
+const session = createVaultSession(env);
+try {
+  const granted = await ensureVaultAllowances(session);
+  console.log(`granted ${String(granted.length)} new allowance(s)`);
+} finally {
+  await session.stop();
+}
+
+testHeader(4, 4, "persist: append the generated values to .env");
 const appended = persistToDotEnv(
   env,
   VAULT_PIPELINE_KEYS,
