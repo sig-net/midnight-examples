@@ -1222,7 +1222,7 @@ export circuit startSwap(
 ): [] {
   requireInitialised();
   assert(swapRequest.erc20AddressIn as Field != 0 as Field, "erc20AddressIn cannot be zero");
-  assert(allowedTokens.member(disclose(swapRequest.erc20AddressOut)), "erc20AddressOut not allowed");
+  requireTokenAllowed(swapRequest.erc20AddressOut);
   assert(swapRequest.amountOut > 0 as Uint<128>, "amountOut must be positive");
   assert(swapRequest.amountInMaximum > 0 as Uint<128>, "amountInMaximum must be positive");
   // completeSwap mints both amounts via a Uint<64> API, so reject unclaimable ones.

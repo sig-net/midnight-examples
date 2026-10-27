@@ -58,7 +58,7 @@
 #   - example: 0x followed by 40 hex chars
 # - EVM_ALLOWED_TOKENS (optional)
 #   - comma-separated ERC20s the deployer allows after initialise, beyond
-#     the stata underlying. Unset, users can deposit only the stata underlying
+#     the stata pair. Unset, users can deposit only the stata pair
 #   - example: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238,0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4
 # - VAULT_TOKEN_FEES (optional)
 #   - JSON object mapping an ERC20 address to its withdraw, swap, supply and
@@ -240,7 +240,7 @@ jobs:
           EVM_STATA_UNDERLYING: ${{ vars.EVM_STATA_UNDERLYING }}
           EVM_STATA_TOKEN: ${{ vars.EVM_STATA_TOKEN }}
           # The ERC20s the deployer allows after initialise. Blank allows none
-          # beyond the stata underlying.
+          # beyond the stata pair.
           EVM_ALLOWED_TOKENS: ${{ vars.EVM_ALLOWED_TOKENS }}
           # The fees stamped on each token and the wallet the fee coins go to.
           # A blank flat fee fails the run for any token VAULT_TOKEN_FEES

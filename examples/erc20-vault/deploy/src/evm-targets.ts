@@ -56,7 +56,7 @@ export function resolveEvmTargets(env: Record<string, string | undefined>): Vaul
 
 /**
  * Resolve the ERC20s `EVM_ALLOWED_TOKENS` lists for the deployer to allow
- * after `initialise`, which allows the stata underlying itself. The list is
+ * after `initialise`, which allows the stata pair itself. The list is
  * comma-separated, each entry with or without its `0x` prefix, and repeats
  * (in any case) collapse to the first. Unset or blank lists nothing.
  *

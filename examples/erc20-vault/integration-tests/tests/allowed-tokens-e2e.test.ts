@@ -117,7 +117,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
               value: 1n,
             },
           ),
-        ).rejects.toThrow(/erc20AddressOut not allowed/);
+        ).rejects.toThrow(/ERC20 not allowed/);
       },
       5 * MINUTE,
     );

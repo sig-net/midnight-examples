@@ -166,9 +166,14 @@ const ZERO_ADDRESS = new Uint8Array(20);
 const AMOUNT = 1_000_000n;
 const UINT64_MAX = 18446744073709551615n;
 
-// The fees initialise() stamps on the stata pair and addAllowedToken() on every ERC20
-// the tests allow, distinct per action so a start reading the wrong one shows.
+// The fees addAllowedToken() stamps on every ERC20 the tests allow, and the fees
+// initialise() stamps on the stata underlying and on the stata token: distinct per
+// action and per token, so a start reading another action's or token's fee shows.
 const TOKEN_FEES = { withdraw: 11n, swap: 13n, supply: 17n, redeem: 19n };
+const STATA_UNDERLYING_FEES = { withdraw: 31n, swap: 37n, supply: 41n, redeem: 43n };
+const STATA_TOKEN_FEES = { withdraw: 53n, swap: 59n, supply: 61n, redeem: 67n };
+// A fee of one base unit for every action: the smallest fee a start mints.
+const UNIT_FEES = { withdraw: 1n, swap: 1n, supply: 1n, redeem: 1n };
 // A fee of zero for every action: a start then burns the principal alone and mints nothing.
 const NO_FEES = { withdraw: 0n, swap: 0n, supply: 0n, redeem: 0n };
 // The fee recipient's keys, a wallet of its own, so a fee mint is told apart from a
@@ -321,8 +326,8 @@ const deployInitialised = async (evmStartHeight: bigint = EVM_START_HEIGHT) => {
       MPC_RESPONSE_KEY,
       MPC_KEY_VERSION,
       evmStartHeight,
-      TOKEN_FEES,
-      TOKEN_FEES,
+      STATA_UNDERLYING_FEES,
+      STATA_TOKEN_FEES,
       { bytes: FEE_RECIPIENT_CPK },
       FEE_RECIPIENT_EPK,
     )
@@ -443,8 +448,8 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
-        TOKEN_FEES,
-        TOKEN_FEES,
+        STATA_UNDERLYING_FEES,
+        STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
         FEE_RECIPIENT_EPK,
       ),
@@ -464,8 +469,8 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         0n,
         EVM_START_HEIGHT,
-        TOKEN_FEES,
-        TOKEN_FEES,
+        STATA_UNDERLYING_FEES,
+        STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
         FEE_RECIPIENT_EPK,
       ),
@@ -485,8 +490,8 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
-        TOKEN_FEES,
-        TOKEN_FEES,
+        STATA_UNDERLYING_FEES,
+        STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
         FEE_RECIPIENT_EPK,
       ),
@@ -506,8 +511,8 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
-        TOKEN_FEES,
-        TOKEN_FEES,
+        STATA_UNDERLYING_FEES,
+        STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
         FEE_RECIPIENT_EPK,
       ),
@@ -549,8 +554,8 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
-        TOKEN_FEES,
-        TOKEN_FEES,
+        STATA_UNDERLYING_FEES,
+        STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
         FEE_RECIPIENT_EPK,
       ),
@@ -580,16 +585,16 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
-        TOKEN_FEES,
-        TOKEN_FEES,
+        STATA_UNDERLYING_FEES,
+        STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
         FEE_RECIPIENT_EPK,
       )
     ).context;
     const state = ledgerOf(initialised);
     expect(state.allowedTokens.size()).toBe(2n);
-    expect(state.allowedTokens.lookup(STATA_UNDERLYING)).toEqual({ fees: TOKEN_FEES });
-    expect(state.allowedTokens.lookup(STATA_TOKEN)).toEqual({ fees: TOKEN_FEES });
+    expect(state.allowedTokens.lookup(STATA_UNDERLYING)).toEqual({ fees: STATA_UNDERLYING_FEES });
+    expect(state.allowedTokens.lookup(STATA_TOKEN)).toEqual({ fees: STATA_TOKEN_FEES });
   });
 
   it("stores the fee recipient's keys", async () => {
@@ -3374,12 +3379,12 @@ const SWAP_REJECTION_CASES: SwapRejectionCase[] = [
   {
     name: "a zero output ERC20 address",
     args: { ...VALID_SWAP, swap: { ...VALID_SWAP.swap, erc20AddressOut: ZERO_ADDRESS } },
-    throws: /erc20AddressOut not allowed/,
+    throws: /ERC20 not allowed/,
   },
   {
     name: "an output ERC20 the vault does not allow",
     args: { ...VALID_SWAP, swap: { ...VALID_SWAP.swap, erc20AddressOut: UNLISTED_ERC20 } },
-    throws: /erc20AddressOut not allowed/,
+    throws: /ERC20 not allowed/,
   },
   {
     name: "a zero amountOut",
@@ -3438,7 +3443,7 @@ describe("swap validation", () => {
       ...VALID_SWAP,
       swap: { ...VALID_SWAP.swap, erc20AddressOut: UNLISTED_ERC20 },
     };
-    await expect(queueSwap(contract, ctx, unlisted)).rejects.toThrow(/erc20AddressOut not allowed/);
+    await expect(queueSwap(contract, ctx, unlisted)).rejects.toThrow(/ERC20 not allowed/);
 
     const allowed = (await contract.circuits.addAllowedToken(ctx, UNLISTED_ERC20, TOKEN_FEES))
       .context;
@@ -4009,7 +4014,7 @@ interface SupplyCallArgs {
 const VALID_SUPPLY: SupplyCallArgs = {
   inIndex: 51n,
   supply: { amount: AMOUNT },
-  coin: vaultCoin(AMOUNT + TOKEN_FEES.supply, STATA_UNDERLYING_COLOR),
+  coin: vaultCoin(AMOUNT + STATA_UNDERLYING_FEES.supply, STATA_UNDERLYING_COLOR),
 };
 
 // The gas every supply copies at start: the vault's default fees at its supply limit.
@@ -4112,7 +4117,7 @@ describe("supply round-trip", () => {
     expect(ledger(state).supplyArgsMap.lookup(VALID_SUPPLY.inIndex)).toEqual({
       request: VALID_SUPPLY.supply,
       gas: DEFAULT_SUPPLY_GAS,
-      fee: TOKEN_FEES.supply,
+      fee: STATA_UNDERLYING_FEES.supply,
     });
     expect(ledger(state).evictionMap.lookup(requestIdBytes(idHex))).toEqual(outIndex);
     expect(ledger(state).inputRequestBuffer.isEmpty()).toBe(true);
@@ -4128,7 +4133,7 @@ describe("supply round-trip", () => {
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
     expect(consumed.color).toEqual(STATA_UNDERLYING_COLOR);
-    expect(consumed.value).toBe(AMOUNT + TOKEN_FEES.supply);
+    expect(consumed.value).toBe(AMOUNT + STATA_UNDERLYING_FEES.supply);
 
     expect(zswap.outputs).toHaveLength(3);
     const received = first(
@@ -4143,7 +4148,7 @@ describe("supply round-trip", () => {
     });
     const burnOutput = burnOutputOf(zswap);
     expect(burnOutput.coinInfo.color).toEqual(STATA_UNDERLYING_COLOR);
-    expect(burnOutput.coinInfo.value).toBe(AMOUNT + TOKEN_FEES.supply);
+    expect(burnOutput.coinInfo.value).toBe(AMOUNT + STATA_UNDERLYING_FEES.supply);
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
 
     // The fee: the same colour, minted to the fee recipient under the public nonce
@@ -4152,7 +4157,7 @@ describe("supply round-trip", () => {
     expect(feeOutput.coinInfo).toEqual({
       nonce: pureCircuits.feeMintNonce(VALID_SUPPLY.coin.nonce),
       color: STATA_UNDERLYING_COLOR,
-      value: TOKEN_FEES.supply,
+      value: STATA_UNDERLYING_FEES.supply,
     });
   });
 
@@ -4696,7 +4701,7 @@ interface RedeemCallArgs {
 const VALID_REDEEM: RedeemCallArgs = {
   inIndex: 61n,
   redeem: { shares: REDEEM_SHARES },
-  coin: vaultCoin(REDEEM_SHARES + TOKEN_FEES.redeem, STATA_TOKEN_COLOR),
+  coin: vaultCoin(REDEEM_SHARES + STATA_TOKEN_FEES.redeem, STATA_TOKEN_COLOR),
 };
 
 // The gas every redeem copies at start: the vault's default fees at its redeem limit.
@@ -4800,7 +4805,7 @@ describe("redeem round-trip", () => {
     expect(ledger(state).redeemArgsMap.lookup(VALID_REDEEM.inIndex)).toEqual({
       request: VALID_REDEEM.redeem,
       gas: DEFAULT_REDEEM_GAS,
-      fee: TOKEN_FEES.redeem,
+      fee: STATA_TOKEN_FEES.redeem,
     });
     expect(ledger(state).evictionMap.lookup(requestIdBytes(idHex))).toEqual(outIndex);
     expect(ledger(state).inputRequestBuffer.isEmpty()).toBe(true);
@@ -4816,7 +4821,7 @@ describe("redeem round-trip", () => {
     expect(zswap.inputs).toHaveLength(1);
     const consumed = first(zswap.inputs, "consumed coin");
     expect(consumed.color).toEqual(STATA_TOKEN_COLOR);
-    expect(consumed.value).toBe(REDEEM_SHARES + TOKEN_FEES.redeem);
+    expect(consumed.value).toBe(REDEEM_SHARES + STATA_TOKEN_FEES.redeem);
 
     expect(zswap.outputs).toHaveLength(3);
     const received = first(
@@ -4831,7 +4836,7 @@ describe("redeem round-trip", () => {
     });
     const burnOutput = burnOutputOf(zswap);
     expect(burnOutput.coinInfo.color).toEqual(STATA_TOKEN_COLOR);
-    expect(burnOutput.coinInfo.value).toBe(REDEEM_SHARES + TOKEN_FEES.redeem);
+    expect(burnOutput.coinInfo.value).toBe(REDEEM_SHARES + STATA_TOKEN_FEES.redeem);
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
 
     // The fee: the same colour, minted to the fee recipient under the public nonce
@@ -4840,7 +4845,7 @@ describe("redeem round-trip", () => {
     expect(feeOutput.coinInfo).toEqual({
       nonce: pureCircuits.feeMintNonce(VALID_REDEEM.coin.nonce),
       color: STATA_TOKEN_COLOR,
-      value: TOKEN_FEES.redeem,
+      value: STATA_TOKEN_FEES.redeem,
     });
   });
 
@@ -6559,6 +6564,20 @@ describe("fee arithmetic at start", () => {
     expect(ledgerOf(queued).withdrawArgsMap.lookup(VALID_WITHDRAW.inIndex).fee).toBe(0n);
   });
 
+  it("a fee of one base unit is taken from the coin and minted to the recipient", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const priced = (await contract.circuits.setTokenFees(ctx, ERC20, UNIT_FEES)).context;
+    const queued = (
+      await queueWithdraw(contract, priced, { ...VALID_WITHDRAW, coin: vaultCoin(AMOUNT + 1n) })
+    ).context;
+    const zswap = zswapState(queued);
+    expect(zswap.outputs).toHaveLength(3);
+    expect(burnOutputOf(zswap).coinInfo.value).toBe(AMOUNT + 1n);
+    expect(feeOutputOf(zswap).coinInfo.value).toBe(1n);
+    expect(shieldedMintsSince(priced, queued)).toEqual([[VAULT_TOKEN_MINT_KEY, 1n]]);
+    expect(ledgerOf(queued).withdrawArgsMap.lookup(VALID_WITHDRAW.inIndex).fee).toBe(1n);
+  });
+
   it("a zero fee still refuses a coin carrying one", async () => {
     const { contract, ctx } = await deployWithFreeErc20();
     await expect(queueWithdraw(contract, ctx, VALID_WITHDRAW)).rejects.toThrow(
@@ -6573,13 +6592,16 @@ describe("fee arithmetic at start", () => {
     const redeemQueued = (await queueRedeem(contract, supplyQueued, VALID_REDEEM)).context;
     const state = ledgerOf(redeemQueued);
     expect(state.swapArgsMap.lookup(VALID_SWAP.inIndex).fee).toBe(TOKEN_FEES.swap);
-    expect(state.supplyArgsMap.lookup(VALID_SUPPLY.inIndex).fee).toBe(TOKEN_FEES.supply);
-    expect(state.redeemArgsMap.lookup(VALID_REDEEM.inIndex).fee).toBe(TOKEN_FEES.redeem);
+    expect(state.supplyArgsMap.lookup(VALID_SUPPLY.inIndex).fee).toBe(STATA_UNDERLYING_FEES.supply);
+    expect(state.redeemArgsMap.lookup(VALID_REDEEM.inIndex).fee).toBe(STATA_TOKEN_FEES.redeem);
     expect(new Map(shieldedMintsSince(ctx, redeemQueued))).toEqual(
       new Map([
         [VAULT_TOKEN_MINT_KEY, TOKEN_FEES.swap],
-        [bytesToHex(pureCircuits.vaultTokenDomainSeparator(STATA_UNDERLYING)), TOKEN_FEES.supply],
-        [bytesToHex(pureCircuits.vaultTokenDomainSeparator(STATA_TOKEN)), TOKEN_FEES.redeem],
+        [
+          bytesToHex(pureCircuits.vaultTokenDomainSeparator(STATA_UNDERLYING)),
+          STATA_UNDERLYING_FEES.supply,
+        ],
+        [bytesToHex(pureCircuits.vaultTokenDomainSeparator(STATA_TOKEN)), STATA_TOKEN_FEES.redeem],
       ]),
     );
   });
