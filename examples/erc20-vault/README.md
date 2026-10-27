@@ -531,7 +531,8 @@ yarn setup-local:erc20-vault        # deploy signet + vault, initialise, allow E
 
 It runs the suite's own setup steps in-process, then the deploy package's
 `initialise`, then allows every ERC20 `EVM_ALLOWED_TOKENS` lists (each with
-the fees the `VAULT_FEE_*` variables set, see [Deploying](#deploying)), and appends
+the fees `VAULT_TOKEN_FEES` or the flat `VAULT_FEE_*` variables set, see
+[Deploying](#deploying)), and appends
 every value it generated to `.env` under the names the suite reads: the role
 wallet seeds, `MPC_ROOT_KEY`, `MPC_SECP256K1_PUBKEY`, both contract addresses,
 `MPC_RESPONSE_KEY`, the derived EVM addresses, `EVM_CHAIN_ID`,
@@ -731,9 +732,10 @@ yarn initialise:erc20-vault
 # the list grows. The vault never removes a token.
 yarn add-allowed-tokens:erc20-vault
 
-# reprice every allowed ERC20 to the VAULT_FEE_* values, skipping tokens
-# already at them: the call a scheduled job makes after recomputing the fees
-# from current gas and token prices (see design proposal 001's residual risk)
+# reprice each allowed ERC20 VAULT_TOKEN_FEES names to the fees it gives, in
+# that token's base units, skipping tokens already at them: the call a
+# scheduled job makes after recomputing each token's fees from current gas and
+# token prices (see design proposal 001's residual risk)
 yarn set-token-fees:erc20-vault
 
 # install the circuits a split deploy left missing (recovers a run that died
@@ -764,16 +766,20 @@ EVM_RPC_URL=               # the EVM chain the vault operates on
 
 Everything else is derived: the signet singleton and the MPC root public key
 are the ones `@sig-net/midnight` publishes for the network, and the chain id is
-read from `EVM_RPC_URL`. The fees are optional too: `VAULT_FEE_WITHDRAW`,
-`VAULT_FEE_SWAP`, `VAULT_FEE_SUPPLY` and `VAULT_FEE_REDEEM` (each in the
-token's base units, 1000 when unset) are stamped on the stata pair at
-`initialise` and on every ERC20 `EVM_ALLOWED_TOKENS` lists, and
-`VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY` with
+read from `EVM_RPC_URL`. The fees come from two variables. `VAULT_TOKEN_FEES`
+is a JSON object mapping an ERC20 address to its `withdraw`, `swap`, `supply`
+and `redeem` fees, each an integer in THAT token's base units (a 6-decimal
+USDC and an 18-decimal token need figures twelve orders apart for the same
+value), and prices the stata pair at `initialise`, any ERC20
+`EVM_ALLOWED_TOKENS` lists, and whatever `yarn set-token-fees:erc20-vault`
+reprices. Every token the map leaves out takes the flat `VAULT_FEE_WITHDRAW`,
+`VAULT_FEE_SWAP`, `VAULT_FEE_SUPPLY` and `VAULT_FEE_REDEEM` values, which a
+deployed network requires whenever a token needs them (the local stack alone
+defaults each to 1000). `VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY` with
 `VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY` name the wallet the fee coins are
-minted to, the deployer wallet's own shielded keys when unset. One figure
-serves every token at bring-up: size a token's fees to its decimals and the
-action's gas afterwards with the deployer's `setTokenFees` circuit, and move
-the recipient with `setFeeRecipient`. `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
+minted to, the deployer wallet's own shielded keys when unset. Reprice a token
+afterwards through the map and `yarn set-token-fees:erc20-vault`, and move the
+recipient with the deployer's `setFeeRecipient` circuit. `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
 `MPC_SECP256K1_PUBKEY` and `EVM_CHAIN_ID` remain as overrides, and a set value
 must agree with the published one or with what the chain reports. The local
 stack publishes nothing, so there the e2e setup deploys a singleton and mints a
@@ -825,7 +831,7 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | Spec | Tests | What it proves | Resume var(s) |
 |---|---|---|---|
 | `happy-day-e2e` | 15 | Initialise and allow the suites' ERC20s, then a full deposit round trip and a full withdraw round trip, every leg asserted (incl. the MPC-convention reads a responder does) | `DEPOSIT_REQUEST_ID` / `WITHDRAW_REQUEST_ID` |
-| `allowed-tokens-e2e` | 6 | Deposits and swaps refuse an ERC20 the vault does not allow, only the deployer can allow one, once allowed the ledger holds it, and only the deployer reprices its fees | none |
+| `allowed-tokens-e2e` | 7 | Deposits and swaps refuse an ERC20 the vault does not allow, only the deployer can allow one, once allowed the ledger holds it, and only the deployer reprices the fees of tokens it allows | none |
 | `deposit-withdrawal-failure-refund` | 9 | A withdrawal whose EVM transfer reverts is attested failed, and `completeWithdraw` re-mints the burned vault tokens | `FAILURE_REFUND_DEPOSIT_REQUEST_ID` / `FAILURE_REFUND_WITHDRAW_REQUEST_ID` |
 | `deposit-claimant-not-caller` | 6 | `completeDeposit` can direct the mint to a different wallet's coin public key, discovered from chain data alone | `DEPOSIT_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID` |
 | `false-claimer` | 6 | A deposit recorded for identity A is NOT claimable by identity B, even with the valid MPC attestation | `FALSE_CLAIMER_DEPOSIT_REQUEST_ID` |
@@ -840,7 +846,7 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `concurrent-flush-e2e` | 10 | Two wallets race to flush the same items: the user's transactions never fail, the losing flush is retried, and a lone canary deposit afterwards shows the stack is healthy. Runs last, as its concurrent load is the most likely to strain the local stack | `CONCURRENT_FLUSH_DEPOSIT_REQUEST_ID` / `CONCURRENT_FLUSH_CANARY_REQUEST_ID` |
 
 134 tests total across these specs. The seven offline specs (56 tests, no stack
-needed) are not pinned and run after them, so a full run reports 192. The
+needed) are not pinned and run after them, so a full run reports 193. The
 suite runs against a Sepolia fork, and the setup pipeline
 verifies that the Uniswap router and the stataUSDC wrapper are deployed on it
 before any spec runs, so a fork missing either fails the run at setup with an

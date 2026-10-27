@@ -12,7 +12,7 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-suite (192 tests: fourteen e2e specs carrying 136, plus seven offline
+suite (193 tests: fourteen e2e specs carrying 137, plus seven offline
 specs carrying 56). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest
@@ -115,13 +115,13 @@ vault with every circuit).
 - The suite is `vitest --bail 1` and the spec files run serially in a pinned
   order: it stops at the first failure.
 - Expected per-spec test counts, in run order: `happy-day-e2e` **15**,
-  `allowed-tokens-e2e` **6**, `deposit-withdrawal-failure-refund` **9**,
+  `allowed-tokens-e2e` **7**, `deposit-withdrawal-failure-refund` **9**,
   `deposit-claimant-not-caller` **6**, `false-claimer` **6**,
   `bearer-transfer` **10**, `approve-e2e` **14**, `swap-e2e` **8**,
   `supply-redeem-e2e` **13**, `supply-refund-e2e` **9**,
   `swap-refund-e2e` **8**, `redeem-refund-e2e` **10**,
   `admin-replace-nonce-e2e` **12**, `concurrent-flush-e2e` **10**,
-  then the seven unpinned offline specs (**56**) last. 192 total. The setup
+  then the seven unpinned offline specs (**56**) last. 193 total. The setup
   pipeline verifies Uniswap and the stataUSDC wrapper are deployed on the fork,
   so a fork missing either fails the run at setup rather than mid-spec.
 - **Wallets are role wallets funded from ROOT at setup.** The setup's

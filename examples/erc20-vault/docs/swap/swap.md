@@ -55,7 +55,7 @@ As illustrated, the flow comprises 9 steps:
     and [`takeFee`](../../contract/src/erc20-vault.compact) burns it with the same pair of calls a
     [withdraw](../withdraw/withdraw.md) uses, then mints the fee to
     [`feeRecipientCoinPublicKey`](../../contract/src/erc20-vault.compact) under the public nonce
-    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the input index, recorded as `fee` in
+    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the surrendered coin's nonce, recorded as `fee` in
     [`SwapArgs`](../../contract/src/erc20-vault.compact). The coin spend IS the
     authorisation. `erc20AddressOut` must be one the deployer allowed
     (a key of `allowedTokens`), as the complete mints its vault token.

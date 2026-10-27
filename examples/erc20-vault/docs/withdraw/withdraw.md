@@ -53,7 +53,7 @@ As illustrated, the flow comprises 9 steps:
     owns. Vault tokens are IOUs, and a failed withdrawal re-mints them.
   - The fee is non-refundable: `takeFee` mints it, of the same colour, to
     [`feeRecipientCoinPublicKey`](../../contract/src/erc20-vault.compact) under the public nonce
-    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the input index, and the circuit
+    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the surrendered coin's nonce, and the circuit
     records it as `fee` in [`WithdrawArgs`](../../contract/src/erc20-vault.compact). Why the vault charges it is
     [design proposal 001](../design-proposals/001-take-fees-on-vault-operations/README.md).
   - The call is optimistic, and the coin spend IS the authorisation: the wallet

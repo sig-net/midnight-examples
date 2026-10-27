@@ -6,38 +6,37 @@
 // run. This flow is the session-shaped face of it, so the suites exercise the
 // code a remote bring-up depends on.
 
-import type { TokenFees } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { addAllowedTokensToVaultContract } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import {
+  addAllowedTokensToVaultContract,
+  type TokenFeesByToken,
+} from "@sig-net/midnight-examples-erc20-vault-deploy";
 
 import type { VaultContext } from "../vault-context.ts";
 
 /**
  * Allow each of `tokens` the vault does not already allow, with one
- * `addAllowedToken` call per token stamping `fees` on it.
+ * `addAllowedToken` call per token stamping its fees on it.
  *
  * The caller must be the DEPLOYER identity: the circuit compares the
  * `callerSecretKey` witness commitment against the sealed `deployer` field, so
  * `VAULT_USER_SECRET_KEY` must hold the deployer's secret for this call.
  *
  * @param context - The flow context.
- * @param tokens - The ERC20s to allow, as 0x hex (the deploy package's
- *   `resolveAllowedTokens` against the env the setup pipeline populated).
- * @param fees - The per-action fees each added token gets (the deploy package's
- *   `resolveTokenFees` against the same env).
- * @returns The ERC20s this call added.
+ * @param tokens - The ERC20s to allow, each with its per-action fees (the deploy
+ *   package's `resolveTokenFeesFor` over `resolveAllowedTokens`, against the env the
+ *   setup pipeline populated).
+ * @returns The ERC20s this call added, as lowercased 0x hex.
  * @throws {Error} If the vault is not initialised, a token is malformed, or the circuit
  *   rejects the caller.
  */
 export async function addAllowedTokens(
   context: VaultContext,
-  tokens: readonly string[],
-  fees: TokenFees,
+  tokens: TokenFeesByToken,
 ): Promise<readonly string[]> {
   return addAllowedTokensToVaultContract(
     context.vault,
     context.providers.publicDataProvider,
     context.vaultContractAddress,
     tokens,
-    fees,
   );
 }

@@ -3,6 +3,7 @@
 // a previous vault may be lying around in the environment. Offline: every case
 // pins EVM_CHAIN_ID or omits EVM_RPC_URL, so no chain is consulted.
 
+import { AAVE_USDC, STATA_USDC } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -24,12 +25,32 @@ const DEPLOYER_SEED = "000000000000000000000000000000000000000000000000000000000
 
 // The smallest environment initialise accepts without an address on the local
 // stack (which publishes no MPC key): the EVM targets default to their Sepolia
-// canonicals, the fees to their defaults and the fee recipient to the deployer.
+// canonicals, the fees to their local defaults and the fee recipient to the deployer.
 const VALID_INPUTS = {
   MPC_SECP256K1_PUBKEY: MPC_KEY_CANONICAL,
   EVM_CHAIN_ID: "11155111",
   DEPLOYER_SEED,
 } as const;
+
+// The smallest environment initialise accepts on a deployed network: the SDK
+// publishes its MPC key, a seed of its own holds funds there (the genesis mint
+// seed holds funds on the local chain alone), and every flat fee is set, since
+// a deployed network takes no default fee.
+const VALID_DEPLOYED_INPUTS = {
+  NETWORK_ID: "stagenet",
+  EVM_CHAIN_ID: "11155111",
+  DEPLOYER_SEED: "ab".repeat(32),
+  VAULT_FEE_WITHDRAW: "1000000",
+  VAULT_FEE_SWAP: "1000000",
+  VAULT_FEE_SUPPLY: "1000000",
+  VAULT_FEE_REDEEM: "1000000",
+} as const;
+
+// The stata pair priced in VAULT_TOKEN_FEES, which leaves no token for the flat fees.
+const STATA_PAIR_PRICED = JSON.stringify({
+  [AAVE_USDC]: { withdraw: "1000000", swap: "1000000", supply: "1000000", redeem: "1000000" },
+  [STATA_USDC]: { withdraw: "1000000", swap: "1000000", supply: "1000000", redeem: "1000000" },
+});
 
 describe("assertInitialiseInputsPresent", () => {
   /** An environment the check accepts. */
@@ -50,9 +71,25 @@ describe("assertInitialiseInputsPresent", () => {
     },
     {
       name: "no MPC key on a deployed network the SDK publishes one for",
-      // The genesis mint seed holds funds on the local chain alone, so a deployed
-      // network takes a seed of its own.
-      env: { NETWORK_ID: "stagenet", EVM_CHAIN_ID: "11155111", DEPLOYER_SEED: "ab".repeat(32) },
+      env: VALID_DEPLOYED_INPUTS,
+    },
+    {
+      name: "the stata pair priced in VAULT_TOKEN_FEES and no flat fees on a deployed network",
+      env: {
+        NETWORK_ID: "stagenet",
+        EVM_CHAIN_ID: "11155111",
+        DEPLOYER_SEED: "ab".repeat(32),
+        VAULT_TOKEN_FEES: STATA_PAIR_PRICED,
+      },
+    },
+    {
+      name: "a priced stata underlying and flat fees for the wrapper on a deployed network",
+      env: {
+        ...VALID_DEPLOYED_INPUTS,
+        VAULT_TOKEN_FEES: JSON.stringify({
+          [AAVE_USDC]: { withdraw: 1, swap: 1, supply: 1, redeem: 1 },
+        }),
+      },
     },
     {
       name: "an explicit fee recipient and no deployer seed",
@@ -64,8 +101,17 @@ describe("assertInitialiseInputsPresent", () => {
       },
     },
     {
-      name: "every fee set",
+      name: "some flat fees set on the local stack, the rest defaulted",
       env: { ...VALID_INPUTS, VAULT_FEE_WITHDRAW: "0", VAULT_FEE_SWAP: "5" },
+    },
+    {
+      name: "a token outside the stata pair priced on the local stack",
+      env: {
+        ...VALID_INPUTS,
+        VAULT_TOKEN_FEES: JSON.stringify({
+          [`0x${"cc".repeat(20)}`]: { withdraw: 1, swap: 1, supply: 1, redeem: 1 },
+        }),
+      },
     },
     { name: "chain id 1", env: { ...VALID_INPUTS, EVM_CHAIN_ID: "1" } },
     { name: "start height 0", env: { ...VALID_INPUTS, EVM_START_HEIGHT: "0" } },
@@ -133,13 +179,35 @@ describe("assertInitialiseInputsPresent", () => {
       error: /VAULT_FEE_REDEEM/,
     },
     {
+      name: "a malformed VAULT_TOKEN_FEES",
+      env: { ...VALID_INPUTS, VAULT_TOKEN_FEES: "[]" },
+      error: /VAULT_TOKEN_FEES must be a JSON object/,
+    },
+    {
+      name: "no flat fees on a deployed network",
+      env: { ...VALID_DEPLOYED_INPUTS, VAULT_FEE_SUPPLY: undefined },
+      error: /VAULT_FEE_SUPPLY is required on "stagenet"/,
+    },
+    {
+      name: "only the stata underlying priced and no flat fees on a deployed network",
+      env: {
+        NETWORK_ID: "stagenet",
+        EVM_CHAIN_ID: "11155111",
+        DEPLOYER_SEED: "ab".repeat(32),
+        VAULT_TOKEN_FEES: JSON.stringify({
+          [AAVE_USDC]: { withdraw: 1, swap: 1, supply: 1, redeem: 1 },
+        }),
+      },
+      error: /VAULT_FEE_WITHDRAW is required on "stagenet"/,
+    },
+    {
       name: "half a fee recipient",
       env: { ...VALID_INPUTS, VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY: "ab".repeat(32) },
       error: /set both or neither/,
     },
     {
       name: "no fee recipient and no deployer seed on a deployed network",
-      env: { NETWORK_ID: "stagenet", EVM_CHAIN_ID: "11155111" },
+      env: { ...VALID_DEPLOYED_INPUTS, DEPLOYER_SEED: undefined },
       error: /DEPLOYER_SEED is required/,
     },
   ];

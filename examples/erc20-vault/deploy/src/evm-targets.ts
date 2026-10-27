@@ -21,10 +21,15 @@ export interface VaultEvmTargets {
   readonly stataTokenAddress: string;
 }
 
-// An operator may paste an EVM address override with or without the `0x`
-// prefix, and `evmAddressBytes` accepts only the prefixed form. Width and hex
-// digits stay its check.
-function withHexPrefix(address: string): string {
+/**
+ * Prefix an EVM address an operator pasted without its `0x`, since
+ * `evmAddressBytes` accepts only the prefixed form and keeps the width and
+ * hex-digit checks.
+ *
+ * @param address - The address as pasted, with or without `0x`.
+ * @returns The address with exactly one `0x` prefix.
+ */
+export function withHexPrefix(address: string): string {
   return /^0x/i.test(address) ? address : `0x${address}`;
 }
 

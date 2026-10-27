@@ -1463,10 +1463,10 @@ describe("withdraw round-trip", () => {
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
 
     // The fee: the same colour, minted to the fee recipient under the public nonce
-    // the index derives.
+    // the surrendered coin's nonce derives.
     const feeOutput = feeOutputOf(zswap);
     expect(feeOutput.coinInfo).toEqual({
-      nonce: pureCircuits.feeMintNonce(VALID_WITHDRAW.inIndex),
+      nonce: pureCircuits.feeMintNonce(VALID_WITHDRAW.coin.nonce),
       color: VAULT_TOKEN_COLOR,
       value: TOKEN_FEES.withdraw,
     });
@@ -3325,10 +3325,10 @@ describe("swap round-trip", () => {
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
 
     // The fee: the same colour, minted to the fee recipient under the public nonce
-    // the index derives.
+    // the surrendered coin's nonce derives.
     const feeOutput = feeOutputOf(zswap);
     expect(feeOutput.coinInfo).toEqual({
-      nonce: pureCircuits.feeMintNonce(VALID_SWAP.inIndex),
+      nonce: pureCircuits.feeMintNonce(VALID_SWAP.coin.nonce),
       color: VAULT_TOKEN_COLOR,
       value: TOKEN_FEES.swap,
     });
@@ -4147,10 +4147,10 @@ describe("supply round-trip", () => {
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
 
     // The fee: the same colour, minted to the fee recipient under the public nonce
-    // the index derives.
+    // the surrendered coin's nonce derives.
     const feeOutput = feeOutputOf(zswap);
     expect(feeOutput.coinInfo).toEqual({
-      nonce: pureCircuits.feeMintNonce(VALID_SUPPLY.inIndex),
+      nonce: pureCircuits.feeMintNonce(VALID_SUPPLY.coin.nonce),
       color: STATA_UNDERLYING_COLOR,
       value: TOKEN_FEES.supply,
     });
@@ -4835,10 +4835,10 @@ describe("redeem round-trip", () => {
     expect(burnOutput.recipient.left.bytes).toEqual(BURN_ADDRESS_BYTES);
 
     // The fee: the same colour, minted to the fee recipient under the public nonce
-    // the index derives.
+    // the surrendered coin's nonce derives.
     const feeOutput = feeOutputOf(zswap);
     expect(feeOutput.coinInfo).toEqual({
-      nonce: pureCircuits.feeMintNonce(VALID_REDEEM.inIndex),
+      nonce: pureCircuits.feeMintNonce(VALID_REDEEM.coin.nonce),
       color: STATA_TOKEN_COLOR,
       value: TOKEN_FEES.redeem,
     });
@@ -6599,11 +6599,12 @@ describe("fee arithmetic at start", () => {
 });
 
 describe("feeMintNonce", () => {
-  it("is a 32-byte function of the index alone", () => {
-    const nonce = pureCircuits.feeMintNonce(VALID_WITHDRAW.inIndex);
+  it("is a 32-byte function of the surrendered coin's nonce alone", () => {
+    const nonce = pureCircuits.feeMintNonce(VALID_WITHDRAW.coin.nonce);
     expect(nonce).toHaveLength(32);
-    expect(nonce).toEqual(pureCircuits.feeMintNonce(VALID_WITHDRAW.inIndex));
-    expect(nonce).not.toEqual(pureCircuits.feeMintNonce(VALID_WITHDRAW.inIndex + 1n));
+    expect(nonce).toEqual(pureCircuits.feeMintNonce(VALID_WITHDRAW.coin.nonce));
+    expect(nonce).not.toEqual(pureCircuits.feeMintNonce(bytes(32, 0x0d)));
+    expect(nonce).not.toEqual(VALID_WITHDRAW.coin.nonce);
     expect(nonce).not.toEqual(new Uint8Array(32));
   });
 
@@ -6611,8 +6612,32 @@ describe("feeMintNonce", () => {
     const { contract, ctx } = await deployInitialised();
     const queued = (await queueSwap(contract, ctx, VALID_SWAP)).context;
     expect(feeOutputOf(zswapState(queued)).coinInfo.nonce).toEqual(
-      pureCircuits.feeMintNonce(VALID_SWAP.inIndex),
+      pureCircuits.feeMintNonce(VALID_SWAP.coin.nonce),
     );
+  });
+
+  it("differs between two starts that reuse an index under different coins", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const first = (await queueWithdraw(contract, ctx, VALID_WITHDRAW)).context;
+    const otherCoin = { ...VALID_WITHDRAW.coin, nonce: bytes(32, 0x0d) };
+    const second = (
+      await queueWithdraw(contract, first, {
+        ...VALID_WITHDRAW,
+        inIndex: VALID_WITHDRAW.inIndex + 1n,
+        coin: otherCoin,
+      })
+    ).context;
+    const nonces = zswapState(second)
+      .outputs.filter(
+        (output) =>
+          output.recipient.is_left &&
+          bytesToHex(output.recipient.left.bytes) === bytesToHex(FEE_RECIPIENT_CPK),
+      )
+      .map((output) => bytesToHex(output.coinInfo.nonce));
+    expect(nonces).toEqual([
+      bytesToHex(pureCircuits.feeMintNonce(VALID_WITHDRAW.coin.nonce)),
+      bytesToHex(pureCircuits.feeMintNonce(otherCoin.nonce)),
+    ]);
   });
 });
 

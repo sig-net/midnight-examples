@@ -30,7 +30,7 @@ import {
   type FeeRecipientKeys,
   formatTokenFees,
   resolveFeeRecipient,
-  resolveTokenFees,
+  resolveTokenFeesFor,
 } from "./fee-config.ts";
 
 /** What an {@link initialiseVaultContract} call did. */
@@ -154,7 +154,8 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
   evmChainId: bigint;
   evmStartHeight: bigint;
   targets: VaultEvmTargets;
-  fees: TokenFees;
+  stataUnderlyingFees: TokenFees;
+  stataTokenFees: TokenFees;
   feeRecipient: FeeRecipientKeys;
 }> {
   // The SDK's published key for a deployed network, or MPC_SECP256K1_PUBKEY in
@@ -169,10 +170,39 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
   evmAddressBytes(targets.routerAddress);
   evmAddressBytes(targets.stataUnderlyingAddress);
   evmAddressBytes(targets.stataTokenAddress);
-  const fees = resolveTokenFees(env);
+  const { stataUnderlyingFees, stataTokenFees } = resolveStataPairFees(env, targets);
   const feeRecipient = resolveFeeRecipient(env);
 
-  return { mpcSecp256k1PublicKey, evmChainId, evmStartHeight, targets, fees, feeRecipient };
+  return {
+    mpcSecp256k1PublicKey,
+    evmChainId,
+    evmStartHeight,
+    targets,
+    stataUnderlyingFees,
+    stataTokenFees,
+    feeRecipient,
+  };
+}
+
+// The fees initialise stamps on the stata pair: each token's VAULT_TOKEN_FEES
+// entry, else the flat VAULT_FEE_* values.
+function resolveStataPairFees(
+  env: Record<string, string | undefined>,
+  targets: VaultEvmTargets,
+): { stataUnderlyingFees: TokenFees; stataTokenFees: TokenFees } {
+  const fees = resolveTokenFeesFor(env, [
+    targets.stataUnderlyingAddress,
+    targets.stataTokenAddress,
+  ]);
+  const feesOf = (token: string): TokenFees => {
+    const found = fees.get(token.toLowerCase());
+    if (found === undefined) throw new Error(`no fees resolved for ${token}`);
+    return found;
+  };
+  return {
+    stataUnderlyingFees: feesOf(targets.stataUnderlyingAddress),
+    stataTokenFees: feesOf(targets.stataTokenAddress),
+  };
 }
 
 /**
@@ -188,20 +218,27 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
  *   `MPC_SECP256K1_PUBKEY` where the SDK publishes no MPC root public key for the
  *   network (see `resolveMpcRootPublicKey`), the optional `EVM_ROUTER` /
  *   `EVM_STATA_UNDERLYING` / `EVM_STATA_TOKEN` overrides, and the fee variables
- *   {@link resolveTokenFees} and {@link resolveFeeRecipient} read.
+ *   {@link resolveTokenFeesFor} and {@link resolveFeeRecipient} read.
  * @param vaultContractAddress - The deployed vault contract's address.
  * @returns The resolved arguments.
  * @throws {Error} If no MPC root public key or chain id resolves, `MPC_SECP256K1_PUBKEY` is
  *   not a secp256k1 public key, `EVM_CHAIN_ID` is malformed or contradicts the RPC, a fee
- *   variable is malformed, or a preset `EVM_VAULT_ADDRESS` / `MPC_RESPONSE_KEY`
+ *   variable is malformed or missing, or a preset `EVM_VAULT_ADDRESS` / `MPC_RESPONSE_KEY`
  *   contradicts the derivation.
  */
 export async function resolveInitialiseConfig(
   env: Record<string, string | undefined>,
   vaultContractAddress: string,
 ): Promise<VaultInitialiseConfig> {
-  const { mpcSecp256k1PublicKey, evmChainId, evmStartHeight, targets, fees, feeRecipient } =
-    await resolveAddressFreeInputs(env);
+  const {
+    mpcSecp256k1PublicKey,
+    evmChainId,
+    evmStartHeight,
+    targets,
+    stataUnderlyingFees,
+    stataTokenFees,
+    feeRecipient,
+  } = await resolveAddressFreeInputs(env);
 
   const vaultEvmAddress = deriveVaultEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress);
   assertDerivedMatch(
@@ -222,8 +259,8 @@ export async function resolveInitialiseConfig(
     evmStartHeight,
     mpcResponseKey,
     mpcKeyVersion: SIGNET_DEFAULT_KEY_VERSION,
-    stataUnderlyingFees: fees,
-    stataTokenFees: fees,
+    stataUnderlyingFees,
+    stataTokenFees,
     feeRecipient,
   };
 }

@@ -57,7 +57,7 @@ As illustrated, the flow comprises 9 steps:
     [`takeFee`](../../contract/src/erc20-vault.compact) burns it with the same pair of calls a
     [withdrawal](../withdraw/withdraw.md) uses and mints the fee to
     [`feeRecipientCoinPublicKey`](../../contract/src/erc20-vault.compact) under the public nonce
-    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the input index, recorded as `fee` in
+    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the surrendered coin's nonce, recorded as `fee` in
     [`SupplyArgs`](../../contract/src/erc20-vault.compact). The coin spend IS the
     authorisation, so anyone holding underlying vault tokens may supply.
   - Both tokens are contract-fixed, so the

@@ -37,7 +37,7 @@ import {
   InitialiseVaultOutcome,
   resolveAllowedTokens,
   resolveInitialiseConfig,
-  resolveTokenFees,
+  resolveTokenFeesFor,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { waitForFacadeState } from "@sig-net/midnight-examples-lib";
 import {
@@ -135,10 +135,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
       // Every later spec deposits or swaps into these, each stamped with the fees the
       // env resolves. A rerun adds only the missing ones.
-      const allowedTokens = resolveAllowedTokens(env);
-      expect(allowedTokens, "setup defaults EVM_ALLOWED_TOKENS").not.toHaveLength(0);
-      const fees = resolveTokenFees(env);
-      const added = await addAllowedTokens(context, allowedTokens, fees);
+      const allowedTokens = resolveTokenFeesFor(env, resolveAllowedTokens(env));
+      expect(allowedTokens.size, "setup defaults EVM_ALLOWED_TOKENS").toBeGreaterThan(0);
+      const added = await addAllowedTokens(context, allowedTokens);
       console.log(`allowed ${String(added.length)} new ERC20(s)`);
 
       await printVaultState(context.providers.publicDataProvider, context.vaultContractAddress);
@@ -158,7 +157,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         config.stataUnderlyingFees,
       );
       expect(state.allowedTokens.lookup(state.stataToken).fees).toEqual(config.stataTokenFees);
-      for (const token of allowedTokens) {
+      for (const [token, fees] of allowedTokens) {
         expect(state.allowedTokens.member(evmAddressBytes(token)), `${token} allowed`).toBe(true);
         expect(state.allowedTokens.lookup(evmAddressBytes(token)).fees, `${token} fees`).toEqual(
           fees,

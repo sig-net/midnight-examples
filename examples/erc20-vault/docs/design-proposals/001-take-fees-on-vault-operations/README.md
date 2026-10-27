@@ -123,30 +123,30 @@ The operator therefore treats the collection address as a public mailbox. To mov
 
 The caller passes one coin worth `amountInMaximum + fee`. The circuit receives it and burns it whole, as today, then mints a new coin worth exactly the fee to the fee recipient. Supply stays balanced: `amountInMaximum + fee` is burnt, `fee` is minted now, and the `complete*` circuit mints at most `amountInMaximum` later, exactly as it does today.
 
-The mint nonce is derived from `inIndex`, which the circuit already discloses, so it is public and unique: the index-in-use check refuses a second request under the same `inIndex`, and the coin's colour already binds it to this contract. A public nonce is what makes every fee coin recomputable from the chain (see Fee Discovery). The burn and the mint are one helper the four start circuits share:
+The mint nonce is a domain-tagged hash of the surrendered coin's own nonce, which the circuit already discloses when it receives the coin, so it is public, and the coin's colour already binds it to this contract. The ledger keeps every coin commitment ever created and rejects an output that repeats one, so a start whose fee coin would repeat an earlier fee coin (same colour, value, nonce and recipient) is refused whole and the earlier coin is untouched. A wallet draws a fresh random nonce per coin, so an honest repeat needs a 256-bit collision, and a user who crafts a surrendered coin with a repeated nonce refuses only their own start. `inIndex` would not do: the request's args entry is removed at complete, which frees the index, and an honest repeat of the same amount on the same token would then be refused with no visible cause. A ledger counter would make the nonce fresh by construction, but reading it pins its value into every start's transcript, so two starts in one block would conflict. A public nonce is what makes every fee coin recomputable from the chain (see Fee Discovery). The burn and the mint are one helper the four start circuits share:
 
 ```compact
-// The fee coin's nonce, public and unique: inIndex is disclosed by every start and
-// refused while any request holds it, so every fee coin is recomputable from the chain.
-export pure circuit feeMintNonce(inIndex: Uint<64>): Bytes<32> {
-  return evolveNonce(inIndex as Uint<128>, pad(32, "erc20:vault:fee"));
+// The fee coin's nonce, public and fresh per surrendered coin: the start discloses the
+// coin's nonce, an honest wallet draws one at random per coin, and the ledger refuses a
+// start whose fee coin repeats an earlier commitment, so a chosen repeat fails only its
+// own start. A fork that changes transientHash renames only fee coins minted after it.
+export pure circuit feeMintNonce(coinNonce: Bytes<32>): Bytes<32> {
+  return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([
+    pad(32, "erc20:vault:fee"),
+    coinNonce
+  ]));
 }
 
 // Burns the surrendered coin whole and mints the fee of the same colour to the fee
 // recipient, so principal + fee leaves the caller and only the fee leaves the burn.
-circuit takeFee(
-  inIndex: Uint<64>,
-  erc20Address: Bytes<20>,
-  coin: ShieldedCoinInfo,
-  fee: Uint<64>
-): [] {
+circuit takeFee(erc20Address: Bytes<20>, coin: ShieldedCoinInfo, fee: Uint<64>): [] {
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
   if (fee > 0 as Uint<64>) {
     mintShieldedToken(
       vaultTokenDomainSeparator(disclose(erc20Address)),
       fee,
-      feeMintNonce(disclose(inIndex)),
+      feeMintNonce(disclose(coin).nonce),
       left<ZswapCoinPublicKey, ContractAddress>(feeRecipientCoinPublicKey)
     );
   }
@@ -179,7 +179,7 @@ export circuit startSwap(
     coin.value == (swapRequest.amountInMaximum + fee) as Uint<128>,
     "Coin value must equal amountInMaximum plus fee"
   );
-  takeFee(inIndex, swapRequest.erc20AddressIn, coin, fee);
+  takeFee(swapRequest.erc20AddressIn, coin, fee);
 
   const args = disclose(SwapArgs {
     request: swapRequest,
@@ -198,7 +198,7 @@ The fee charged is recorded in the request's args struct (`SwapArgs` and its sib
 
 ### How the Coins Flow
 
-Three coins exist by the end of a start, and every one has a different nonce. The burn output's nonce is derived by the standard library from the input nonce with a fixed domain separator, and the fee coin's nonce is derived by the circuit from the public `inIndex`, so no two coins in the flow can collide.
+Three coins exist by the end of a start, and every one has a different nonce. The burn output's nonce is derived by the standard library from the input nonce with a fixed domain separator, and the fee coin's nonce is derived by the circuit from the same input nonce under its own domain separator, so no two coins in the flow can collide.
 
 ```text
 caller's wallet                       contract                              burn address
@@ -225,7 +225,7 @@ caller's wallet                       contract                              burn
                                               │
                                               ▼
                               { color, nonceF, fee }                       ──▶  collection address
-                              nonceF = evolveNonce(inIndex, "erc20:vault:fee")
+                              nonceF = hash("erc20:vault:fee", nonce0)
 ```
 
 ## Fee Discovery by the Operator
@@ -234,7 +234,7 @@ A shielded output on Midnight is only a commitment and a nullifier: nothing on t
 
 Midnight.js attaches it from a resolver mapping coin public keys to encryption keys. It knows the caller's own wallet and the burn address, and a third party only when given the mapping explicitly (`additionalCoinEncPublicKeyMappings` on the call). An honest client reads `feeRecipientEncryptionPublicKey` from the ledger and passes that mapping, and the fee shows up in the collection wallet at once.
 
-Discovery is a wallet concern, not a contract one, so the contract does nothing more. For clients that omit the mapping, every fee coin is recomputable from public data: colour from the token, value from the `fee` recorded in the request's args, nonce from `feeMintNonce(inIndex)`. The args entry is removed at complete, so a small operator tool reads the contract's transactions from the indexer instead, from a block the operator names so it can resync past coins, rebuilds each fee coin from the start transaction's public transcript, and registers any the wallet has not seen with `watchFor`, which lets the wallet notice a commitment without a ciphertext. Emitting a `ShieldedMint` event per fee would give the scan an indexed commitment to filter on, an implementation detail to settle when the tool is built.
+Discovery is a wallet concern, not a contract one, so the contract does nothing more. For clients that omit the mapping, every fee coin is recomputable from public data: colour from the token, value from the `fee` recorded in the request's args, nonce from `feeMintNonce` over the surrendered coin's nonce, which the start transcript discloses. The args entry is removed at complete, so a small operator tool reads the contract's transactions from the indexer instead, from a block the operator names so it can resync past coins, rebuilds each fee coin from the start transaction's public transcript, and registers any the wallet has not seen with `watchFor`, which lets the wallet notice a commitment without a ciphertext. Emitting a `ShieldedMint` event per fee would give the scan an indexed commitment to filter on, an implementation detail to settle when the tool is built.
 
 ## Residual Risk
 
