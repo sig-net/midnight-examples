@@ -1,5 +1,5 @@
 // Public surface of the vault's deploy package: the split deploy, the
-// deployer-gated initialise and allowed-ERC20 additions, the environment its entrypoints run against, and
+// deployer-gated initialise, allowed-ERC20 additions and fee repricing, the environment its entrypoints run against, and
 // the Node pieces those flows and the integration tests share: the
 // compiled-contract binding over the contract package's managed/ output and
 // the midnight-js provider set. The environment-agnostic client surface
@@ -10,6 +10,8 @@ export * from "./add-allowed-tokens.ts";
 export * from "./deploy-vault.ts";
 export * from "./entrypoint-env.ts";
 export * from "./evm-targets.ts";
+export * from "./fee-config.ts";
 export * from "./initialise-vault.ts";
+export * from "./set-token-fees.ts";
 export * from "./vault-contract-binding.ts";
 export * from "./vault-providers.ts";

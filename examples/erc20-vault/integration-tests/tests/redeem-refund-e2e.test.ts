@@ -55,6 +55,7 @@ import { startRedeem } from "../src/flows/start-redeem.ts";
 import { runSupplyRoundTrip } from "../src/flows/supply-round-trip.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import type { VaultContext } from "../src/vault-context.ts";
+import { vaultFeesOf } from "../src/vault-fees.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -176,14 +177,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "arrange: deposit round trip mints the shielded underlying the supply will burn",
       async () => {
         const context = await session.vaultContext();
+        const underlying = `0x${bytesToHex((await vaultLedger(context)).stataUnderlying)}`;
+        // The supply surrenders the amount plus the supply fee: fund both.
+        const funded = SUPPLY_AMOUNT + (await vaultFeesOf(context, underlying)).supply;
         const { requestId } = await runDepositRoundTrip(session, {
-          amount: SUPPLY_AMOUNT,
-          erc20Address: `0x${bytesToHex((await vaultLedger(context)).stataUnderlying)}`,
+          amount: funded,
+          erc20Address: underlying,
           reuseRequestId: env.REDEEM_REFUND_DEPOSIT_REQUEST_ID as RequestIdHex | undefined,
         });
 
         banner([
-          `Arrange deposit ${requestId} complete: the caller holds ${String(SUPPLY_AMOUNT)} base units of shielded underlying.`,
+          `Arrange deposit ${requestId} complete: the caller holds ${String(funded)} base units of shielded underlying.`,
           "",
           "If a later step dies (e.g. proof-server OOM), resume with",
           `  REDEEM_REFUND_DEPOSIT_REQUEST_ID=${requestId}`,
@@ -267,8 +271,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         const context = await session.vaultContext();
 
         // The drain put the vault account's nonce back, so the nonce the flush
-        // assigns is the account's next expected tx.
-        redeemRequestId = await startRedeem(context, { shares });
+        // assigns is the account's next expected tx. The redeem surrenders the
+        // shares plus the redeem fee, out of the shares the arrange supply minted.
+        const wrapper = `0x${bytesToHex((await vaultLedger(context)).stataToken)}`;
+        const redeemFee = (await vaultFeesOf(context, wrapper)).redeem;
+        redeemRequestId = await startRedeem(context, { shares: shares - redeemFee });
         expect(redeemRequestId).toMatch(/^[0-9a-f]{64}$/);
 
         banner([

@@ -42,14 +42,20 @@ false.
 As illustrated, the flow comprises 9 steps:
 
 - **1.** startWithdraw(...) burns the surrendered coin and queues the request
-  - The caller surrenders a shielded **vault coin** of exactly the withdraw
-    amount. [`startWithdraw`](../../contract/src/erc20-vault.compact) checks
+  - The caller surrenders a shielded **vault coin** worth the withdraw amount
+    plus that ERC20's withdraw fee, read from
+    [`allowedTokens`](../../contract/src/erc20-vault.compact). [`startWithdraw`](../../contract/src/erc20-vault.compact) checks
     the coin's colour is that ERC20's vault token
     ([`vaultTokenDomainSeparator`](../../contract/src/erc20-vault.compact))
-    and burns it: `receiveShielded` assigns the coin to the contract, then
-    `sendImmediateShielded` sends its full value to the shielded burn address.
-    Both calls are needed, as a contract can only spend coins it owns. Vault
-    tokens are IOUs, and a failed withdrawal re-mints them.
+    and [`takeFee`](../../contract/src/erc20-vault.compact) burns it: `receiveShielded` assigns the coin to the
+    contract, then `sendImmediateShielded` sends its full value to the shielded
+    burn address. Both calls are needed, as a contract can only spend coins it
+    owns. Vault tokens are IOUs, and a failed withdrawal re-mints them.
+  - The fee is non-refundable: `takeFee` mints it, of the same colour, to
+    [`feeRecipientCoinPublicKey`](../../contract/src/erc20-vault.compact) under the public nonce
+    [`feeMintNonce`](../../contract/src/erc20-vault.compact) derives from the surrendered coin's nonce, and the circuit
+    records it as `fee` in [`WithdrawArgs`](../../contract/src/erc20-vault.compact). Why the vault charges it is
+    [design proposal 001](../design-proposals/001-take-fees-on-vault-operations/README.md).
   - The call is optimistic, and the coin spend IS the authorisation: the wallet
     can only fund the coin from the caller's own balance, so anyone holding
     vault tokens may withdraw to any destination. The amount is bounded to
@@ -65,7 +71,10 @@ As illustrated, the flow comprises 9 steps:
     [`ownershipCommitment`](../../contract/src/erc20-vault.compact) that makes
     completing the withdrawal, and taking any re-mint, withdrawer-only.
   - Off chain, [`start-withdraw.ts`](../../integration-tests/src/flows/start-withdraw.ts)
-    funds the coin from the caller's shielded balance and calls the circuit.
+    reads the fee from the ledger, funds the coin from the caller's shielded
+    balance and calls the circuit, passing the fee recipient's
+    [`feeRecipientEncryptionPublicKey`](../../contract/src/erc20-vault.compact)
+    so the recipient's wallet discovers the fee coin.
 - **2.** flushQueue(...) assigns the vault nonce and moves the request into the output buffer
   - A request slot of [`flushQueue`](../../contract/src/erc20-vault.compact)
     gives a vault-signed entry the current
@@ -159,7 +168,8 @@ As illustrated, the flow comprises 9 steps:
     nothing, so the circuit re-mints the surrendered amount of the ERC20's
     vault token to the caller, under a caller-chosen random `mintNonce`: a
     nonce derived from the public request id would link the re-minted coin to
-    the withdrawal. On a failure the output it is passed is ignored.
+    the withdrawal. The fee stays with its recipient on every verdict. On a
+    failure the output it is passed is ignored.
   - [`complete-withdraw.ts`](../../integration-tests/src/flows/complete-withdraw.ts)
     queues and flushes the attestation, then calls the circuit with a fresh
     random mint nonce on every verdict.

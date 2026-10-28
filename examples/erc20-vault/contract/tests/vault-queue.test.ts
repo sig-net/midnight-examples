@@ -75,6 +75,8 @@ const SECRET_KEY = new Uint8Array(32).fill(7);
 const MPC_RESPONSE_SECRET = new Uint8Array(32).fill(0x42);
 const VAULT_ADDRESS = sampleContractAddress();
 const ERC20 = new Uint8Array(20).fill(0xaa);
+// No fee on any action: the queue tests move deposits, which charge none anyway.
+const NO_FEES = { withdraw: 0n, swap: 0n, supply: 0n, redeem: 0n };
 const AMOUNT = 1_000_000n;
 const ATTESTED_HEIGHT = 150n;
 
@@ -229,9 +231,13 @@ const arrangeVault = async (arrangement: VaultArrangement) => {
       secp256k1PublicKeyOf(MPC_RESPONSE_SECRET),
       1n,
       100n,
+      NO_FEES,
+      NO_FEES,
+      { bytes: new Uint8Array(32).fill(0xfe) },
+      new Uint8Array(32).fill(0xef),
     )
   ).context;
-  ctx = (await contract.circuits.addAllowedToken(ctx, ERC20)).context;
+  ctx = (await contract.circuits.addAllowedToken(ctx, ERC20, NO_FEES)).context;
   const attested = await sendDeposits(contract, ctx, arrangement.attested);
   ctx = attested.ctx;
   for (const requestId of attested.requestIds) {

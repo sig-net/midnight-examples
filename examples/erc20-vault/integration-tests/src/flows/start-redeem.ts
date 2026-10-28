@@ -1,11 +1,13 @@
 // `startRedeem` then `sendRedeem`: surrender a shielded vault coin of the pinned
-// stataToken wrapper (burned by the contract), flush the queued redeem, which assigns
+// stataToken wrapper worth the shares plus the redeem fee (the contract burns it and
+// mints the fee to the fee recipient), flush the queued redeem, which assigns
 // it the vault account's next EVM nonce, and record its SignBidirectionalEvent in the
 // vault's bidirectionalRedeemMap. It asks the MPC to sign an EVM `redeem(shares,
 // vault, vault)` on the wrapper, sent from the VAULT's derived address (path
 // "vault"). The request id is recomputed off-chain with the library's TS twin of the
 // request-id circuit and asserted against the ledger map index before it is returned.
 // The settle side lives in complete-redeem.ts.
+import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
 import {
   bytesToHex,
   calculateRequestId,
@@ -22,10 +24,12 @@ import {
 } from "@sig-net/midnight";
 import {
   Action,
+  feeRecipientEncryptionMapping,
   flushedRequestIndex,
   newInputIndex,
   readVaultLedger,
   VAULT_PATH_BYTES,
+  vaultTokenFees,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
@@ -46,10 +50,12 @@ export interface StartRedeemOptions {
  * the output buffer, send it with `sendRedeem`, and return the resulting
  * request id.
  *
- * Surrenders a shielded vault coin of exactly `shares` of the vault's pinned
- * stataToken: its colour comes from the compiled `vaultTokenDomainSeparator`
- * circuit plus the runtime's `rawTokenType`, and midnight-js funds its value
- * from the caller's shielded balance when it balances the call. The entry pins
+ * Surrenders a shielded vault coin of exactly `shares` plus the wrapper's
+ * redeem fee read from the ledger, of the vault's pinned stataToken: its colour
+ * comes from the compiled `vaultTokenDomainSeparator` circuit plus the
+ * runtime's `rawTokenType`, and midnight-js funds its value from the caller's
+ * shielded balance when it balances the call. The call carries the fee
+ * recipient's encryption key, so the recipient's wallet discovers the fee coin. The entry pins
  * an ownership commitment of this wallet's identity secret, so only this caller
  * can complete the redeem and take its assets or its re-mint. The caller
  * chooses only the shares: the contract pins both tokens, the vault's account
@@ -63,8 +69,8 @@ export interface StartRedeemOptions {
  * @param options - The redeem arguments.
  * @returns The request id as 64-char lowercase hex.
  * @throws {Error} If the shares are not positive, the vault is uninitialised,
- *   the caller's shielded balance cannot cover `options.shares`, or the
- *   recomputed id does not appear on the ledger.
+ *   the caller's shielded balance cannot cover `options.shares` plus the fee, or
+ *   the recomputed id does not appear on the ledger.
  */
 export async function startRedeem(
   context: VaultContext,
@@ -93,15 +99,23 @@ export async function startRedeem(
   );
 
   // The surrendered coin: the vault token for the pinned wrapper, of exactly
-  // `shares`, under a fresh random nonce.
+  // `shares` plus the redeem fee, under a fresh random nonce.
+  const redeemFee = vaultTokenFees(before, before.stataToken).redeem;
+  console.log(`redeem fee:     ${String(redeemFee)} base units`);
   const coin = {
     nonce: crypto.getRandomValues(new Uint8Array(32)),
     color: hexToBytes(vaultTokenType(wrapper, context.vaultContractAddress)),
-    value: options.shares,
+    value: options.shares + redeemFee,
   };
 
   const inIndex = newInputIndex();
-  const queued = await context.vault.callTx.startRedeem(inIndex, { shares: options.shares }, coin);
+  const queued = await withContractScopedTransaction(
+    context.providers,
+    async (txCtx) => {
+      await context.vault.callTx.startRedeem(txCtx, inIndex, { shares: options.shares }, coin);
+    },
+    { additionalCoinEncPublicKeyMappings: feeRecipientEncryptionMapping(before) },
+  );
   console.log(`redeem queued in tx ${queued.public.txId}`);
   const flushed = await flushUntil(context, (state) => !state.inputRequestBuffer.member(inIndex), {
     inIndexes: [inIndex],

@@ -59,6 +59,7 @@ import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startReplaceNonce } from "../src/flows/start-replace-nonce.ts";
 import { startWithdraw } from "../src/flows/start-withdraw.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
+import { vaultFeesOf } from "../src/vault-fees.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -189,13 +190,18 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     it(
       "arrange: deposit round trip mints the shielded vault tokens the replaced withdraw will burn",
       async () => {
+        // The withdraw surrenders the principal plus the withdraw fee: fund both.
+        const withdrawFee = (
+          await vaultFeesOf(await session.vaultContext(), requireEnv("ERC20_ADDRESS"))
+        ).withdraw;
+        const funded = DEPOSIT_AMOUNT + withdrawFee;
         const { requestId } = await runDepositRoundTrip(session, {
-          amount: DEPOSIT_AMOUNT,
+          amount: funded,
           reuseRequestId: env.REPLACE_NONCE_DEPOSIT_REQUEST_ID as RequestIdHex | undefined,
         });
 
         banner([
-          `Arrange deposit ${requestId} complete: the caller holds ${String(DEPOSIT_AMOUNT)} base units of shielded vault tokens.`,
+          `Arrange deposit ${requestId} complete: the caller holds ${String(funded)} base units of shielded vault tokens.`,
           "",
           "If a later step dies (e.g. proof-server OOM), resume with",
           `  REPLACE_NONCE_DEPOSIT_REQUEST_ID=${requestId}`,
