@@ -1,11 +1,13 @@
-// `startWithdraw` then `sendWithdraw`: surrender a shielded vault coin (burned by
-// the contract), flush the queued withdrawal, which assigns it the vault account's
+// `startWithdraw` then `sendWithdraw`: surrender a shielded vault coin worth the
+// amount plus the withdraw fee (the contract burns it and mints the fee to the fee
+// recipient), flush the queued withdrawal, which assigns it the vault account's
 // next EVM nonce, and record its SignBidirectionalEvent in the vault's
 // bidirectionalWithdrawMap. It asks the MPC to sign an EVM `transfer(destination,
 // amount)` on the ERC20, sent from the VAULT's derived address (path "vault"). The
 // request id is recomputed off-chain with the library's TS twin of the request-id
 // circuit and asserted against the ledger map index before it is returned. The settle
 // side lives in complete-withdraw.ts.
+import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
 import {
   calculateRequestId,
   evmAddressAbiWord,
@@ -22,10 +24,12 @@ import {
 import {
   Action,
   evmAddressBytes,
+  feeRecipientEncryptionMapping,
   flushedRequestIndex,
   newInputIndex,
   readVaultLedger,
   VAULT_PATH_BYTES,
+  vaultTokenFees,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
@@ -48,10 +52,12 @@ export interface StartWithdrawOptions {
  * into the output buffer, send it with `sendWithdraw`, and return the resulting
  * request id.
  *
- * Surrenders a shielded vault coin of exactly `amount`: its colour comes from
- * the compiled `vaultTokenDomainSeparator` circuit plus the runtime's
- * `rawTokenType`, and midnight-js funds its value from the caller's shielded
- * balance when it balances the call. The entry pins an ownership commitment of
+ * Surrenders a shielded vault coin of exactly `amount` plus the token's
+ * withdraw fee read from the ledger: its colour comes from the compiled
+ * `vaultTokenDomainSeparator` circuit plus the runtime's `rawTokenType`, and
+ * midnight-js funds its value from the caller's shielded balance when it
+ * balances the call. The call carries the fee recipient's encryption key, so
+ * the recipient's wallet discovers the fee coin. The entry pins an ownership commitment of
  * this wallet's identity secret, so only this caller can complete the
  * withdrawal and take any re-mint. The caller chooses only the withdrawal
  * itself: the vault's account signs, so the contract copies the vault's gas
@@ -63,9 +69,9 @@ export interface StartWithdrawOptions {
  * @param context - The flow context.
  * @param options - The withdraw arguments.
  * @returns The request id as 64-char lowercase hex.
- * @throws {Error} If an option is invalid, the vault is uninitialised, the
- *   caller's shielded balance cannot cover `options.amount`, or the recomputed
- *   id does not appear on the ledger.
+ * @throws {Error} If an option is invalid, the vault is uninitialised or does not
+ *   allow the ERC20, the caller's shielded balance cannot cover `options.amount`
+ *   plus the fee, or the recomputed id does not appear on the ledger.
  */
 export async function startWithdraw(
   context: VaultContext,
@@ -95,19 +101,28 @@ export async function startWithdraw(
     throw new Error("vault is not initialised, run the initialise flow first");
   }
 
-  // The surrendered coin: the vault token for THIS erc20, of exactly `amount`,
-  // under a fresh random nonce.
+  // The surrendered coin: the vault token for THIS erc20, of exactly `amount`
+  // plus the withdraw fee, under a fresh random nonce.
+  const withdrawFee = vaultTokenFees(before, erc20).withdraw;
+  console.log(`withdraw fee:   ${String(withdrawFee)} base units`);
   const coin = {
     nonce: crypto.getRandomValues(new Uint8Array(32)),
     color: hexToBytes(vaultTokenType(context.erc20Address, context.vaultContractAddress)),
-    value: options.amount,
+    value: options.amount + withdrawFee,
   };
 
   const inIndex = newInputIndex();
-  const queued = await context.vault.callTx.startWithdraw(
-    inIndex,
-    { erc20Address: erc20, amount: options.amount, destEvmAddress },
-    coin,
+  const queued = await withContractScopedTransaction(
+    context.providers,
+    async (txCtx) => {
+      await context.vault.callTx.startWithdraw(
+        txCtx,
+        inIndex,
+        { erc20Address: erc20, amount: options.amount, destEvmAddress },
+        coin,
+      );
+    },
+    { additionalCoinEncPublicKeyMappings: feeRecipientEncryptionMapping(before) },
   );
   console.log(`withdraw queued in tx ${queued.public.txId}`);
   const flushed = await flushUntil(context, (state) => !state.inputRequestBuffer.member(inIndex), {

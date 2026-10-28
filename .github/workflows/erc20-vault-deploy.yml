@@ -9,7 +9,7 @@
 # included: the address is final at that point, and the PR says when the
 # initialise is still to be run by hand.
 #
-# The 27 circuits do not fit one block: a base transaction registers one
+# The 29 circuits do not fit one block: a base transaction registers one
 # and a maintenance update adds each of the rest. A run that fails AFTER
 # printing "deployed erc20-vault base at ..." has a live contract (the
 # failure step below repeats that address in the step summary): do not
@@ -58,8 +58,22 @@
 #   - example: 0x followed by 40 hex chars
 # - EVM_ALLOWED_TOKENS (optional)
 #   - comma-separated ERC20s the deployer allows after initialise, beyond
-#     the stata underlying. Unset, users can deposit only the stata underlying
+#     the stata pair. Unset, users can deposit only the stata pair
 #   - example: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238,0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4
+# - VAULT_TOKEN_FEES (optional)
+#   - JSON object mapping an ERC20 address to its withdraw, swap, supply and
+#     redeem fees, each in THAT token's base units, for the stata pair and
+#     every allowed ERC20 it names
+#   - example: {"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238":{"withdraw":"1000000","swap":"1000000","supply":"1000000","redeem":"1000000"}}
+# - VAULT_FEE_WITHDRAW / VAULT_FEE_SWAP / VAULT_FEE_SUPPLY / VAULT_FEE_REDEEM
+#   - the flat fee each action takes, in the token's base units, on every
+#     token VAULT_TOKEN_FEES leaves out. Required on a deployed network
+#     whenever a token needs them: there is no default off the local stack
+#   - example: 1000000
+# - VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY / VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY (optional)
+#   - the wallet the fee coins are minted to, set both or neither. Unset,
+#     the deployer wallet's own shielded keys
+#   - example: 64 hex chars each
 # - MIDNIGHT_NODE_URL / MIDNIGHT_NODE_INDEXER_URL (optional)
 #   - endpoint overrides, defaulting to the committed per-network endpoints
 #   - example: https://rpc.stagenet.shielded.tools
@@ -226,8 +240,18 @@ jobs:
           EVM_STATA_UNDERLYING: ${{ vars.EVM_STATA_UNDERLYING }}
           EVM_STATA_TOKEN: ${{ vars.EVM_STATA_TOKEN }}
           # The ERC20s the deployer allows after initialise. Blank allows none
-          # beyond the stata underlying.
+          # beyond the stata pair.
           EVM_ALLOWED_TOKENS: ${{ vars.EVM_ALLOWED_TOKENS }}
+          # The fees stamped on each token and the wallet the fee coins go to.
+          # A blank flat fee fails the run for any token VAULT_TOKEN_FEES
+          # leaves out, and a blank recipient falls through to the deployer wallet.
+          VAULT_TOKEN_FEES: ${{ vars.VAULT_TOKEN_FEES }}
+          VAULT_FEE_WITHDRAW: ${{ vars.VAULT_FEE_WITHDRAW }}
+          VAULT_FEE_SWAP: ${{ vars.VAULT_FEE_SWAP }}
+          VAULT_FEE_SUPPLY: ${{ vars.VAULT_FEE_SUPPLY }}
+          VAULT_FEE_REDEEM: ${{ vars.VAULT_FEE_REDEEM }}
+          VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY: ${{ vars.VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY }}
+          VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY: ${{ vars.VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY }}
           # Optional per-environment endpoint overrides. Every network has
           # committed defaults, and a blank var falls through to them.
           MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}

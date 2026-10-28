@@ -1,5 +1,6 @@
 // Joining a deployed vault as its deployer, for the entrypoints that call a
-// deployer-gated circuit without a session: `initialise` and `addAllowedToken`.
+// deployer-gated circuit without a session: `initialise`, `addAllowedToken` and
+// `setTokenFees`.
 // The deployer identity resolves exactly as the deploy resolves it
 // (`VAULT_DEPLOYER_SECRET_KEY`, falling back to the `DEPLOYER_SEED` bytes), so
 // the caller and the commitment sealed at deploy agree by construction.

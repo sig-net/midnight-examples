@@ -3,9 +3,10 @@
 // client, the deploy tooling and a read-only script all drive it the same way.
 
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
+import type { CoinPublicKey, EncPublicKey } from "@midnight-ntwrk/midnight-js-protocol/ledger";
 import { bytesToHex, hexToBytes, toSignBidirectionalEventIndex } from "@sig-net/midnight";
 
-import { ledger } from "./managed/erc20-vault/contract/index.js";
+import { ledger, type TokenFees } from "./managed/erc20-vault/contract/index.js";
 
 /** The decoded vault public ledger state, as the generated `ledger()` returns it. */
 export type VaultLedgerState = ReturnType<typeof ledger>;
@@ -55,9 +56,14 @@ export async function printVaultState(
   console.log(`vault EVM address: 0x${bytesToHex(state.vaultEvmAddress)}`);
   console.log(`EVM chain id:      ${String(state.evmChainId)}`);
   console.log(`vault EVM nonce:   ${String(state.vaultAccountNonce)}`);
+  console.log(`fee recipient:     coin ${bytesToHex(state.feeRecipientCoinPublicKey.bytes)}`);
+  console.log(`                   enc  ${bytesToHex(state.feeRecipientEncryptionPublicKey)}`);
   console.log(`allowed ERC20s:    ${String(state.allowedTokens.size())}`);
-  for (const token of state.allowedTokens) {
-    console.log(`- 0x${bytesToHex(token)}`);
+  for (const [token, { fees }] of state.allowedTokens) {
+    console.log(
+      `- 0x${bytesToHex(token)} fees: withdraw ${String(fees.withdraw)}, swap ${String(fees.swap)}, ` +
+        `supply ${String(fees.supply)}, redeem ${String(fees.redeem)}`,
+    );
   }
 
   printRequestMap("deposit", state.bidirectionalDepositMap);
@@ -111,4 +117,39 @@ export function vaultGasEnvelope(state: VaultLedgerState, kind: VaultGasKind): V
     maxFeePerGas: state.vaultMaxFeePerGas,
     maxPriorityFeePerGas: state.vaultMaxPriorityFeePerGas,
   };
+}
+
+/**
+ * The flat per-action fees the ledger holds for an ERC20's vault coin, which a start
+ * circuit adds to the surrendered principal and takes from the coin.
+ *
+ * @param state - The decoded vault ledger state.
+ * @param erc20Address - The ERC20 the vault coin stands for, as 20 bytes.
+ * @returns That token's fees, in its base units.
+ * @throws {Error} If the vault does not allow the ERC20.
+ */
+export function vaultTokenFees(state: VaultLedgerState, erc20Address: Uint8Array): TokenFees {
+  if (!state.allowedTokens.member(erc20Address)) {
+    throw new Error(`the vault does not allow ERC20 0x${bytesToHex(erc20Address)}`);
+  }
+  return state.allowedTokens.lookup(erc20Address).fees;
+}
+
+/**
+ * The coin-to-encryption key mapping a fee-charging call passes midnight-js, so the
+ * fee coin's ciphertext is encrypted to the recipient wallet the ledger names and that
+ * wallet discovers the coin.
+ *
+ * @param state - The decoded vault ledger state.
+ * @returns One entry: the fee recipient's coin public key to its encryption public key.
+ */
+export function feeRecipientEncryptionMapping(
+  state: VaultLedgerState,
+): ReadonlyMap<CoinPublicKey, EncPublicKey> {
+  return new Map([
+    [
+      bytesToHex(state.feeRecipientCoinPublicKey.bytes),
+      bytesToHex(state.feeRecipientEncryptionPublicKey),
+    ],
+  ]);
 }

@@ -53,6 +53,7 @@ import { pollSignatureResponse } from "../src/flows/poll-signature-response.ts";
 import { startSupply } from "../src/flows/start-supply.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import type { VaultContext } from "../src/vault-context.ts";
+import { vaultFeesOf } from "../src/vault-fees.ts";
 import { createVaultSession } from "../src/vault-session.ts";
 import { vaultTokenType } from "../src/vault-token.ts";
 
@@ -180,14 +181,17 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
       "arrange: deposit round trip mints the shielded underlying the doomed supply will burn",
       async () => {
         const context = await session.vaultContext();
+        const underlying = await pinnedUnderlying(context);
+        // The supply surrenders the amount plus the supply fee: fund both.
+        const funded = SUPPLY_AMOUNT + (await vaultFeesOf(context, underlying)).supply;
         const { requestId } = await runDepositRoundTrip(session, {
-          amount: SUPPLY_AMOUNT,
-          erc20Address: await pinnedUnderlying(context),
+          amount: funded,
+          erc20Address: underlying,
           reuseRequestId: env.SUPPLY_REFUND_DEPOSIT_REQUEST_ID as RequestIdHex | undefined,
         });
 
         banner([
-          `Arrange deposit ${requestId} complete: the caller holds ${String(SUPPLY_AMOUNT)} base units of shielded underlying.`,
+          `Arrange deposit ${requestId} complete: the caller holds ${String(funded)} base units of shielded underlying.`,
           "",
           "If a later step dies (e.g. proof-server OOM), resume with",
           `  SUPPLY_REFUND_DEPOSIT_REQUEST_ID=${requestId}`,
