@@ -29,7 +29,7 @@ action.
 |---|---|
 | [`initialise`](#setup-step-4-pin-the-derived-addresses-and-the-response-key) | Deployment setup rather than an MPC flow: the deployer-gated one-shot that pins the vault's derived EVM address, the EVM chain, the Uniswap router, the Aave stataToken pair, the MPC response key and the EVM height attestations must exceed. |
 | `setGasParams` | The deployer resets the fee envelope and the per-action gas limits of the transactions the vault's own account signs. A request keeps the values it was started with. |
-| `addAllowedToken` / `setTokenFees` | The deployer allows one more ERC20 into the vault, with the flat fee each fee-charging action takes on it, and reprices an allowed token's fees later. `startDeposit` accepts only an allowed ERC20, and `startSwap` buys only an allowed `erc20AddressOut`. `initialise` allows the stata pair itself, and no circuit removes a token. |
+| `addAllowedToken` / `setTokenFees` | The deployer allows one more ERC20 into the vault, with the flat fee each fee-charging action takes on it, and reprices an allowed token's fees later. `startDeposit` accepts only an allowed ERC20, and `startSwap` buys only an allowed `erc20AddressOut`. `initialise` allows the stata pair itself, and no circuit removes a token. Allow only [supported tokens](#supported-tokens). |
 | `setFeeRecipient` | The deployer moves the wallet every fee coin is minted to: its coin public key and the encryption public key clients encrypt the coin's ciphertext to. `initialise` names the first one. |
 | [`flushQueue`](docs/contention-handling.md#the-flush) | The only writer of `globalLastSeen` after `initialise` and of `vaultAccountNonce`: moves up to 10 queued requests and attestations into the output buffers, assigning each vault-signed request the vault account's next EVM nonce. Anyone may submit it. |
 | [`queueAttestation`](docs/contention-handling.md#why-the-queue-needs-no-output) | Verify an MPC attestation's signature over the output width and hash it carries, and queue it for the flush, whatever the output's width. Anyone may submit one. |
@@ -113,6 +113,20 @@ several transactions around a request queue (see
 [Sign Bidirectional Flow](../../README.md#sign-bidirectional-protocol-flow) in the repo
 README for the protocol diagram and its step walkthrough, which points on to
 the integration repository for the full detail.
+
+## Supported tokens
+
+Midnight's mint API takes a `Uint<64>`, so one vault coin holds at most
+`2^64 - 1` base units. Every `start*` circuit rejects an input at or above
+`2^64`, but the attested output of a supply or redeem is not known at start. If
+it reaches `2^64`, the settle circuit can never succeed, and the funds stay
+locked. So the vault supports only ERC20s whose total supply, in base units,
+stays below `2^64` (~1.8 × 10^19), the stata pair included. 6-decimal USDC and
+8-decimal WBTC are well inside the limit. An 18-decimal token such as WETH or
+DAI is not: there, `2^64` base units is ~18.4 tokens.
+
+This limit is temporary. We are working to support 18-decimal tokens. Progress
+is tracked in [#100](https://github.com/sig-net/midnight-examples/issues/100).
 
 ## Integration guide
 
@@ -338,7 +352,8 @@ Nothing is narrowed off chain. A `uint256` reaches the circuit as `Bytes<32>`,
 and the vault's readers (`swapAmountIn`, `supplyShares`, `redeemAssets`) narrow
 it in-circuit: the SDK's `checkedTruncationU128` to `Uint<128>`, then a checked
 cast to the `Uint<64>` the mint API takes, so an attested value at or above
-`2^64` fails the settle circuit under a valid signature. The simulator tests
+`2^64` fails the settle circuit under a valid signature (see
+[Supported tokens](#supported-tokens)). The simulator tests
 exercise those bounds and decode SDK-produced bytes with the compiled circuits.
 Failed and unviable outcomes carry an empty output, and so does an executed
 nonce replacement: its settle verifies at width 0 and closes the request on
@@ -769,10 +784,9 @@ are the ones `@sig-net/midnight` publishes for the network, and the chain id is
 read from `EVM_RPC_URL`. The fees come from two variables. `VAULT_TOKEN_FEES`
 is a JSON object mapping an ERC20 address to its `withdraw`, `swap`, `supply`
 and `redeem` fees, each an integer in THAT token's base units (a 6-decimal
-USDC and an 18-decimal token need figures twelve orders apart for the same
-value), and prices the stata pair at `initialise`, any ERC20
-`EVM_ALLOWED_TOKENS` lists, and whatever `yarn set-token-fees:erc20-vault`
-reprices. Every token the map leaves out takes the flat `VAULT_FEE_WITHDRAW`,
+USDC and an 8-decimal WBTC need different figures for the same value), and
+prices the stata pair at `initialise`, any ERC20 `EVM_ALLOWED_TOKENS` lists,
+and whatever `yarn set-token-fees:erc20-vault` reprices. Every token the map leaves out takes the flat `VAULT_FEE_WITHDRAW`,
 `VAULT_FEE_SWAP`, `VAULT_FEE_SUPPLY` and `VAULT_FEE_REDEEM` values, which a
 deployed network requires whenever a token needs them (the local stack alone
 defaults each to 1000). `VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY` with
