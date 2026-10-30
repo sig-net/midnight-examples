@@ -16,7 +16,7 @@ A diagram is a committed pair:
 Render settings live in the repo's draw.io config file, [drawio.config.json](../drawio.config.json).
 Resolution changes are edits to that file (`render.scale`), re-rendering every pair in the
 same change. The pair moves together: re-render after every source edit, and commit both.
-Draw.io SVG exports depend on the viewer's theme and render broken in dark mode, so READMEs
+Draw.io SVG exports depend on the viewer's theme and render broken under a dark viewer theme, so READMEs
 embed the PNG and never an SVG.
 
 **TIP:** If you are using a coding agent you can ask it to edit and render diagrams for
