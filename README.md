@@ -1,5 +1,9 @@
 # Midnight Contracts Calling Foreign Chains with Sig Network
 
+> **Night Mode for other blockchains.** Midnight contracts act on foreign chains through the Sig Network MPC, bringing Midnight's privacy to applications already deployed elsewhere. The first example is an ERC20 vault that holds, swaps and lends tokens on an EVM chain.
+
+This project is built on the Midnight Network.
+
 This monorepo holds experimental example contracts for Midnight. They use the Sig Network [Distributed MPC](https://github.com/sig-net/mpc) to execute arbitrary transactions on foreign blockchains, through the [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow).
 
 The examples demonstrate how to integrate using the following packages:
