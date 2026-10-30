@@ -294,6 +294,13 @@ exception for that specific case.
   the WHOLE repo for the old name before finishing — CI workflows and READMEs
   quote script names.
 
+- **The phrase is "Night Mode", NEVER "dark mode".** Wherever text describes
+  Midnight bringing privacy to another blockchain (taglines, READMEs, docs,
+  package descriptions, commit messages, PR text, awesome-list entries), the
+  term is **Night Mode**, capitalised exactly so. "Dark mode", in any casing,
+  never appears anywhere in this repository, and a reviewer fixes it on sight.
+  Grep the change for `dark mode` (case-insensitive) before finishing.
+
 # Contract packages (`examples/*/contract`)
 
 Every example's contract package is deliberately identical in shape; these rules
@@ -385,7 +392,7 @@ apply to all of them:
   overrides (resolution changes are edits to [drawio.config.json](drawio.config.json),
   re-rendering every pair in the same change), commit a PNG not rendered from the
   `.drawio` source beside it, leave an edge without `source` and `target` attachments,
-  or embed a draw.io SVG export in docs (it renders theme-mangled in dark-mode viewers).
+  or embed a draw.io SVG export in docs (it renders theme-mangled under a dark viewer theme).
   Never draw a diagonal or almost-straight edge segment (edges are strict horizontal and
   vertical runs, `strokeWidth=2`, coloured step edges turning their corners as arcs and
   derivation edges keeping sharp right angles), never let an edge cut
