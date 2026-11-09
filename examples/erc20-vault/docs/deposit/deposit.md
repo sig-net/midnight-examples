@@ -254,9 +254,9 @@ As illustrated, the flow comprises 10 steps:
   - The mint nonce is a fresh RANDOM 32 bytes per settle: one derived from the
     (public) request id would let any observer link the minted coin to the
     deposit. Minting to another wallet needs that wallet's encryption public
-    key mapped in, which is why
+    key mapped in, which
     [`complete-deposit.ts`](../../integration-tests/src/flows/complete-deposit.ts)
-    wraps that case in a contract-scoped transaction.
+    passes as the call's `additionalCoinEncPublicKeyMappings`.
 
 ## The shared vault and reader setup
 

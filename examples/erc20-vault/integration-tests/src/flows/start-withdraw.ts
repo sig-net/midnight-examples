@@ -7,7 +7,7 @@
 // request id is recomputed off-chain with the library's TS twin of the request-id
 // circuit and asserted against the ledger map index before it is returned. The settle
 // side lives in complete-withdraw.ts.
-import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
+import { createCallTxOptions, submitCallTx } from "@midnight-ntwrk/midnight-js/contracts";
 import {
   calculateRequestId,
   evmAddressAbiWord,
@@ -29,8 +29,10 @@ import {
   newInputIndex,
   readVaultLedger,
   VAULT_PATH_BYTES,
+  VAULT_PRIVATE_STATE_ID,
   vaultTokenFees,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-deploy";
 
 import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import { ERC20_TRANSFER_SELECTOR } from "../evm-transfer.ts";
@@ -112,18 +114,17 @@ export async function startWithdraw(
   };
 
   const inIndex = newInputIndex();
-  const queued = await withContractScopedTransaction(
-    context.providers,
-    async (txCtx) => {
-      await context.vault.callTx.startWithdraw(
-        txCtx,
-        inIndex,
-        { erc20Address: erc20, amount: options.amount, destEvmAddress },
-        coin,
-      );
-    },
-    { additionalCoinEncPublicKeyMappings: feeRecipientEncryptionMapping(before) },
-  );
+  const queued = await submitCallTx(context.providers, {
+    ...createCallTxOptions(
+      vaultCompiledContract,
+      "startWithdraw",
+      context.vaultContractAddress,
+      VAULT_PRIVATE_STATE_ID,
+      feeRecipientEncryptionMapping(before),
+      [inIndex, { erc20Address: erc20, amount: options.amount, destEvmAddress }, coin],
+    ),
+    privateStateId: VAULT_PRIVATE_STATE_ID,
+  });
   console.log(`withdraw queued in tx ${queued.public.txId}`);
   const flushed = await flushUntil(context, (state) => !state.inputRequestBuffer.member(inIndex), {
     inIndexes: [inIndex],

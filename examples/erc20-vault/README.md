@@ -267,12 +267,12 @@ import "@sig-net/midnight/src/Signet";
 ```
 
 The compile script resolves that import through `node_modules` with
-`COMPACT_PATH`, passes the mandatory `--feature-zkir-v3` flag, and links the
+`COMPACT_PATH` and links the
 Signet singleton's managed artefacts in as `src/managed/SignetSigner` for the
 cross-contract call:
 
 ```sh
-COMPACT_PATH=../../../node_modules compact compile --feature-zkir-v3 \
+COMPACT_PATH=../../../node_modules compact compile \
   src/erc20-vault.compact src/managed/erc20-vault
 ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed \
   src/managed/SignetSigner
@@ -360,7 +360,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.25.1/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.6/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
@@ -527,7 +527,7 @@ contracts.
 corepack enable
 yarn install
 cp .env.example .env                # then set SEPOLIA_FORK_RPC_URL to an archive Sepolia RPC
-compact update 0.33.0-rc.2          # Exact version required.
+compact update 0.36.0               # Exact version required.
 yarn compile:erc20-vault            # no zk keys: the first e2e run generates them itself (~10 min)
 docker compose up -d                # node, indexer, proof server, anvil forking
                                     # Sepolia (NOT the fakenet responder: it is

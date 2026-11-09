@@ -75,9 +75,9 @@ async function readContractState(
   pdp: IndexerPublicDataProvider,
   contractAddress: string,
 ): Promise<{ serialized: Uint8Array; counter: bigint } | undefined> {
-  const state = await pdp.queryContractState(contractAddress);
-  if (!state) return undefined;
-  const serialized = state.serialize();
+  const read = await pdp.queryContractState(contractAddress);
+  if (!read) return undefined;
+  const serialized = read.contractState.serialize();
   const counter = ledger.ContractState.deserialize(serialized).maintenanceAuthority.counter;
   return { serialized, counter };
 }

@@ -172,16 +172,14 @@ For more detail on the ERC20 vault example and on running its e2e suite (a fresh
 | ------- | ------| ------  |----------- |
 | Node | ≥ 22 | `node --version` | [nodejs.org](https://nodejs.org) or your version manager (nvm, fnm, …) |
 | Yarn 4 (via Corepack) | 4.x | `corepack enable && yarn --version` | Corepack ships with Node. The repo's `packageManager` field pins the Yarn version |
-| Compact toolchain | compiler 0.33.0-rc.2, invoked with `--feature-zkir-v3` (see note) | `compact compile --version` → `0.33.0` | Install the `compact` launcher per [Midnight's docs](https://docs.midnight.network/), then `compact update 0.33.0-rc.2` (compiler builds live at [LFDT-Minokawa/compact releases](https://github.com/LFDT-Minokawa/compact/releases)). If the launcher refuses the rc version, use the direct-download recipe in [.github/workflows/example-test.yaml](.github/workflows/example-test.yaml) |
+| Compact toolchain | compiler 0.36.0 | `compact compile --version` → `0.36.0` | Install the `compact` launcher per [Midnight's docs](https://docs.midnight.network/), then `compact update 0.36.0` (compiler builds live at [LFDT-Minokawa/compact releases](https://github.com/LFDT-Minokawa/compact/releases)) |
 | A docker environment | any recent engine | `docker --version` | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS/Windows) or your distro's engine, with **≥ 16 GB RAM allocated** (see note) |
 | Docker Compose v2 | ≥ 2.x | `docker compose version` | Included with Docker Desktop, plugin package on Linux |
 
-**NOTE:** every `compact compile` against this stack must pass the
-`--feature-zkir-v3` flag: it is part of the pinned ledger-9 matched set
-(compiler, node, indexer, proof server), and output compiled without it is not
-compatible with that stack. This repository's compile scripts already pass it.
-Integrators compiling their own contracts must pass it themselves, as shown in
-the [Integrator Guide](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide).
+**NOTE:** the compiler is part of the pinned ledger-9 matched set (compiler,
+node, indexer, proof server). Compile your own contracts with exactly that
+release: the Compact runtime accepts a cross-contract callee only when its
+compiled verifier keys match the keys deployed on chain.
 
 **NOTE:** the Midnight proof server is quite heavy. Allocate at least 16 GB of
 RAM to your docker environment, otherwise expect to restart the tests multiple

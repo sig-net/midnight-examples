@@ -1,6 +1,8 @@
 // Simulator-level unit tests: the contract runs entirely in-process via
 // @midnight-ntwrk/compact-runtime. No ledger, no network, no proving.
 
+import { readFileSync } from "node:fs";
+
 import {
   ChargedState,
   type CircuitContext,
@@ -14,9 +16,14 @@ import {
   StateMap,
   StateValue,
 } from "@midnight-ntwrk/compact-runtime";
-// This tree's wasm ContractState class: see signetStateProvider for why the
+// This tree's wasm ContractState class: see deployedSignetState for why the
 // portal-linked signet module's state must round-trip through it.
-import { ContractState, CostModel, QueryContext } from "@midnightntwrk/onchain-runtime-v4";
+import {
+  ContractOperation,
+  ContractState,
+  CostModel,
+  QueryContext,
+} from "@midnightntwrk/onchain-runtime-v4";
 import {
   asciiPadded,
   assembleCalldata,
@@ -55,8 +62,8 @@ const ERC20_TRANSFER_SELECTOR = new Uint8Array([0xa9, 0x05, 0x9c, 0xbb]);
 // The signet contract (callee) module, the same one the vault's generated code
 // cross-contract-calls (via the compile-time src/managed/SignetSigner link
 // into this npm package's managed output). The request circuits end in a call
-// to its signBidirectional, so the simulator needs its state
-// (see signetStateProvider) to execute that path.
+// to its signBidirectional, so the simulator needs its module and deployed
+// state (see signetCrossContract) to execute that path.
 import * as SignetSigner from "@sig-net/midnight-contract/managed/contract/index.js";
 
 import {
@@ -129,26 +136,50 @@ const SIGNET_CONTRACT_REF = {
 };
 const BLOCK_HASH = "0".repeat(64);
 
+// The verifier key the published signet contract package ships for each provable circuit, read once.
+const SIGNET_VERIFIER_KEYS: ReadonlyMap<string, Uint8Array> = new Map(
+  Object.entries(SignetSigner.circuitSignatures)
+    .filter(([, signature]) => signature.provable)
+    .map(([circuitId]) => [
+      circuitId,
+      readFileSync(
+        new URL(`../src/managed/SignetSigner/keys/${circuitId}.verifier`, import.meta.url),
+      ),
+    ]),
+);
+
 /**
- * A ContractStateProvider serving the signet contract's initial state to the
- * simulator's cross-contract call, which is how the request circuits reach
- * signBidirectionalEvent in-process (no node/indexer). Returns the state for
- * any address: the vault only calls the single sealed signet contract.
+ * The signet contract's deployed state as a cross-contract callee: its initial
+ * state carrying the shipped verifier keys, which the runtime matches against
+ * the callee module's expected keys.
  *
- * The state is re-materialised through bytes: while `@sig-net/*` resolve to
- * the sibling checkout (portal wiring), the signet module runs on its OWN
- * copy of the wasm runtime, and the simulator's `instanceof ContractState`
- * checks demand THIS tree's class identity. Serialisation is
- * identity-neutral, so a byte round trip converts between the two. Harmless
- * (a no-op copy) under published single-tree installs.
+ * The state crosses into this tree's `ContractState` class through bytes, as
+ * a linked SDK checkout runs the signet module on its own copy of the wasm runtime.
+ *
+ * @returns The signet contract's state with every operation's verifier key set.
  */
-const signetStateProvider = async () => {
+async function deployedSignetState(): Promise<ContractState> {
   const signet = new SignetSigner.Contract({});
   const { currentContractState } = await signet.initialState(
     createConstructorContext(undefined, CPK),
   );
   const state = ContractState.deserialize(currentContractState.serialize());
-  return { getContractState: () => Promise.resolve(state) };
+  for (const [circuitId, verifierKey] of SIGNET_VERIFIER_KEYS) {
+    const operation = new ContractOperation();
+    operation.verifierKey = verifierKey;
+    state.setOperation(circuitId, operation);
+  }
+  return state;
+}
+
+/**
+ * How the simulator reaches signBidirectionalEvent from the request circuits
+ * in-process (no node/indexer). Every address resolves to the signet contract:
+ * the vault only calls the single sealed signet contract.
+ */
+const signetCrossContract = {
+  stateProvider: { getContractState: deployedSignetState },
+  moduleProvider: { resolve: () => () => Promise.resolve(SignetSigner) },
 };
 
 const VAULT_EVM = bytes(20, 0xee);
@@ -265,18 +296,15 @@ const deployContract = async (deployerCommitment: Uint8Array = DEPLOYER_COMMITME
     deployerCommitment,
     SIGNET_CONTRACT_REF,
   );
-  const ctx = createCircuitContext(
-    "startDeposit",
-    VAULT_ADDRESS,
-    CPK,
-    currentContractState,
-    currentPrivateState,
-    await signetStateProvider(),
-    undefined,
-    undefined,
-    undefined,
-    BLOCK_HASH,
-  );
+  const ctx = createCircuitContext({
+    circuitId: "startDeposit",
+    contractAddress: VAULT_ADDRESS,
+    coinPublicKeyOrZswapState: CPK,
+    contractState: currentContractState,
+    privateState: currentPrivateState,
+    parentBlockHash: BLOCK_HASH,
+    crossContract: signetCrossContract,
+  });
   return { contract, ctx };
 };
 
@@ -285,22 +313,19 @@ const deployContract = async (deployerCommitment: Uint8Array = DEPLOYER_COMMITME
  * state, but the private state (the callerSecretKey witness) is a stranger's
  * ({@link OTHER_SECRET_KEY}).
  */
-const strangerContext = async (
+const strangerContext = (
   circuitId: string,
   ctx: Parameters<Contract<VaultPrivateState>["circuits"]["startDeposit"]>[0],
 ) =>
-  createCircuitContext(
+  createCircuitContext({
     circuitId,
-    VAULT_ADDRESS,
-    CPK,
-    ctx.callContext.currentQueryContext.state,
-    createVaultPrivateState(OTHER_SECRET_KEY),
-    await signetStateProvider(),
-    undefined,
-    undefined,
-    undefined,
-    BLOCK_HASH,
-  );
+    contractAddress: VAULT_ADDRESS,
+    coinPublicKeyOrZswapState: CPK,
+    contractState: ctx.callContext.currentQueryContext.state,
+    privateState: createVaultPrivateState(OTHER_SECRET_KEY),
+    parentBlockHash: BLOCK_HASH,
+    crossContract: signetCrossContract,
+  });
 
 const stateOf = (ctx: CircuitContext<VaultPrivateState>): unknown =>
   ctx.callContext.currentQueryContext.state;
@@ -633,7 +658,7 @@ describe("addAllowedToken", () => {
     const { contract, ctx } = await deployInitialised();
     await expect(
       contract.circuits.addAllowedToken(
-        await strangerContext("addAllowedToken", ctx),
+        strangerContext("addAllowedToken", ctx),
         UNLISTED_ERC20,
         TOKEN_FEES,
       ),
@@ -1255,7 +1280,7 @@ describe("completeDeposit settle", () => {
     );
     await expect(
       contract.circuits.completeDeposit(
-        await strangerContext("completeDeposit", attested),
+        strangerContext("completeDeposit", attested),
         requestId,
         OUTPUT_SUCCESS,
         MINT_NONCE,
@@ -1676,7 +1701,7 @@ describe("sendWithdraw", () => {
     );
 
     const sent = (
-      await contract.circuits.sendWithdraw(await strangerContext("sendWithdraw", flushed), outIndex)
+      await contract.circuits.sendWithdraw(strangerContext("sendWithdraw", flushed), outIndex)
     ).context;
     const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalWithdrawMap);
     expect(index.size).toBe(1);
@@ -1869,7 +1894,7 @@ describe("completeWithdraw settle", () => {
 
       await expect(
         contract.circuits.completeWithdraw(
-          await strangerContext("completeWithdraw", attested),
+          strangerContext("completeWithdraw", attested),
           requestId,
           presentedOutput,
           MINT_NONCE,
@@ -2213,9 +2238,7 @@ describe("approve validation", () => {
 
   it.each(APPROVALS)("$name rejects a caller other than the deployer", async ({ name, start }) => {
     const { contract, ctx } = await deployInitialised();
-    await expect(start(contract, await strangerContext(name, ctx))).rejects.toThrow(
-      /Not the deployer/,
-    );
+    await expect(start(contract, strangerContext(name, ctx))).rejects.toThrow(/Not the deployer/);
   });
 
   it.each(APPROVALS)("$name rejects before initialise", async ({ start }) => {
@@ -2260,7 +2283,7 @@ describe("sendApprove", () => {
     const outIndex = flushedRequestIndex(ledgerOf(flushed), Action.approve, APPROVE_INDEX);
 
     const sent = (
-      await contract.circuits.sendApprove(await strangerContext("sendApprove", flushed), outIndex)
+      await contract.circuits.sendApprove(strangerContext("sendApprove", flushed), outIndex)
     ).context;
     const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalApproveMap);
     expect(index.size).toBe(1);
@@ -2400,7 +2423,7 @@ describe("completeApprove settle", () => {
 
       await expect(
         contract.circuits.completeApprove(
-          await strangerContext("completeApprove", attested),
+          strangerContext("completeApprove", attested),
           requestId,
           presentedOutput,
         ),
@@ -2763,7 +2786,7 @@ describe("replace nonce validation", () => {
 
   it("is deployer-gated: a stranger is refused and nothing is queued", async () => {
     const { contract, ctx, requestId: withdrawId } = await withdrawRequested();
-    const stranger = await strangerContext("startReplaceNonce", ctx);
+    const stranger = strangerContext("startReplaceNonce", ctx);
 
     await expect(
       queueReplaceNonce(contract, stranger, { ...VALID_REPLACE_NONCE, requestId: withdrawId }),
@@ -2824,7 +2847,7 @@ describe("sendReplaceNonce", () => {
 
     const sent = (
       await contract.circuits.sendReplaceNonce(
-        await strangerContext("sendReplaceNonce", flushed),
+        strangerContext("sendReplaceNonce", flushed),
         outIndex,
       )
     ).context;
@@ -2972,7 +2995,7 @@ describe("completeReplaceNonce settle", () => {
 
       await expect(
         contract.circuits.completeReplaceNonce(
-          await strangerContext("completeReplaceNonce", attested),
+          strangerContext("completeReplaceNonce", attested),
           requestId,
         ),
       ).rejects.toThrow(/Not the requester/);
@@ -3481,9 +3504,8 @@ describe("sendSwap", () => {
     const flushed = await flush(contract, queued, [VALID_SWAP.inIndex], []);
     const outIndex = flushedRequestIndex(ledgerOf(flushed), Action.swap, VALID_SWAP.inIndex);
 
-    const sent = (
-      await contract.circuits.sendSwap(await strangerContext("sendSwap", flushed), outIndex)
-    ).context;
+    const sent = (await contract.circuits.sendSwap(strangerContext("sendSwap", flushed), outIndex))
+      .context;
     const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalSwapMap);
     expect(index.size).toBe(1);
     const record = first(index.values(), "swap request");
@@ -3728,7 +3750,7 @@ describe("completeSwap settle", () => {
 
       await expect(
         contract.circuits.completeSwap(
-          await strangerContext("completeSwap", attested),
+          strangerContext("completeSwap", attested),
           requestId,
           presentedOutput,
           MINT_NONCE,
@@ -4269,7 +4291,7 @@ describe("sendSupply", () => {
     const outIndex = flushedRequestIndex(ledgerOf(flushed), Action.supply, VALID_SUPPLY.inIndex);
 
     const sent = (
-      await contract.circuits.sendSupply(await strangerContext("sendSupply", flushed), outIndex)
+      await contract.circuits.sendSupply(strangerContext("sendSupply", flushed), outIndex)
     ).context;
     const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalSupplyMap);
     expect(index.size).toBe(1);
@@ -4528,7 +4550,7 @@ describe("completeSupply settle", () => {
 
       await expect(
         contract.circuits.completeSupply(
-          await strangerContext("completeSupply", attested),
+          strangerContext("completeSupply", attested),
           requestId,
           presentedOutput,
           MINT_NONCE,
@@ -4964,7 +4986,7 @@ describe("sendRedeem", () => {
     const outIndex = flushedRequestIndex(ledgerOf(flushed), Action.redeem, VALID_REDEEM.inIndex);
 
     const sent = (
-      await contract.circuits.sendRedeem(await strangerContext("sendRedeem", flushed), outIndex)
+      await contract.circuits.sendRedeem(strangerContext("sendRedeem", flushed), outIndex)
     ).context;
     const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalRedeemMap);
     expect(index.size).toBe(1);
@@ -5150,7 +5172,7 @@ describe("completeRedeem settle", () => {
 
       await expect(
         contract.circuits.completeRedeem(
-          await strangerContext("completeRedeem", attested),
+          strangerContext("completeRedeem", attested),
           requestId,
           presentedOutput,
           MINT_NONCE,
@@ -5304,6 +5326,14 @@ const gasOf = (run: { context: CircuitContext<VaultPrivateState> }): Record<stri
 const withHeadroom = (gas: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(Object.entries(gas).map(([k, v]) => [k, typeof v === "bigint" ? v * 8n : v]));
 
+// The ledger rejects a transcript that claims more bytesDeleted than it deletes, and a
+// threaded simulator context sums the cost of every call before the run, so the replay
+// claims no deletions.
+const withoutDeletionClaim = (gas: Record<string, unknown>): Record<string, unknown> => ({
+  ...gas,
+  bytesDeleted: 0n,
+});
+
 const replay = (
   state: unknown,
   run: { context: CircuitContext<VaultPrivateState> },
@@ -5314,7 +5344,7 @@ const replay = (
   (qc as unknown as { block: unknown }).block = call.initialQueryContext.block;
   const gas = gasOf(run);
   const transcript = {
-    gas: headroom ? withHeadroom(gas) : gas,
+    gas: withoutDeletionClaim(headroom ? withHeadroom(gas) : gas),
     effects: call.finalQueryContext.effects,
     program: call.publicTranscript,
   };
@@ -6082,7 +6112,7 @@ const CONCURRENT_STARTS_CASES: ConcurrentStartsCase[] = [
     name: "startDeposit, by the depositor and a stranger",
     first: (contract, ctx) => queueDeposit(contract, ctx, VALID_DEPOSIT),
     second: async (contract, ctx) =>
-      queueDeposit(contract, await strangerContext("startDeposit", ctx), {
+      queueDeposit(contract, strangerContext("startDeposit", ctx), {
         ...VALID_DEPOSIT,
         inIndex: VALID_DEPOSIT.inIndex + 1n,
       }),
@@ -6091,7 +6121,7 @@ const CONCURRENT_STARTS_CASES: ConcurrentStartsCase[] = [
     name: "startWithdraw, by the withdrawer and a stranger",
     first: (contract, ctx) => queueWithdraw(contract, ctx, VALID_WITHDRAW),
     second: async (contract, ctx) =>
-      queueWithdraw(contract, await strangerContext("startWithdraw", ctx), {
+      queueWithdraw(contract, strangerContext("startWithdraw", ctx), {
         ...VALID_WITHDRAW,
         inIndex: VALID_WITHDRAW.inIndex + 1n,
       }),
@@ -6133,7 +6163,7 @@ const CONCURRENT_STARTS_CASES: ConcurrentStartsCase[] = [
     name: "startSwap, by the swapper and a stranger",
     first: (contract, ctx) => queueSwap(contract, ctx, VALID_SWAP),
     second: async (contract, ctx) =>
-      queueSwap(contract, await strangerContext("startSwap", ctx), {
+      queueSwap(contract, strangerContext("startSwap", ctx), {
         ...VALID_SWAP,
         inIndex: VALID_SWAP.inIndex + 1n,
       }),
@@ -6142,7 +6172,7 @@ const CONCURRENT_STARTS_CASES: ConcurrentStartsCase[] = [
     name: "startSupply, by the supplier and a stranger",
     first: (contract, ctx) => queueSupply(contract, ctx, VALID_SUPPLY),
     second: async (contract, ctx) =>
-      queueSupply(contract, await strangerContext("startSupply", ctx), {
+      queueSupply(contract, strangerContext("startSupply", ctx), {
         ...VALID_SUPPLY,
         inIndex: VALID_SUPPLY.inIndex + 1n,
       }),
@@ -6151,7 +6181,7 @@ const CONCURRENT_STARTS_CASES: ConcurrentStartsCase[] = [
     name: "startRedeem, by the redeemer and a stranger",
     first: (contract, ctx) => queueRedeem(contract, ctx, VALID_REDEEM),
     second: async (contract, ctx) =>
-      queueRedeem(contract, await strangerContext("startRedeem", ctx), {
+      queueRedeem(contract, strangerContext("startRedeem", ctx), {
         ...VALID_REDEEM,
         inIndex: VALID_REDEEM.inIndex + 1n,
       }),
@@ -6484,11 +6514,7 @@ describe("setTokenFees", () => {
   it("is deployer-gated", async () => {
     const { contract, ctx } = await deployInitialised();
     await expect(
-      contract.circuits.setTokenFees(
-        await strangerContext("setTokenFees", ctx),
-        ERC20,
-        REPRICED_FEES,
-      ),
+      contract.circuits.setTokenFees(strangerContext("setTokenFees", ctx), ERC20, REPRICED_FEES),
     ).rejects.toThrow(/Not the deployer/);
   });
 });
@@ -6520,7 +6546,7 @@ describe("setFeeRecipient", () => {
     const { contract, ctx } = await deployInitialised();
     await expect(
       contract.circuits.setFeeRecipient(
-        await strangerContext("setFeeRecipient", ctx),
+        strangerContext("setFeeRecipient", ctx),
         { bytes: OTHER_RECIPIENT_CPK },
         OTHER_RECIPIENT_EPK,
       ),
@@ -6696,7 +6722,7 @@ describe("gas parameters: initialise defaults", () => {
 describe("setGasParams", () => {
   it("is deployer-gated", async () => {
     const { contract, ctx } = await deployInitialised();
-    const stranger = await strangerContext("setGasParams", ctx);
+    const stranger = strangerContext("setGasParams", ctx);
 
     await expect(setGasParams(contract, stranger, NEW_GAS_PARAMS)).rejects.toThrow(
       /Not the deployer/,
@@ -6705,7 +6731,7 @@ describe("setGasParams", () => {
 
   it("leaves the stored values untouched when a non-deployer is rejected", async () => {
     const { contract, ctx } = await deployInitialised();
-    const stranger = await strangerContext("setGasParams", ctx);
+    const stranger = strangerContext("setGasParams", ctx);
 
     await expect(setGasParams(contract, stranger, NEW_GAS_PARAMS)).rejects.toThrow();
 
@@ -7090,7 +7116,7 @@ describe("attested block heights", () => {
     const flushed = await flush(contract, queued, [VALID_DEPOSIT.inIndex], []);
 
     const sent = (
-      await contract.circuits.sendDeposit(await strangerContext("sendDeposit", flushed), outIndex)
+      await contract.circuits.sendDeposit(strangerContext("sendDeposit", flushed), outIndex)
     ).context;
     const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalDepositMap);
     expect(index.size).toBe(1);
@@ -7299,26 +7325,23 @@ const replacedAt = (node: StateValue, path: readonly number[], value: StateValue
  * Re-enter `ctx`'s state as its own caller, about to call `circuitId`, with the vault
  * ledger field `name` replaced by `value`.
  */
-const withLedgerField = async (
+const withLedgerField = (
   circuitId: string,
   ctx: CircuitContext<VaultPrivateState>,
   name: string,
   value: StateValue,
-): Promise<CircuitContext<VaultPrivateState>> =>
-  createCircuitContext(
+): CircuitContext<VaultPrivateState> =>
+  createCircuitContext({
     circuitId,
-    VAULT_ADDRESS,
-    CPK,
-    new ChargedState(
+    contractAddress: VAULT_ADDRESS,
+    coinPublicKeyOrZswapState: CPK,
+    contractState: new ChargedState(
       replacedAt(ctx.callContext.currentQueryContext.state.state, compiledFieldIndex(name), value),
     ),
-    createVaultPrivateState(SECRET_KEY),
-    await signetStateProvider(),
-    undefined,
-    undefined,
-    undefined,
-    BLOCK_HASH,
-  );
+    privateState: createVaultPrivateState(SECRET_KEY),
+    parentBlockHash: BLOCK_HASH,
+    crossContract: signetCrossContract,
+  });
 
 const EMPTY_MAP = StateValue.newMap(new StateMap());
 
@@ -7402,7 +7425,7 @@ const EVENT_MISSING_CASES: EventMissingCase[] = [
 describe("invariant guards, on a ledger built by hand", () => {
   it("queueAttestation refuses a sent request whose output entry is gone", async () => {
     const { contract, ctx, requestId } = await depositRequested();
-    const broken = await withLedgerField("queueAttestation", ctx, "outputRequestBuffer", EMPTY_MAP);
+    const broken = withLedgerField("queueAttestation", ctx, "outputRequestBuffer", EMPTY_MAP);
     await expect(
       contract.circuits.queueAttestation(
         broken,
@@ -7424,12 +7447,7 @@ describe("invariant guards, on a ledger built by hand", () => {
       ctx,
       respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, OUTPUT_SUCCESS, ATTESTED_HEIGHT),
     );
-    const broken = await withLedgerField(
-      "completeDeposit",
-      attested,
-      "outputRequestBuffer",
-      EMPTY_MAP,
-    );
+    const broken = withLedgerField("completeDeposit", attested, "outputRequestBuffer", EMPTY_MAP);
     await expect(
       contract.circuits.completeDeposit(
         broken,
@@ -7454,7 +7472,7 @@ describe("invariant guards, on a ledger built by hand", () => {
     const laterQueued = (await queueDeposit(later.contract, later.ctx, VALID_DEPOSIT)).context;
     const laterFlushed = await flush(later.contract, laterQueued, [VALID_DEPOSIT.inIndex], []);
 
-    const restamped = await withLedgerField(
+    const restamped = withLedgerField(
       "completeDeposit",
       attested,
       "outputRequestBuffer",
@@ -7485,7 +7503,7 @@ describe("invariant guards, on a ledger built by hand", () => {
         ctx,
         respond(MPC_RESPONSE_SECRET, requestId, OutputKind.failed, OUTPUT_EMPTY, ATTESTED_HEIGHT),
       );
-      const broken = await withLedgerField(name, attested, eventMap, EMPTY_MAP);
+      const broken = withLedgerField(name, attested, eventMap, EMPTY_MAP);
       await expect(complete(contract, broken, requestId)).rejects.toThrow(/Request event missing/);
     },
   );
