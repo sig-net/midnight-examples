@@ -6,9 +6,6 @@
 // the caller and the commitment sealed at deploy agree by construction.
 
 import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
-// midnight-js reads a process-global network id (unlike compact-js, which
-// takes it explicitly), so joining a deployed contract needs it set.
-import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import {
   deriveAccountKeys,
@@ -80,7 +77,6 @@ export async function withDeployerVault<T>(
 ): Promise<T> {
   const deployConfig = getDeployConfig(env);
   const nodeConfig = deployConfig.midnightNodeConfig;
-  setNetworkId(nodeConfig.networkId);
 
   const secretKey = parseIdentitySecretKey(
     "VAULT_DEPLOYER_SECRET_KEY",

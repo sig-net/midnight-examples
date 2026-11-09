@@ -27,6 +27,7 @@
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/), in-process, never a subprocess.
+import { ProviderFailedError } from "@midnight-ntwrk/midnight-js/contracts";
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 import {
@@ -350,10 +351,18 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // The `startWithdraw` circuit demands a surrendered coin of the full
         // amount. A's wallet holds none of the colour, so balancing cannot fund
         // it and the attempt dies client-side: the tx is never submitted.
+        const attempt = startWithdraw(context, {
+          amount: WITHDRAW_AMOUNT,
+          destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
+        });
+        await expect(attempt).rejects.toBeInstanceOf(ProviderFailedError);
+        await expect(attempt).rejects.toMatchObject({
+          method: "balanceTx",
+          circuitId: "startWithdraw",
+        });
         await expect(
-          startWithdraw(context, {
-            amount: WITHDRAW_AMOUNT,
-            destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
+          attempt.catch((error: unknown) => {
+            throw error instanceof ProviderFailedError ? error.cause : error;
           }),
         ).rejects.toThrow(/[Ii]nsufficient funds/);
 

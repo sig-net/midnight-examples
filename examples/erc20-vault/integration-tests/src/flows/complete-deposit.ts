@@ -5,10 +5,14 @@
 // names one.
 
 import { type CoinPublicKey, encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
-import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
+import { createCallTxOptions, submitCallTx } from "@midnight-ntwrk/midnight-js/contracts";
 import { OutputKind, type RequestIdHex, requestIdHex } from "@sig-net/midnight";
 import type { EncPublicKey } from "@sig-net/midnight-contract-deploy";
-import { VAULT_DEPOSIT_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  VAULT_DEPOSIT_REQUESTS_PATH,
+  VAULT_PRIVATE_STATE_ID,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-deploy";
 
 import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { VaultContext } from "../vault-context.ts";
@@ -94,33 +98,20 @@ export async function settleDeposit(
 
   // Minting to another wallet's key needs that wallet's encryption public
   // key mapped in, or midnight-js cannot encrypt the output's ciphertext and
-  // rejects the transaction build: a scoped transaction is the only carrier
-  // for such mappings. The caller's own wallet resolves implicitly.
-  const result =
-    recipient !== undefined
-      ? await withContractScopedTransaction(
-          context.providers,
-          async (txCtx) => {
-            await context.vault.callTx.completeDeposit(
-              txCtx,
-              requestIdOnLedger,
-              serializedOutput,
-              mintNonce,
-              mintRecipient,
-            );
-          },
-          {
-            additionalCoinEncPublicKeyMappings: new Map([
-              [recipient.coinPublicKey, recipient.encryptionPublicKey],
-            ]),
-          },
-        )
-      : await context.vault.callTx.completeDeposit(
-          requestIdOnLedger,
-          serializedOutput,
-          mintNonce,
-          mintRecipient,
-        );
+  // rejects the transaction build. The caller's own wallet resolves implicitly.
+  const result = await submitCallTx(context.providers, {
+    ...createCallTxOptions(
+      vaultCompiledContract,
+      "completeDeposit",
+      context.vaultContractAddress,
+      VAULT_PRIVATE_STATE_ID,
+      recipient !== undefined
+        ? new Map([[recipient.coinPublicKey, recipient.encryptionPublicKey]])
+        : undefined,
+      [requestIdOnLedger, serializedOutput, mintNonce, mintRecipient],
+    ),
+    privateStateId: VAULT_PRIVATE_STATE_ID,
+  });
   console.log(`completeDeposit settled in tx ${result.public.txId}`);
 }
 

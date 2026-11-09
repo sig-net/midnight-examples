@@ -8,9 +8,6 @@
 // the example's deploy package, which its deploy flows build on too.
 
 import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
-// midnight-js reads a process-global network id (unlike compact-js, which
-// takes it explicitly). createVaultContext sets it once per construction.
-import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import {
   MpcOutputCacheReader,
   signetEventSourceFromIndexer,
@@ -102,7 +99,6 @@ export async function createVaultContext(
   proofObserver?: ProofServerObserver,
 ): Promise<VaultContext> {
   const nodeConfig = getMidnightNodeConfig(env);
-  setNetworkId(nodeConfig.networkId);
 
   const evmChainIdRaw = requireEnv(env, "EVM_CHAIN_ID");
   if (!/^\d+$/.test(evmChainIdRaw)) {

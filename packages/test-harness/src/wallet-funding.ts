@@ -8,7 +8,7 @@ import {
   type WalletRegistry,
   walletRegistryKey,
 } from "@sig-net/midnight-contract-deploy";
-import { waitForFacadeState } from "@sig-net/midnight-examples-lib";
+import { isAwaiting, waitForFacadeState } from "@sig-net/midnight-examples-lib";
 
 import { explainDustSpendRejection } from "./steps.ts";
 
@@ -89,7 +89,7 @@ export async function fundWalletsFromRoot(
         const root: RegisteredWallet = await wallets.wallet(rootSeed, "root");
         const rootState: FacadeState = await waitForFacadeState(
           root.facade,
-          (snapshot) => snapshot.pending.all.length === 0,
+          (snapshot) => !snapshot.lifecycle.some(isAwaiting),
           FUNDING_WAIT_MS,
         );
         if (failures.length > 0) break;

@@ -15,10 +15,10 @@ import { join } from "node:path";
  * the workspace's toolchain pin, which moves together with the workflows'
  * launcher and compiler URLs and the README's prerequisites table.
  */
-export const COMPACT_COMPILER_VERSION = "0.33.0-rc.2";
+export const COMPACT_COMPILER_VERSION = "0.36.0";
 
 /** The launcher's own release, named in the fix printed when the compiler is missing. */
-export const COMPACT_LAUNCHER_VERSION = "compact-v0.5.1";
+export const COMPACT_LAUNCHER_VERSION = "compact-v0.5.3";
 
 /** The toolchain is absent, the wrong release, or refuses to run. */
 export class ToolchainError extends Error {}
@@ -119,7 +119,7 @@ export function runCompactCompile(
 }
 
 /**
- * The release string the pinned compiler reports, e.g. `0.33.0`.
+ * The release string the pinned compiler reports, e.g. `0.36.0`.
  *
  * @param env - The environment the launcher runs under.
  * @returns The trimmed output of `compact compile +<pin> --version`.
@@ -165,7 +165,7 @@ export async function compileWithKeys(
   cwd: string,
   env: Record<string, string | undefined>,
 ): Promise<void> {
-  await runCompactCompile(["--feature-zkir-v3", source, target], {
+  await runCompactCompile([source, target], {
     cwd,
     env: { ...env, COMPACT_PATH: compactPath },
     inherit: true,

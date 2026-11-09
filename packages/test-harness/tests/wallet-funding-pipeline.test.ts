@@ -59,7 +59,7 @@ function arrange() {
     const state = {
       unshielded,
       dust,
-      pending: { all: [] },
+      lifecycle: [],
     } as Partial<funding.FacadeState> as funding.FacadeState;
     const facade = {
       waitForSyncedState: vi
@@ -215,7 +215,7 @@ describe("pipelined wallet funding", () => {
     const pending = {
       unshielded: state.unshielded,
       dust: state.dust,
-      pending: { all: [{} as funding.FacadeState["pending"]["all"][number]] },
+      lifecycle: [{ status: { _tag: "Submitted" } } as funding.FacadeState["lifecycle"][number]],
     } as Partial<funding.FacadeState> as funding.FacadeState;
     vi.spyOn(root, "waitForSyncedState")
       .mockResolvedValueOnce(state)

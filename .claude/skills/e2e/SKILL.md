@@ -26,7 +26,7 @@ Run everything from the repo root, in this order:
 ```sh
 corepack enable                # yarn 4 via the packageManager field
 yarn install                   # NEVER from inside a member package
-compact update 0.33.0-rc.2     # the ledger-9 rc toolchain, see the toolchain note
+compact update 0.36.0          # the pinned toolchain, see the toolchain note
 yarn compile                   # run before the e2e
 docker compose up -d           # node :9944, indexer :8088, proof server :6300, anvil :8545
 yarn test:erc20-vault:e2e > e2e-run.log 2>&1 &        # BACKGROUND it, watch the log
@@ -39,15 +39,12 @@ NOT run `yarn compile:erc20-vault:zk` separately first: the setup recompiles
 regardless and you pay keygen twice. Expect the whole first invocation to take
 ~20–25 minutes (keygen + fresh deploys + the flow tests).
 
-**Toolchain note:** the contracts declare `pragma language_version >= 0.25`,
-which needs the ledger-9 rc compiler (0.33.0-rc.2, pinned in
+**Toolchain note:** the compiler is pinned to 0.36.0 (in
 `.github/workflows/example-test.yaml` and `AGENTS.md`). A bare `compact update`
-installs latest STABLE (0.31.1, language 0.23), and DOWNGRADES the default if
-an rc is already active, after which the compile fails with
-`language version 0.23.0 mismatch`. If `compact` itself is missing, or the
-launcher's channel refuses the rc version, use the installer + direct-download
-recipe in `.github/workflows/example-test.yaml` (the `Install the compact
-toolchain` step).
+installs whatever stable is latest, which drifts from the pin and changes every
+compiled key. If `compact` itself is missing, use the installer +
+direct-download recipe in `.github/workflows/example-test.yaml` (the `Install
+the compact toolchain` step).
 
 One value MUST be in `.env` before the stack comes up: `SEPOLIA_FORK_RPC_URL`
 (an ARCHIVE Sepolia RPC, e.g. `https://sepolia.gateway.tenderly.co`). The

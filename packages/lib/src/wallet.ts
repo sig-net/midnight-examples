@@ -7,6 +7,8 @@ import type {
   TransactionIdentifier,
   WalletFacade,
 } from "@midnightntwrk/wallet-sdk-facade";
+
+export { isAwaiting } from "@midnightntwrk/wallet-sdk-facade";
 import type { AccountKeys, NetworkId } from "@sig-net/midnight-contract-deploy";
 
 import { withOperationProgress } from "./operation-progress.ts";
@@ -36,11 +38,10 @@ export async function submitTransferTransaction(
   networkId: NetworkId,
 ): Promise<TransactionIdentifier> {
   const expires: number = Date.now() + RECIPE_TTL_MS;
-  const prepared = await facade.transferTransaction(
-    outputs,
-    { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
-    { ttl: new Date(expires), payFees: false },
-  );
+  const prepared = await facade.transferTransaction(outputs, {
+    ttl: new Date(expires),
+    payFees: false,
+  });
   let recipe = prepared;
   let finalized: Awaited<ReturnType<WalletFacade["finalizeRecipe"]>>;
   try {
@@ -52,11 +53,9 @@ export async function submitTransferTransaction(
       expires,
       "wallet transfer",
     );
-    recipe = await facade.balanceUnprovenTransaction(
-      prepared.transaction,
-      { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
-      { ttl: new Date(expires) },
-    );
+    recipe = await facade.balanceUnprovenTransaction(prepared.transaction, {
+      ttl: new Date(expires),
+    });
     const signed = await facade.signRecipe(recipe, keys.unshieldedKeystore.signDataAsync);
     finalized = await withOperationProgress(
       "wallet transfer finalisation",

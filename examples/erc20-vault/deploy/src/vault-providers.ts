@@ -23,11 +23,14 @@ import type {
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   createCrossContractProofServerProvider,
-  createWalletAndMidnightProvider,
+  createFacadeWalletProviders,
   type ProofServerObserver,
 } from "@sig-net/midnight-examples-lib";
 
 import { VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
+
+// Every call transaction this provider set builds expires 30 min out.
+const CALL_TTL_SECONDS = 30 * 60;
 
 /**
  * Build the midnight-js provider set for the vault. Proving reads the vault's
@@ -66,15 +69,20 @@ export function buildVaultProviders(
 
   // The wallet, adapted to midnight-js's balancer + submitter interfaces
   // (the facade itself does not implement WalletProvider/MidnightProvider).
-  const walletAndMidnightProvider = createWalletAndMidnightProvider(facade, keys, config.networkId);
-  const accountId = walletAndMidnightProvider.getCoinPublicKey();
+  const { walletProvider, midnightProvider } = createFacadeWalletProviders(
+    facade,
+    keys,
+    config.networkId,
+  );
+  const accountId = walletProvider.getCoinPublicKey();
 
   return {
     // Manages the private state of a contract, plus contract-maintenance
     // signing keys.
-    // Key methods: get(id)→PS|null, set(id, PS), remove, clear,
-    //              getSigningKey/setSigningKey (keyed by contract address),
-    //              exportPrivateStates/importPrivateStates.
+    // Key methods: forContract(addr), whose get(id)→PS|null, set(id, PS),
+    //              remove, clear and exportPrivateStates/importPrivateStates
+    //              act on that contract's states, plus
+    //              getSigningKey/setSigningKey (keyed by contract address).
     // Storage is LevelDB (browser: IndexedDB): clearing the store permanently
     // destroys it, and the package itself warns against production use where
     // loss matters. Fine here: our private state is just the identity secret
@@ -131,9 +139,18 @@ export function buildVaultProviders(
     ),
 
     // Creates proven, balanced transactions.
-    walletProvider: walletAndMidnightProvider,
+    walletProvider,
 
     // Submits proven, balanced transactions to the network.
-    midnightProvider: walletAndMidnightProvider,
+    midnightProvider,
+
+    config: { networkId: config.networkId, ttlSeconds: CALL_TTL_SECONDS },
+
+    // The vault's one cross-contract callee is the signet contract it seals,
+    // so every address resolves to the signet module: the runtime still
+    // refuses a callee whose deployed verifier keys differ from that module's.
+    contractModuleProvider: {
+      resolve: () => () => import("@sig-net/midnight-contract/managed/contract/index.js"),
+    },
   };
 }

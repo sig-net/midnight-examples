@@ -7,7 +7,7 @@
 // request id is recomputed off-chain with the library's TS twin of the request-id
 // circuit and asserted against the ledger map index before it is returned. The
 // settle side lives in complete-swap.ts.
-import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
+import { createCallTxOptions, submitCallTx } from "@midnight-ntwrk/midnight-js/contracts";
 import {
   calculateRequestId,
   evmAddressAbiWord,
@@ -29,8 +29,10 @@ import {
   newInputIndex,
   readVaultLedger,
   VAULT_PATH_BYTES,
+  VAULT_PRIVATE_STATE_ID,
   vaultTokenFees,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-deploy";
 
 import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import { EXACT_OUTPUT_SINGLE_SELECTOR } from "../evm-swap.ts";
@@ -128,11 +130,14 @@ export async function startSwap(
   };
 
   const inIndex = newInputIndex();
-  const queued = await withContractScopedTransaction(
-    context.providers,
-    async (txCtx) => {
-      await context.vault.callTx.startSwap(
-        txCtx,
+  const queued = await submitCallTx(context.providers, {
+    ...createCallTxOptions(
+      vaultCompiledContract,
+      "startSwap",
+      context.vaultContractAddress,
+      VAULT_PRIVATE_STATE_ID,
+      feeRecipientEncryptionMapping(before),
+      [
         inIndex,
         {
           erc20AddressIn,
@@ -142,10 +147,10 @@ export async function startSwap(
           amountInMaximum: options.amountInMaximum,
         },
         coin,
-      );
-    },
-    { additionalCoinEncPublicKeyMappings: feeRecipientEncryptionMapping(before) },
-  );
+      ],
+    ),
+    privateStateId: VAULT_PRIVATE_STATE_ID,
+  });
   console.log(`swap queued in tx ${queued.public.txId}`);
   const flushed = await flushUntil(context, (state) => !state.inputRequestBuffer.member(inIndex), {
     inIndexes: [inIndex],

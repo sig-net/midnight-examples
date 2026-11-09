@@ -21,8 +21,8 @@
     "erc20-vault-zk-assets": "./dist/bin/erc20-vault-zk-assets.js"
   },
   "scripts": {
-    "compile": "COMPACT_PATH=../../../node_modules compact compile --skip-zk --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
-    "compile:zk": "COMPACT_PATH=../../../node_modules compact compile --feature-zkir-v3 src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
+    "compile": "COMPACT_PATH=../../../node_modules compact compile --skip-zk src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
+    "compile:zk": "COMPACT_PATH=../../../node_modules compact compile src/erc20-vault.compact src/managed/erc20-vault && rm -f src/managed/SignetNotifier && ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed src/managed/SignetSigner",
     "build": "tsc -p tsconfig.json",
     "zk-assets": "tsx src/bin/erc20-vault-zk-assets.ts",
     "prepack": "ls src/managed/erc20-vault/keys/*.prover >/dev/null 2>&1 || { echo 'erc20-vault-contract prepack: no prover keys in src/managed/erc20-vault/keys, run `yarn compile:zk` first (compile uses --skip-zk)' >&2; exit 1; } && rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/managed/erc20-vault && cp -R src/managed/erc20-vault/contract src/managed/erc20-vault/compiler src/managed/erc20-vault/zkir dist/managed/erc20-vault/ && mkdir -p dist/managed/erc20-vault/keys && cp src/managed/erc20-vault/keys/*.verifier dist/managed/erc20-vault/keys/ && mkdir -p dist/managed/SignetSigner && cp -R src/managed/SignetSigner/contract dist/managed/SignetSigner/",
@@ -41,14 +41,14 @@
     }
   },
   "dependencies": {
-    "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-    "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
-    "@midnight-ntwrk/midnight-js-protocol": "5.0.0-beta.6",
-    "@sig-net/midnight": "0.25.1",
-    "@sig-net/midnight-contract": "0.25.1"
+    "@midnight-ntwrk/compact-runtime": "0.21.0",
+    "@midnight-ntwrk/midnight-js": "5.0.0",
+    "@midnight-ntwrk/midnight-js-protocol": "5.0.0",
+    "@sig-net/midnight": "0.26.0-rc.6",
+    "@sig-net/midnight-contract": "0.26.0-rc.6"
   },
   "devDependencies": {
-    "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3",
+    "@midnightntwrk/onchain-runtime-v4": "4.0.1",
     "@types/node": "^26.1.1",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",

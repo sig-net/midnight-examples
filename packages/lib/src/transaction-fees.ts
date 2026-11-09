@@ -58,7 +58,7 @@ export async function ensureTransactionFee(
         if (Date.now() >= deadline)
           throw new Error(`${label}: fee preparation exhausted the transaction validity window`);
         try {
-          const fee: bigint = await facade.estimateTransactionFee(transaction, keys.dustSecretKey, {
+          const fee: bigint = await facade.estimateTransactionFee(transaction, {
             ttl: new Date(expires),
           });
           const synced = await facade.waitForSyncedState();
