@@ -250,7 +250,8 @@ As illustrated, the flow comprises 10 steps:
     the caller or to the optional recipient's coin public key. A transfer that
     returned false only closes the request.
   - A `failed` or `unviable` verdict only closes the request, as the deposit
-    surrendered nothing, and the output it is passed is ignored.
+    surrendered nothing; the output it is passed is not used, and the client
+    sends a zero byte (compactc 0.36 rejects a byte above 1 on every verdict).
   - The mint nonce is a fresh RANDOM 32 bytes per settle: one derived from the
     (public) request id would let any observer link the minted coin to the
     deposit. Minting to another wallet needs that wallet's encryption public

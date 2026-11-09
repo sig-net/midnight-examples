@@ -959,8 +959,9 @@ export circuit sendDeposit(outIndex: Bytes<32>): [] {
 // Settles a deposit on any verdict. Executed: checks the output against the
 // attestation, then mints the deposited amount when the transfer returned true. Failed
 // or unviable: nothing was surrendered, so it only closes the request, and
-// serializedOutput is ignored. Depositor-gated, one settle per request. mintNonce is
-// caller-chosen and must be random, else no hiding property is guaranteed.
+// serializedOutput is not used: pass a zero byte (compactc 0.36 rejects a byte above 1 on
+// every verdict). Depositor-gated, one settle per request. mintNonce is caller-chosen and
+// must be random, else no hiding property is guaranteed.
 export circuit completeDeposit(
   requestId: RequestId,
   serializedOutput: Bytes<1>,
@@ -978,6 +979,8 @@ export circuit completeDeposit(
   bidirectionalDepositMap.remove(disclosedId);
 
   const output = disclose(serializedOutput);
+  // Read before the branch: compactc 0.36 crashes on a deserialize<Boolean> under a
+  // condition (LFDT-Minokawa/compact#856).
   const success = deserialize<VaultResponse, 1>(output).success;
   if (record.outputKind == OutputKind.executed) {
     assert(
@@ -1133,9 +1136,10 @@ export circuit sendWithdraw(outIndex: Bytes<32>): [] {
 // Settles a withdrawal on any verdict. Executed: checks the output against the
 // attestation. A transfer that returned true moved the tokens, so the burn stands. One
 // that returned false, or a failed or unviable transaction, moved nothing, so the
-// surrendered amount is re-minted to the caller, and on a failure serializedOutput is
-// ignored. Withdrawer-gated, one settle per request. mintNonce is caller-chosen and must be
-// random, else no hiding property is guaranteed.
+// surrendered amount is re-minted to the caller, and on a failure serializedOutput is not
+// used: pass a zero byte (compactc 0.36 rejects a byte above 1 on every verdict).
+// Withdrawer-gated, one settle per request. mintNonce is caller-chosen and must be random,
+// else no hiding property is guaranteed.
 export circuit completeWithdraw(
   requestId: RequestId,
   serializedOutput: Bytes<1>,
@@ -1160,6 +1164,7 @@ export circuit completeWithdraw(
     );
   }
   // A refund of the fee on an unviable verdict is perhaps wanted but not yet implemented.
+  // Read before the condition: see completeDeposit (LFDT-Minokawa/compact#856).
   const success = deserialize<VaultResponse, 1>(output).success;
   if (outcomeRefunds(record.outputKind) || !success) {
     mintShieldedToken(

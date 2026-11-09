@@ -33,7 +33,7 @@ export interface ShieldedTokenRecipient {
 /**
  * Settle a resolved deposit outcome: {@link queueAndFlushAttestation}, then call
  * `completeDeposit` with the request id, the output bytes (one zero byte for a
- * failed or unviable sweep, whose output the circuit ignores), a random mint
+ * failed or unviable sweep, whose output the circuit does not use), a random mint
  * nonce, and the wallet the mint goes to: `recipient` when given, otherwise the
  * caller's own. A sweep that failed or returned false only closes the request.
  * The mint's coin handling is midnight-js's job: the callTx balances the

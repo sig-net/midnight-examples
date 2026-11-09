@@ -169,7 +169,8 @@ As illustrated, the flow comprises 9 steps:
     vault token to the caller, under a caller-chosen random `mintNonce`: a
     nonce derived from the public request id would link the re-minted coin to
     the withdrawal. The fee stays with its recipient on every verdict. On a
-    failure the output it is passed is ignored.
+    failure the output it is passed is not used, and the client sends a zero
+    byte (compactc 0.36 rejects a byte above 1 on every verdict).
   - [`complete-withdraw.ts`](../../integration-tests/src/flows/complete-withdraw.ts)
     queues and flushes the attestation, then calls the circuit with a fresh
     random mint nonce on every verdict.

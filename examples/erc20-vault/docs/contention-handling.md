@@ -147,7 +147,8 @@ flushes touch shared state.
      and mints the deposited amount when the attested transfer returned true.
      A transfer that returned false only closes the request.
    - **Failed or unviable:** nothing was surrendered, so it only closes the
-     request, and the output it was passed is ignored.
+     request; the output it was passed is not used (the client sends a zero
+     byte).
 
 ## The flush
 

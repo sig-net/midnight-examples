@@ -908,7 +908,8 @@ describe("Boolean attested output bytes", () => {
 // A failed or unviable execution attests an empty output.
 const OUTPUT_EMPTY = new Uint8Array(0);
 
-// completeDeposit takes a 1-byte output on every verdict and ignores it on a failure.
+// completeDeposit takes a 1-byte output on every verdict and does not use it on a
+// failure; a zero byte, as compactc 0.36 rejects a byte above 1 on every verdict.
 const OUTPUT_IGNORED = new Uint8Array(1);
 
 /**
