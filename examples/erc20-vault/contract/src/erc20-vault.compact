@@ -977,13 +977,14 @@ export circuit completeDeposit(
   assert(bidirectionalDepositMap.member(disclosedId), "Request event missing");
   bidirectionalDepositMap.remove(disclosedId);
 
+  const output = disclose(serializedOutput);
+  const success = deserialize<VaultResponse, 1>(output).success;
   if (record.outputKind == OutputKind.executed) {
-    const output = disclose(serializedOutput);
     assert(
       verifyAttestedOutputV1<1>(output, record.serializedOutputLength, record.outputHash),
       "Output does not match the attestation"
     );
-    if (deserialize<VaultResponse, 1>(output).success) {
+    if (success) {
       const claimRecipient = disclose(recipient).is_some
         ? disclose(recipient).value
         : left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
@@ -1159,7 +1160,8 @@ export circuit completeWithdraw(
     );
   }
   // A refund of the fee on an unviable verdict is perhaps wanted but not yet implemented.
-  if (outcomeRefunds(record.outputKind) || !deserialize<VaultResponse, 1>(output).success) {
+  const success = deserialize<VaultResponse, 1>(output).success;
+  if (outcomeRefunds(record.outputKind) || !success) {
     mintShieldedToken(
       vaultTokenDomainSeparator(args.request.erc20Address),
       args.request.amount as Uint<64>,
