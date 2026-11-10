@@ -44,8 +44,8 @@
     "@midnight-ntwrk/compact-runtime": "0.21.0",
     "@midnight-ntwrk/midnight-js": "5.0.0",
     "@midnight-ntwrk/midnight-js-protocol": "5.0.0",
-    "@sig-net/midnight": "0.26.0-rc.12",
-    "@sig-net/midnight-signer": "0.26.0-rc.12"
+    "@sig-net/midnight": "0.26.0-rc.13",
+    "@sig-net/midnight-signer": "0.26.0-rc.13"
   },
   "devDependencies": {
     "@midnightntwrk/onchain-runtime-v4": "4.0.1",
