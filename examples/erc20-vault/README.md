@@ -75,7 +75,7 @@ draws and describes its steps (see [The flows](#the-flows)).
   derived for the requesting contract, and attests their execution outcomes.
   It never broadcasts them.
 - **Midnight Blockchain (source chain)** hosts three contracts: the
-  **Sig Network Singleton Contract**, which the vault notifies of each
+  **Sig Network Signer Contract**, which the vault notifies of each
   request, the **Sig Network Responder Contract**, through which the MPC posts
   its responses as contract events, and the **ERC20 Vault Contract**, this example's contract, whose exported circuits
   appear on the map and are listed in
@@ -242,18 +242,18 @@ The contract package's dependency list is the minimal integration surface:
 ```jsonc
 // contract/package.json
 "dependencies": {
-  "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-  "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
-  "@midnight-ntwrk/midnight-js-protocol": "5.0.0-beta.6",
-  "@sig-net/midnight": "0.25.0",
-  "@sig-net/midnight-contract": "0.25.0"
+  "@midnight-ntwrk/compact-runtime": "0.21.0",
+  "@midnight-ntwrk/midnight-js": "5.0.0",
+  "@midnight-ntwrk/midnight-js-protocol": "5.0.0",
+  "@sig-net/midnight": "0.26.0-rc.11",
+  "@sig-net/midnight-signer": "0.26.0-rc.11"
 }
 ```
 
 `@sig-net/midnight` is the client-agnostic protocol library: the Compact
 module the contract imports, plus the TypeScript twins, state readers and
-derivation helpers used off-chain. `@sig-net/midnight-contract` supplies the
-Signet singleton's compiled artefacts, which the vault's cross-contract calls
+derivation helpers used off-chain. `@sig-net/midnight-signer` supplies the
+Signet signer's compiled artefacts, which the vault's cross-contract calls
 link against. The Midnight packages are what the generated module, the
 provider types and the vault's flush helpers
 ([`contract/src/vault-queue.ts`](contract/src/vault-queue.ts)) import.
@@ -268,13 +268,13 @@ import "@sig-net/midnight/src/Signet";
 
 The compile script resolves that import through `node_modules` with
 `COMPACT_PATH` and links the
-Signet singleton's managed artefacts in as `src/managed/SignetSigner` for the
+Signet signer's managed artefacts in as `src/managed/SignetSigner` for the
 cross-contract call:
 
 ```sh
 COMPACT_PATH=../../../node_modules compact compile \
   src/erc20-vault.compact src/managed/erc20-vault
-ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed \
+ln -sfn ../../../../../node_modules/@sig-net/midnight-signer/dist/managed \
   src/managed/SignetSigner
 ```
 
@@ -284,13 +284,13 @@ generating proving keys.
 
 ### Setup step 3: declare the ledger state
 
-The vault declares the protocol-required fields (the Signet singleton
+The vault declares the protocol-required fields (the Signet signer
 reference, the response key and, per action, the event map the MPC reads the
 requests from) plus its own state:
 
 ```compact
 // ==== Configuration ====
-// The Signet singleton the send circuits cross-contract call to notify the MPC.
+// The Signet signer the send circuits cross-contract call to notify the MPC.
 sealed ledger signetSigner: SignetSigner;
 
 // Verifies every attestation (the signet responder emits MPC posts unverified).
@@ -301,9 +301,9 @@ export ledger mpcResponseKey: Secp256k1Point;
 //     commitment, the pinned EVM contracts, allowedTokens (each token's
 //     per-action fees) and the fee recipient's keys ...
 
-constructor(deployerCommitment: Bytes<32>, signetContract: SignetSigner) {
+constructor(deployerCommitment: Bytes<32>, initialSignetSigner: SignetSigner) {
   deployer = disclose(deployerCommitment);
-  signetSigner = disclose(signetContract);
+  signetSigner = disclose(initialSignetSigner);
 }
 
 // ==== Request queue ====
@@ -360,7 +360,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.8/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.11/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
@@ -502,7 +502,7 @@ the deposit round trip, from funding the deposit account through
 
 | Package | What it is |
 |---|---|
-| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads, the vault's flush helpers and the EVM constants, all browser-safe. Plus simulator unit tests. Its runtime dependencies are the SDK (`@sig-net/midnight`, `@sig-net/midnight-contract`) plus the three Midnight packages the generated module, the provider types and the flush helpers import (`@midnight-ntwrk/compact-runtime`, `@midnight-ntwrk/midnight-js`, `@midnight-ntwrk/midnight-js-protocol`). |
+| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads, the vault's flush helpers and the EVM constants, all browser-safe. Plus simulator unit tests. Its runtime dependencies are the SDK (`@sig-net/midnight`, `@sig-net/midnight-signer`) plus the three Midnight packages the generated module, the provider types and the flush helpers import (`@midnight-ntwrk/compact-runtime`, `@midnight-ntwrk/midnight-js`, `@midnight-ntwrk/midnight-js-protocol`). |
 | [`deploy/`](deploy/) | Deploying and post-deploy initialisation: the split base-deploy-plus-maintenance-adds, the deployer-gated `initialise`, and the configuration those resolve, as typed functions taking an environment map plus thin CLI entrypoints over them, so a hand-run deploy and the e2e setup execute identical code. Also the Node half of the vault's client surface those flows and the integration tests share: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. Everything here needs Node, which is why it is not in the contract package. |
 | [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and Aave's USDC for the lending flows) dealt to the derived accounts with anvil cheatcodes, and swaps buy real EURC. |
 
@@ -614,13 +614,13 @@ What does NOT happen automatically on a real chain, by design:
 ### Running against the real MPC on a deployed network
 
 Point the Midnight side at a deployed network the SDK publishes values for
-(today only stagenet) and drop the fakenet: the real Signature Network MPC
-listens to the signet singleton the SDK publishes for that network, and signs
+(Preview) and drop the fakenet: the real Signature Network MPC
+listens to the signet signer the SDK publishes for that network, and signs
 and attests the requests it admits from any vault sealed to it. The minimal
-`.env`, with stagenet as the example network, is:
+`.env`, with Preview as the example network, is:
 
 ```sh
-NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
+NETWORK_ID=preview         # any deployed network the SDK publishes values for
 ROOT_SEED=                 # funded via the network's faucet (the first run prints the address and URL)
 MAINTENANCE_SIGNING_KEY=   # 32 bytes of hex, required on any deployed network
 EVM_RPC_URL=               # a REAL Sepolia RPC; must serve debug_traceTransaction unless mpc-cache below
@@ -632,8 +632,8 @@ EVM_RPC_URL=               # a REAL Sepolia RPC; must serve debug_traceTransacti
 
 What differs from the local loop:
 
-- **No signet deploy.** The setup takes the singleton address the SDK
-  publishes for the network (a set `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` must
+- **No signet deploy.** The setup takes the signet signer address the SDK
+  publishes for the network (a set `MIDNIGHT_SIGNER_CONTRACT_ADDRESS` must
   agree with it), and the responder address it publishes beside it.
 - **No `MPC_ROOT_KEY`.** The MPC root public key the SDK publishes for the
   network names the real MPC, every derived account starts from it, and the
@@ -734,7 +734,7 @@ network needs is exercised on every local e2e run.
 # local, against the docker stack
 yarn deploy:erc20-vault
 
-# a remote network (stagenet): deploy, run the deployer-gated initialise,
+# a remote network (Preview): deploy, run the deployer-gated initialise,
 # then allow the ERC20s EVM_ALLOWED_TOKENS lists
 yarn deploy-initialise:erc20-vault
 
@@ -773,13 +773,13 @@ On a deployed network a deploy needs four variables, plus
 not itself 32 bytes of hex:
 
 ```sh
-NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
+NETWORK_ID=preview         # any deployed network the SDK publishes values for
 DEPLOYER_SEED=             # pays the fees, funded via the network's faucet
 MAINTENANCE_SIGNING_KEY=   # 32 bytes of hex, kept (see below)
 EVM_RPC_URL=               # the EVM chain the vault operates on
 ```
 
-Everything else is derived: the signet singleton and the MPC root public key
+Everything else is derived: the signet signer and the MPC root public key
 are the ones `@sig-net/midnight` publishes for the network, and the chain id is
 read from `EVM_RPC_URL`. The fees come from two variables. `VAULT_TOKEN_FEES`
 is a JSON object mapping an ERC20 address to its `withdraw`, `swap`, `supply`
@@ -793,10 +793,10 @@ defaults each to 1000). `VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY` with
 `VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY` name the wallet the fee coins are
 minted to, the deployer wallet's own shielded keys when unset. Reprice a token
 afterwards through the map and `yarn set-token-fees:erc20-vault`, and move the
-recipient with the deployer's `setFeeRecipient` circuit. `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
+recipient with the deployer's `setFeeRecipient` circuit. `MIDNIGHT_SIGNER_CONTRACT_ADDRESS`,
 `MPC_SECP256K1_PUBKEY` and `EVM_CHAIN_ID` remain as overrides, and a set value
 must agree with the published one or with what the chain reports. The local
-stack publishes nothing, so there the e2e setup deploys a singleton and a
+stack publishes nothing, so there the e2e setup deploys a signet signer and a
 responder and mints a fakenet key, and hands them over through those same
 variables and `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS`.
 
@@ -1004,7 +1004,7 @@ manifest, and writes:
 public/keys/<circuit>.prover, <circuit>.verifier    the vault's 29 circuits
 public/zkir/<circuit>.bzkir
 public/compiler/contract-manifest.json, contract-info.json
-public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract
+public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-signer
 ```
 
 A rerun verifies what is there and skips a tree that already matches.

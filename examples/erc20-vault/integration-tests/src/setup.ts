@@ -6,9 +6,9 @@
 // harness's generic steps plus the vault-specific steps below. The vitest
 // globalSetup `setup` runs it via `runSetupPipeline` in vitest's main process,
 // and `scripts/setup-local.ts` runs the same steps outside vitest to bring up
-// a local stack by hand. The signet contract and the signet responder need
+// a local stack by hand. The signet signer and the signet responder need
 // no zk-compile step: their proving keys ship inside the published
-// @sig-net/midnight-contract and @sig-net/midnight-responder packages the
+// @sig-net/midnight-signer and @sig-net/midnight-responder packages the
 // deploys read them from. The MPC response key step runs AFTER the vault
 // deploy: the key derives from the vault's own contract address, and the
 // initialise flow pins it on-chain.
@@ -31,8 +31,8 @@ import {
   appendRepoDotEnv,
   assertEnvironment,
   compileContractZk,
-  deploySignetContractStep,
   deploySignetResponderStep,
+  deploySignetSignerStep,
   ensureMpcResponseKey,
   ensureMpcRootKey,
   ensureMpcSecp256k1Pubkey,
@@ -71,7 +71,7 @@ export const VAULT_PIPELINE_KEYS = [
   "EVM_ALLOWED_TOKENS",
   "MPC_ROOT_KEY",
   "MPC_SECP256K1_PUBKEY",
-  "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
+  "MIDNIGHT_SIGNER_CONTRACT_ADDRESS",
   "MIDNIGHT_RESPONDER_CONTRACT_ADDRESS",
   "VAULT_DEPLOYER_SECRET_KEY",
   "MAINTENANCE_SIGNING_KEY",
@@ -100,7 +100,7 @@ export const VAULT_PIPELINE_KEYS = [
  * without it.
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
- *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
+ *   `MIDNIGHT_SIGNER_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
  *   config from it).
  * @param wallets - The pipeline's registry, holding the deployer wallet the funding step synced.
  * @throws {SplitDeployAfterBaseSubmitError} If the deploy failed after its base
@@ -417,7 +417,7 @@ const STEPS: readonly SetupStep[] = [
       ensureMpcSecp256k1Pubkey(env);
     },
   ],
-  ["setup: deploy signet contract", deploySignetContractStep],
+  ["setup: deploy signet signer", deploySignetSignerStep],
   ["setup: deploy signet responder", deploySignetResponderStep],
   ["setup: persist fakenet hand-off values to .env (append-only)", persistFakenetHandoffToDotEnv],
   ["setup: start the fakenet responder (docker compose)", startFakenetResponder],

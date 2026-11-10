@@ -49,8 +49,8 @@ export interface VaultContext {
   readonly nodeConfig: MidnightNodeConfig;
   /** Address of the deployed ERC20 vault contract on Midnight. */
   readonly vaultContractAddress: string;
-  /** Address of the deployed central signet contract on Midnight. */
-  readonly signetContractAddress: string;
+  /** Address of the deployed central signet signer on Midnight. */
+  readonly signerContractAddress: string;
   /** Address of the deployed signet responder contract on Midnight, which emits the MPC's responses. */
   readonly responderContractAddress: string;
   /** JSON-RPC endpoint of the EVM chain the vault operates on. */
@@ -114,7 +114,7 @@ export async function createVaultContext(
   }
 
   const vaultContractAddress = requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
-  const signetContractAddress = requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
+  const signerContractAddress = requireEnv(env, "MIDNIGHT_SIGNER_CONTRACT_ADDRESS");
   const responderContractAddress = requireEnv(env, "MIDNIGHT_RESPONDER_CONTRACT_ADDRESS");
   const respondOutputSource = parseOutputSource(requireEnv(env, "RESPOND_OUTPUT_SOURCE"));
   const cacheUrl = optionalEnv(env, "MPC_OUTPUT_CACHE_URL");
@@ -123,7 +123,7 @@ export async function createVaultContext(
       ? new MpcOutputCacheReader({
           cacheUrl,
           networkId: nodeConfig.networkId,
-          signetContractAddress,
+          signerContractAddress,
         })
       : undefined;
   const identity = resolveUserIdentity(env);
@@ -139,7 +139,7 @@ export async function createVaultContext(
   return {
     nodeConfig,
     vaultContractAddress,
-    signetContractAddress,
+    signerContractAddress,
     responderContractAddress,
     evmRpcUrl: requireEnv(env, "EVM_RPC_URL"),
     respondOutputSource,

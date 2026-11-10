@@ -26,7 +26,7 @@ import "@sig-net/midnight/src/Signet";
 
 // ==== Configuration ==================================================================
 
-// The Signet singleton the send circuits cross-contract call to notify the MPC.
+// The Signet signer the send circuits cross-contract call to notify the MPC.
 sealed ledger signetSigner: SignetSigner;
 
 // Verifies every attestation (the signet responder emits MPC posts unverified).
@@ -168,10 +168,10 @@ export pure circuit userCommitment(sk: Bytes<32>): Bytes<32> {
 // initialise().
 constructor(
   deployerCommitment: Bytes<32>,
-  signetContract: SignetSigner,
+  initialSignetSigner: SignetSigner,
 ) {
   deployer = disclose(deployerCommitment);
-  signetSigner = disclose(signetContract);
+  signetSigner = disclose(initialSignetSigner);
 }
 
 // #####################################################################################

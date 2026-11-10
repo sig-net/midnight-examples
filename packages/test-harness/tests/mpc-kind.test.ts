@@ -20,12 +20,12 @@ const RESOLVED: readonly ResolvedCase[] = [
   },
   {
     name: "a root key on a deployed network (a fakenet answering that network)",
-    env: { NETWORK_ID: "stagenet", MPC_ROOT_KEY: ROOT_KEY },
+    env: { NETWORK_ID: "preview", MPC_ROOT_KEY: ROOT_KEY },
     expected: MpcKind.Fakenet,
   },
   {
     name: "no root key on a deployed network",
-    env: { NETWORK_ID: "stagenet", MPC_SECP256K1_PUBKEY: "0x04ab" },
+    env: { NETWORK_ID: "preview", MPC_SECP256K1_PUBKEY: "0x04ab" },
     expected: MpcKind.Real,
   },
 ];

@@ -248,7 +248,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e
       });
 
       banner([
-        `MPC signed response for doomed swap ${swapRequestId} found from Signet Contract.`,
+        `MPC signed response for doomed swap ${swapRequestId} found on the signet responder.`,
         "",
         `Signed tx hash: ${signedTxHash(signedSwapTransaction)}`,
       ]);

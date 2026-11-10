@@ -24,6 +24,10 @@
 # - DEPLOYER_SEED
 #   - wallet seed paying the fees, faucet-funded with NIGHT
 #   - example: c0ffee...c0ffee (32 or 64 bytes of hex) or a 24-word mnemonic
+# - BLOCKFROST_PROJECT_ID (preprod and mainnet only)
+#   - token of a Blockfrost project for that network, which serves its public
+#     node and indexer
+#   - example: nightpreprod... (the project id from the Blockfrost dashboard)
 # - VAULT_DEPLOYER_SECRET_KEY
 #   - identity sealed as `deployer`, the only one initialise accepts: KEEP
 #     it. Optional when DEPLOYER_SEED is itself 32 bytes of hex, which then
@@ -39,8 +43,8 @@
 #   - a JSON-RPC endpoint of the EVM chain the vault operates on. The
 #     initialise reads the chain id it seals from it
 #   - example: https://sepolia.infura.io/v3/<key>
-# - MIDNIGHT_SIGNET_CONTRACT_ADDRESS (optional)
-#   - the network's signet singleton, sealed as the vault's cross-contract
+# - MIDNIGHT_SIGNER_CONTRACT_ADDRESS (optional)
+#   - the network's signet signer, sealed as the vault's cross-contract
 #     signer. Unset, the one @sig-net/midnight publishes for the network is
 #     sealed, and a set value must agree with it
 #   - example: 0badf00d...1dea (64 hex chars, 0x optional)
@@ -75,8 +79,8 @@
 #     the deployer wallet's own shielded keys
 #   - example: 64 hex chars each
 # - MIDNIGHT_NODE_URL / MIDNIGHT_NODE_INDEXER_URL (optional)
-#   - endpoint overrides, defaulting to the committed per-network endpoints
-#   - example: https://rpc.stagenet.shielded.tools
+#   - endpoint overrides, defaulting to the SDK's per-network endpoints
+#   - example: https://rpc.preview.midnight.network
 
 name: erc20-vault-deploy
 
@@ -88,7 +92,6 @@ on:
         required: true
         type: choice
         options:
-          - stagenet
           - preview
           - preprod
           - mainnet
@@ -225,7 +228,7 @@ jobs:
           # Optional: the SDK's published values for the network and the
           # chain id EVM_RPC_URL reports fill these in. A blank var falls
           # through, a set one must agree.
-          MIDNIGHT_SIGNET_CONTRACT_ADDRESS: ${{ vars.MIDNIGHT_SIGNET_CONTRACT_ADDRESS }}
+          MIDNIGHT_SIGNER_CONTRACT_ADDRESS: ${{ vars.MIDNIGHT_SIGNER_CONTRACT_ADDRESS }}
           MPC_SECP256K1_PUBKEY: ${{ vars.MPC_SECP256K1_PUBKEY }}
           EVM_CHAIN_ID: ${{ vars.EVM_CHAIN_ID }}
           # Optional per-environment EVM target overrides. Blank falls through
@@ -246,11 +249,13 @@ jobs:
           VAULT_FEE_REDEEM: ${{ vars.VAULT_FEE_REDEEM }}
           VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY: ${{ vars.VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY }}
           VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY: ${{ vars.VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY }}
-          # Optional per-environment endpoint overrides. Every network has
-          # committed defaults, and a blank var falls through to them.
+          # Per-environment endpoint overrides. A blank var falls through to
+          # the SDK's endpoints, which need the Blockfrost project token on
+          # preprod and mainnet.
           MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}
           MIDNIGHT_NODE_INDEXER_URL: ${{ vars.MIDNIGHT_NODE_INDEXER_URL }}
           MIDNIGHT_NODE_PROOF_SERVER_URL: http://127.0.0.1:6300
+          BLOCKFROST_PROJECT_ID: ${{ secrets.BLOCKFROST_PROJECT_ID }}
           # $GITHUB_REF_NAME is the dispatching branch, so carry the tag over.
           TAG: ${{ inputs.tag }}
         run: |

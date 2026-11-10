@@ -18,14 +18,14 @@ import { buildBaseEnv, loadRepoDotEnv } from "@sig-net/midnight-examples-lib";
 // local-chain values for them. Values a deploy MINTS (the vault address and
 // the two derived from it) are not here: nobody exports those for a network,
 // and `assertNoVaultBoundPresets` refuses them before a fresh deploy.
-const NETWORK_SCOPED_KEYS = ["MIDNIGHT_SIGNET_CONTRACT_ADDRESS", "MPC_SECP256K1_PUBKEY"] as const;
+const NETWORK_SCOPED_KEYS = ["MIDNIGHT_SIGNER_CONTRACT_ADDRESS", "MPC_SECP256K1_PUBKEY"] as const;
 
 /**
  * The environment for a deploy entrypoint: the repo-root `.env` overlaid with
  * the real environment (which wins), checked against the network this run
  * targets.
  *
- * A vault deploy seals `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` into the contract as
+ * A vault deploy seals `MIDNIGHT_SIGNER_CONTRACT_ADDRESS` into the contract as
  * a constructor argument, and `initialise` seals values derived from
  * `MPC_SECP256K1_PUBKEY`. Both are permanent. When the `.env` was written for a
  * different network than this run targets (the usual case: a local e2e run

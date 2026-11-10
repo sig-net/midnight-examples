@@ -23,8 +23,8 @@ import tseslint from "typescript-eslint";
  * owning package.
  *
  * The packaged `./managed/*` subpath is deliberately absent: both this repo's
- * contract packages and `@sig-net/midnight-contract` declare it in `exports`,
- * so it is a published API. The simulator tests import the signet contract
+ * contract packages and `@sig-net/midnight-signer` declare it in `exports`,
+ * so it is a published API. The simulator tests import the signet signer
  * module through it to execute the cross-contract call path.
  *
  * A RELATIVE path into another package's output is `import-x/no-relative-packages`' catch.

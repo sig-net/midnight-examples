@@ -125,7 +125,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
 
-      // The same arguments the stagenet deploy+initialise entrypoint resolves, from the
+      // The same arguments the deploy+initialise entrypoint resolves, from the
       // same env. A rerun against a kept, initialised contract is a no-op inside initialise.
       const config = await resolveInitialiseConfig(env, context.vaultContractAddress);
       const outcome = await initialise(context, config);
@@ -254,8 +254,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         "",
         `  request id: ${depositTransactionSignatureRequestId}`,
         "",
-        "The response server (MIDNIGHT_SIGNET_CONTRACT_ADDRESS set) polls the",
-        "signet contract's emitted notification events and should pick it up",
+        "The response server (MIDNIGHT_SIGNER_CONTRACT_ADDRESS set) polls the",
+        "signet signer's emitted notification events and should pick it up",
         "on its next poll — resolving it from THIS vault's ledger — and sign the EVM tx.",
       ]);
     },
@@ -263,11 +263,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   it(
-    "golden notification: the vault's deposit emitted a decodable notification event on the signet contract",
+    "golden notification: the vault's deposit emitted a decodable notification event on the signet signer",
     async () => {
       // Pins the SignBidirectionalNotification payload layout against a LIVE
       // indexer, read exactly the way the MPC reads it — the signet
-      // contract's emitted Misc events through the shared event decoders.
+      // signer's emitted Misc events through the shared event decoders.
       // The vault's deposit cross-contract-called signBidirectional to emit
       // this.
       expect(depositTransactionSignatureRequestId).toBeDefined();
@@ -320,7 +320,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       });
 
       banner([
-        `MPC signed Response for request ${depositTransactionSignatureRequestId} found from Signet Contract.`,
+        `MPC signed Response for request ${depositTransactionSignatureRequestId} found on the signet responder.`,
         "",
         `Signature: ${signedDepositSweepTransaction.serialized}`,
       ]);
@@ -614,7 +614,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   it(
-    "watch withdraw signature request: the withdraw emitted a notification event on the signet contract",
+    "watch withdraw signature request: the withdraw emitted a notification event on the signet signer",
     async () => {
       // The same event poll the MPC runs for discovery: sendWithdraw
       // cross-contract-called signBidirectional to emit this.
@@ -662,7 +662,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       });
 
       banner([
-        `MPC signed response for withdraw request ${withdrawTransactionSignatureRequestId} found from Signet Contract.`,
+        `MPC signed response for withdraw request ${withdrawTransactionSignatureRequestId} found on the signet responder.`,
         "",
         `Signature: ${signedWithdrawTransaction.serialized}`,
       ]);

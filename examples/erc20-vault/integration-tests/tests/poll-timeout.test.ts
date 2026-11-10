@@ -16,7 +16,7 @@ import * as contextModule from "../src/vault-context.ts";
 
 const REQUEST = parseRequestIdHex("ab".repeat(32));
 const CONTEXT = {
-  signetContractAddress: "cd".repeat(32),
+  signerContractAddress: "cd".repeat(32),
   respondOutputSource: OutputSource.EVMNode,
 } as contextModule.VaultContext;
 

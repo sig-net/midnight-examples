@@ -14,7 +14,7 @@ import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config
 import {
   type AccountKeys,
   type MidnightNodeConfig,
-  signetContractManagedPath,
+  signetSignerManagedPath,
   type WalletFacade,
 } from "@sig-net/midnight-contract-deploy";
 import type {
@@ -63,9 +63,9 @@ export function buildVaultProviders(
   // typed to the circuit-name union.
   const vaultZkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH);
 
-  // The callee (signet contract) circuits, resolved for the cross-contract
+  // The callee (signet signer) circuits, resolved for the cross-contract
   // proof provider so every send circuit's whole call tree proves.
-  const signetZkConfigProvider = new NodeZkConfigProvider<string>(signetContractManagedPath);
+  const signetZkConfigProvider = new NodeZkConfigProvider<string>(signetSignerManagedPath);
 
   // The wallet, adapted to midnight-js's balancer + submitter interfaces
   // (the facade itself does not implement WalletProvider/MidnightProvider).
@@ -130,7 +130,7 @@ export function buildVaultProviders(
     // transcript). This is NOT the wallet's proving config: the facade's
     // proof server only proves the wallet's own balancing additions when it
     // finalizes a recipe. The call transcript is proven here first. Spans the
-    // vault AND the signet contract so each send circuit's cross-contract call
+    // vault AND the signet signer so each send circuit's cross-contract call
     // resolves keys for the whole call tree.
     proofProvider: createCrossContractProofServerProvider(
       config.proofServerUrl,
@@ -146,11 +146,11 @@ export function buildVaultProviders(
 
     config: { networkId: config.networkId, ttlSeconds: CALL_TTL_SECONDS },
 
-    // The vault's one cross-contract callee is the signet contract it seals,
+    // The vault's one cross-contract callee is the signet signer it seals,
     // so every address resolves to the signet module: the runtime still
     // refuses a callee whose deployed verifier keys differ from that module's.
     contractModuleProvider: {
-      resolve: () => () => import("@sig-net/midnight-contract/managed/contract/index.js"),
+      resolve: () => () => import("@sig-net/midnight-signer/managed/contract/index.js"),
     },
   };
 }

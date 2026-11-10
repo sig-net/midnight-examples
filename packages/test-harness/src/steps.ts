@@ -1,6 +1,6 @@
 // The GENERIC setup steps every example's pipeline composes: environment
 // check → wallet seed resolution + root funding (wallets.ts) → EVM chain
-// resolution → MPC key derivation → singleton signet deploy → signet
+// resolution → MPC key derivation → signet signer deploy → signet
 // responder deploy → fakenet responder hand-off → MPC hand-off printout. EVM token and account funding
 // is example-specific and lives in the example itself.
 // Each step keeps its skip-if-env-var-set semantics (presence of the
@@ -23,10 +23,10 @@ import {
 import {
   CounterpartyOrigin,
   deployedNetwork,
-  deploySignetContract,
   deploySignetResponder,
+  deploySignetSigner,
   findMpcRootPublicKey,
-  findSignetContractAddress,
+  findSignerContractAddress,
   getMidnightNodeConfig,
   isLocalStandaloneNetwork,
   type WalletRegistry,
@@ -148,7 +148,7 @@ export function ensureMpcRootKey(env: NodeJS.ProcessEnv): void {
       `${mpcKeyOrigin(preset.origin)} names a real MPC network (${preset.value}), whose root key this run does not hold`,
     );
     console.log(
-      ` ➜ no fakenet responder can serve that key: the real MPC answers the signet singleton`,
+      ` ➜ no fakenet responder can serve that key: the real MPC answers the signet signer`,
     );
     return;
   }
@@ -393,11 +393,11 @@ export async function explainDustSpendRejection<T>(
 }
 
 /**
- * Deploy the central signet contract (the Signature Network singleton every
+ * Deploy the central signet signer (the Signature Network contract every
  * example's requester contract notifies), unless one is already named:
- * `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` when set, else the singleton the SDK
+ * `MIDNIGHT_SIGNER_CONTRACT_ADDRESS` when set, else the one the SDK
  * publishes for a deployed network (which the real MPC listens to, so a
- * second singleton there would never be answered). The example's own
+ * second one there would never be answered). The example's own
  * requester contract deploy is the example's step — it runs AFTER this one
  * (requesters seal the signet address at deploy time).
  *
@@ -405,34 +405,36 @@ export async function explainDustSpendRejection<T>(
  * @param wallets - The pipeline's registry, holding the deployer wallet the funding step synced.
  * @throws {Error} If a preset address disagrees with the SDK's published one, or the deploy fails.
  */
-export async function deploySignetContractStep(
+export async function deploySignetSignerStep(
   env: NodeJS.ProcessEnv,
   wallets: WalletRegistry,
 ): Promise<void> {
   const { networkId } = getMidnightNodeConfig(env);
-  const found = findSignetContractAddress(env);
+  const found = findSignerContractAddress(env);
   if (found?.origin === CounterpartyOrigin.Environment) {
-    env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = found.value;
-    logSkip("deploy signet contract", `MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set (${found.value})`);
+    env.MIDNIGHT_SIGNER_CONTRACT_ADDRESS = found.value;
+    logSkip("deploy signet signer", `MIDNIGHT_SIGNER_CONTRACT_ADDRESS is set (${found.value})`);
     return;
   }
   if (found !== undefined) {
-    env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = found.value;
+    env.MIDNIGHT_SIGNER_CONTRACT_ADDRESS = found.value;
     logSkip(
-      "deploy signet contract",
-      `the SDK publishes the "${networkId}" signet singleton at ${found.value}`,
+      "deploy signet signer",
+      `the SDK publishes the "${networkId}" signet signer at ${found.value}`,
     );
-    console.log(` ➜ the real MPC listens to that singleton: requesters deployed here notify it`);
+    console.log(
+      ` ➜ the real MPC listens to that signet signer: requesters deployed here notify it`,
+    );
     return;
   }
-  const { contractAddress } = await explainDustSpendRejection("deploy signet contract", () =>
-    deploySignetContract(env, wallets),
+  const { contractAddress } = await explainDustSpendRejection("deploy signet signer", () =>
+    deploySignetSigner(env, wallets),
   );
-  env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = contractAddress;
-  console.log(`deployed a fresh MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${contractAddress}`);
-  console.log(` ➜ the Signet singleton on Midnight: records signature requests`);
+  env.MIDNIGHT_SIGNER_CONTRACT_ADDRESS = contractAddress;
+  console.log(`deployed a fresh MIDNIGHT_SIGNER_CONTRACT_ADDRESS=${contractAddress}`);
+  console.log(` ➜ the Signet signer on Midnight: records signature requests`);
   console.log(
-    ` ➜ 💡 Set as MIDNIGHT_SIGNET_CONTRACT_ADDRESS in the environment to skip the deploy on the next run`,
+    ` ➜ 💡 Set as MIDNIGHT_SIGNER_CONTRACT_ADDRESS in the environment to skip the deploy on the next run`,
   );
 }
 
@@ -494,7 +496,7 @@ export async function deploySignetResponderStep(
 /** The env keys docker compose interpolates into the fakenet service — the hand-off payload. */
 const FAKENET_HANDOFF_KEYS = [
   "MPC_ROOT_KEY",
-  "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
+  "MIDNIGHT_SIGNER_CONTRACT_ADDRESS",
   "MIDNIGHT_RESPONDER_CONTRACT_ADDRESS",
 ] as const;
 
@@ -607,7 +609,7 @@ export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<voi
   }
   console.log("fakenet-responder container is running");
   console.log(" ➜ watch it: `docker logs -f fakenet-responder` — healthy startup prints");
-  console.log('   "MidnightMonitor: polling signet contract events at <signet address>"');
+  console.log('   "MidnightMonitor: polling signet signer events at <signet address>"');
 }
 
 /**
@@ -625,7 +627,7 @@ export function printMpcServerConfig(
   pipelineKeys: readonly string[],
 ): void {
   const managed = env.FAKENET_MANAGED !== "0";
-  const signetContractAddress = requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
+  const signerContractAddress = requireEnv(env, "MIDNIGHT_SIGNER_CONTRACT_ADDRESS");
   const responderContractAddress = requireEnv(env, "MIDNIGHT_RESPONDER_CONTRACT_ADDRESS");
   const minimalEnvBlock = [
     "",
@@ -639,9 +641,9 @@ export function printMpcServerConfig(
       "MPC configuration: a real MPC network answers this run.",
       "",
       `  MPC_SECP256K1_PUBKEY=${requireEnv(env, "MPC_SECP256K1_PUBKEY")}`,
-      `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${signetContractAddress}`,
+      `  MIDNIGHT_SIGNER_CONTRACT_ADDRESS=${signerContractAddress}`,
       `  MIDNIGHT_RESPONDER_CONTRACT_ADDRESS=${responderContractAddress}`,
-      "  # 💡 The MPC DISCOVERS requesters by polling this signet contract's",
+      "  # 💡 The MPC DISCOVERS requesters by polling this signet signer's",
       "  #    emitted notification events, and posts its responses to the",
       "  #    signet responder. Its root key is not held here.",
       ...minimalEnvBlock,
@@ -652,10 +654,10 @@ export function printMpcServerConfig(
     "MPC (fakenet) responder configuration:",
     "",
     `  MPC_ROOT_KEY=${requireEnv(env, "MPC_ROOT_KEY")}`,
-    `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${signetContractAddress}`,
+    `  MIDNIGHT_SIGNER_CONTRACT_ADDRESS=${signerContractAddress}`,
     `  MIDNIGHT_RESPONDER_CONTRACT_ADDRESS=${responderContractAddress}`,
     "  # 💡 The responder DISCOVERS requesters by polling this signet",
-    "  #    contract's emitted notification events, and posts its responses",
+    "  #    signer's emitted notification events, and posts its responses",
     "  #    to the signet responder.",
     "",
     ...(managed

@@ -59,12 +59,12 @@ import { describe, expect, it } from "vitest";
 // `Bytes [0xa9, 0x05, 0x9c, 0xbb]` hardcoded in erc20-vault.compact.
 const ERC20_TRANSFER_SELECTOR = new Uint8Array([0xa9, 0x05, 0x9c, 0xbb]);
 
-// The signet contract (callee) module, the same one the vault's generated code
+// The signet signer (callee) module, the same one the vault's generated code
 // cross-contract-calls (via the compile-time src/managed/SignetSigner link
 // into this npm package's managed output). The request circuits end in a call
 // to its signBidirectional, so the simulator needs its module and deployed
 // state (see signetCrossContract) to execute that path.
-import * as SignetSigner from "@sig-net/midnight-contract/managed/contract/index.js";
+import * as SignetSigner from "@sig-net/midnight-signer/managed/contract/index.js";
 
 import {
   Action,
@@ -128,15 +128,15 @@ const EVM_START_HEIGHT = 100n;
 const MPC_KEY_VERSION = 1n;
 const ATTESTED_HEIGHT = 101n;
 
-// The signet contract (callee) the vault seals + cross-contract-calls. A valid
+// The signet signer (callee) the vault seals + cross-contract-calls. A valid
 // sample contract address so the runtime's address checks pass.
 const SIGNET_ADDRESS = sampleContractAddress();
-const SIGNET_CONTRACT_REF = {
+const SIGNET_SIGNER_REF = {
   bytes: hexToBytes(SIGNET_ADDRESS),
 };
 const BLOCK_HASH = "0".repeat(64);
 
-// The verifier key the published signet contract package ships for each provable circuit, read once.
+// The verifier key the published signet signer package ships for each provable circuit, read once.
 const SIGNET_VERIFIER_KEYS: ReadonlyMap<string, Uint8Array> = new Map(
   Object.entries(SignetSigner.circuitSignatures)
     .filter(([, signature]) => signature.provable)
@@ -149,14 +149,14 @@ const SIGNET_VERIFIER_KEYS: ReadonlyMap<string, Uint8Array> = new Map(
 );
 
 /**
- * The signet contract's deployed state as a cross-contract callee: its initial
+ * The signet signer's deployed state as a cross-contract callee: its initial
  * state carrying the shipped verifier keys, which the runtime matches against
  * the callee module's expected keys.
  *
  * The state crosses into this tree's `ContractState` class through bytes, as
  * a linked SDK checkout runs the signet module on its own copy of the wasm runtime.
  *
- * @returns The signet contract's state with every operation's verifier key set.
+ * @returns The signet signer's state with every operation's verifier key set.
  */
 async function deployedSignetState(): Promise<ContractState> {
   const signet = new SignetSigner.Contract({});
@@ -174,8 +174,8 @@ async function deployedSignetState(): Promise<ContractState> {
 
 /**
  * How the simulator reaches signBidirectionalEvent from the request circuits
- * in-process (no node/indexer). Every address resolves to the signet contract:
- * the vault only calls the single sealed signet contract.
+ * in-process (no node/indexer). Every address resolves to the signet signer:
+ * the vault only calls the single sealed signet signer.
  */
 const signetCrossContract = {
   stateProvider: { getContractState: deployedSignetState },
@@ -294,7 +294,7 @@ const deployContract = async (deployerCommitment: Uint8Array = DEPLOYER_COMMITME
   const { currentContractState, currentPrivateState } = await contract.initialState(
     createConstructorContext<VaultPrivateState>(createVaultPrivateState(SECRET_KEY), CPK),
     deployerCommitment,
-    SIGNET_CONTRACT_REF,
+    SIGNET_SIGNER_REF,
   );
   const ctx = createCircuitContext({
     circuitId: "startDeposit",
@@ -690,7 +690,7 @@ describe("deposit round-trip", () => {
 
     const [idHex, record] = first(typedIndex.entries(), "indexed signBidirectional request");
 
-    // The cross-contract call's observable effect: the signet contract
+    // The cross-contract call's observable effect: the signet signer
     // emitted the notification event, its payload declaring the stored
     // event's id and naming THIS vault and the bidirectionalDepositMap (decoded
     // through the shared library's decoders, the same read the MPC's

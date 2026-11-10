@@ -4,7 +4,7 @@
 
 import { getMidnightNodeConfig, isLocalStandaloneNetwork } from "@sig-net/midnight-contract-deploy";
 
-/** The MPC answering a run's signet singleton. */
+/** The MPC answering a run's signet signer. */
 export enum MpcKind {
   /** The fakenet responder, whose `MPC_ROOT_KEY` this run holds. */
   Fakenet = "fakenet",
@@ -14,8 +14,8 @@ export enum MpcKind {
 
 /**
  * Which MPC a run faces. A held `MPC_ROOT_KEY` means a fakenet, on any
- * network (a fakenet can answer a deployed network's singleton too). No root
- * key on a deployed network means the real MPC that network's singleton is
+ * network (a fakenet can answer a deployed network's signet signer too). No root
+ * key on a deployed network means the real MPC that network's signet signer is
  * answered by, named by `MPC_SECP256K1_PUBKEY`. The local standalone stack
  * has no real MPC, so no root key there is a misconfiguration: the setup's
  * MPC key step mints one when nothing names an MPC.

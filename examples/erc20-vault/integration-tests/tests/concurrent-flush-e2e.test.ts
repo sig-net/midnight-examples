@@ -259,7 +259,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     let signedSweepTransaction: Transaction;
 
     it(
-      "pollSignatureResponse: poll signet contract for the deposit sweep's signature response",
+      "pollSignatureResponse: poll signet responder for the deposit sweep's signature response",
       async () => {
         expect(depositRequestId).toBeDefined();
         const context = await session.vaultContext();
@@ -289,7 +289,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
     let depositOutcome: RespondOutcome;
 
     it(
-      "pollRespondBidirectional: poll signet contract for the deposit sweep's attestation",
+      "pollRespondBidirectional: poll signet responder for the deposit sweep's attestation",
       async () => {
         expect(depositRequestId).toBeDefined();
         const context = await session.vaultContext();
