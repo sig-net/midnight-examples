@@ -16,6 +16,7 @@
 import { bytesToHex, deriveEvmAddress, getMpcOutputCacheUrl } from "@sig-net/midnight";
 import {
   deployedNetwork,
+  findSignerContractAddress,
   generateHexSeed,
   getMidnightNodeConfig,
   isLocalStandaloneNetwork,
@@ -394,6 +395,28 @@ async function verifyForkDependencies(env: NodeJS.ProcessEnv): Promise<void> {
   );
 }
 
+/**
+ * Refuse a kept vault that no signet signer is named for. A vault seals its
+ * signer at deploy, so a signer deployed beside a kept vault is one the vault
+ * never notifies, and every signature poll would time out.
+ *
+ * @param env - The suite's env accumulator.
+ * @throws {Error} If `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is set while neither
+ *   `MIDNIGHT_SIGNER_CONTRACT_ADDRESS` nor the SDK names a signet signer.
+ */
+export function assertKeptVaultNamesItsSigner(env: NodeJS.ProcessEnv): void {
+  const vaultContractAddress = optionalEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
+  if (vaultContractAddress === undefined || findSignerContractAddress(env) !== undefined) {
+    return;
+  }
+  throw new Error(
+    `MIDNIGHT_VAULT_CONTRACT_ADDRESS is set (${vaultContractAddress}) but MIDNIGHT_SIGNER_CONTRACT_ADDRESS is not: ` +
+      "the vault notifies only the signet signer sealed into it at deploy. Set " +
+      "MIDNIGHT_SIGNER_CONTRACT_ADDRESS to that signer, or unset MIDNIGHT_VAULT_CONTRACT_ADDRESS " +
+      "(with MPC_RESPONSE_KEY, EVM_VAULT_ADDRESS and EVM_USER_ADDRESS) to deploy a fresh pair.",
+  );
+}
+
 // Step names match what the operator greps for and what STEP_THROUGH prompts show.
 const STEPS: readonly SetupStep[] = [
   [
@@ -417,7 +440,13 @@ const STEPS: readonly SetupStep[] = [
       ensureMpcSecp256k1Pubkey(env);
     },
   ],
-  ["setup: deploy signet signer", deploySignetSignerStep],
+  [
+    "setup: deploy signet signer",
+    async (env, wallets) => {
+      assertKeptVaultNamesItsSigner(env);
+      await deploySignetSignerStep(env, wallets);
+    },
+  ],
   ["setup: deploy signet responder", deploySignetResponderStep],
   ["setup: persist fakenet hand-off values to .env (append-only)", persistFakenetHandoffToDotEnv],
   ["setup: start the fakenet responder (docker compose)", startFakenetResponder],

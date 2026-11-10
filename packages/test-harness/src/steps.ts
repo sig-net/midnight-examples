@@ -19,6 +19,7 @@ import {
   formatSecp256k1PublicKey,
   getResponderContractAddress,
   normaliseSecp256k1PublicKey,
+  redactUrlQuery,
 } from "@sig-net/midnight";
 import {
   CounterpartyOrigin,
@@ -39,7 +40,7 @@ import { runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { MpcKind, mpcKind } from "./mpc-kind.ts";
 import { banner, logSkip } from "./output.ts";
-import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
+import { assertCommandAvailable, assertHttpReachable, nodeHealthUrl } from "./preflight.ts";
 
 const MINUTE = 60_000;
 
@@ -67,12 +68,14 @@ function mpcKeyOrigin(origin: CounterpartyOrigin): string {
  */
 export async function assertEnvironment(env: NodeJS.ProcessEnv): Promise<void> {
   const nodeConfig = getMidnightNodeConfig(env);
-  await assertHttpReachable("midnight node", new URL("/health", nodeConfig.nodeUrl).href);
+  await assertHttpReachable("midnight node", nodeHealthUrl(nodeConfig.nodeUrl));
   await assertHttpReachable("indexer", nodeConfig.indexerUrl);
   await assertHttpReachable("proof server", nodeConfig.proofServerUrl);
   await assertCommandAvailable("compact", ["--version"]);
   requireEnv(env, "EVM_RPC_URL");
-  console.log(`targeting the ${nodeConfig.networkId} network at ${nodeConfig.nodeUrl}`);
+  console.log(
+    `targeting the ${nodeConfig.networkId} network at ${redactUrlQuery(nodeConfig.nodeUrl)}`,
+  );
 }
 
 /**

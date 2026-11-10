@@ -203,8 +203,7 @@ step "verify EVM_RPC_URL serves debug_traceTransaction" refuses an endpoint
 without it. Every attestation poll can instead download the attested
 bytes from the MPC's output cache, and the setup then skips that check:
 `RESPOND_OUTPUT_SOURCE=mpc-cache`, reading the cache the SDK publishes for the
-network (preview:
-`https://storage.googleapis.com/midnight-cache-storage-dev/v1/stagenet`) unless
+network (`getMpcOutputCacheUrl` in `@sig-net/midnight`) unless
 `MPC_OUTPUT_CACHE_URL` overrides it (the cache's URL down to the MPC's object
 prefix; the poll appends `/<network>/<signet address>/<request id>.bin`). On
 the local stack no cache is published, so set

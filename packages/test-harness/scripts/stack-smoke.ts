@@ -13,7 +13,7 @@ import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 import { buildBaseEnv, getEvmChainId } from "@sig-net/midnight-examples-lib";
 
 import { runCommand } from "../src/exec.ts";
-import { assertHttpReachable } from "../src/preflight.ts";
+import { assertHttpReachable, nodeHealthUrl } from "../src/preflight.ts";
 
 const MINUTE = 60_000;
 
@@ -58,7 +58,7 @@ await runCommand("docker", ["compose", "up", "-d"], env, 10 * MINUTE);
 try {
   await waitUntilReachable(
     "midnight node",
-    () => assertHttpReachable("midnight node", new URL("/health", nodeConfig.nodeUrl).href),
+    () => assertHttpReachable("midnight node", nodeHealthUrl(nodeConfig.nodeUrl)),
     2 * MINUTE,
   );
   await waitUntilReachable(

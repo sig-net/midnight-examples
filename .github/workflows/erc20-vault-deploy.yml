@@ -142,6 +142,22 @@ jobs:
         run: |
           echo "::error::mainnet deploys a stable erc20-vault-vX.Y.Z tag only, got the prerelease $TAG"
           exit 1
+      # The deploy step resolves its endpoints only after the toolchain
+      # install and the keygen, so an environment that cannot reach its
+      # network is refused here first.
+      - name: Preprod and mainnet need a Blockfrost token or both endpoint overrides
+        if: ${{ inputs.network == 'preprod' || inputs.network == 'mainnet' }}
+        env:
+          NETWORK_ID: ${{ inputs.network }}
+          BLOCKFROST_PROJECT_ID: ${{ secrets.BLOCKFROST_PROJECT_ID }}
+          MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}
+          MIDNIGHT_NODE_INDEXER_URL: ${{ vars.MIDNIGHT_NODE_INDEXER_URL }}
+        run: |
+          if [ -z "$BLOCKFROST_PROJECT_ID" ] &&
+            { [ -z "$MIDNIGHT_NODE_URL" ] || [ -z "$MIDNIGHT_NODE_INDEXER_URL" ]; }; then
+            echo "::error::$NETWORK_ID is served by Blockfrost: set the BLOCKFROST_PROJECT_ID secret on the $NETWORK_ID environment, or both the MIDNIGHT_NODE_URL and MIDNIGHT_NODE_INDEXER_URL variables"
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # refs/tags/ prefixed: a ref that is not a tag fails the checkout
