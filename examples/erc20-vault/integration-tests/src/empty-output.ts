@@ -7,7 +7,8 @@
 // attestation commits to the same zero bytes, which completeReplaceNonce
 // checks against the attestation's width and hash as Bytes<0> on every
 // verdict. The other complete circuits check their output only on an executed
-// verdict and ignore it on a failed or unviable one.
+// verdict and do not use it on a failed or unviable one (completeDeposit and
+// completeWithdraw still read their one byte, which must be 0 or 1).
 
 /** The zero-byte output every failure attestation, and an executed nonce replacement's, commits to. */
 export const EMPTY_OUTPUT: Uint8Array = new Uint8Array(0);

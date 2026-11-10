@@ -1163,9 +1163,9 @@ export circuit completeWithdraw(
       "Output does not match the attestation"
     );
   }
-  // A refund of the fee on an unviable verdict is perhaps wanted but not yet implemented.
   // Read before the condition: see completeDeposit (LFDT-Minokawa/compact#856).
   const success = deserialize<VaultResponse, 1>(output).success;
+  // A refund of the fee on an unviable verdict is perhaps wanted but not yet implemented.
   if (outcomeRefunds(record.outputKind) || !success) {
     mintShieldedToken(
       vaultTokenDomainSeparator(args.request.erc20Address),
