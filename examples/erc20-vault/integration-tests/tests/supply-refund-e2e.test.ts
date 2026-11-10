@@ -280,7 +280,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         banner([
-          `MPC signed response for doomed supply ${supplyRequestId} found from Signet Contract.`,
+          `MPC signed response for doomed supply ${supplyRequestId} found on the signet responder.`,
           "",
           `Signed tx hash: ${signedTxHash(signedSupplyTransaction)}`,
         ]);

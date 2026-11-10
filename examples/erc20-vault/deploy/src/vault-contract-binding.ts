@@ -16,7 +16,7 @@ import { VAULT_CONTRACT_ENTRY_DIR } from "./vault-contract-package.ts";
 
 /**
  * Absolute path of the vault contract's compiler output dir (`contract/`, `zkir/`, `keys/`).
- * The signet callee's is the deploy SDK's `signetContractManagedPath`.
+ * The signet callee's is the deploy SDK's `signetSignerManagedPath`.
  */
 export const VAULT_MANAGED_PATH = join(VAULT_CONTRACT_ENTRY_DIR, "managed/erc20-vault");
 

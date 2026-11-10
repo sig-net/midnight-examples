@@ -13,7 +13,7 @@ const RECIPIENTS: readonly WalletFundingRecipient[] = [2, 3, 4, 5, 6].map((value
   label: `child ${String(value)}`,
   amount: 100n,
 }));
-const CONFIG = funding.getMidnightNodeConfig({ NETWORK_ID: "stagenet" });
+const CONFIG = funding.getMidnightNodeConfig({ NETWORK_ID: "preview" });
 const KEYS: ReadonlyMap<string, funding.AccountKeys> = new Map(
   [ROOT_SEED, ...RECIPIENTS.map(({ seed }) => seed)].map((seed) => [
     seed,

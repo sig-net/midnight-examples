@@ -21,8 +21,8 @@ const HAS_VERIFIER_KEYS = existsSync(join(VAULT_MANAGED_PATH, "keys"));
 // The deployer's identity secret; its commitment is the constructor arg.
 const SECRET_KEY = new Uint8Array(32).fill(7);
 
-// Stand-in signet-contract reference sealed as the cross-contract signer.
-const SIGNET_CONTRACT_REF = { bytes: new Uint8Array(32).fill(0x5e) };
+// Stand-in signet-signer reference sealed as the cross-contract signer.
+const SIGNET_SIGNER_REF = { bytes: new Uint8Array(32).fill(0x5e) };
 
 // Dummy coin public key (32-byte hex) for the constructor context.
 const CPK = "0".repeat(64);
@@ -37,7 +37,7 @@ describe.skipIf(!HAS_VERIFIER_KEYS)(
         CPK,
         createVaultPrivateState(SECRET_KEY),
         pureCircuits.userCommitment(SECRET_KEY),
-        SIGNET_CONTRACT_REF,
+        SIGNET_SIGNER_REF,
       );
 
       expect(deployTransaction.contractAddress).not.toHaveLength(0);
@@ -56,7 +56,7 @@ describe.skipIf(!HAS_VERIFIER_KEYS)(
           CPK,
           createVaultPrivateState(SECRET_KEY),
           new Uint8Array(31), // not Bytes<32>: the generated arg validation must trip
-          SIGNET_CONTRACT_REF,
+          SIGNET_SIGNER_REF,
         ),
       ).rejects.toThrow(/Failed to initialize contract/);
     });

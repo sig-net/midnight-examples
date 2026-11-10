@@ -11,13 +11,13 @@ import {
   assertNoVaultBoundPresets,
 } from "../src/initialise-vault.ts";
 
-// The stagenet MPC root public key as the MPC team hands it out (NEAR form),
+// The Preview MPC root public key as the MPC team hands it out (NEAR form),
 // its canonical SEC1 spelling, and its compressed twin.
 const MPC_KEY_NEAR_FORM =
-  "secp256k1:3Ww8iFjqTHufye5aRGUvrQqETegR4gVUcW8FX5xzscaN9ENhpkffojsxJwi6N1RbbHMTxYa9UyKeqK3fsMuwxjR5";
+  "secp256k1:54hU5wcCmVUPFWLDALXMh1fFToZsVXrx9BbTbHzSfQq1Kd1rJZi52iPa4QQxo6s5TgjWqgpY8HamYuUDzG6fAaUq";
 const MPC_KEY_CANONICAL =
-  "0x047dd8ecafa5d9c921485b6ac33476870e98c3378e395f3c8fae92ce4943d8432847f591ab25ca454effb522ec2eaf04b7e1c83ba65ae731ea98dd52eb7d458dd4";
-const MPC_KEY_COMPRESSED = "0x027dd8ecafa5d9c921485b6ac33476870e98c3378e395f3c8fae92ce4943d84328";
+  "0x04cb41bab8bc97121f4902514ca57a284f167b9239ecb8176831d1ef0fede87c61ca3e59da1c194aa90108098a9e5cdc55d3b3297cdefbc085ffafd0f2c34ae61a";
+const MPC_KEY_COMPRESSED = "0x02cb41bab8bc97121f4902514ca57a284f167b9239ecb8176831d1ef0fede87c61";
 
 // The genesis mint seed, the deployer the local stack funds, whose shielded keys
 // the fee recipient defaults to.
@@ -37,7 +37,7 @@ const VALID_INPUTS = {
 // seed holds funds on the local chain alone), and every flat fee is set, since
 // a deployed network takes no default fee.
 const VALID_DEPLOYED_INPUTS = {
-  NETWORK_ID: "stagenet",
+  NETWORK_ID: "preview",
   EVM_CHAIN_ID: "11155111",
   DEPLOYER_SEED: "ab".repeat(32),
   VAULT_FEE_WITHDRAW: "1000000",
@@ -76,7 +76,7 @@ describe("assertInitialiseInputsPresent", () => {
     {
       name: "the stata pair priced in VAULT_TOKEN_FEES and no flat fees on a deployed network",
       env: {
-        NETWORK_ID: "stagenet",
+        NETWORK_ID: "preview",
         EVM_CHAIN_ID: "11155111",
         DEPLOYER_SEED: "ab".repeat(32),
         VAULT_TOKEN_FEES: STATA_PAIR_PRICED,
@@ -161,7 +161,7 @@ describe("assertInitialiseInputsPresent", () => {
     {
       name: "an MPC key disagreeing with the one the SDK publishes for the network",
       env: {
-        NETWORK_ID: "stagenet",
+        NETWORK_ID: "preview",
         EVM_CHAIN_ID: "11155111",
         MPC_SECP256K1_PUBKEY:
           "0x0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
@@ -186,19 +186,19 @@ describe("assertInitialiseInputsPresent", () => {
     {
       name: "no flat fees on a deployed network",
       env: { ...VALID_DEPLOYED_INPUTS, VAULT_FEE_SUPPLY: undefined },
-      error: /VAULT_FEE_SUPPLY is required on "stagenet"/,
+      error: /VAULT_FEE_SUPPLY is required on "preview"/,
     },
     {
       name: "only the stata underlying priced and no flat fees on a deployed network",
       env: {
-        NETWORK_ID: "stagenet",
+        NETWORK_ID: "preview",
         EVM_CHAIN_ID: "11155111",
         DEPLOYER_SEED: "ab".repeat(32),
         VAULT_TOKEN_FEES: JSON.stringify({
           [AAVE_USDC]: { withdraw: 1, swap: 1, supply: 1, redeem: 1 },
         }),
       },
-      error: /VAULT_FEE_WITHDRAW is required on "stagenet"/,
+      error: /VAULT_FEE_WITHDRAW is required on "preview"/,
     },
     {
       name: "half a fee recipient",
@@ -227,7 +227,7 @@ describe("assertNoVaultBoundPresets", () => {
   const ACCEPTED: readonly AcceptedCase[] = [
     {
       name: "an environment holding nothing bound to a vault",
-      env: { ...VALID_INPUTS, MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "aa".repeat(32) },
+      env: { ...VALID_INPUTS, MIDNIGHT_SIGNER_CONTRACT_ADDRESS: "aa".repeat(32) },
     },
     {
       name: "blank lines from an emptied .env",

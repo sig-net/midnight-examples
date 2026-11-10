@@ -11,7 +11,7 @@ import { ensureTransactionFee } from "../src/transaction-fees.ts";
 
 type TransferRecipe = Awaited<ReturnType<funding.WalletFacade["transferTransaction"]>>;
 
-const KEYS = funding.deriveAccountKeys("01".repeat(32), "stagenet");
+const KEYS = funding.deriveAccountKeys("01".repeat(32), "preview");
 // Every facade method is mocked and none reads the transaction, so a bare handle stands in.
 const TRANSACTION = {} as TransferRecipe["transaction"];
 
@@ -41,7 +41,7 @@ describe("transaction fee readiness", () => {
       } as Partial<funding.WalletFacade> as funding.WalletFacade;
       const expires: number = Date.now() + 120_000;
       await expect(
-        ensureTransactionFee(facade, KEYS, "stagenet", TRANSACTION, expires, "startDeposit"),
+        ensureTransactionFee(facade, KEYS, "preview", TRANSACTION, expires, "startDeposit"),
       ).resolves.toBe(fee);
       expect(estimate).toHaveBeenCalledWith(TRANSACTION, { ttl: new Date(expires) });
       expect(ensure).not.toHaveBeenCalled();
@@ -70,7 +70,7 @@ describe("transaction fee readiness", () => {
     const result = ensureTransactionFee(
       facade,
       KEYS,
-      "stagenet",
+      "preview",
       TRANSACTION,
       Date.now() + 120_000,
       "startDeposit",
@@ -87,7 +87,7 @@ describe("transaction fee readiness", () => {
       calculateTransactionFee: calculate,
     } as Partial<funding.WalletFacade> as funding.WalletFacade;
     await expect(
-      ensureTransactionFee(facade, KEYS, "stagenet", TRANSACTION, Date.now() + 30_000, "withdraw"),
+      ensureTransactionFee(facade, KEYS, "preview", TRANSACTION, Date.now() + 30_000, "withdraw"),
     ).rejects.toThrow("insufficient validity time");
     expect(calculate).not.toHaveBeenCalled();
   });
@@ -114,7 +114,7 @@ describe("transfer preparation failure", () => {
       revert,
       submitTransaction: submit,
     } as Partial<funding.WalletFacade> as funding.WalletFacade;
-    await expect(submitTransferTransaction(facade, KEYS, [], "stagenet")).rejects.toThrow(
+    await expect(submitTransferTransaction(facade, KEYS, [], "preview")).rejects.toThrow(
       "estimator unavailable",
     );
     expect(revert).toHaveBeenCalledExactlyOnceWith(prepared);

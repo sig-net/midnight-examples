@@ -3,7 +3,7 @@
 // (`keys/`, `zkir/`, `compiler/`, and the same under `signet/`). The vault's
 // prover keys are regenerated with the pinned toolchain and accepted only when
 // every served file matches the manifest this package ships. The callee's
-// tree is copied from `@sig-net/midnight-contract`, which ships its provers.
+// tree is copied from `@sig-net/midnight-signer`, which ships its provers.
 // Not part of the package's export surface.
 
 import { randomUUID } from "node:crypto";
@@ -338,7 +338,7 @@ async function produceSignet(
   stagingRoot: string,
   uuid: string,
 ): Promise<string> {
-  const signetManaged = join(packageDirOf("@sig-net/midnight-contract"), "dist", "managed");
+  const signetManaged = join(packageDirOf("@sig-net/midnight-signer"), "dist", "managed");
   const shipped = await readManifest(signetManaged);
   const sha256 = computeSha256Hex(shipped.bytes);
   const destDir = join(options.outDir, SIGNET_TREE);

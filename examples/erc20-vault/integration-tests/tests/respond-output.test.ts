@@ -37,8 +37,8 @@ import * as contextModule from "../src/vault-context.ts";
 
 const REQUEST_ID = parseRequestIdHex("ab".repeat(32));
 const NETWORK_ID = "undeployed";
-const SIGNET_CONTRACT_ADDRESS = "cd".repeat(32);
-const EXPECTED_OBJECT_PATH = `/v1/test/${NETWORK_ID}/${SIGNET_CONTRACT_ADDRESS}/${REQUEST_ID}.bin`;
+const SIGNER_CONTRACT_ADDRESS = "cd".repeat(32);
+const EXPECTED_OBJECT_PATH = `/v1/test/${NETWORK_ID}/${SIGNER_CONTRACT_ADDRESS}/${REQUEST_ID}.bin`;
 // The key the vault pinned at initialise, here held locally so the test can
 // post attestations the way the MPC does.
 const MPC_RESPONSE_SECRET = new Uint8Array(32).fill(7);
@@ -111,7 +111,7 @@ async function serveBucket(reply: BucketReply, paths: string[]): Promise<string>
 /** A context whose cache is the bucket stand-in at `baseUrl` (or none when omitted). */
 function contextWithCache(baseUrl: string | undefined): contextModule.VaultContext {
   return {
-    signetContractAddress: SIGNET_CONTRACT_ADDRESS,
+    signerContractAddress: SIGNER_CONTRACT_ADDRESS,
     vaultContractAddress: "ef".repeat(32),
     // The ledger read and the execution observation are stubbed, so neither
     // the provider nor the EVM endpoint is consulted.
@@ -124,7 +124,7 @@ function contextWithCache(baseUrl: string | undefined): contextModule.VaultConte
         : new MpcOutputCacheReader({
             cacheUrl: `${baseUrl}/v1/test`,
             networkId: NETWORK_ID,
-            signetContractAddress: SIGNET_CONTRACT_ADDRESS,
+            signerContractAddress: SIGNER_CONTRACT_ADDRESS,
           }),
   } as contextModule.VaultContext;
 }

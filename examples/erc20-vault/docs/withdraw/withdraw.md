@@ -100,7 +100,7 @@ As illustrated, the flow comprises 9 steps:
   - It stores the **SignBidirectionalEventV1** in
     [`bidirectionalWithdrawMap`](../../contract/src/erc20-vault.compact) under
     its request id, maps the id to the request index in `evictionMap`, and calls
-    the singleton's `signBidirectional(...)` with the map's path
+    the signet signer's `signBidirectional(...)` with the map's path
     ([`VAULT_WITHDRAW_REQUESTS_PATH`](../../contract/src/index.ts)).
     Anyone may send it, and a second send is refused.
   - Off chain, `start-withdraw.ts` rebuilds the expected record from the
@@ -112,7 +112,7 @@ As illustrated, the flow comprises 9 steps:
     through the signet responder's `respond(...)`.
   - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts)
     polls the responder's emitted signature events through the SDK's
-    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.25.1/packages/signet-midnight/src/signet-request-response-reader.ts),
+    [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.11/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
     recovers to the expected signer: for a withdrawal, the vault's own
     account, `evmVaultAddress`.

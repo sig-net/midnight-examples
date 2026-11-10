@@ -1,7 +1,7 @@
 // The guard standing between a local e2e run's leftovers and a remote deploy.
-// The e2e setup appends MPC_ROOT_KEY and MIDNIGHT_SIGNET_CONTRACT_ADDRESS to
+// The e2e setup appends MPC_ROOT_KEY and MIDNIGHT_SIGNER_CONTRACT_ADDRESS to
 // the repo-root .env on every local run, and the vault's constructor seals the
-// signet address permanently, so a stagenet deploy that silently picked those
+// signet address permanently, so a remote deploy that silently picked those
 // up would produce a contract that can never work.
 
 import { MidnightNetwork } from "@sig-net/midnight";
@@ -13,7 +13,7 @@ import { assertEnvFileMatchesNetwork } from "../src/entrypoint-env.ts";
 const LOCAL_ENV_FILE = {
   ROOT_SEED: "00".repeat(32),
   MPC_ROOT_KEY: "123456",
-  MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "aa".repeat(32),
+  MIDNIGHT_SIGNER_CONTRACT_ADDRESS: "aa".repeat(32),
   MIDNIGHT_VAULT_CONTRACT_ADDRESS: "bb".repeat(32),
   MPC_SECP256K1_PUBKEY: "0x04ab",
 } as const;
@@ -37,11 +37,11 @@ const ACCEPTED: readonly GuardCase[] = [
     name: "a remote run overriding both sealed inputs, whatever else the file holds",
     fileEnv: LOCAL_ENV_FILE,
     processEnv: {
-      NETWORK_ID: "stagenet",
-      MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "cc".repeat(32),
+      NETWORK_ID: "preview",
+      MIDNIGHT_SIGNER_CONTRACT_ADDRESS: "cc".repeat(32),
       MPC_SECP256K1_PUBKEY: "0x04cd",
     },
-    networkId: MidnightNetwork.Stagenet,
+    networkId: MidnightNetwork.Preview,
   },
   {
     name: "a remote run inheriting only values no entrypoint seals",
@@ -51,20 +51,20 @@ const ACCEPTED: readonly GuardCase[] = [
       EVM_VAULT_ADDRESS: `0x${"ab".repeat(20)}`,
       MPC_RESPONSE_KEY: `04${"cd".repeat(64)}`,
     },
-    processEnv: { NETWORK_ID: "stagenet" },
-    networkId: MidnightNetwork.Stagenet,
+    processEnv: { NETWORK_ID: "preview" },
+    networkId: MidnightNetwork.Preview,
   },
   {
     name: "a remote run whose file carries only network-agnostic values",
     fileEnv: { ROOT_SEED: LOCAL_ENV_FILE.ROOT_SEED, FUND_CHILD_NIGHT: "1000" },
-    processEnv: { NETWORK_ID: "stagenet" },
-    networkId: MidnightNetwork.Stagenet,
+    processEnv: { NETWORK_ID: "preview" },
+    networkId: MidnightNetwork.Preview,
   },
   {
     name: "a blank value in the file, which counts as unset",
-    fileEnv: { MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "   " },
-    processEnv: { NETWORK_ID: "stagenet" },
-    networkId: MidnightNetwork.Stagenet,
+    fileEnv: { MIDNIGHT_SIGNER_CONTRACT_ADDRESS: "   " },
+    processEnv: { NETWORK_ID: "preview" },
+    networkId: MidnightNetwork.Preview,
   },
 ];
 
@@ -77,22 +77,22 @@ const REFUSED: readonly RefusedCase[] = [
   {
     name: "a remote run inheriting the local run's network-scoped values",
     fileEnv: LOCAL_ENV_FILE,
-    processEnv: { NETWORK_ID: "stagenet" },
-    networkId: MidnightNetwork.Stagenet,
-    names: ["MIDNIGHT_SIGNET_CONTRACT_ADDRESS", "MPC_SECP256K1_PUBKEY"],
+    processEnv: { NETWORK_ID: "preview" },
+    networkId: MidnightNetwork.Preview,
+    names: ["MIDNIGHT_SIGNER_CONTRACT_ADDRESS", "MPC_SECP256K1_PUBKEY"],
   },
   {
     name: "a local run against a file pinned to a remote network",
-    fileEnv: { ...LOCAL_ENV_FILE, NETWORK_ID: "stagenet" },
+    fileEnv: { ...LOCAL_ENV_FILE, NETWORK_ID: "preview" },
     processEnv: {},
     networkId: MidnightNetwork.Undeployed,
-    names: ["MIDNIGHT_SIGNET_CONTRACT_ADDRESS"],
+    names: ["MIDNIGHT_SIGNER_CONTRACT_ADDRESS"],
   },
   {
     name: "a remote run overriding only some of what it inherits",
     fileEnv: LOCAL_ENV_FILE,
-    processEnv: { NETWORK_ID: "stagenet", MIDNIGHT_SIGNET_CONTRACT_ADDRESS: "cc".repeat(32) },
-    networkId: MidnightNetwork.Stagenet,
+    processEnv: { NETWORK_ID: "preview", MIDNIGHT_SIGNER_CONTRACT_ADDRESS: "cc".repeat(32) },
+    networkId: MidnightNetwork.Preview,
     names: ["MPC_SECP256K1_PUBKEY"],
   },
 ];

@@ -440,7 +440,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         banner([
-          `MPC signed response for wallet B's withdraw ${withdrawRequestId} found from Signet Contract.`,
+          `MPC signed response for wallet B's withdraw ${withdrawRequestId} found on the signet responder.`,
           "",
           `Signed tx hash: ${signedTxHash(signedWithdrawTransaction)}`,
         ]);

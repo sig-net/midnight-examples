@@ -53,7 +53,7 @@ import {
   respondBidirectionalEventToCircuitInput,
 } from "@sig-net/midnight";
 import { attestRespondBidirectional, secp256k1PublicKeyOf } from "@sig-net/midnight/testing";
-import * as SignetSigner from "@sig-net/midnight-contract/managed/contract/index.js";
+import * as SignetSigner from "@sig-net/midnight-signer/managed/contract/index.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -95,11 +95,11 @@ const VAULT_TOKEN_COLOR = hexToBytes(
 
 // The helpers hash flushQueue's on-chain verifier key into the call's key location, so
 // the served state must hold a key the ledger parses. The chain never checks a proof,
-// so any well-formed key serves: this one ships with the Signet contract.
+// so any well-formed key serves: this one ships with the Signet signer.
 const STAND_IN_VERIFIER_KEY = new Uint8Array(
   readFileSync(
     new URL(
-      import.meta.resolve("@sig-net/midnight-contract/managed/keys/signBidirectional.verifier"),
+      import.meta.resolve("@sig-net/midnight-signer/managed/keys/signBidirectional.verifier"),
     ),
   ),
 );
@@ -153,12 +153,12 @@ const EMPTY_VAULT: VaultArrangement = { attested: [], open: [], queued: [], with
 
 // ---- Harness: the vault, built with the simulator ----
 
-// The Signet contract the vault's send circuits call, served to the simulator at any
+// The Signet signer the vault's send circuits call, served to the simulator at any
 // address, round-tripped through bytes into this tree's ContractState class, with the
 // verifier keys the published package ships, which the runtime matches against the
 // callee module's expected keys.
 const SIGNET_ADDRESS = sampleContractAddress();
-// The verifier key the published signet contract package ships for each provable circuit, read once.
+// The verifier key the published signet signer package ships for each provable circuit, read once.
 const SIGNET_VERIFIER_KEYS: ReadonlyMap<string, Uint8Array> = new Map(
   Object.entries(SignetSigner.circuitSignatures)
     .filter(([, signature]) => signature.provable)

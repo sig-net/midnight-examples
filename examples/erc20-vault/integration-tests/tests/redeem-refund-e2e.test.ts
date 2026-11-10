@@ -308,7 +308,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         banner([
-          `MPC signed response for doomed redeem ${redeemRequestId} found from Signet Contract.`,
+          `MPC signed response for doomed redeem ${redeemRequestId} found on the signet responder.`,
           "",
           `Signed tx hash: ${signedTxHash(signedRedeemTransaction)}`,
         ]);

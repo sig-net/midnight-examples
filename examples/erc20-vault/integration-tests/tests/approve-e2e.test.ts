@@ -229,7 +229,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           });
 
           banner([
-            `MPC signed response for the ${name} ${requestId} found from Signet Contract.`,
+            `MPC signed response for the ${name} ${requestId} found on the signet responder.`,
             "",
             `Signed tx hash: ${signedTxHash(signedTransaction)}`,
           ]);

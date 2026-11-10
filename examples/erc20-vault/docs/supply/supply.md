@@ -94,7 +94,7 @@ As illustrated, the flow comprises 9 steps:
     whose width is part of the supply map's ledger type.
   - The record goes into `bidirectionalSupplyMap` under its request id, signed
     for the vault's own account (path `pad(32, "vault")`) at the assigned
-    nonce and the gas the start copied, and the singleton's
+    nonce and the gas the start copied, and the signet signer's
     `signBidirectional(...)` call carries the map's path
     ([`VAULT_SUPPLY_REQUESTS_PATH`](../../contract/src/index.ts)).
 - **4.** poll for the MPC's signature

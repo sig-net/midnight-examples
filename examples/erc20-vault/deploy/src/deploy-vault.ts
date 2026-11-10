@@ -2,7 +2,7 @@
 // transaction using the wallet and node-config plumbing of
 // @sig-net/midnight-contract-deploy and the split-deploy builders of
 // @sig-net/midnight-examples-lib. Everything contract-specific lives HERE: the constructor args (deployerCommitment, the
-// signet contract reference), the witnesses, and the private state. Requires
+// signet signer reference), the witnesses, and the private state. Requires
 // `yarn compile:zk` output (verifier keys) in the contract package's managed
 // dir. The MPC response key is NOT a deploy input: it derives from the new
 // contract's own address, so the deployer-gated initialise circuit pins it
@@ -32,7 +32,7 @@ import {
   type NetworkId,
   parseIdentitySecretKey,
   type RegisteredWallet,
-  resolveSignetContractAddress,
+  resolveSignerContractAddress,
   submitUnprovenTransaction,
   type TransactionIdentifier,
   WalletRegistry,
@@ -321,8 +321,8 @@ export interface VaultDeployment {
  *
  * @param env - Environment providing `DEPLOYER_SEED`, `VAULT_DEPLOYER_SECRET_KEY`,
  *   `MAINTENANCE_SIGNING_KEY` and the deploy SDK's Midnight node configuration, plus
- *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` where the SDK publishes no signet singleton
- *   for the network (see `resolveSignetContractAddress`). Defaults to `process.env`.
+ *   `MIDNIGHT_SIGNER_CONTRACT_ADDRESS` where the SDK publishes no signet signer
+ *   for the network (see `resolveSignerContractAddress`). Defaults to `process.env`.
  * @param wallets - A registry to take the deployer wallet from, when the caller keeps wallets
  *   open across steps (the e2e setup pipeline). Without one, a private registry is opened for
  *   this deploy and closed after it.
@@ -333,7 +333,7 @@ export interface VaultDeployment {
  * @returns The deployed contract address and base deploy transaction id.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.
- * @throws {Error} If no signet singleton resolves (see `resolveSignetContractAddress`),
+ * @throws {Error} If no signet signer resolves (see `resolveSignerContractAddress`),
  *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, the fee of the base deploy
  *   plus one add per deferred circuit does not generate in spendable DUST after registering
  *   the wallet's NIGHT, or the base deploy submission fails.
@@ -358,16 +358,16 @@ export async function deployVault(
     );
     const deployerCommitment = pureCircuits.userCommitment(secretKey);
 
-    // The signet contract the vault cross-contract-calls to register signature
+    // The signet signer the vault cross-contract-calls to register signature
     // request notifications, sealed into the vault as the SignetSigner
-    // reference: the singleton the SDK publishes for a deployed network, or the
-    // one MIDNIGHT_SIGNET_CONTRACT_ADDRESS names.
-    const signet = resolveSignetContractAddress(env);
+    // reference: the one the SDK publishes for a deployed network, or the
+    // one MIDNIGHT_SIGNER_CONTRACT_ADDRESS names.
+    const signet = resolveSignerContractAddress(env);
     console.log(
-      `signet singleton ${signet.value} ` +
+      `signet signer ${signet.value} ` +
         (signet.origin === CounterpartyOrigin.Published
           ? `(published by the SDK for ${networkId})`
-          : "(MIDNIGHT_SIGNET_CONTRACT_ADDRESS)"),
+          : "(MIDNIGHT_SIGNER_CONTRACT_ADDRESS)"),
     );
     const signetSigner = contractAddressFromHex(signet.value);
 

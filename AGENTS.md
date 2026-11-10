@@ -40,7 +40,7 @@ generated `src/managed/` output.
 These three rules are what make this repo work as an *examples* repo. They override
 any instinct carried in from product-repo conventions.
 
-- **Examples depend on `@sig-net/midnight` / `@sig-net/midnight-contract` ONLY via
+- **Examples depend on `@sig-net/midnight` / `@sig-net/midnight-signer` ONLY via
   npm published versions in committed manifests.** An example's `package.json`
   names the SDK as a normal npm semver range — never a `workspace:`, `link:`,
   `portal:`, or `file:` reference back to the protocol repo, and never a
@@ -70,7 +70,7 @@ any instinct carried in from product-repo conventions.
 - **No workspace package is published by default.** Every member is named
   `@sig-net/midnight-examples-*` and starts `"private": true`. That is the SAME
   npm scope the published SDK uses (`@sig-net/midnight`,
-  `@sig-net/midnight-contract`), so the `midnight-examples-` prefix is the only
+  `@sig-net/midnight-signer`), so the `midnight-examples-` prefix is the only
   thing separating an example from a product package: never drop it, and never
   clear `"private"` without meaning to publish into the SDK's scope. Anything
   else worth publishing graduates to the protocol repo's SDK packages.
@@ -94,7 +94,7 @@ any instinct carried in from product-repo conventions.
   the workspace copy whatever version the sibling carries (a bare `"*"` is a
   semver range, which a prerelease version such as `0.1.0-rc.3` does not
   satisfy, so yarn would fall through to npm and fail the install). It names
-  `@sig-net/midnight` / `@sig-net/midnight-contract` as a plain npm version:
+  `@sig-net/midnight` / `@sig-net/midnight-signer` as a plain npm version:
   never a `workspace:`, `link:`, `portal:` or `file:` reference back to the
   protocol repo. The published contract package has no intra-workspace deps at
   all (see the corollary below).
@@ -377,7 +377,7 @@ apply to all of them:
   code > README > diagram: take it from the leftmost source that has it. One exemption: the generic protocol diagram
   (`docs/sign-bidirectional-flow.*`) depicts a hypothetical integrating contract, so its
   placeholder circuits (`startCrossChain(...)`, `completeCrossChain(...)`) grep nowhere
-  by design. Every real name in it (events, singleton circuits, ledger fields) still
+  by design. Every real name in it (events, signet signer circuits, ledger fields) still
   must grep.
 - **An example's actor map is the ONLY diagram carrying the contract's full
   anatomy** (every exported circuit, every witness, every exported ledger field,
