@@ -98,7 +98,9 @@ const VAULT_TOKEN_COLOR = hexToBytes(
 // so any well-formed key serves: this one ships with the Signet contract.
 const STAND_IN_VERIFIER_KEY = new Uint8Array(
   readFileSync(
-    new URL(import.meta.resolve("@sig-net/midnight-contract/managed/keys/respond.verifier")),
+    new URL(
+      import.meta.resolve("@sig-net/midnight-contract/managed/keys/signBidirectional.verifier"),
+    ),
   ),
 );
 

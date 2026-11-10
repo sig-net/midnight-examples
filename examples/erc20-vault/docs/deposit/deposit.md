@@ -138,9 +138,9 @@ As illustrated, the flow comprises 10 steps:
 - **5.** poll for the MPC's signature
   - The MPC reads the recorded request from the vault's ledger, signs the sweep
     transaction with the user's derived deposit-account key, and posts the
-    signature back through the singleton's
-    [`respond`](https://github.com/sig-net/midnight-integration/blob/v0.25.1/packages/signet-contract/src/signet-contract.compact).
-  - The dApp polls the singleton's emitted response events with
+    signature back through the signet responder's
+    [`respond`](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.8/packages/signet-responder/src/signet-responder.compact).
+  - The dApp polls the responder's emitted response events with
     [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts).
     The event log is unauthenticated (anyone may post), so enumeration and
     verification go through the SDK's
@@ -164,8 +164,8 @@ As illustrated, the flow comprises 10 steps:
   - The MPC watches the EVM chain for the transaction in a final block and
     posts an attestation of its outcome. It attests `unviable` when another
     request's transaction from the same account used up the same nonce and is
-    in a final block. It posts the attestation through the singleton's
-    [`respondBidirectional`](https://github.com/sig-net/midnight-integration/blob/v0.25.1/packages/signet-contract/src/signet-contract.compact).
+    in a final block. It posts the attestation through the signet responder's
+    [`respondBidirectional`](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.8/packages/signet-responder/src/signet-responder.compact).
     The emitted event carries the request id it answers, the finalised EVM
     block height, the MPC's verdict (`outputKind`: `executed`, `failed` or
     `unviable`), the output's byte width and hash, the attestation digest and
@@ -212,7 +212,7 @@ As illustrated, the flow comprises 10 steps:
     height, output kind, output width and output hash the event carries, and
     verifies the MPC's ECDSA signature over it against the initialise-pinned
     [`mpcResponseKey`](../../contract/src/erc20-vault.compact) with
-    `verifyRespondBidirectionalAttestationV1`. The singleton emits MPC posts
+    `verifyRespondBidirectionalAttestationV1`. The responder emits MPC posts
     unverified, so this is the authentication gate, and it proves which block
     height the MPC signed without the output (see
     [Why the queue needs no output](../contention-handling.md#why-the-queue-needs-no-output)).
@@ -268,7 +268,7 @@ the integration tests by the `VAULT_USER_SECRET_KEY` environment variable
 (falling back to the `USER_SEED` bytes when unset).
 
 The two polling steps (5 and 7) each build a `SignetRequestResponseReader` over
-the vault and singleton pair through
+the vault and responder pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts). The
 expected signer of the deposit sweep is the user's deposit account, derived with
 [`deriveEvmAddress`](https://github.com/sig-net/midnight-integration/blob/v0.25.1/packages/signet-midnight/src/epsilon-derivation.ts)

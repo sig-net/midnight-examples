@@ -81,7 +81,7 @@ export interface E2eSessionOptions {
  * / STEP_THROUGH pauses can't hand out a stale wallet.
  *
  * A reader is likewise built lazily, one per request-map path, over the
- * example's requester contract / signet contract pair, backed by a fresh
+ * example's requester contract / signet responder pair, backed by a fresh
  * indexerPublicDataProvider so it reads RAW ledger state exactly as the
  * response server does. Each caches its fetched request records, so repeated
  * lookups across tests cost one query each.
@@ -125,7 +125,7 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
       const reader = new SignetRequestResponseReader({
         requesterContractAddress: requireEnv(env, options.requesterAddressEnvVar),
         requesterRequestsPath: requestsPath,
-        signetContractAddress: requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"),
+        responderContractAddress: requireEnv(env, "MIDNIGHT_RESPONDER_CONTRACT_ADDRESS"),
         publicDataProvider,
         eventSource: signetEventSourceFromIndexer({ queryUrl: nodeConfig.indexerUrl }),
       });
