@@ -18,7 +18,7 @@ import {
   indexerPublicDataProvider,
 } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import * as ledger from "@midnightntwrk/ledger-v9";
-import { contractAddressFromHex } from "@sig-net/midnight";
+import { contractAddressFromHex, redactUrlQuery } from "@sig-net/midnight";
 import {
   CounterpartyOrigin,
   ensureFeeReady,
@@ -372,7 +372,7 @@ export async function deployVault(
     const signetSigner = contractAddressFromHex(signet.value);
 
     console.log(
-      `deploying erc20-vault to ${networkId} (${deployConfig.midnightNodeConfig.nodeUrl})`,
+      `deploying erc20-vault to ${networkId} (${redactUrlQuery(deployConfig.midnightNodeConfig.nodeUrl)})`,
     );
     const deployer = await registry.wallet(deployConfig.deployerSeed, "deployer");
 
@@ -549,7 +549,7 @@ export async function resumeVaultDeploy(
     const live = await readContractState(pdp, vaultContractAddress);
     if (!live) {
       throw new Error(
-        `no contract at ${vaultContractAddress} on ${networkId} (${nodeConfig.indexerUrl})`,
+        `no contract at ${vaultContractAddress} on ${networkId} (${redactUrlQuery(nodeConfig.indexerUrl)})`,
       );
     }
     installed = installedCircuitIds(live.serialized);
