@@ -177,7 +177,7 @@ describe("ensureMpcSecp256k1Pubkey", () => {
     },
     {
       name: "no root key, no preset and nothing published for the network",
-      env: { NETWORK_ID: "preprod", BLOCKFROST_PROJECT_ID: "token" },
+      env: { NETWORK_ID: "mainnet", BLOCKFROST_PROJECT_ID: "token" },
       error: /no MPC to face/,
     },
     {

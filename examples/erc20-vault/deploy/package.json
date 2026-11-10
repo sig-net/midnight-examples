@@ -24,11 +24,11 @@
     "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0",
     "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0",
     "@midnightntwrk/ledger-v9": "1.0.1",
-    "@sig-net/midnight": "0.26.0-rc.12",
-    "@sig-net/midnight-contract-deploy": "0.26.0-rc.12",
+    "@sig-net/midnight": "0.26.0-rc.13",
+    "@sig-net/midnight-contract-deploy": "0.26.0-rc.13",
     "@sig-net/midnight-examples-erc20-vault-contract": "workspace:*",
     "@sig-net/midnight-examples-lib": "workspace:*",
-    "@sig-net/midnight-signer": "0.26.0-rc.12"
+    "@sig-net/midnight-signer": "0.26.0-rc.13"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
