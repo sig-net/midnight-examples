@@ -14,8 +14,8 @@ import type { RespondOutcome } from "./respond-output.ts";
 /**
  * Settle a resolved withdraw outcome: {@link queueAndFlushAttestation}, then call
  * `completeWithdraw` with the request id, the output bytes (one zero byte for a
- * failed or unviable transfer, whose output the circuit ignores) and a random
- * mint nonce. A transfer that returned true only closes the request. One that
+ * failed or unviable transfer, whose output the circuit does not use) and a
+ * random mint nonce. A transfer that returned true only closes the request. One that
  * returned false, failed or was unviable re-mints the surrendered amount to this
  * wallet, which must be the withdrawer's either way. The re-mint's coin handling
  * is midnight-js's job: the callTx balances the resulting offer like any other
