@@ -29,7 +29,7 @@ import "@sig-net/midnight/src/Signet";
 // The Signet singleton the send circuits cross-contract call to notify the MPC.
 sealed ledger signetSigner: SignetSigner;
 
-// Verifies every attestation (the Signet singleton emits MPC posts unverified).
+// Verifies every attestation (the signet responder emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
 export ledger vaultMaxFeePerGas: Uint<128>;

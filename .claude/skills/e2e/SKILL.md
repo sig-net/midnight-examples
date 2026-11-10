@@ -58,7 +58,7 @@ is pruned", so the unviable attestation never posts and the spec times out.
 it appends the generated wallet seeds (root + the deployer/user/mpc
 responder/bearer roles, funded from root), the MPC public key it derives from
 the root key (`MPC_SECP256K1_PUBKEY`) and the fakenet hand-off values
-(`MPC_ROOT_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`) plus prints a ready-to-paste
+(`MPC_ROOT_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS`) plus prints a ready-to-paste
 block with everything else it deployed/derived. Appends are append-only:
 existing lines are never modified, and a value that conflicts with the shell
 environment is a hard error, not an overwrite. On the Sepolia-forked anvil
@@ -85,6 +85,7 @@ vault with every circuit).
 - **`/e2e redeploy`**: a circuit changed (any `.compact` edit that alters a
   circuit, struct layout, or the request-id hash domain): comment out
   `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
+  `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS`,
   `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS`
   in `.env`, then rerun. `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS` and
   `EVM_USER_ADDRESS` all derive from the vault's contract address, so a stale
@@ -155,10 +156,11 @@ The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
 stand-in: it polls the signet contract's emitted notification events via the
 indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and
-posts responses through the proof server.
+posts responses to the signet responder through the proof server.
 
 - **Managed by setup (default):** the setup's hand-off steps append
-  `MPC_ROOT_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
+  `MPC_ROOT_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` and
+  `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS` to `.env` and run
   `docker compose --profile fakenet up -d fakenet`, with `--force-recreate`
   exactly when values newly landed in `.env` (recreate re-reads `.env` AND
   resets the responder's container-local LevelDB state). A running responder

@@ -65,7 +65,7 @@ anatomy: its exported circuits, its witness and its exported ledger fields.
 
 The edges it draws are the dashed key derivations (see
 [Derived keys and accounts](#derived-keys-and-accounts)) plus the three
-standing responsibilities of the dApp/relayer: picking up the singleton's
+standing responsibilities of the dApp/relayer: picking up the responder's
 `SignatureRespondedEvent`s and `RespondBidirectionalEvent`s, and broadcasting
 the MPC-signed transactions. Every other runtime interaction between these
 actors belongs to a specific MPC flow, and each flow's own walkthrough page
@@ -74,10 +74,10 @@ draws and describes its steps (see [The flows](#the-flows)).
 - **Sig Network Distributed MPC**: signs requested transactions with keys
   derived for the requesting contract, and attests their execution outcomes.
   It never broadcasts them.
-- **Midnight Blockchain (source chain)** hosts two contracts: the
-  **Sig Network Singleton Contract**, which the vault notifies of each request
-  and through which the MPC posts its responses as contract events, and the
-  **ERC20 Vault Contract**, this example's contract, whose exported circuits
+- **Midnight Blockchain (source chain)** hosts three contracts: the
+  **Sig Network Singleton Contract**, which the vault notifies of each
+  request, the **Sig Network Responder Contract**, through which the MPC posts
+  its responses as contract events, and the **ERC20 Vault Contract**, this example's contract, whose exported circuits
   appear on the map and are listed in
   [The vault's circuits](#the-vaults-circuits).
 - **EVM Blockchain (target chain)** hosts what the vault transacts with:
@@ -89,7 +89,7 @@ draws and describes its steps (see [The flows](#the-flows)).
   token contracts: an approval started with `startApproveRouter` lets the
   Uniswap router spend an ERC20, and one started with `startApproveStata`
   lets the stataToken wrapper pull the underlying token during a supply.
-- **Vault dApp/Relayer**: the off-chain client. It polls the singleton's
+- **Vault dApp/Relayer**: the off-chain client. It polls the responder's
   emitted events for the MPC's signature, assembles and broadcasts the
   MPC-signed transaction to the EVM chain, then polls for the MPC's
   attestation and hands the attested output back for settling. The MPC never
@@ -293,7 +293,7 @@ requests from) plus its own state:
 // The Signet singleton the send circuits cross-contract call to notify the MPC.
 sealed ledger signetSigner: SignetSigner;
 
-// Verifies every attestation (the Signet singleton emits MPC posts unverified).
+// Verifies every attestation (the signet responder emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
 // ... then the vault's own configuration: the gas settings, initialised,
@@ -360,7 +360,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.6/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.8/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
@@ -634,7 +634,7 @@ What differs from the local loop:
 
 - **No signet deploy.** The setup takes the singleton address the SDK
   publishes for the network (a set `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` must
-  agree with it).
+  agree with it), and the responder address it publishes beside it.
 - **No `MPC_ROOT_KEY`.** The MPC root public key the SDK publishes for the
   network names the real MPC, every derived account starts from it, and the
   fakenet hand-off steps skip on their own. A set `MPC_SECP256K1_PUBKEY` must
@@ -796,8 +796,9 @@ afterwards through the map and `yarn set-token-fees:erc20-vault`, and move the
 recipient with the deployer's `setFeeRecipient` circuit. `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
 `MPC_SECP256K1_PUBKEY` and `EVM_CHAIN_ID` remain as overrides, and a set value
 must agree with the published one or with what the chain reports. The local
-stack publishes nothing, so there the e2e setup deploys a singleton and mints a
-fakenet key and hands both over through those same variables.
+stack publishes nothing, so there the e2e setup deploys a singleton and a
+responder and mints a fakenet key, and hands them over through those same
+variables and `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS`.
 
 `BASE_DEPLOY_CIRCUITS` names the circuit that goes in the base transaction.
 `buildDeployTransactionDeferring` returns the contract address plus the deferred

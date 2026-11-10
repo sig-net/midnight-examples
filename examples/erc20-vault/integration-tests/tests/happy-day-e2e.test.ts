@@ -305,7 +305,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   let signedDepositSweepTransaction: Transaction;
 
   it(
-    "pollSignatureResponse: poll signet contract for sweep transaction signature response",
+    "pollSignatureResponse: poll signet responder for sweep transaction signature response",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
@@ -374,7 +374,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   let depositSweepTransactionRespondBidirectional: RespondOutcome;
 
   it(
-    "pollRespondBidirectional: poll signet contract for sweep transaction attestation",
+    "pollRespondBidirectional: poll signet responder for sweep transaction attestation",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
@@ -419,7 +419,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
 
       banner([
-        `Found deposit RespondBidirectionalEvent (verified) on the signet contract: ` +
+        `Found deposit RespondBidirectionalEvent (verified) on the signet responder: ` +
           `success '${String(outcome.succeeded)}' ` +
           `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${String(outcome.serializedOutput.length)} byte(s), ` +
           `kind ${OutputKind[outcome.event.outputKind]}, block ${String(outcome.event.blockHeight)})`,
@@ -646,7 +646,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   let signedWithdrawTransaction: Transaction;
 
   it(
-    "pollSignatureResponse: poll signet contract for withdraw transaction signature response",
+    "pollSignatureResponse: poll signet responder for withdraw transaction signature response",
     async () => {
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
 
@@ -717,7 +717,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   let withdrawRespondBidirectional: RespondOutcome;
 
   it(
-    "pollRespondBidirectional: poll signet contract for withdraw transaction attestation",
+    "pollRespondBidirectional: poll signet responder for withdraw transaction attestation",
     async () => {
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
 
@@ -737,7 +737,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       ).toBe(true);
 
       banner([
-        `Found withdraw RespondBidirectionalEvent (verified) on the signet contract: ` +
+        `Found withdraw RespondBidirectionalEvent (verified) on the signet responder: ` +
           `success '${String(withdrawRespondBidirectional.succeeded)}' ` +
           `(payload 0x${bytesToHex(withdrawRespondBidirectional.serializedOutput)})`,
       ]);

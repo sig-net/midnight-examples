@@ -109,9 +109,9 @@ As illustrated, the flow comprises 9 steps:
 - **4.** poll for the MPC's signature
   - The MPC reads the recorded request from the vault's ledger, signs the
     transfer with the vault's derived signing key, and posts the signature back
-    through the singleton's `respond(...)`.
+    through the signet responder's `respond(...)`.
   - [`poll-signature-response.ts`](../../integration-tests/src/flows/poll-signature-response.ts)
-    polls the singleton's emitted signature events through the SDK's
+    polls the responder's emitted signature events through the SDK's
     [`SignetRequestResponseReader`](https://github.com/sig-net/midnight-integration/blob/v0.25.1/packages/signet-midnight/src/signet-request-response-reader.ts),
     asking `getVerifiedSignatureRespondedEvent` for a post whose signature
     recovers to the expected signer: for a withdrawal, the vault's own
@@ -128,7 +128,7 @@ As illustrated, the flow comprises 9 steps:
     nonce-burned transfer throws.
 - **6.** poll for the MPC's attestation
   - The MPC posts an attestation of the transfer's outcome through the
-    singleton's `respondBidirectional(...)`, and
+    signet responder's `respondBidirectional(...)`, and
     [`poll-respond-bidirectional.ts`](../../integration-tests/src/flows/poll-respond-bidirectional.ts)
     resolves it exactly as a [deposit](../deposit/deposit.md) does: a post
     declaring **`executed`** is checked over the transfer's Borsh-encoded bool (`0x01`
@@ -184,7 +184,7 @@ integration tests take it from the `VAULT_USER_SECRET_KEY` environment
 variable, falling back to the `USER_SEED` bytes when it is unset.
 
 The two polling steps (4 and 6) each build a `SignetRequestResponseReader` over
-the vault and singleton pair through
+the vault and responder pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts), passing
 the withdraw map's path. The withdraw-specific piece is the expected signer:
 every withdraw transfer is signed by the vault's own account, whose derivation

@@ -51,6 +51,8 @@ export interface VaultContext {
   readonly vaultContractAddress: string;
   /** Address of the deployed central signet contract on Midnight. */
   readonly signetContractAddress: string;
+  /** Address of the deployed signet responder contract on Midnight, which emits the MPC's responses. */
+  readonly responderContractAddress: string;
   /** JSON-RPC endpoint of the EVM chain the vault operates on. */
   readonly evmRpcUrl: string;
   /** Where the attestation polls obtain the serialised output the MPC attested (`RESPOND_OUTPUT_SOURCE`). */
@@ -113,6 +115,7 @@ export async function createVaultContext(
 
   const vaultContractAddress = requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
   const signetContractAddress = requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
+  const responderContractAddress = requireEnv(env, "MIDNIGHT_RESPONDER_CONTRACT_ADDRESS");
   const respondOutputSource = parseOutputSource(requireEnv(env, "RESPOND_OUTPUT_SOURCE"));
   const cacheUrl = optionalEnv(env, "MPC_OUTPUT_CACHE_URL");
   const mpcOutputCache =
@@ -137,6 +140,7 @@ export async function createVaultContext(
     nodeConfig,
     vaultContractAddress,
     signetContractAddress,
+    responderContractAddress,
     evmRpcUrl: requireEnv(env, "EVM_RPC_URL"),
     respondOutputSource,
     mpcOutputCache,
@@ -152,7 +156,7 @@ export async function createVaultContext(
 
 /**
  * A request/response reader over the context's vault (requester) / signet
- * contract pair, reading through the context's indexer-backed public data
+ * responder pair, reading through the context's indexer-backed public data
  * provider — the same read path the response server uses. Built fresh per
  * flow invocation (the reader caches fetched request records internally).
  *
@@ -170,7 +174,7 @@ export function createResponseReader(
     // The requestsPath the vault's notifications pack (erc20-vault.compact).
     // The vault's 37 ledger fields chunk the state tree, so every path is depth 2.
     requesterRequestsPath: requestsPath,
-    signetContractAddress: context.signetContractAddress,
+    responderContractAddress: context.responderContractAddress,
     publicDataProvider: context.providers.publicDataProvider,
     eventSource: signetEventSourceFromIndexer({ queryUrl: context.nodeConfig.indexerUrl }),
   });

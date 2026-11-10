@@ -12,10 +12,12 @@ The examples demonstrate how to integrate using the following packages:
   event decoders, request feed and crypto helpers).
 - [`@sig-net/midnight-contract`](https://www.npmjs.com/package/@sig-net/midnight-contract):
   the central Signet singleton contract.
+- [`@sig-net/midnight-responder`](https://www.npmjs.com/package/@sig-net/midnight-responder):
+  the Signet responder contract the MPC posts its responses through.
 - [`@sig-net/midnight-contract-deploy`](https://www.npmjs.com/package/@sig-net/midnight-contract-deploy):
-  deploy tooling for that contract plus generic Midnight deploy and wallet
-  plumbing. Used here by the test harness to deploy the singleton for the
-  local e2e stack.
+  deploy tooling for those contracts plus generic Midnight deploy and wallet
+  plumbing. Used here by the test harness to deploy the singleton and the
+  responder for the local e2e stack.
 
 ## Reading Guide
 - Start by reading the [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
@@ -51,7 +53,7 @@ The protocol is best understood in 5 steps:
 
 1. A user interacts with a dApp, which starts a cross chain interaction by calling a circuit on a contract on Midnight that has integrated with Sig Network.
 2. The MPC network, watching for events on the Singleton contract, picks up the emitted **SignBidirectionalEvent** (which carries the **SignBidirectionalEventNotification**) and honours the signature request it points to.
-3. The integrating dApp, watching for events on the Singleton contract, picks up the emitted **SignatureRespondedEvent** and relays the fully signed transaction to the foreign chain.
+3. The integrating dApp, watching for events on the Responder contract, picks up the emitted **SignatureRespondedEvent** and relays the fully signed transaction to the foreign chain.
 4. The MPC network observes the outcome of the signed transaction in final blocks of the foreign blockchain and posts an attestation thereof back to Midnight.
 5. The integrating dApp collects the execution output and its attestation and submits both back to the integrating contract, completing the cross chain interaction.
 

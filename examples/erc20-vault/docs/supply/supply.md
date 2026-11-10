@@ -165,7 +165,7 @@ integration tests take it from the `VAULT_USER_SECRET_KEY` environment
 variable, falling back to the `USER_SEED` bytes when it is unset.
 
 The two polling steps (4 and 6) each build a `SignetRequestResponseReader` over
-the vault and singleton pair through
+the vault and responder pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts),
 pointed at the supply map's ledger-tree path. The expected signer is the
 vault's own account, whose derivation path is the contract-fixed

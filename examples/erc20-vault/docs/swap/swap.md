@@ -182,7 +182,7 @@ pipeline checks for the router with `uniswapAvailable` before any spec runs
 and fails the run on an EVM chain without it.
 
 The two polling steps (4 and 6) each build a `SignetRequestResponseReader` over
-the vault and singleton pair through
+the vault and responder pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts). The
 swap-specific piece is the path: a swap passes
 [`VAULT_SWAP_REQUESTS_PATH`](../../contract/src/index.ts) so the reader reads
