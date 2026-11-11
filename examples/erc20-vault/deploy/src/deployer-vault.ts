@@ -8,13 +8,12 @@
 import { findDeployedContract } from "@midnight-ntwrk/midnight-js/contracts";
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import {
-  deriveAccountKeys,
   ensureFeeReady,
   envOrUndefined,
   getDeployConfig,
   getFaucetUrl,
   parseIdentitySecretKey,
-  withSyncedWalletFacade,
+  WalletRegistry,
 } from "@sig-net/midnight-contract-deploy";
 import {
   createVaultPrivateState,
@@ -22,7 +21,12 @@ import {
   VAULT_PRIVATE_STATE_ID,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
-import { vaultCompiledContract } from "./vault-contract-binding.ts";
+import {
+  announceDeployerRun,
+  logDeployerBalance,
+  type VaultRunSettings,
+} from "./deployer-run-report.ts";
+import { assertVaultKeysPresent, vaultCompiledContract } from "./vault-contract-binding.ts";
 import { buildVaultProviders } from "./vault-providers.ts";
 
 /**
@@ -55,26 +59,36 @@ export function resolveVaultContractAddress(
 }
 
 /**
- * Sync the deployer wallet, make sure it can pay fees, join the vault at
+ * Announce the run, sync the deployer wallet, log its balance, make sure it can pay fees, join the vault at
  * `vaultContractAddress` with the deployer identity as private state, and run
  * `action` against it.
  *
  * @param env - The environment: the deploy SDK's Midnight node configuration,
  *   `DEPLOYER_SEED` and `VAULT_DEPLOYER_SECRET_KEY`.
  * @param vaultContractAddress - The vault to join.
+ * @param activity - What the run does to the vault, completing "<activity> erc20-vault
+ *   <address>" in the run's opening log line.
+ * @param vaultSettings - The vault-specific settings the run reads, tabulated under that line.
  * @param action - The deployer's calls, given the joined vault and the provider to read its
  *   ledger through.
+ * @param wallets - A registry to take the deployer wallet from, when the caller keeps wallets
+ *   open across steps. Without one a private registry is opened for this run and closed after it.
  * @returns Whatever `action` returns.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.
- * @throws {Error} If no spendable DUST appears after registering the wallet's
- *   NIGHT, no contract answers at the address, or `action` throws.
+ * @throws {Error} If the vault's zk keys are missing, no spendable DUST appears
+ *   after registering the wallet's NIGHT, no contract answers at the address,
+ *   or `action` throws.
  */
 export async function withDeployerVault<T>(
   env: Record<string, string | undefined>,
   vaultContractAddress: string,
+  activity: string,
+  vaultSettings: VaultRunSettings,
   action: (vault: DeployedVaultContract, publicDataProvider: PublicDataProvider) => Promise<T>,
+  wallets?: WalletRegistry,
 ): Promise<T> {
+  assertVaultKeysPresent();
   const deployConfig = getDeployConfig(env);
   const nodeConfig = deployConfig.midnightNodeConfig;
 
@@ -83,23 +97,35 @@ export async function withDeployerVault<T>(
     env,
     deployConfig.deployerSeed,
   );
-  const accountKeys = deriveAccountKeys(deployConfig.deployerSeed, nodeConfig.networkId);
+  const registry = wallets ?? new WalletRegistry(nodeConfig);
 
-  return withSyncedWalletFacade(accountKeys, nodeConfig, async (facade, state) => {
+  announceDeployerRun(
+    `${activity} erc20-vault ${vaultContractAddress} on ${nodeConfig.networkId}`,
+    env,
+    deployConfig,
+    vaultSettings,
+    wallets === undefined,
+  );
+  try {
+    const { facade, keys } = await registry.wallet(deployConfig.deployerSeed, "deployer");
+    const state = await facade.waitForSyncedState();
+    logDeployerBalance(state, keys, nodeConfig.networkId);
     await ensureFeeReady(
       facade,
-      accountKeys,
+      keys,
       state,
       nodeConfig.networkId,
       getFaucetUrl(env, nodeConfig.networkId),
     );
-    const providers = buildVaultProviders(facade, accountKeys, nodeConfig);
+    const providers = buildVaultProviders(facade, keys, nodeConfig);
     const vault = await findDeployedContract(providers, {
       contractAddress: vaultContractAddress,
       compiledContract: vaultCompiledContract,
       privateStateId: VAULT_PRIVATE_STATE_ID,
       initialPrivateState: createVaultPrivateState(secretKey),
     });
-    return action(vault, providers.publicDataProvider);
-  });
+    return await action(vault, providers.publicDataProvider);
+  } finally {
+    if (wallets === undefined) await registry.close();
+  }
 }

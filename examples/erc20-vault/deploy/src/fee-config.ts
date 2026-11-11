@@ -14,6 +14,7 @@ import {
 } from "@sig-net/midnight-contract-deploy";
 import { evmAddressBytes, type TokenFees } from "@sig-net/midnight-examples-erc20-vault-contract";
 
+import type { VaultRunSettings } from "./deployer-run-report.ts";
 import { withHexPrefix } from "./evm-targets.ts";
 
 /** Per-action fees keyed by the ERC20 they price, as lowercased 0x hex. */
@@ -238,6 +239,33 @@ export function resolveFeeRecipient(env: Record<string, string | undefined>): Fe
   return {
     coinPublicKey: coinPublicKey.toLowerCase(),
     encryptionPublicKey: encryptionPublicKey.toLowerCase(),
+  };
+}
+
+const FLAT_FEE_VARIABLES = [
+  "VAULT_FEE_WITHDRAW",
+  "VAULT_FEE_SWAP",
+  "VAULT_FEE_SUPPLY",
+  "VAULT_FEE_REDEEM",
+] as const;
+
+/**
+ * The fee variables as a run's settings table shows them: each flat variable's
+ * value, {@link DEFAULT_TOKEN_FEE} for an unset one on the local standalone
+ * network, and `VAULT_TOKEN_FEES` as written. Nothing is validated here.
+ *
+ * @param env - The environment to read the fee variables and `NETWORK_ID` from.
+ * @returns The fee settings, keyed by variable name.
+ */
+export function feeRunSettings(env: Record<string, string | undefined>): VaultRunSettings {
+  const localDefault = isLocalStandaloneNetwork(getMidnightNodeConfig(env).networkId)
+    ? String(DEFAULT_TOKEN_FEE)
+    : undefined;
+  return {
+    ...Object.fromEntries(
+      FLAT_FEE_VARIABLES.map((name) => [name, envOrUndefined(env, name) ?? localDefault]),
+    ),
+    VAULT_TOKEN_FEES: envOrUndefined(env, "VAULT_TOKEN_FEES"),
   };
 }
 

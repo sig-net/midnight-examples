@@ -8,6 +8,7 @@
 // directory and the e2e setup pipeline run exactly the same code.
 export * from "./add-allowed-tokens.ts";
 export * from "./deploy-vault.ts";
+export * from "./deployer-run-report.ts";
 export * from "./entrypoint-env.ts";
 export * from "./evm-targets.ts";
 export * from "./fee-config.ts";

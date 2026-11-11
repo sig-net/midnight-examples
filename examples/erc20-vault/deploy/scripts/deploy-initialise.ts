@@ -10,8 +10,11 @@
 // authority that installs the deferred circuits, and the only way to add or
 // replace one later) and a faucet-funded DEPLOYER_SEED.
 
+import { getDeployConfig, WalletRegistry } from "@sig-net/midnight-contract-deploy";
+
 import { addAllowedTokensToVault } from "../src/add-allowed-tokens.ts";
 import { deployVault } from "../src/deploy-vault.ts";
+import { logDeployerFundingAddress } from "../src/deployer-run-report.ts";
 import { buildEntrypointEnv } from "../src/entrypoint-env.ts";
 import { resolveAllowedTokens } from "../src/evm-targets.ts";
 import {
@@ -29,9 +32,19 @@ await assertInitialiseInputsPresent(env);
 resolveAllowedTokens(env);
 assertNoVaultBoundPresets(env);
 
-const { contractAddress } = await deployVault(env);
-await initialiseVault(env, contractAddress);
-await addAllowedTokensToVault(env, contractAddress);
+// One registry for the whole run, so the deployer wallet syncs once and the
+// later steps only catch it up.
+const deployConfig = getDeployConfig(env);
+logDeployerFundingAddress(deployConfig);
+const wallets = new WalletRegistry(deployConfig.midnightNodeConfig);
+let contractAddress: string;
+try {
+  ({ contractAddress } = await deployVault(env, wallets));
+  await initialiseVault(env, contractAddress, wallets);
+  await addAllowedTokensToVault(env, contractAddress, wallets);
+} finally {
+  await wallets.close();
+}
 
 console.log("\n==================== DONE ====================");
 console.log(`NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS=${contractAddress}`);

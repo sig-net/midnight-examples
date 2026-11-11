@@ -3,6 +3,7 @@
 // transaction, the provider set, the proof server's key lookups) resolves its
 // assets through here, so there is one answer to "where is managed/".
 
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { makeCompiledContract } from "@sig-net/midnight-contract-deploy";
@@ -29,3 +30,18 @@ export const vaultCompiledContract = makeCompiledContract<
   Contract<VaultPrivateState>,
   VaultPrivateState
 >("erc20-vault", Contract, witnesses, VAULT_MANAGED_PATH);
+
+/**
+ * Assert the vault's compiler output holds its zk keys. A `--skip-zk` compile writes none, and
+ * the missing files otherwise surface as a read error inside the SDK only once a wallet has
+ * synced.
+ *
+ * @throws {Error} If {@link VAULT_MANAGED_PATH} has no `keys/` directory.
+ */
+export function assertVaultKeysPresent(): void {
+  if (!existsSync(join(VAULT_MANAGED_PATH, "keys"))) {
+    throw new Error(
+      `no zk keys under ${VAULT_MANAGED_PATH}: run \`yarn compile:erc20-vault:zk\` first`,
+    );
+  }
+}

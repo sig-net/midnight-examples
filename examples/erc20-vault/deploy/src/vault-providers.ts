@@ -5,9 +5,6 @@
 // @sig-net/midnight-examples-lib. Both the deploy flows and the integration
 // tests compose this and call `findDeployedContract(providers, ...)`.
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
 import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
@@ -27,7 +24,7 @@ import {
   type ProofServerObserver,
 } from "@sig-net/midnight-examples-lib";
 
-import { VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
+import { assertVaultKeysPresent, VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
 
 // Every call transaction this provider set builds expires 30 min out.
 const CALL_TTL_SECONDS = 30 * 60;
@@ -50,13 +47,7 @@ export function buildVaultProviders(
   config: MidnightNodeConfig,
   proofObserver?: ProofServerObserver,
 ): VaultProviders {
-  // Without this check the missing keys surface as an ENOENT inside the proof
-  // provider on the first circuit call, with no hint at the fix.
-  if (!existsSync(join(VAULT_MANAGED_PATH, "keys"))) {
-    throw new Error(
-      `no prover keys under ${VAULT_MANAGED_PATH}: run \`yarn compile:erc20-vault:zk\` first`,
-    );
-  }
+  assertVaultKeysPresent();
 
   // Retrieves the ZK artifacts of a contract needed to create proofs.
   // Key methods: getProverKey(id), getVerifierKey(id), getZKIR(id), with id
