@@ -98,13 +98,16 @@ const calldataWordAt = (words: readonly Uint8Array[], index: number): Uint8Array
 // Wallet facade + vault context + MPC-style reader shared by every test in
 // this file (lazily built, so the offline path never touches the network);
 // stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // The fee recipient's session: the deployer wallet, which the local initialise
 // names as the recipient of every fee coin. Only its wallet is read, to see the
 // withdraw fee arrive. Read leniently at module scope: offline the injected env
 // is empty and the suite skips before any test touches it.
-const feeRecipientSession = createVaultSession({ ...env, USER_SEED: env.DEPLOYER_SEED ?? "" });
+const feeRecipientSession = createVaultSession(
+  { ...env, USER_SEED: env.DEPLOYER_SEED ?? "" },
+  "deployer",
+);
 
 // The withdraw leg drives 0.1 USDC back OUT of the vault: the deposit leg funds
 // that principal plus the withdraw fee the start takes on top of it.

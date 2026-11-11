@@ -355,7 +355,7 @@ export async function deployVault(
   const deployConfig = getDeployConfig(env);
   const { networkId } = deployConfig.midnightNodeConfig;
   const deployEnv = resolveMaintenanceEnv(env, networkId);
-  const registry = wallets ?? new WalletRegistry(deployConfig.midnightNodeConfig);
+  const registry = wallets ?? new WalletRegistry(deployConfig.midnightNodeConfig, env);
   try {
     const secretKey = parseIdentitySecretKey(
       "VAULT_DEPLOYER_SECRET_KEY",
@@ -587,7 +587,7 @@ export async function resumeVaultDeploy(
     {},
     wallets === undefined,
   );
-  const registry = wallets ?? new WalletRegistry(nodeConfig);
+  const registry = wallets ?? new WalletRegistry(nodeConfig, env);
   try {
     const deployer = await registry.wallet(deployConfig.deployerSeed, "deployer");
     logDeployerBalance(await deployer.facade.waitForSyncedState(), deployer.keys, networkId);

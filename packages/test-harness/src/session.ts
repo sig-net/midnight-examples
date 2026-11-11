@@ -12,7 +12,8 @@ import {
   type AccountKeys,
   deriveAccountKeys,
   getMidnightNodeConfig,
-  initialiseWalletFacade,
+  type OpenedWallet,
+  openSyncedWallet,
   type WalletFacade,
 } from "@sig-net/midnight-contract-deploy";
 import { withOperationProgress } from "@sig-net/midnight-examples-lib";
@@ -65,6 +66,12 @@ export interface E2eSessionOptions {
   /** The setup-populated env accumulator (seeds, node config, contract addresses). */
   env: NodeJS.ProcessEnv;
   /**
+   * The role name of the wallet `USER_SEED` holds in this session, named after
+   * the seed's own env var (`user`, `bearer`, `deployer`), which names the
+   * wallet's cache file and its `<LABEL>_WALLET_CACHE_PATH` variable.
+   */
+  label: string;
+  /**
    * Env-var name holding the example's requester contract address (the
    * contract whose signature requests the reader follows), e.g.
    * `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
@@ -75,10 +82,11 @@ export interface E2eSessionOptions {
 /**
  * Create the shared wallet + reader lifecycle for one flow test file.
  *
- * The wallet is built lazily on first use — it needs the setup pipeline to
- * have populated `env` — started once, and stopped once via `stop()`. Each
- * access re-awaits synced state (instant when already synced) so long tests
- * / STEP_THROUGH pauses can't hand out a stale wallet.
+ * The wallet is opened lazily on first use, since it needs the setup
+ * pipeline to have populated `env`: once, through the SDK's wallet cache,
+ * and stopped once via `stop()`, which writes that cache. Each access
+ * re-awaits synced state (instant when already synced) so long tests /
+ * STEP_THROUGH pauses can't hand out a stale wallet.
  *
  * A reader is likewise built lazily, one per request-map path, over the
  * example's requester contract / signet responder pair, backed by a fresh
@@ -91,7 +99,7 @@ export interface E2eSessionOptions {
  */
 export function createE2eSession(options: E2eSessionOptions): E2eSession {
   const { env } = options;
-  let sharedWallet: SessionWallet | undefined;
+  let sharedWallet: OpenedWallet | undefined;
   const readersByPath = new Map<string, SignetRequestResponseReader>();
 
   return {
@@ -99,15 +107,12 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
       if (!sharedWallet) {
         const config = getMidnightNodeConfig(env);
         const keys = deriveAccountKeys(resolveUserSeed(env), config.networkId);
-        const facade = await initialiseWalletFacade(keys, config);
-        await facade.start(keys.seeds);
-        await withOperationProgress("user wallet synchronisation", () =>
-          facade.waitForSyncedState(),
-        );
-        sharedWallet = { facade, keys };
+        sharedWallet = await openSyncedWallet({ keys, config, label: options.label, env });
       }
       const facade = sharedWallet.facade;
-      await withOperationProgress("user wallet synchronisation", () => facade.waitForSyncedState());
+      await withOperationProgress(`${options.label} wallet synchronisation`, () =>
+        facade.waitForSyncedState(),
+      );
       return sharedWallet;
     },
 
@@ -134,7 +139,7 @@ export function createE2eSession(options: E2eSessionOptions): E2eSession {
     },
 
     async stop(): Promise<void> {
-      await sharedWallet?.facade.stop().catch(() => undefined);
+      await sharedWallet?.stop();
     },
   };
 }

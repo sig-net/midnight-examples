@@ -36,7 +36,7 @@ assertNoVaultBoundPresets(env);
 // later steps only catch it up.
 const deployConfig = getDeployConfig(env);
 logDeployerFundingAddress(deployConfig);
-const wallets = new WalletRegistry(deployConfig.midnightNodeConfig);
+const wallets = new WalletRegistry(deployConfig.midnightNodeConfig, env);
 let contractAddress: string;
 try {
   ({ contractAddress } = await deployVault(env, wallets));

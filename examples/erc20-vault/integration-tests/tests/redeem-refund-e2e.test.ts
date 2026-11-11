@@ -85,7 +85,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // Wallet facade + vault context shared by every test in this file (lazily
 // built, so the offline path never touches the network), stopped once in
 // afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // 1 USDC (6 decimals): deposited, then supplied for the shares the doomed
 // redeem burns and the refund re-mints whole.

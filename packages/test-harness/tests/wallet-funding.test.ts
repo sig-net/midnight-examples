@@ -50,6 +50,7 @@ describe("child funding decisions", () => {
     const transfer = vi.mocked(pipeline.fundWalletsFromRoot);
     const wallets = new funding.WalletRegistry(
       funding.getMidnightNodeConfig({ NETWORK_ID: "preview" }),
+      {},
     );
     await ensureWalletsFunded(ENV, wallets);
     expect(root).not.toHaveBeenCalled();
@@ -69,6 +70,7 @@ describe("child funding decisions", () => {
     const transfer = vi.mocked(pipeline.fundWalletsFromRoot);
     const wallets = new funding.WalletRegistry(
       funding.getMidnightNodeConfig({ NETWORK_ID: "preview" }),
+      {},
     );
     await ensureWalletsFunded(ENV, wallets);
     expect(read).toHaveBeenCalledTimes(5);
@@ -87,6 +89,7 @@ describe("child funding decisions", () => {
       .mockRejectedValue(new Error("must not open root"));
     const wallets = new funding.WalletRegistry(
       funding.getMidnightNodeConfig({ NETWORK_ID: "preview" }),
+      {},
     );
     await ensureWalletsFunded(ENV, wallets);
     expect(root).not.toHaveBeenCalled();

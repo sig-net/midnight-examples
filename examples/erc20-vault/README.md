@@ -574,6 +574,55 @@ you using this [skill](../../.claude/skills/e2e/SKILL.md). It knows the whole
 operational runbook (rerun vs redeploy modes, the fakenet responder hand-off,
 failure recovery) and will drive it for you.
 
+### The wallet sync cache
+
+A wallet opened fresh scans the whole chain, which takes several minutes per
+wallet on a deployed network. Every wallet the e2e suite and the deploy
+scripts open (the root and role wallets of the setup, each spec's session
+wallets, the deployer of every deploy script) keeps a cache file of its synced
+state, restores from it on the next run, and only catches up from where it
+left off. A restored wallet on preprod is synced in seconds.
+
+- **Location.** The cache files live in the repository root, one per wallet,
+  named `.wallet-cache-<networkId>-<label>-<fingerprint>.json`. The label is
+  the wallet's role (`root`, `deployer`, `user`, `bearer`, `mpc responder`,
+  `stranger`, `false claimer`, `recipient`) and the fingerprint comes from the
+  wallet's unshielded address, so two seeds used under one label keep separate
+  files. `.wallet-cache-*` is gitignored.
+- **Setting a path.** A wallet's cache path can be set with an environment
+  variable named after its label: upper case, every run of other characters
+  as `_`, then `_WALLET_CACHE_PATH` (`DEPLOYER_WALLET_CACHE_PATH`,
+  `USER_WALLET_CACHE_PATH`, `MPC_RESPONDER_WALLET_CACHE_PATH`). A relative
+  path resolves against the repository root.
+- **Integrity.** Every file carries a SHA-256 digest over all of its other
+  fields, every wallet snapshot included, and is refused when the digest is
+  missing or does not match, so a truncated, partly written or hand-edited
+  file is never trusted. A missing, empty or unknown field is refused too.
+- **Validation.** Beyond its digest, a cache is used only when it was written
+  for the same network (by the file and by each wallet snapshot), the same
+  seed (its addresses, the public keys inside every wallet snapshot and the
+  owner of every unshielded UTXO) and the same DUST history setting, when its
+  unshielded UTXOs agree with its transaction history, when it sits on the
+  same chain (the indexer still reports its genesis block and the last block
+  it recorded, which a wiped local stack or a reset network does not, and no
+  wallet's sync cursor is past the chain's newest transaction or ledger
+  event), and when the wallet SDK can restore every part of it.
+- **A refusal.** An invalid cache at the default location is deleted and the
+  wallet syncs from scratch, logging the reason on one line. An invalid cache
+  at a path set through the variable stops the run with an error naming the
+  variable, the path and the reason, and keeps the file: delete it or unset
+  the variable. An indexer that cannot be reached is an error, never a reason
+  to delete a cache.
+- **Writing.** A running wallet rewrites its cache every ten seconds when its
+  state changed, once when its first sync completes and when it stops, each
+  time through a temporary file renamed into place, so an interrupted run
+  resumes from at most ten seconds back.
+- **Contents.** The file holds no seed and no secret key, only the wallet
+  SDK's serialised state and the wallet's public addresses. It does reveal the
+  wallet's balances and transaction history, so it is written readable by its
+  owner only and is never committed. Delete the files to force every wallet to
+  sync from scratch.
+
 ### Running against the real Sepolia network
 
 By default the EVM leg runs on the local anvil chain from `docker-compose.yaml`,

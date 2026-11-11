@@ -63,7 +63,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // The depositor's session (identity A): wallet facade + vault context shared
 // by every test in this file (lazily built, so the offline path never touches
 // the network); stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // The false claimer's seed AND identity secret (identity B): one fixed
 // constant serving as both, deliberately different from the depositor's
@@ -76,11 +76,14 @@ const FALSE_CLAIMER_SEED = "0000000000000000000000000000000000000000000000000000
 // The false claimer's session (identity B): same lazily-built shape as the
 // depositor's, over the same stack, differing ONLY in wallet seed + identity
 // secret.
-const falseClaimerSession = createVaultSession({
-  ...env,
-  USER_SEED: FALSE_CLAIMER_SEED,
-  VAULT_USER_SECRET_KEY: FALSE_CLAIMER_SEED,
-});
+const falseClaimerSession = createVaultSession(
+  {
+    ...env,
+    USER_SEED: FALSE_CLAIMER_SEED,
+    VAULT_USER_SECRET_KEY: FALSE_CLAIMER_SEED,
+  },
+  "false claimer",
+);
 
 // One deposit's worth is arranged, defended against the false claimer, and
 // claimed by its rightful owner — 0.1 USDC, the funding preflight's minimum.

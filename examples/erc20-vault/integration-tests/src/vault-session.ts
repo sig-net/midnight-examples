@@ -45,15 +45,19 @@ export interface VaultSession {
  * hand out a stale wallet.
  *
  * @param env - The setup-populated env accumulator.
+ * @param label - The role name of the wallet `USER_SEED` holds here, after the
+ *   seed's own env var (`user` for `USER_SEED`, `bearer` for `BEARER_SEED`).
  * @param proofObserver - Called after every proof-server /check and /prove round trip.
  * @returns The session lifecycle.
  */
 export function createVaultSession(
   env: NodeJS.ProcessEnv,
+  label: string,
   proofObserver?: ProofServerObserver,
 ): VaultSession {
   const session: E2eSession = createE2eSession({
     env,
+    label,
     requesterAddressEnvVar: "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
   });
   let sharedContext: VaultContext | undefined;
