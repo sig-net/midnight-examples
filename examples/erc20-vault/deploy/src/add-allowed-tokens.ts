@@ -5,6 +5,7 @@
 // removes a token.
 
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
+import type { WalletRegistry } from "@sig-net/midnight-contract-deploy";
 import {
   type DeployedVaultContract,
   evmAddressBytes,
@@ -13,7 +14,12 @@ import {
 
 import { resolveVaultContractAddress, withDeployerVault } from "./deployer-vault.ts";
 import { resolveAllowedTokens } from "./evm-targets.ts";
-import { formatTokenFees, resolveTokenFeesFor, type TokenFeesByToken } from "./fee-config.ts";
+import {
+  feeRunSettings,
+  formatTokenFees,
+  resolveTokenFeesFor,
+  type TokenFeesByToken,
+} from "./fee-config.ts";
 
 /**
  * Call the vault's `addAllowedToken` circuit once for each of `tokens` the
@@ -67,6 +73,8 @@ export async function addAllowedTokensToVaultContract(
  * @param env - The environment: `EVM_ALLOWED_TOKENS`, `VAULT_TOKEN_FEES`, the flat fee
  *   variables and everything {@link withDeployerVault} reads. Defaults to `process.env`.
  * @param contractAddress - The vault to configure. Defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
+ * @param wallets - A registry to take the deployer wallet from, when the caller keeps wallets
+ *   open across steps. Without one the wallet is opened for this call and closed after it.
  * @returns The ERC20s this call added.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.
@@ -77,18 +85,26 @@ export async function addAllowedTokensToVaultContract(
 export async function addAllowedTokensToVault(
   env: Record<string, string | undefined> = process.env,
   contractAddress?: string,
+  wallets?: WalletRegistry,
 ): Promise<readonly string[]> {
   const vaultContractAddress = resolveVaultContractAddress(
     env,
     contractAddress,
     "add allowed ERC20s to",
   );
-  const tokens = resolveTokenFeesFor(env, resolveAllowedTokens(env));
+  const allowedTokens = resolveAllowedTokens(env);
+  const tokens = resolveTokenFeesFor(env, allowedTokens);
   if (tokens.size === 0) {
     console.log("EVM_ALLOWED_TOKENS lists no ERC20s, nothing to allow");
     return [];
   }
-  return withDeployerVault(env, vaultContractAddress, (vault, publicDataProvider) =>
-    addAllowedTokensToVaultContract(vault, publicDataProvider, vaultContractAddress, tokens),
+  return withDeployerVault(
+    env,
+    vaultContractAddress,
+    "allowing ERC20s on",
+    { EVM_ALLOWED_TOKENS: allowedTokens.join(","), ...feeRunSettings(env) },
+    (vault, publicDataProvider) =>
+      addAllowedTokensToVaultContract(vault, publicDataProvider, vaultContractAddress, tokens),
+    wallets,
   );
 }

@@ -20,7 +20,6 @@ import {
 import * as ledger from "@midnightntwrk/ledger-v9";
 import { contractAddressFromHex, redactUrlQuery } from "@sig-net/midnight";
 import {
-  CounterpartyOrigin,
   ensureFeeReady,
   envOrUndefined,
   estimateUnprovenTransactionFee,
@@ -51,7 +50,12 @@ import {
   type SplitDeployTransaction,
 } from "@sig-net/midnight-examples-lib";
 
-import { VAULT_MANAGED_PATH, vaultCompiledContract } from "./vault-contract-binding.ts";
+import { announceDeployerRun, logDeployerBalance } from "./deployer-run-report.ts";
+import {
+  assertVaultKeysPresent,
+  VAULT_MANAGED_PATH,
+  vaultCompiledContract,
+} from "./vault-contract-binding.ts";
 
 // Verifier keys are large, so the base registers just ONE small circuit and every other
 // circuit is added by a maintenance update right after, each a transaction carrying a
@@ -333,7 +337,8 @@ export interface VaultDeployment {
  * @returns The deployed contract address and base deploy transaction id.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.
- * @throws {Error} If no signet signer resolves (see `resolveSignerContractAddress`),
+ * @throws {Error} If the vault's zk keys are missing (see {@link assertVaultKeysPresent}), no
+ *   signet signer resolves (see `resolveSignerContractAddress`),
  *   `MAINTENANCE_SIGNING_KEY` is missing on a deployed network, the fee of the base deploy
  *   plus one add per deferred circuit does not generate in spendable DUST after registering
  *   the wallet's NIGHT, or the base deploy submission fails.
@@ -346,6 +351,7 @@ export async function deployVault(
   wallets?: WalletRegistry,
   onBaseDeploySubmitted?: (contractAddress: string) => void,
 ): Promise<VaultDeployment> {
+  assertVaultKeysPresent();
   const deployConfig = getDeployConfig(env);
   const { networkId } = deployConfig.midnightNodeConfig;
   const deployEnv = resolveMaintenanceEnv(env, networkId);
@@ -363,18 +369,17 @@ export async function deployVault(
     // reference: the one the SDK publishes for a deployed network, or the
     // one MIDNIGHT_SIGNER_CONTRACT_ADDRESS names.
     const signet = resolveSignerContractAddress(env);
-    console.log(
-      `signet signer ${signet.value} ` +
-        (signet.origin === CounterpartyOrigin.Published
-          ? `(published by the SDK for ${networkId})`
-          : "(MIDNIGHT_SIGNER_CONTRACT_ADDRESS)"),
-    );
     const signetSigner = contractAddressFromHex(signet.value);
 
-    console.log(
-      `deploying erc20-vault to ${networkId} (${redactUrlQuery(deployConfig.midnightNodeConfig.nodeUrl)})`,
+    announceDeployerRun(
+      `deploying erc20-vault to ${networkId}`,
+      env,
+      deployConfig,
+      { MIDNIGHT_SIGNER_CONTRACT_ADDRESS: signet.value },
+      wallets === undefined,
     );
     const deployer = await registry.wallet(deployConfig.deployerSeed, "deployer");
+    logDeployerBalance(await deployer.facade.waitForSyncedState(), deployer.keys, networkId);
 
     const deployTransaction = await buildDeployTransactionDeferring(
       vaultCompiledContract,
@@ -575,9 +580,17 @@ export async function resumeVaultDeploy(
   }
 
   const deferred = orderDeferredCircuits(readDeferredCircuits(missing));
+  announceDeployerRun(
+    `installing ${String(deferred.length)} circuit(s) on erc20-vault ${vaultContractAddress} on ${networkId}`,
+    env,
+    deployConfig,
+    {},
+    wallets === undefined,
+  );
   const registry = wallets ?? new WalletRegistry(nodeConfig);
   try {
     const deployer = await registry.wallet(deployConfig.deployerSeed, "deployer");
+    logDeployerBalance(await deployer.facade.waitForSyncedState(), deployer.keys, networkId);
     await addDeferredCircuits(nodeConfig, env, deployer, networkId, vaultContractAddress, deferred);
   } finally {
     if (wallets === undefined) await registry.close();

@@ -5,6 +5,7 @@
 // submits nothing.
 
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
+import { envOrUndefined } from "@sig-net/midnight-contract-deploy";
 import {
   type DeployedVaultContract,
   evmAddressBytes,
@@ -95,7 +96,12 @@ export async function setTokenFeesOnVault(
     console.log("VAULT_TOKEN_FEES prices no ERC20s, nothing to reprice");
     return [];
   }
-  return withDeployerVault(env, vaultContractAddress, (vault, publicDataProvider) =>
-    setTokenFeesOnVaultContract(vault, publicDataProvider, vaultContractAddress, tokens),
+  return withDeployerVault(
+    env,
+    vaultContractAddress,
+    "repricing ERC20s on",
+    { VAULT_TOKEN_FEES: envOrUndefined(env, "VAULT_TOKEN_FEES") },
+    (vault, publicDataProvider) =>
+      setTokenFeesOnVaultContract(vault, publicDataProvider, vaultContractAddress, tokens),
   );
 }
