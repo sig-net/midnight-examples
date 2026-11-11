@@ -56,6 +56,8 @@ export async function printVaultState(
   console.log(`initialised:       ${String(state.initialised)}`);
   console.log(`vault EVM address: 0x${bytesToHex(state.vaultEvmAddress)}`);
   console.log(`EVM chain id:      ${String(state.evmChainId)}`);
+  console.log(`EVM last seen:     ${String(state.globalLastSeen)}`);
+  console.log(`Tron last seen:    ${String(state.tronLastSeen)}`);
   console.log(`vault EVM nonce:   ${String(state.vaultAccountNonce)}`);
   console.log(`fee recipient:     coin ${bytesToHex(state.feeRecipientCoinPublicKey.bytes)}`);
   console.log(`                   enc  ${bytesToHex(state.feeRecipientEncryptionPublicKey)}`);
@@ -66,8 +68,16 @@ export async function printVaultState(
         `supply ${String(fees.supply)}, redeem ${String(fees.redeem)}`,
     );
   }
+  console.log(`allowed TRC-20s:   ${String(state.allowedTronTokens.size())}`);
+  for (const [token, { fees }] of state.allowedTronTokens) {
+    console.log(
+      `- 0x${bytesToHex(token)} fees: withdraw ${String(fees.withdraw)}, swap ${String(fees.swap)}, ` +
+        `supply ${String(fees.supply)}, redeem ${String(fees.redeem)}`,
+    );
+  }
 
   printRequestMap("deposit", state.bidirectionalDepositMap);
+  printRequestMap("Tron deposit", state.bidirectionalTronDepositMap);
   printRequestMap("withdraw", state.bidirectionalWithdrawMap);
   printRequestMap("approve", state.bidirectionalApproveMap);
   printRequestMap("nonce replacement", state.bidirectionalReplaceNonceMap);

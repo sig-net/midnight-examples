@@ -7,6 +7,7 @@
 // takes its environment as an argument, so the CLI entrypoints beside this
 // directory and the e2e setup pipeline run exactly the same code.
 export * from "./add-allowed-tokens.ts";
+export * from "./add-allowed-tron-tokens.ts";
 export * from "./deploy-vault.ts";
 export * from "./deployer-run-report.ts";
 export * from "./entrypoint-env.ts";
@@ -14,5 +15,6 @@ export * from "./evm-targets.ts";
 export * from "./fee-config.ts";
 export * from "./initialise-vault.ts";
 export * from "./set-token-fees.ts";
+export * from "./tron-targets.ts";
 export * from "./vault-contract-binding.ts";
 export * from "./vault-providers.ts";

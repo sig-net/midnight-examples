@@ -35,6 +35,7 @@ import {
   decodeSignetLogEvents,
   evmAddressAbiWord,
   hexToBytes,
+  isEvmType2SignBidirectionalEvent,
   MPCDestination,
   MPCSignatureAlgorithm,
   numericAbiWord,
@@ -42,10 +43,12 @@ import {
   pureCircuits as signetCircuits,
   readSignetRequestsLedgerFromState,
   requestIdBytes,
+  type RequestIdHex,
   requestIdHex,
   type RespondBidirectionalEvent,
   respondBidirectionalEventToCircuitInput,
   serializeRespondOutput,
+  type SignBidirectionalEvent,
   type SignBidirectionalEventLedgerMap,
   SignetEventName,
   signetFieldNodeByPath,
@@ -68,6 +71,7 @@ import * as SignetSigner from "@sig-net/midnight-signer/managed/contract/index.j
 
 import {
   Action,
+  Chain,
   Contract,
   createVaultPrivateState,
   FLUSH_WIDTH,
@@ -125,6 +129,7 @@ const OTHER_COMMITMENT = pureCircuits.userCommitment(OTHER_SECRET_KEY);
 const MPC_RESPONSE_SECRET = bytes(32, 0x42);
 const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
 const EVM_START_HEIGHT = 100n;
+const TRON_START_HEIGHT = 5_000n;
 const MPC_KEY_VERSION = 1n;
 const ATTESTED_HEIGHT = 101n;
 
@@ -287,6 +292,19 @@ const VALID_DEPOSIT: DepositCallArgs = {
   deposit: { erc20Address: ERC20, amount: AMOUNT },
 };
 
+const evmEventIndex = (
+  map: Parameters<typeof toSignBidirectionalEventIndex>[0],
+): Map<RequestIdHex, SignBidirectionalEvent> => {
+  const index = new Map<RequestIdHex, SignBidirectionalEvent>();
+  for (const [idHex, record] of toSignBidirectionalEventIndex(map)) {
+    if (!isEvmType2SignBidirectionalEvent(record)) {
+      throw new Error(`request ${idHex} is not an evmType2 record`);
+    }
+    index.set(idHex, record);
+  }
+  return index;
+};
+
 // ---- Harness ----
 
 const deployContract = async (deployerCommitment: Uint8Array = DEPLOYER_COMMITMENT) => {
@@ -351,6 +369,7 @@ const deployInitialised = async (evmStartHeight: bigint = EVM_START_HEIGHT) => {
       MPC_RESPONSE_KEY,
       MPC_KEY_VERSION,
       evmStartHeight,
+      TRON_START_HEIGHT,
       STATA_UNDERLYING_FEES,
       STATA_TOKEN_FEES,
       { bytes: FEE_RECIPIENT_CPK },
@@ -417,7 +436,7 @@ describe("erc20-vault ledger shape", () => {
     ).bidirectionalDepositMap;
 
     expect(ledgerMap.isEmpty()).toBe(true);
-    expect(toSignBidirectionalEventIndex(ledgerMap).size).toBe(0);
+    expect(evmEventIndex(ledgerMap).size).toBe(0);
   });
 
   it("MPC-style: finds the event map in RAW state by ledger-tree path, no ledger()", async () => {
@@ -431,7 +450,7 @@ describe("erc20-vault ledger shape", () => {
       rawState,
       VAULT_DEPOSIT_REQUESTS_PATH,
     );
-    const typedIndex = toSignBidirectionalEventIndex(
+    const typedIndex = evmEventIndex(
       ledger(ctx.callContext.currentQueryContext.state).bidirectionalDepositMap,
     );
     expect(requestsIndex).toEqual(typedIndex);
@@ -473,6 +492,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TRON_START_HEIGHT,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -494,6 +514,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         0n,
         EVM_START_HEIGHT,
+        TRON_START_HEIGHT,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -515,6 +536,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TRON_START_HEIGHT,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -536,6 +558,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TRON_START_HEIGHT,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -579,6 +602,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TRON_START_HEIGHT,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -610,6 +634,7 @@ describe("initialise", () => {
         MPC_RESPONSE_KEY,
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
+        TRON_START_HEIGHT,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -681,7 +706,7 @@ describe("deposit round-trip", () => {
     const state = next.callContext.currentQueryContext.state;
 
     // Read 1: generated ledger().
-    const typedIndex = toSignBidirectionalEventIndex(ledger(state).bidirectionalDepositMap);
+    const typedIndex = evmEventIndex(ledger(state).bidirectionalDepositMap);
     // Read 2: MPC-style raw read, no compiled contract involved.
     const rawLedger = readSignetRequestsLedgerFromState(state, VAULT_DEPOSIT_REQUESTS_PATH);
 
@@ -765,6 +790,7 @@ describe("deposit round-trip", () => {
     const { entry, lastSeen } = ledger(state).outputRequestBuffer.lookup(outIndex);
     expect(entry).toEqual({
       action: Action.deposit,
+      chain: Chain.ethereum,
       useNextVaultAccountNonce: false,
       evmNonce: VALID_DEPOSIT.evmNonce,
       inIndex: VALID_DEPOSIT.inIndex,
@@ -899,7 +925,7 @@ describe("deposit validation", () => {
     ).context;
     const state = ledger(afterSecond.callContext.currentQueryContext.state);
 
-    const index = toSignBidirectionalEventIndex(state.bidirectionalDepositMap);
+    const index = evmEventIndex(state.bidirectionalDepositMap);
     expect(index.size).toBe(2);
   });
 });
@@ -1038,7 +1064,7 @@ const CONTRACT_RECIPIENT = {
 const depositRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const { context: next, outIndex } = await deposit(contract, ctx, VALID_DEPOSIT);
-  const index = toSignBidirectionalEventIndex(ledgerOf(next).bidirectionalDepositMap);
+  const index = evmEventIndex(ledgerOf(next).bidirectionalDepositMap);
   const idHex = first(index.keys(), "signBidirectional request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex), outIndex };
 };
@@ -1384,7 +1410,7 @@ describe("withdraw round-trip", () => {
     const { context: next, outIndex } = await withdraw(contract, ctx, VALID_WITHDRAW);
     const state = next.callContext.currentQueryContext.state;
 
-    const typedIndex = toSignBidirectionalEventIndex(ledger(state).bidirectionalWithdrawMap);
+    const typedIndex = evmEventIndex(ledger(state).bidirectionalWithdrawMap);
     const rawLedger = readSignetRequestsLedgerFromState(state, VAULT_WITHDRAW_REQUESTS_PATH);
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
@@ -1445,6 +1471,7 @@ describe("withdraw round-trip", () => {
     const { entry, lastSeen } = ledger(state).outputRequestBuffer.lookup(outIndex);
     expect(entry).toEqual({
       action: Action.withdraw,
+      chain: Chain.ethereum,
       useNextVaultAccountNonce: true,
       evmNonce: 0n,
       inIndex: VALID_WITHDRAW.inIndex,
@@ -1521,7 +1548,7 @@ describe("withdraw round-trip", () => {
       })
     ).context;
 
-    const index = toSignBidirectionalEventIndex(ledgerOf(afterSecond).bidirectionalWithdrawMap);
+    const index = evmEventIndex(ledgerOf(afterSecond).bidirectionalWithdrawMap);
     expect([...index.values()].map(({ txParams }) => [txParams.to, txParams.nonce]).sort()).toEqual(
       [
         [ERC20, 0n],
@@ -1703,7 +1730,7 @@ describe("sendWithdraw", () => {
     const sent = (
       await contract.circuits.sendWithdraw(strangerContext("sendWithdraw", flushed), outIndex)
     ).context;
-    const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalWithdrawMap);
+    const index = evmEventIndex(ledgerOf(sent).bidirectionalWithdrawMap);
     expect(index.size).toBe(1);
     const record = first(index.values(), "withdraw request");
     expect(record.path).toEqual(asciiPadded("vault", 32));
@@ -1760,7 +1787,7 @@ describe("sendWithdraw", () => {
 const withdrawRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const { context: next } = await withdraw(contract, ctx, VALID_WITHDRAW);
-  const index = toSignBidirectionalEventIndex(ledgerOf(next).bidirectionalWithdrawMap);
+  const index = evmEventIndex(ledgerOf(next).bidirectionalWithdrawMap);
   const idHex = first(index.keys(), "withdraw request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
@@ -1986,7 +2013,7 @@ describe("cross-action settle isolation", () => {
     const { context: withdrawn } = await withdraw(contract, ctx, VALID_WITHDRAW);
     const withdrawId = requestIdBytes(
       first(
-        toSignBidirectionalEventIndex(ledgerOf(withdrawn).bidirectionalWithdrawMap).keys(),
+        evmEventIndex(ledgerOf(withdrawn).bidirectionalWithdrawMap).keys(),
         "withdraw request id",
       ),
     );
@@ -2104,7 +2131,7 @@ describe("approve round-trip", () => {
       const { context: next, outIndex } = await approve(contract, ctx, approval);
       const state = next.callContext.currentQueryContext.state;
 
-      const typedIndex = toSignBidirectionalEventIndex(ledger(state).bidirectionalApproveMap);
+      const typedIndex = evmEventIndex(ledger(state).bidirectionalApproveMap);
       const rawLedger = readSignetRequestsLedgerFromState(state, VAULT_APPROVE_REQUESTS_PATH);
       expect(typedIndex.size).toBe(1);
       expect(rawLedger.requestsIndex).toEqual(typedIndex);
@@ -2164,6 +2191,7 @@ describe("approve round-trip", () => {
       const { entry, lastSeen } = ledger(state).outputRequestBuffer.lookup(outIndex);
       expect(entry).toEqual({
         action: Action.approve,
+        chain: Chain.ethereum,
         useNextVaultAccountNonce: true,
         evmNonce: 0n,
         inIndex: APPROVE_INDEX,
@@ -2205,7 +2233,7 @@ describe("approve round-trip", () => {
     const sent = (await contract.circuits.sendApprove(flushed, outIndex)).context;
 
     const record = first(
-      toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalApproveMap).values(),
+      evmEventIndex(ledgerOf(sent).bidirectionalApproveMap).values(),
       "approve request",
     );
     expect(record.txParams.to).toEqual(otherErc20);
@@ -2285,7 +2313,7 @@ describe("sendApprove", () => {
     const sent = (
       await contract.circuits.sendApprove(strangerContext("sendApprove", flushed), outIndex)
     ).context;
-    const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalApproveMap);
+    const index = evmEventIndex(ledgerOf(sent).bidirectionalApproveMap);
     expect(index.size).toBe(1);
     const record = first(index.values(), "approve request");
     expect(record.path).toEqual(asciiPadded("vault", 32));
@@ -2337,7 +2365,7 @@ describe("sendApprove", () => {
 const approveRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const { context: next } = await approve(contract, ctx, ROUTER_APPROVAL);
-  const index = toSignBidirectionalEventIndex(ledgerOf(next).bidirectionalApproveMap);
+  const index = evmEventIndex(ledgerOf(next).bidirectionalApproveMap);
   const idHex = first(index.keys(), "approve request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
@@ -2510,7 +2538,7 @@ describe("completeApprove settle", () => {
     const { context: withdrawn } = await withdraw(contract, ctx, VALID_WITHDRAW);
     const withdrawId = requestIdBytes(
       first(
-        toSignBidirectionalEventIndex(ledgerOf(withdrawn).bidirectionalWithdrawMap).keys(),
+        evmEventIndex(ledgerOf(withdrawn).bidirectionalWithdrawMap).keys(),
         "withdraw request id",
       ),
     );
@@ -2613,7 +2641,7 @@ describe("replace nonce round-trip", () => {
     });
     const state = next.callContext.currentQueryContext.state;
 
-    const typedIndex = toSignBidirectionalEventIndex(ledger(state).bidirectionalReplaceNonceMap);
+    const typedIndex = evmEventIndex(ledger(state).bidirectionalReplaceNonceMap);
     const rawLedger = readSignetRequestsLedgerFromState(state, VAULT_REPLACE_NONCE_REQUESTS_PATH);
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
@@ -2666,6 +2694,7 @@ describe("replace nonce round-trip", () => {
     const { entry, lastSeen } = ledger(state).outputRequestBuffer.lookup(outIndex);
     expect(entry).toEqual({
       action: Action.replaceNonce,
+      chain: Chain.ethereum,
       useNextVaultAccountNonce: false,
       evmNonce: 0n,
       inIndex: VALID_REPLACE_NONCE.inIndex,
@@ -2689,7 +2718,7 @@ describe("replace nonce round-trip", () => {
 
     const state = ledgerOf(replaced);
     const nonceOf = (map: Parameters<typeof toSignBidirectionalEventIndex>[0]) =>
-      first(toSignBidirectionalEventIndex(map).values(), "recorded request").txParams.nonce;
+      first(evmEventIndex(map).values(), "recorded request").txParams.nonce;
     expect(nonceOf(state.bidirectionalWithdrawMap)).toBe(0n);
     expect(nonceOf(state.bidirectionalReplaceNonceMap)).toBe(0n);
     expect(state.vaultAccountNonce).toBe(1n);
@@ -2851,7 +2880,7 @@ describe("sendReplaceNonce", () => {
         outIndex,
       )
     ).context;
-    const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalReplaceNonceMap);
+    const index = evmEventIndex(ledgerOf(sent).bidirectionalReplaceNonceMap);
     expect(index.size).toBe(1);
     const record = first(index.values(), "replacement request");
     expect(record.path).toEqual(asciiPadded("vault", 32));
@@ -2927,7 +2956,7 @@ const replaceNonceRequested = async () => {
     ...VALID_REPLACE_NONCE,
     requestId: withdrawId,
   });
-  const index = toSignBidirectionalEventIndex(ledgerOf(next).bidirectionalReplaceNonceMap);
+  const index = evmEventIndex(ledgerOf(next).bidirectionalReplaceNonceMap);
   const idHex = first(index.keys(), "replacement request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
@@ -3065,7 +3094,7 @@ describe("completeReplaceNonce settle", () => {
     ).context;
     const replacementId = requestIdBytes(
       first(
-        toSignBidirectionalEventIndex(ledgerOf(replaced).bidirectionalReplaceNonceMap).keys(),
+        evmEventIndex(ledgerOf(replaced).bidirectionalReplaceNonceMap).keys(),
         "replacement request id",
       ),
     );
@@ -3116,7 +3145,7 @@ describe("completeReplaceNonce settle", () => {
     ).context;
     const replacementId = requestIdBytes(
       first(
-        toSignBidirectionalEventIndex(ledgerOf(replaced).bidirectionalReplaceNonceMap).keys(),
+        evmEventIndex(ledgerOf(replaced).bidirectionalReplaceNonceMap).keys(),
         "replacement request id",
       ),
     );
@@ -3243,7 +3272,7 @@ describe("swap round-trip", () => {
     const { context: next, outIndex } = await swap(contract, ctx, VALID_SWAP);
     const state = next.callContext.currentQueryContext.state;
 
-    const typedIndex = toSignBidirectionalEventIndex(ledger(state).bidirectionalSwapMap);
+    const typedIndex = evmEventIndex(ledger(state).bidirectionalSwapMap);
     const rawLedger = readSignetRequestsLedgerFromState(state, VAULT_SWAP_REQUESTS_PATH);
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
@@ -3308,6 +3337,7 @@ describe("swap round-trip", () => {
     const { entry, lastSeen } = ledger(state).outputRequestBuffer.lookup(outIndex);
     expect(entry).toEqual({
       action: Action.swap,
+      chain: Chain.ethereum,
       useNextVaultAccountNonce: true,
       evmNonce: 0n,
       inIndex: VALID_SWAP.inIndex,
@@ -3506,7 +3536,7 @@ describe("sendSwap", () => {
 
     const sent = (await contract.circuits.sendSwap(strangerContext("sendSwap", flushed), outIndex))
       .context;
-    const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalSwapMap);
+    const index = evmEventIndex(ledgerOf(sent).bidirectionalSwapMap);
     expect(index.size).toBe(1);
     const record = first(index.values(), "swap request");
     expect(record.path).toEqual(asciiPadded("vault", 32));
@@ -3570,7 +3600,7 @@ describe("sendSwap", () => {
 const swapRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const { context: next } = await swap(contract, ctx, VALID_SWAP);
-  const index = toSignBidirectionalEventIndex(ledgerOf(next).bidirectionalSwapMap);
+  const index = evmEventIndex(ledgerOf(next).bidirectionalSwapMap);
   const idHex = first(index.keys(), "swap request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
@@ -3948,10 +3978,7 @@ describe("completeSwap settle", () => {
     const { contract, ctx, requestId: withdrawId } = await withdrawRequested();
     const swapped = (await swap(contract, ctx, VALID_SWAP)).context;
     const swapId = requestIdBytes(
-      first(
-        toSignBidirectionalEventIndex(ledgerOf(swapped).bidirectionalSwapMap).keys(),
-        "swap request id",
-      ),
+      first(evmEventIndex(ledgerOf(swapped).bidirectionalSwapMap).keys(), "swap request id"),
     );
     const withdrawQueued = (
       await contract.circuits.queueAttestation(
@@ -4071,7 +4098,7 @@ describe("supply round-trip", () => {
     const { context: next, outIndex } = await supply(contract, ctx, VALID_SUPPLY);
     const state = next.callContext.currentQueryContext.state;
 
-    const typedIndex = toSignBidirectionalEventIndex(ledger(state).bidirectionalSupplyMap);
+    const typedIndex = evmEventIndex(ledger(state).bidirectionalSupplyMap);
     const rawLedger = readSignetRequestsLedgerFromState(state, VAULT_SUPPLY_REQUESTS_PATH);
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
@@ -4129,6 +4156,7 @@ describe("supply round-trip", () => {
     const { entry, lastSeen } = ledger(state).outputRequestBuffer.lookup(outIndex);
     expect(entry).toEqual({
       action: Action.supply,
+      chain: Chain.ethereum,
       useNextVaultAccountNonce: true,
       evmNonce: 0n,
       inIndex: VALID_SUPPLY.inIndex,
@@ -4293,7 +4321,7 @@ describe("sendSupply", () => {
     const sent = (
       await contract.circuits.sendSupply(strangerContext("sendSupply", flushed), outIndex)
     ).context;
-    const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalSupplyMap);
+    const index = evmEventIndex(ledgerOf(sent).bidirectionalSupplyMap);
     expect(index.size).toBe(1);
     const record = first(index.values(), "supply request");
     expect(record.path).toEqual(asciiPadded("vault", 32));
@@ -4357,7 +4385,7 @@ describe("sendSupply", () => {
 const supplyRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const { context: next } = await supply(contract, ctx, VALID_SUPPLY);
-  const index = toSignBidirectionalEventIndex(ledgerOf(next).bidirectionalSupplyMap);
+  const index = evmEventIndex(ledgerOf(next).bidirectionalSupplyMap);
   const idHex = first(index.keys(), "supply request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
@@ -4418,6 +4446,7 @@ describe("queueAttestation", () => {
 
     const queued = (await contract.circuits.queueAttestation(ctx, attestation)).context;
     expect(ledgerOf(queued).inputAttestationBuffer.lookup(requestId)).toEqual({
+      chain: Chain.ethereum,
       blockHeight: ATTESTED_HEIGHT,
       outputKind: OutputKind.executed,
       serializedOutputLength: BigInt(OUTPUT_SUPPLY.length),
@@ -4651,10 +4680,7 @@ describe("completeSupply settle", () => {
     const { contract, ctx, requestId: withdrawId } = await withdrawRequested();
     const supplied = (await supply(contract, ctx, VALID_SUPPLY)).context;
     const supplyId = requestIdBytes(
-      first(
-        toSignBidirectionalEventIndex(ledgerOf(supplied).bidirectionalSupplyMap).keys(),
-        "supply request id",
-      ),
+      first(evmEventIndex(ledgerOf(supplied).bidirectionalSupplyMap).keys(), "supply request id"),
     );
     const withdrawQueued = (
       await contract.circuits.queueAttestation(
@@ -4758,7 +4784,7 @@ describe("redeem round-trip", () => {
     const { context: next, outIndex } = await redeem(contract, ctx, VALID_REDEEM);
     const state = next.callContext.currentQueryContext.state;
 
-    const typedIndex = toSignBidirectionalEventIndex(ledger(state).bidirectionalRedeemMap);
+    const typedIndex = evmEventIndex(ledger(state).bidirectionalRedeemMap);
     const rawLedger = readSignetRequestsLedgerFromState(state, VAULT_REDEEM_REQUESTS_PATH);
     expect(typedIndex.size).toBe(1);
     expect(rawLedger.requestsIndex).toEqual(typedIndex);
@@ -4817,6 +4843,7 @@ describe("redeem round-trip", () => {
     const { entry, lastSeen } = ledger(state).outputRequestBuffer.lookup(outIndex);
     expect(entry).toEqual({
       action: Action.redeem,
+      chain: Chain.ethereum,
       useNextVaultAccountNonce: true,
       evmNonce: 0n,
       inIndex: VALID_REDEEM.inIndex,
@@ -4892,7 +4919,7 @@ describe("redeem round-trip", () => {
 
     const sent = (await contract.circuits.sendRedeem(flushed, redeemIndex)).context;
     const record = first(
-      toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalRedeemMap).values(),
+      evmEventIndex(ledgerOf(sent).bidirectionalRedeemMap).values(),
       "redeem request",
     );
     expect(record.txParams.nonce).toBe(1n);
@@ -4988,7 +5015,7 @@ describe("sendRedeem", () => {
     const sent = (
       await contract.circuits.sendRedeem(strangerContext("sendRedeem", flushed), outIndex)
     ).context;
-    const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalRedeemMap);
+    const index = evmEventIndex(ledgerOf(sent).bidirectionalRedeemMap);
     expect(index.size).toBe(1);
     const record = first(index.values(), "redeem request");
     expect(record.path).toEqual(asciiPadded("vault", 32));
@@ -5048,7 +5075,7 @@ describe("sendRedeem", () => {
 const redeemRequested = async () => {
   const { contract, ctx } = await deployInitialised();
   const { context: next } = await redeem(contract, ctx, VALID_REDEEM);
-  const index = toSignBidirectionalEventIndex(ledgerOf(next).bidirectionalRedeemMap);
+  const index = evmEventIndex(ledgerOf(next).bidirectionalRedeemMap);
   const idHex = first(index.keys(), "redeem request id");
   return { contract, ctx: next, requestId: requestIdBytes(idHex) };
 };
@@ -5273,10 +5300,7 @@ describe("completeRedeem settle", () => {
     const { contract, ctx, requestId: supplyId } = await supplyRequested();
     const redeemed = (await redeem(contract, ctx, VALID_REDEEM)).context;
     const redeemId = requestIdBytes(
-      first(
-        toSignBidirectionalEventIndex(ledgerOf(redeemed).bidirectionalRedeemMap).keys(),
-        "redeem request id",
-      ),
+      first(evmEventIndex(ledgerOf(redeemed).bidirectionalRedeemMap).keys(), "redeem request id"),
     );
     const supplyQueued = (
       await contract.circuits.queueAttestation(
@@ -5423,10 +5447,8 @@ describe("replace nonce: the requests it can replace", () => {
     "replaces the nonce a sent $action request holds, read from its own event",
     async ({ action, requested, map }) => {
       const { contract, ctx, requestId } = await requested();
-      const sentNonce = first(
-        toSignBidirectionalEventIndex(map(ledgerOf(ctx))).values(),
-        "sent request",
-      ).txParams.nonce;
+      const sentNonce = first(evmEventIndex(map(ledgerOf(ctx))).values(), "sent request").txParams
+        .nonce;
 
       // replaceNonceRequested queues under the base index, so this replacement takes the next.
       const inIndex = VALID_REPLACE_NONCE.inIndex + 1n;
@@ -5460,9 +5482,7 @@ describe("replace nonce: the requests it can replace", () => {
 
 /** The request id of the sent withdrawal whose transaction carries `nonce`. */
 const sentWithdrawId = (ctx: CircuitContext<VaultPrivateState>, nonce: bigint): Uint8Array => {
-  for (const [idHex, record] of toSignBidirectionalEventIndex(
-    ledgerOf(ctx).bidirectionalWithdrawMap,
-  )) {
+  for (const [idHex, record] of evmEventIndex(ledgerOf(ctx).bidirectionalWithdrawMap)) {
     if (record.txParams.nonce === nonce) return requestIdBytes(idHex);
   }
   throw new Error(`no sent withdrawal carries nonce ${String(nonce)}`);
@@ -6448,7 +6468,7 @@ const setGasParams = (
 const envelopeOf = (
   map: Parameters<typeof toSignBidirectionalEventIndex>[0],
 ): { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint; gasLimit: bigint } => {
-  const index = toSignBidirectionalEventIndex(map);
+  const index = evmEventIndex(map);
   expect(index.size).toBe(1);
   const { txParams } = first(index.values(), "recorded request");
   return {
@@ -7118,7 +7138,7 @@ describe("attested block heights", () => {
     const sent = (
       await contract.circuits.sendDeposit(strangerContext("sendDeposit", flushed), outIndex)
     ).context;
-    const index = toSignBidirectionalEventIndex(ledgerOf(sent).bidirectionalDepositMap);
+    const index = evmEventIndex(ledgerOf(sent).bidirectionalDepositMap);
     expect(index.size).toBe(1);
     const record = first(index.values(), "deposit request");
     expect(record.path).toEqual(DEPLOYER_COMMITMENT);

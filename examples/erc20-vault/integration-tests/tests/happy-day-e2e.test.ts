@@ -238,11 +238,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
 
       // MPC-convention verification: fetch the request record the way the
       // response server does — through a SignetRequestResponseReader over RAW
-      // contract state. getSignatureRequest throws when the id is absent, so a
+      // contract state. getEvmType2SignatureRequest throws when the id is absent, so a
       // returned record is itself proof the request landed on the vault ledger.
       const record = await session
         .responseReader(VAULT_DEPOSIT_REQUESTS_PATH)
-        .getSignatureRequest(depositTransactionSignatureRequestId);
+        .getEvmType2SignatureRequest(depositTransactionSignatureRequestId);
       expect(record.txParams.nonce).toBe(evmNonce);
       expect(record.txParams.calldata.is_some).toBe(true);
       expect(abiWordToUint128(calldataWordAt(record.txParams.calldata.value.words, 1))).toBe(
@@ -343,7 +343,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // and the MPC signature reordered or reinterpreted the calldata.
       const record = await session
         .responseReader(VAULT_DEPOSIT_REQUESTS_PATH)
-        .getSignatureRequest(depositTransactionSignatureRequestId);
+        .getEvmType2SignatureRequest(depositTransactionSignatureRequestId);
       const storedCalldata = record.txParams.calldata.value;
       const expectedData =
         `0x${bytesToHex(storedCalldata.selector)}` +
@@ -592,7 +592,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       // VAULT's derivation path, with contract-built calldata.
       const record = await session
         .responseReader(VAULT_WITHDRAW_REQUESTS_PATH)
-        .getSignatureRequest(withdrawTransactionSignatureRequestId);
+        .getEvmType2SignatureRequest(withdrawTransactionSignatureRequestId);
       expect(record.txParams.nonce).toBe(vaultNonceBefore);
       expect(record.txParams.calldata.is_some).toBe(true);
       expect(abiWordToUint128(calldataWordAt(record.txParams.calldata.value.words, 1))).toBe(
