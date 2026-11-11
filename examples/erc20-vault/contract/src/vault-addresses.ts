@@ -13,7 +13,7 @@ import { type DeployedNetwork, MidnightNetwork } from "@sig-net/midnight";
 // getVaultContractAddress throw for that network.
 const vaultContractAddresses: Record<DeployedNetwork, string> = {
   [MidnightNetwork.Preview]: "",
-  [MidnightNetwork.Preprod]: "",
+  [MidnightNetwork.Preprod]: "8773ce947626a6bee0f63ebad89a219978e4051fd6ab026efebc3b8cfbc3124c",
   [MidnightNetwork.Mainnet]: "",
 };
 
