@@ -57,6 +57,13 @@ import { uniswapAvailable } from "./evm-swap.ts";
 import { dealForkEvmAccounts, SEPOLIA_EURC, SEPOLIA_USDC } from "./fork-funding.ts";
 import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
+import {
+  ensureTestTrc20,
+  ensureTronAddresses,
+  ensureTronAllowedTokens,
+  fundTronAccounts,
+  TRON_PIPELINE_KEYS,
+} from "./tron-setup.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 
 /**
@@ -80,6 +87,7 @@ export const VAULT_PIPELINE_KEYS = [
   "MPC_RESPONSE_KEY",
   "EVM_VAULT_ADDRESS",
   "EVM_USER_ADDRESS",
+  ...TRON_PIPELINE_KEYS,
 ] as const;
 
 /**
@@ -476,6 +484,10 @@ const STEPS: readonly SetupStep[] = [
     "setup: verify Sepolia dependencies (Uniswap router + stataUSDC wrapper)",
     verifyForkDependencies,
   ],
+  ["setup: deploy the test TRC-20 on the Tron chain (when TRON_RPC_URL is set)", ensureTestTrc20],
+  ["setup: default TRON_ALLOWED_TOKENS to the test TRC-20", ensureTronAllowedTokens],
+  ["setup: check/derive vault and user Tron addresses", ensureTronAddresses],
+  ["setup: fund the user's derived Tron account (TRX + test TRC-20)", fundTronAccounts],
   [
     "setup: print MPC server configuration",
     (env) => {

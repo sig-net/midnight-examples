@@ -6,7 +6,14 @@
 // or a backend. Anything that cannot (the Node compiled-contract binding, a
 // live provider set, deploy tooling) lives in a sibling package.
 
-import { asciiPadded, bytesToHex, deriveEvmAddress, PATH_BYTES } from "@sig-net/midnight";
+import {
+  asciiPadded,
+  bytesToHex,
+  deriveEvmAddress,
+  deriveTronAddress,
+  PATH_BYTES,
+  type TronAddress,
+} from "@sig-net/midnight";
 
 export * from "./contract-surface.ts";
 export * from "./evm.ts";
@@ -48,6 +55,18 @@ export function deriveVaultEvmAddress(
   return deriveEvmAddress(mpcSecp256k1PublicKey, vaultContractAddress, VAULT_PATH_HEX);
 }
 
+/**
+ * @param mpcSecp256k1PublicKey - The MPC network's secp256k1 public key
+ * @param vaultContractAddress - The deployed vault contract's address
+ * @returns The vault's Tron address
+ */
+export function deriveVaultTronAddress(
+  mpcSecp256k1PublicKey: string,
+  vaultContractAddress: string,
+): TronAddress {
+  return deriveTronAddress(mpcSecp256k1PublicKey, vaultContractAddress, VAULT_PATH_HEX);
+}
+
 // THIS contract's signet ledger layout: each action owns a
 // SignBidirectionalEventMapV1. A client contract is free to place its event maps
 // at any field: every raw reader takes the resolved ledger-tree path explicitly,
@@ -60,9 +79,12 @@ export function deriveVaultEvmAddress(
 /**
  * Resolved ledger-tree path of `bidirectionalDepositMap`, which holds the deposit
  * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
- * `requestsPath` [2, 5, 0, 0] the `sendDeposit` circuit packs.
+ * `requestsPath` [2, 3, 0, 0] the `sendDeposit` circuit packs.
  */
-export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [2, 5];
+export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [2, 3];
+
+/** */
+export const VAULT_TRON_DEPOSIT_REQUESTS_PATH: readonly number[] = [2, 5];
 
 /**
  * Resolved ledger-tree path of `bidirectionalWithdrawMap`, which holds the withdraw
@@ -75,16 +97,16 @@ export const VAULT_WITHDRAW_REQUESTS_PATH: readonly number[] = [2, 7];
  * Resolved ledger-tree path of `bidirectionalApproveMap`, which holds the approve
  * requests of both spenders (the Uniswap router and the stataToken wrapper), as the
  * compiled `contract-info.json` lists it. Matches the depth 2 + `requestsPath`
- * [2, 3, 0, 0] the `sendApprove` circuit packs.
+ * [2, 1, 0, 0] the `sendApprove` circuit packs.
  */
-export const VAULT_APPROVE_REQUESTS_PATH: readonly number[] = [2, 3];
+export const VAULT_APPROVE_REQUESTS_PATH: readonly number[] = [2, 1];
 
 /**
  * Resolved ledger-tree path of `bidirectionalReplaceNonceMap`, which holds the nonce
  * replacement requests, as the compiled `contract-info.json` lists it. Matches the
- * depth 2 + `requestsPath` [2, 1, 0, 0] the `sendReplaceNonce` circuit packs.
+ * depth 2 + `requestsPath` [1, 14, 0, 0] the `sendReplaceNonce` circuit packs.
  */
-export const VAULT_REPLACE_NONCE_REQUESTS_PATH: readonly number[] = [2, 1];
+export const VAULT_REPLACE_NONCE_REQUESTS_PATH: readonly number[] = [1, 14];
 
 /**
  * Resolved ledger-tree path of `bidirectionalSwapMap`, which holds the swap requests,

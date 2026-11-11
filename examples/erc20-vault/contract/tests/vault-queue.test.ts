@@ -271,6 +271,7 @@ const arrangeVault = async (arrangement: VaultArrangement) => {
       secp256k1PublicKeyOf(MPC_RESPONSE_SECRET),
       1n,
       100n,
+      5_000n,
       NO_FEES,
       NO_FEES,
       { bytes: new Uint8Array(32).fill(0xfe) },
