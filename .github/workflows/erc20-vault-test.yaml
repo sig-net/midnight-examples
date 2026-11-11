@@ -82,5 +82,5 @@ jobs:
       # of the circuit that unstalls the vault's EVM nonce sequence. One spec per refund
       # branch, so a broken refund fails the gate. The full suite stays opt-in via
       # workflow_dispatch.
-      gate-spec: "tests/happy-day-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/approve-e2e.test.ts tests/swap-e2e.test.ts tests/supply-redeem-e2e.test.ts tests/supply-refund-e2e.test.ts tests/swap-refund-e2e.test.ts tests/redeem-refund-e2e.test.ts tests/admin-replace-nonce-e2e.test.ts"
+      gate-spec: "tests/happy-day-e2e.test.ts tests/deposit-withdrawal-failure-refund.test.ts tests/approve-e2e.test.ts tests/swap-e2e.test.ts tests/supply-redeem-e2e.test.ts tests/supply-refund-e2e.test.ts tests/swap-refund-e2e.test.ts tests/redeem-refund-e2e.test.ts tests/admin-replace-nonce-e2e.test.ts tests/tron-allowed-tokens-e2e.test.ts tests/tron-deposit-e2e.test.ts tests/tron-deposit-failure-e2e.test.ts tests/tron-deposit-expiry-e2e.test.ts tests/tron-deposit-claimant-not-caller.test.ts tests/tron-false-claimer.test.ts"
       full-suite: ${{ github.event_name == 'workflow_dispatch' && inputs.full-suite == true }}

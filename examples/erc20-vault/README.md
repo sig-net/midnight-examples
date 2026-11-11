@@ -27,13 +27,15 @@ action.
 
 | Circuit(s) | What it does |
 |---|---|
-| [`initialise`](#setup-step-4-pin-the-derived-addresses-and-the-response-key) | Deployment setup rather than an MPC flow: the deployer-gated one-shot that pins the vault's derived EVM address, the EVM chain, the Uniswap router, the Aave stataToken pair, the MPC response key and the EVM height attestations must exceed. |
+| [`initialise`](#setup-step-4-pin-the-derived-addresses-and-the-response-key) | Deployment setup rather than an MPC flow: the deployer-gated one-shot that pins the vault's derived EVM address, the EVM chain, the Uniswap router, the Aave stataToken pair, the MPC response key and the EVM and Tron heights attestations must exceed. |
 | `setGasParams` | The deployer resets the fee envelope and the per-action gas limits of the transactions the vault's own account signs. A request keeps the values it was started with. |
 | `addAllowedToken` / `setTokenFees` | The deployer allows one more ERC20 into the vault, with the flat fee each fee-charging action takes on it, and reprices an allowed token's fees later. `startDeposit` accepts only an allowed ERC20, and `startSwap` buys only an allowed `erc20AddressOut`. `initialise` allows the stata pair itself, and no circuit removes a token. Allow only [supported tokens](#supported-tokens). |
+| `addAllowedTronToken` | The deployer allows one more TRC-20 into the vault for Tron deposits, with the same per-action fees `addAllowedToken` takes. `allowedTronTokens` has `allowedTokens`' shape but is a separate map; a Tron deposit takes no fee, as an Ethereum deposit takes none, and no circuit removes a token. |
 | `setFeeRecipient` | The deployer moves the wallet every fee coin is minted to: its coin public key and the encryption public key clients encrypt the coin's ciphertext to. `initialise` names the first one. |
-| [`flushQueue`](docs/contention-handling.md#the-flush) | The only writer of `globalLastSeen` after `initialise` and of `vaultAccountNonce`: moves up to 10 queued requests and attestations into the output buffers, assigning each vault-signed request the vault account's next EVM nonce. Anyone may submit it. |
+| [`flushQueue`](docs/contention-handling.md#the-flush) | The only writer of `globalLastSeen` and `tronLastSeen` after `initialise` and of `vaultAccountNonce`: moves up to 10 queued requests and attestations into the output buffers, assigning each vault-signed request the vault account's next EVM nonce. Anyone may submit it. |
 | [`queueAttestation`](docs/contention-handling.md#why-the-queue-needs-no-output) | Verify an MPC attestation's signature over the output width and hash it carries, and queue it for the flush, whatever the output's width. Anyone may submit one. |
 | [`startDeposit`](docs/deposit/deposit.md) → [`sendDeposit`](docs/deposit/deposit.md) → [`completeDeposit`](docs/deposit/deposit.md) | **The reference flow, documented step by step in the [deposit walkthrough](docs/deposit/deposit.md).** The depositor's derived EVM account transfers the ERC20 to the vault's account, and `completeDeposit` mints the shielded vault token when the attested transfer returned true. |
+| `startTronDeposit` → `sendTronDeposit` → `completeTronDeposit` | The deposit from Tron: the depositor's derived Tron account (the same key as their EVM account) transfers a TRC-20 to the vault's Tron account, `tronAddress(vaultEvmAddress)`, under the reference block, validity window and fee limit the depositor chose, and `completeTronDeposit` mints the shielded Tron vault token when the MPC attests the transfer executed. The MPC attests Tron executions over an empty output, so the transfer's bool return is not checked: allow only TRC-20s that revert on a failed transfer. |
 | [`startWithdraw`](docs/withdraw/withdraw.md) → [`sendWithdraw`](docs/withdraw/withdraw.md) → [`completeWithdraw`](docs/withdraw/withdraw.md) | The other direction, plus the coin-spend-as-authorisation pattern: `startWithdraw` burns the surrendered vault coin, the vault's account transfers the ERC20, and `completeWithdraw` re-mints the burned amount when the MPC attests the transfer failed or unviable, or that it returned false. |
 | `startApproveRouter` / `startApproveStata` → `sendApprove` → `completeApprove` | Deployer-gated: the vault's account grants the pinned Uniswap router, or the pinned stataToken wrapper, an unlimited allowance the later swaps and supplies draw on (see [Vault-signed requests](docs/contention-handling.md#vault-signed-requests)). |
 | [`startSwap`](docs/swap/swap.md) → [`sendSwap`](docs/swap/swap.md) → [`completeSwap`](docs/swap/swap.md) | `exactOutputSingle` on the pinned router: `startSwap` burns the surrendered `erc20AddressIn` coin, and `completeSwap` mints the exact `amountOut` of `erc20AddressOut` plus the unspent input as change, or re-mints the surrendered coin when the MPC attests the swap failed or unviable. |
@@ -245,8 +247,8 @@ The contract package's dependency list is the minimal integration surface:
   "@midnight-ntwrk/compact-runtime": "0.21.0",
   "@midnight-ntwrk/midnight-js": "5.0.0",
   "@midnight-ntwrk/midnight-js-protocol": "5.0.0",
-  "@sig-net/midnight": "0.26.0-rc.13",
-  "@sig-net/midnight-signer": "0.26.0-rc.13"
+  "@sig-net/midnight": "0.27.0-rc.2",
+  "@sig-net/midnight-signer": "0.27.0-rc.2"
 }
 ```
 
@@ -360,7 +362,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.13/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.27.0-rc.2/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
@@ -373,14 +375,14 @@ Three vault-specific points:
   (see [Contention handling](docs/contention-handling.md#buffers)).
 - The contract package exports each event map's resolved ledger-tree path
   (`VAULT_DEPOSIT_REQUESTS_PATH`, `VAULT_WITHDRAW_REQUESTS_PATH`,
-  `VAULT_APPROVE_REQUESTS_PATH`, `VAULT_REPLACE_NONCE_REQUESTS_PATH`,
+  `VAULT_TRON_DEPOSIT_REQUESTS_PATH`, `VAULT_APPROVE_REQUESTS_PATH`, `VAULT_REPLACE_NONCE_REQUESTS_PATH`,
   `VAULT_SWAP_REQUESTS_PATH`, `VAULT_SUPPLY_REQUESTS_PATH`,
   `VAULT_REDEEM_REQUESTS_PATH`) so off-chain readers cannot drift from them.
-  The vault has 37 ledger fields, past the 15-field flat limit, so the
-  compiler chunks the state tree: chunk 0 holds fields 0–6, chunk 1 holds
-  fields 7–21, chunk 2 holds fields 22–36, and every path is depth 2. The
-  deposit map has the path `[2, 5]`, and `sendDeposit` packs
-  `requestsPathDepth` 2 + `requestsPath` [2, 5, 0, 0] into its notification.
+  The vault has 41 ledger fields, past the 15-field flat limit, so the
+  compiler chunks the state tree: chunk 0 holds fields 0–10, chunk 1 holds
+  fields 11–25, chunk 2 holds fields 26–40, and every path is depth 2. The
+  deposit map has the path `[2, 3]`, and `sendDeposit` packs
+  `requestsPathDepth` 2 + `requestsPath` [2, 3, 0, 0] into its notification.
   The compiler records the same paths as each field's "index" in the compiled
   `contract-info.json`, and a ledger declaration change re-chunks the tree, so
   re-read them there and update every notification vector in the same change.
@@ -424,6 +426,7 @@ export circuit initialise(
   responseKey: Secp256k1Point,
   responseKeyVersion: Uint<8>,
   evmHeight: Uint<64>,
+  tronHeight: Uint<64>,
   stataUnderlyingFees: TokenFees,
   stataTokenFees: TokenFees,
   feeRecipientCoinKey: ZswapCoinPublicKey,
@@ -438,6 +441,7 @@ export circuit initialise(
   // ... the router, the stataToken pair (allowing both in allowedTokens with
   //     their fees), the fee recipient's keys, the chain id and the MPC key ...
   globalLastSeen = disclose(evmHeight);
+  tronLastSeen = disclose(tronHeight);
   // ... then the default gas settings of the vault account's transactions ...
 }
 ```
@@ -451,7 +455,10 @@ SDK's fixed `ethereumCaip2Id()`, whichever Ethereum network that is.
 the flush moves it, and every attestation for that request must exceed that
 recorded height (see [The last seen height](docs/contention-handling.md#the-last-seen-height)).
 The deploy tooling passes `EVM_START_HEIGHT` when set, otherwise the latest
-block `EVM_RPC_URL` reports, and zero when neither is set.
+block `EVM_RPC_URL` reports, and zero when neither is set. `tronHeight` seeds
+`tronLastSeen`, the same bound for Tron requests: `TRON_START_HEIGHT` when set,
+otherwise the latest block `TRON_RPC_URL` reports (`/wallet/getnowblock`), and
+zero when neither is set.
 
 The gate prevents front-running: nobody else can initialise the vault to
 point at their own address, chain or key. Flow function:
@@ -509,7 +516,8 @@ the deposit round trip, from funding the deposit account through
 ## Running it
 
 Everything runs from the repo root against the local docker stack (Midnight
-node, indexer, proof server, anvil forking Sepolia, fakenet MPC responder).
+node, indexer, proof server, anvil forking Sepolia, a TRE Tron dev chain,
+fakenet MPC responder).
 The anvil service forks Sepolia so the real Uniswap V3 deployment and real
 USDC are present, so `SEPOLIA_FORK_RPC_URL` MUST be in `.env` before the
 stack comes up. Use an archive-capable RPC (one serving state at old blocks,
@@ -530,7 +538,7 @@ cp .env.example .env                # then set SEPOLIA_FORK_RPC_URL to an archiv
 compact update 0.36.0               # Exact version required.
 yarn compile:erc20-vault            # no zk keys: the first e2e run generates them itself (~10 min)
 docker compose up -d                # node, indexer, proof server, anvil forking
-                                    # Sepolia (NOT the fakenet responder: it is
+                                    # Sepolia, TRE (NOT the fakenet responder: it is
                                     # behind the `fakenet` profile, the test setup
                                     # starts it mid-run)
 yarn test:erc20-vault:e2e           # the full e2e suite, serially, bail on first failure
@@ -573,6 +581,33 @@ required again before the next e2e run.
 you using this [skill](../../.claude/skills/e2e/SKILL.md). It knows the whole
 operational runbook (rerun vs redeploy modes, the fakenet responder hand-off,
 failure recovery) and will drive it for you.
+
+### Running the Tron deposit specs
+
+The `tron-*` specs run against the `tron` compose service, a TRE dev chain on
+`http://127.0.0.1:9090`, and skip unless `TRON_RPC_URL` is set. They also need
+a fakenet responder with Tron support, which the published image the compose
+file pins does not have yet: build one from a solana-signet-program checkout
+with Tron support (`docker build -f fakenet-signer/Dockerfile -t
+fakenet:tron-local .`) and name it in `.env`:
+
+```sh
+TRON_RPC_URL=http://127.0.0.1:9090
+FAKENET_IMAGE=fakenet:tron-local
+```
+
+Then run the suite as usual. The setup deploys a test TRC-20 on TRE, names
+it in `TRON_ALLOWED_TOKENS`, derives the vault's and the user's
+Tron accounts, and funds the user's with TRX and the TRC-20 from TRE's first
+prefunded account (private key `0x00…01`, or `TRON_FUNDER_PRIVATE_KEY`).
+`initialise` seals the Tron start height from `TRON_RPC_URL`, and
+`tron-deposit-e2e` checks it is above zero, so initialise the vault with
+`TRON_RPC_URL` set (`happy-day-e2e` or `yarn setup-local:erc20-vault` does).
+After that one Tron spec runs on its own:
+
+```sh
+yarn test:erc20-vault:e2e tests/tron-deposit-e2e.test.ts
+```
 
 ### Running against the real Sepolia network
 
@@ -713,7 +748,7 @@ an unattended/backgrounded run.
 
 ## Deploying
 
-The contract has 29 circuits and their verifier keys do not fit in one block, so
+The contract has 33 circuits and their verifier keys do not fit in one block, so
 a deploy is two phases:
 
 1. The base transaction registers the whole ledger state and ONE small circuit.
@@ -741,6 +776,11 @@ yarn deploy-initialise:erc20-vault
 # initialise a vault that already exists (recovers a run whose deploy landed
 # but whose initialise did not: initialise is one-shot and idempotent)
 yarn initialise:erc20-vault
+
+# allow every TRC-20 TRON_ALLOWED_TOKENS lists (base58 or 20-byte hex) for
+# Tron deposits, each with the fees VAULT_TOKEN_FEES or the flat VAULT_FEE_*
+# variables give it
+yarn add-allowed-tron-tokens:erc20-vault
 
 # allow every ERC20 EVM_ALLOWED_TOKENS lists that the vault does not allow
 # yet: deposits and swaps accept only allowed ERC20s, so run this whenever
@@ -968,7 +1008,7 @@ prefix. The tag carries the example name, the npm version does not:
 
 ## A note on package size
 
-The package ships the verifier keys of the vault's 29 circuits, which also go
+The package ships the verifier keys of the vault's 33 circuits, which also go
 on-chain, and publishes their prover keys nowhere: the package packs to well
 under a megabyte, and the workflow logs the packed and unpacked size before it
 publishes anything.
@@ -1001,7 +1041,7 @@ It compiles the shipped `src/erc20-vault.compact` with the pinned compiler
 manifest, and writes:
 
 ```
-public/keys/<circuit>.prover, <circuit>.verifier    the vault's 29 circuits
+public/keys/<circuit>.prover, <circuit>.verifier    the vault's 33 circuits
 public/zkir/<circuit>.bzkir
 public/compiler/contract-manifest.json, contract-info.json
 public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-signer

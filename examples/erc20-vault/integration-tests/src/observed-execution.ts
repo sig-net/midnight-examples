@@ -133,7 +133,7 @@ async function minedTransactionReceipt(
   provider: JsonRpcProvider,
   requestId: RequestIdHex,
 ): Promise<TransactionReceipt | undefined> {
-  const request = await reader.getSignatureRequest(requestId);
+  const request = await reader.getEvmType2SignatureRequest(requestId);
   for (const response of await reader.getSignatureRespondedEvents(requestId)) {
     let hash: string | null;
     try {

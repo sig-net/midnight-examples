@@ -32,3 +32,18 @@ export function vaultTokenType(
     vaultContractAddress,
   );
 }
+
+/**
+ * @param tokenAddress - The TRC-20 in its 20-byte EVM form
+ * @param vaultContractAddress - The deployed vault contract address
+ * @returns The raw token type
+ */
+export function vaultTronTokenType(
+  tokenAddress: Uint8Array,
+  vaultContractAddress: ContractAddress,
+): RawTokenType {
+  return rawTokenType(
+    pureCircuits.vaultTronTokenDomainSeparator(tokenAddress),
+    vaultContractAddress,
+  );
+}

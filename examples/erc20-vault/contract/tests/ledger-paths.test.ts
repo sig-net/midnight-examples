@@ -12,16 +12,18 @@ import {
   VAULT_REPLACE_NONCE_REQUESTS_PATH,
   VAULT_SUPPLY_REQUESTS_PATH,
   VAULT_SWAP_REQUESTS_PATH,
+  VAULT_TRON_DEPOSIT_REQUESTS_PATH,
   VAULT_WITHDRAW_REQUESTS_PATH,
 } from "../src/index.ts";
 import { compiledFieldIndex } from "./compiled-ledger.ts";
 
 describe("exported ledger paths match the compiled contract-info.json", () => {
   it.each([
-    ["bidirectionalDepositMap", VAULT_DEPOSIT_REQUESTS_PATH, [2, 5]],
+    ["bidirectionalDepositMap", VAULT_DEPOSIT_REQUESTS_PATH, [2, 3]],
+    ["bidirectionalTronDepositMap", VAULT_TRON_DEPOSIT_REQUESTS_PATH, [2, 5]],
     ["bidirectionalWithdrawMap", VAULT_WITHDRAW_REQUESTS_PATH, [2, 7]],
-    ["bidirectionalApproveMap", VAULT_APPROVE_REQUESTS_PATH, [2, 3]],
-    ["bidirectionalReplaceNonceMap", VAULT_REPLACE_NONCE_REQUESTS_PATH, [2, 1]],
+    ["bidirectionalApproveMap", VAULT_APPROVE_REQUESTS_PATH, [2, 1]],
+    ["bidirectionalReplaceNonceMap", VAULT_REPLACE_NONCE_REQUESTS_PATH, [1, 14]],
     ["bidirectionalSwapMap", VAULT_SWAP_REQUESTS_PATH, [2, 9]],
     ["bidirectionalSupplyMap", VAULT_SUPPLY_REQUESTS_PATH, [2, 11]],
     ["bidirectionalRedeemMap", VAULT_REDEEM_REQUESTS_PATH, [2, 13]],

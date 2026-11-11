@@ -29,6 +29,12 @@ const FILE_ORDER = [
   "swap-refund-e2e.test.ts",
   "redeem-refund-e2e.test.ts",
   "admin-replace-nonce-e2e.test.ts",
+  "tron-allowed-tokens-e2e.test.ts",
+  "tron-deposit-e2e.test.ts",
+  "tron-deposit-failure-e2e.test.ts",
+  "tron-deposit-expiry-e2e.test.ts",
+  "tron-deposit-claimant-not-caller.test.ts",
+  "tron-false-claimer.test.ts",
   // Last: its concurrent submissions are the load most likely to poison the local stack.
   "concurrent-flush-e2e.test.ts",
 ];
