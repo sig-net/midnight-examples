@@ -67,7 +67,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // Wallet facade + vault context + MPC-style reader shared by every test in
 // this file (lazily built, so the offline path never touches the network);
 // stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // One deposit's worth of shielded vault tokens is minted straight to the
 // alternate recipient — 0.1 USDC, the funding preflight's minimum.
@@ -106,7 +106,7 @@ const readRecipientVaultTokenBalance = async (): Promise<bigint> => {
     requireEnv("ERC20_ADDRESS"),
     requireEnv("MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
   );
-  return withSyncedWalletFacade(keys, nodeConfig, (_facade, state) =>
+  return withSyncedWalletFacade(keys, nodeConfig, "recipient", env, (_facade, state) =>
     Promise.resolve(state.shielded.balances[color] ?? 0n),
   );
 };

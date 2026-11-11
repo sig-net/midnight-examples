@@ -41,7 +41,7 @@ function deferred<T>(): {
 
 function arrange() {
   vi.spyOn(console, "log").mockImplementation(() => undefined);
-  const registry = new funding.WalletRegistry(CONFIG);
+  const registry = new funding.WalletRegistry(CONFIG, {});
   const balances = new Map<string, { night: bigint; dust: bigint }>();
   const facades = new Map<string, funding.WalletFacade>();
   const keysByAddress = new Map<string, string>();

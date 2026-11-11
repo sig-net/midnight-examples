@@ -97,7 +97,7 @@ export async function withDeployerVault<T>(
     env,
     deployConfig.deployerSeed,
   );
-  const registry = wallets ?? new WalletRegistry(nodeConfig);
+  const registry = wallets ?? new WalletRegistry(nodeConfig, env);
 
   announceDeployerRun(
     `${activity} erc20-vault ${vaultContractAddress} on ${nodeConfig.networkId}`,

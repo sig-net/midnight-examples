@@ -88,7 +88,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // Wallet A, the depositor's session: wallet facade + vault context shared by
 // every test in this file (lazily built, so the offline path never touches the
 // network), stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // Wallet B's seed AND identity secret: the `bearer` role wallet's seed serving
 // as both, deliberately different from the depositor's USER_SEED /
@@ -104,11 +104,14 @@ const BEARER_SEED = env.BEARER_SEED ?? "";
 
 // Wallet B, the transferee's session: same lazily-built shape as A's, over the
 // same stack, differing ONLY in wallet seed + identity secret.
-const bearerSession = createVaultSession({
-  ...env,
-  USER_SEED: BEARER_SEED,
-  VAULT_USER_SECRET_KEY: BEARER_SEED,
-});
+const bearerSession = createVaultSession(
+  {
+    ...env,
+    USER_SEED: BEARER_SEED,
+    VAULT_USER_SECRET_KEY: BEARER_SEED,
+  },
+  "bearer",
+);
 
 // One deposit's worth of shielded vault tokens is arranged on A, handed to B in
 // a plain transfer, and withdrawn by B: 0.1 USDC, the funding preflight's

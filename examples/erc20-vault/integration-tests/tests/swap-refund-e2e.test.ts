@@ -79,7 +79,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // Wallet facade + vault context shared by every test in this file (lazily
 // built, so the offline path never touches the network), stopped once in
 // afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // The USDC/EURC pool's fee tier.
 const FEE = 500n;

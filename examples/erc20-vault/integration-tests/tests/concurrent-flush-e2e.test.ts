@@ -66,7 +66,7 @@ const env = injectE2eEnv();
 const requireEnv = (name: string): string => requireEnvOf(env, name);
 
 // The user wallet's session: it owns every request this file starts.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // The second wallet's seed AND identity secret: the `bearer` role wallet, which the setup
 // funds with dust-registered NIGHT so it can pay for flushes. Both variables are overridden
@@ -74,11 +74,14 @@ const session = createVaultSession(env);
 // injected env is empty and the suite skips before any test touches it.
 const SECOND_WALLET_SEED = env.BEARER_SEED ?? "";
 
-const secondSession = createVaultSession({
-  ...env,
-  USER_SEED: SECOND_WALLET_SEED,
-  VAULT_USER_SECRET_KEY: SECOND_WALLET_SEED,
-});
+const secondSession = createVaultSession(
+  {
+    ...env,
+    USER_SEED: SECOND_WALLET_SEED,
+    VAULT_USER_SECRET_KEY: SECOND_WALLET_SEED,
+  },
+  "bearer",
+);
 
 // Each of the two deposits (the raced one and the canary) moves 0.1 USDC.
 const DEPOSIT_AMOUNT = parseUnits("0.1", 6);
