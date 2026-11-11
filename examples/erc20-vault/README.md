@@ -245,8 +245,8 @@ The contract package's dependency list is the minimal integration surface:
   "@midnight-ntwrk/compact-runtime": "0.21.0",
   "@midnight-ntwrk/midnight-js": "5.0.0",
   "@midnight-ntwrk/midnight-js-protocol": "5.0.0",
-  "@sig-net/midnight": "0.26.0-rc.13",
-  "@sig-net/midnight-signer": "0.26.0-rc.13"
+  "@sig-net/midnight": "0.26.0-rc.14",
+  "@sig-net/midnight-signer": "0.26.0-rc.14"
 }
 ```
 
@@ -360,7 +360,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.13/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.14/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
