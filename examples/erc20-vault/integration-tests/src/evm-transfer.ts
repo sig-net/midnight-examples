@@ -2,7 +2,8 @@
 
 // EIP-1559 gas parameters for the deposit sweep the MPC signs: the envelope the
 // deposit flow chooses at startDeposit, which the caller's derived account pays.
-// An ERC20 transfer costs ~50-65k gas, and the fee caps are generous.
+// A Sepolia USDC transfer that creates the recipient's balance slot estimates at
+// ~154k gas, and the fee caps are generous.
 
 /**
  * The ERC20 `transfer(address,uint256)` selector, as broadcast (big-endian).
@@ -19,7 +20,7 @@ export const ERC20_TRANSFER_SELECTOR = new Uint8Array([0xa9, 0x05, 0x9c, 0xbb]);
 export const ERC20_APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
 
 /** Gas ceiling of an MPC-signed ERC20 transfer. */
-export const ERC20_TRANSFER_GAS_LIMIT = 100_000n;
+export const ERC20_TRANSFER_GAS_LIMIT = 200_000n;
 
 /** Max total fee per gas of an MPC-signed ERC20 transfer, wei (30 gwei). */
 export const ERC20_TRANSFER_MAX_FEE_PER_GAS = 30_000_000_000n;

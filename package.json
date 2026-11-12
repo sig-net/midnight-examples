@@ -18,6 +18,7 @@
     "initialise:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy initialise",
     "add-allowed-tokens:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy add-allowed-tokens",
     "set-token-fees:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy set-token-fees",
+    "set-gas-params:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy set-gas-params",
     "resume-deploy:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy resume-deploy",
     "record-contract-address:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-deploy record-contract-address",
     "zk-assets:erc20-vault": "yarn workspace @sig-net/midnight-examples-erc20-vault-contract zk-assets",
