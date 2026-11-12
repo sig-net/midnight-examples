@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The ERC20 vault's deploy flows (the split base deploy plus per-circuit maintenance adds, the deployer-gated initialise, and the deployer's allowed-ERC20 additions), their entrypoint environment, and the Node pieces those flows and the integration tests share: the compiled-contract binding over the contract package's managed/ output and the midnight-js provider set. Typed functions taking an env map, so the CLI entrypoints and the e2e setup run exactly the same code.",
+  "description": "The ERC20 vault's deploy flows (the split base deploy plus per-circuit maintenance adds, the deployer-gated initialise, the deployer's allowed-ERC20 additions, fee repricing and gas-settings resets), their entrypoint environment, and the Node pieces those flows and the integration tests share: the compiled-contract binding over the contract package's managed/ output and the midnight-js provider set. Typed functions taking an env map, so the CLI entrypoints and the e2e setup run exactly the same code.",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -15,6 +15,7 @@
     "initialise": "tsx scripts/initialise.ts",
     "add-allowed-tokens": "tsx scripts/add-allowed-tokens.ts",
     "set-token-fees": "tsx scripts/set-token-fees.ts",
+    "set-gas-params": "tsx scripts/set-gas-params.ts",
     "resume-deploy": "tsx scripts/resume-deploy.ts",
     "record-contract-address": "tsx scripts/record-contract-address.ts"
   },

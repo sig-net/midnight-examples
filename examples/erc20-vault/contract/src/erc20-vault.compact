@@ -225,8 +225,8 @@ export circuit initialise(
   vaultMaxPriorityFeePerGas = 1000000000 as Uint<128>;
 
   vaultGasLimits = VaultGasLimits {
-    withdraw: 100000 as Uint<64>,
-    approve: 100000 as Uint<64>,
+    withdraw: 200000 as Uint<64>,
+    approve: 200000 as Uint<64>,
     swap: 700000 as Uint<64>,
     supply: 500000 as Uint<64>,
     redeem: 500000 as Uint<64>

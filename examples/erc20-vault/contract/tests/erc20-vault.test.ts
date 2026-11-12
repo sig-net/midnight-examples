@@ -1350,7 +1350,7 @@ const VALID_WITHDRAW: WithdrawCallArgs = {
 
 // The vault's gas settings initialise() stores, which every withdrawal copies at start.
 const DEFAULT_VAULT_GAS = {
-  gasLimit: 100_000n,
+  gasLimit: 200_000n,
   maxFeePerGas: 150_000_000_000n,
   maxPriorityFeePerGas: 1_000_000_000n,
 };
@@ -2043,7 +2043,7 @@ const APPROVE_SELECTOR = new Uint8Array([0x09, 0x5e, 0xa7, 0xb3]);
 const APPROVE_INDEX = 21n;
 
 // The vault's gas settings initialise() stores, which every approval copies at start.
-const DEFAULT_APPROVE_GAS = { ...DEFAULT_VAULT_GAS, gasLimit: 100_000n };
+const DEFAULT_APPROVE_GAS = { ...DEFAULT_VAULT_GAS, gasLimit: 200_000n };
 
 /**
  * One of the two approvals: its start circuit called with every argument, the
@@ -6395,8 +6395,8 @@ describe("flushQueue", () => {
 
 const DEFAULT_MAX_FEE_PER_GAS = 150_000_000_000n;
 const DEFAULT_MAX_PRIORITY_FEE_PER_GAS = 1_000_000_000n;
-const DEFAULT_WITHDRAW_GAS_LIMIT = 100_000n;
-const DEFAULT_APPROVE_GAS_LIMIT = 100_000n;
+const DEFAULT_WITHDRAW_GAS_LIMIT = 200_000n;
+const DEFAULT_APPROVE_GAS_LIMIT = 200_000n;
 const DEFAULT_SWAP_GAS_LIMIT = 700_000n;
 const DEFAULT_SUPPLY_GAS_LIMIT = 500_000n;
 const DEFAULT_REDEEM_GAS_LIMIT = 500_000n;

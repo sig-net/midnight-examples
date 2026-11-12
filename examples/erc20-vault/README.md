@@ -802,6 +802,13 @@ yarn add-allowed-tokens:erc20-vault
 # token prices (see design proposal 001's residual risk)
 yarn set-token-fees:erc20-vault
 
+# reset the gas settings of the transactions the vault's own EVM account signs:
+# each of VAULT_MAX_FEE_PER_GAS, VAULT_MAX_PRIORITY_FEE_PER_GAS (wei) and
+# VAULT_GAS_LIMIT_WITHDRAW / _APPROVE / _SWAP / _SUPPLY / _REDEEM replaces one
+# setting, an unset one keeps the vault's current value, and a vault already at
+# those settings is left alone. Requests in flight keep the gas they started with.
+yarn set-gas-params:erc20-vault
+
 # install the circuits a split deploy left missing (recovers a run that died
 # after its base deploy landed, named by MIDNIGHT_VAULT_CONTRACT_ADDRESS, and
 # is a no-op on a vault with every circuit). It does not initialise: run
@@ -810,7 +817,7 @@ yarn set-token-fees:erc20-vault
 yarn resume-deploy:erc20-vault
 ```
 
-All six read the repo-root `.env` overlaid with the real environment, the same
+All seven read the repo-root `.env` overlaid with the real environment, the same
 way the e2e setup does, so one set of variables drives every path. They refuse to
 run when that `.env` names a different `NETWORK_ID` than the run targets and
 still supplies a network-scoped value (a signet address, an MPC key): those are
