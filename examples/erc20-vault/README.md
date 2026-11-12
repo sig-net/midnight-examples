@@ -163,7 +163,7 @@ the same steps and are described in
 
 Every key the MPC signs with is scoped by the requesting contract:
 
-`derivedSigningKey = f(mpcRootKey[keyVersion], caip2ChainId, vaultContractAddress, path)`
+`derivedSigningKey = f(mpcRootKey, keyVersion, caip2ChainId, vaultContractAddress, path)`
 
 `caip2ChainId` is the fixed `midnight:mainnet` for every Midnight network. The
 path is 32 opaque bytes of the client contract's choosing. There are no
@@ -430,7 +430,7 @@ export circuit initialise(
   feeRecipientEncryptionKey: Bytes<32>
 ): [] {
   assert(!initialised, "Already initialised");
-  assert(responseKeyVersion >= 1, "keyVersion must be >= 1");
+  assert(responseKeyVersion == 1, "keyVersion must be 1");
   requireDeployer();
   // ... the chain id and the pinned addresses must be nonzero ...
   initialised = true;
