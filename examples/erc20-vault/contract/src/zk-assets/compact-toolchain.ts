@@ -122,19 +122,15 @@ export function runCompactCompile(
  * The release string the pinned compiler reports, e.g. `0.36.0`.
  *
  * @param env - The environment the launcher runs under.
- * @returns The trimmed output of `compact compile +<pin> --version`.
+ * @returns The release `compact compile +<pin> --version` names.
  * @throws {ToolchainError} If the launcher is not on `PATH` or the pinned release cannot run.
  */
 export async function reportedCompilerVersion(
   env: Record<string, string | undefined>,
 ): Promise<string> {
   try {
-    return (
-      (await runCompactCompile(["--version"], { cwd: process.cwd(), env, inherit: false }))
-        .trim()
-        .split("\n")
-        .at(-1)
-        ?.trim() ?? ""
+    return compilerReleaseOf(
+      await runCompactCompile(["--version"], { cwd: process.cwd(), env, inherit: false }),
     );
   } catch (error) {
     if (error instanceof CompileFailedError) {
@@ -144,6 +140,19 @@ export async function reportedCompilerVersion(
     }
     throw error;
   }
+}
+
+/**
+ * The release in the compiler's `--version` output: the first token of its
+ * last line, which a build may follow with its commit and date, as in
+ * `0.36.0 (b5d9e4dfc 2026-11-03)`. A manifest's `compiler-version` records
+ * the release alone.
+ *
+ * @param versionOutput - The captured stdout of `compact compile +<pin> --version`.
+ * @returns The release, or the empty string when the output holds none.
+ */
+export function compilerReleaseOf(versionOutput: string): string {
+  return versionOutput.trim().split("\n").at(-1)?.trim().split(/\s+/)[0] ?? "";
 }
 
 /**
