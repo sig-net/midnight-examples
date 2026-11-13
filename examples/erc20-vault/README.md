@@ -163,7 +163,7 @@ the same steps and are described in
 
 Every key the MPC signs with is scoped by the requesting contract:
 
-`derivedSigningKey = f(mpcRootKey[keyVersion], caip2ChainId, vaultContractAddress, path)`
+`derivedSigningKey = f(mpcRootKey, keyVersion, caip2ChainId, vaultContractAddress, path)`
 
 `caip2ChainId` is the fixed `midnight:mainnet` for every Midnight network. The
 path is 32 opaque bytes of the client contract's choosing. There are no
@@ -430,7 +430,7 @@ export circuit initialise(
   feeRecipientEncryptionKey: Bytes<32>
 ): [] {
   assert(!initialised, "Already initialised");
-  assert(responseKeyVersion >= 1, "keyVersion must be >= 1");
+  assert(responseKeyVersion == 1, "keyVersion must be 1");
   requireDeployer();
   // ... the chain id and the pinned addresses must be nonzero ...
   initialised = true;
@@ -913,6 +913,109 @@ re-posts the missing responses), then rerun with the resume var as above.
 **TIP:** If you are using Claude Code you can ask it to run the suite for you
 using this [skill](../../.claude/skills/e2e/SKILL.md). It will handle the
 proof server restarts and resume vars between failures for you.
+
+# Vault Operator Guidelines
+
+The operator is the vault's deployer. [The vault's circuits](#the-vaults-circuits)
+lists every deployer-only circuit. This section covers the two duties that need
+ongoing care: fee setting and token whitelisting. The operator's choices decide
+three things:
+
+- that an attacker cannot drain the vault's EVM account by making it pay more
+  gas than the fees collect;
+- that each vault coin stays backed by one base unit of its ERC20 on the vault's
+  EVM account;
+- that a deposit or a settlement does not leave funds locked.
+
+The vault is a reference implementation. The limitations below apply to its
+code as written. A vault built from it can support more tokens if it changes
+that code.
+
+## Fee Setting
+
+The vault's EVM account signs each withdraw, swap, supply and redeem
+transaction and pays its gas in ETH. `setGasParams` sets the EIP-1559 fields
+of those transactions: `maxFeePerGas`, `maxPriorityFeePerGas`, and a gas limit
+for each action. One transaction costs the vault at most its gas limit times
+`maxFeePerGas`.
+
+The user pays for this with a fee in the token itself. `setTokenFees` sets a
+flat fee for each action, in the token's base units, and the vault mints it to
+the fee recipient as a vault coin. A request keeps the fee and the gas settings
+it was started with.
+
+Each fee must stay above the action's worst-case gas cost, converted to the
+token. The fee is fixed, but the gas price, the ETH price and the token price
+change. So compute each fee again on a schedule, and after each `setGasParams`
+change:
+
+```sh
+# reprice the fees VAULT_TOKEN_FEES names
+yarn set-token-fees:erc20-vault
+```
+
+[Residual Risk](docs/design-proposals/001-take-fees-on-vault-operations/README.md#residual-risk)
+in design proposal 001 explains how a fee drifts below the cost.
+
+## Whitelisting
+
+Every user action works only with allowed tokens: deposit and swap check the
+token directly, and withdraw, swap, supply and redeem look up its fees, which
+fails for a token that is not allowed. So the operator must allow each token
+that users can use in the vault:
+
+```sh
+# allow every ERC20 EVM_ALLOWED_TOKENS lists that the vault does not allow yet
+yarn add-allowed-tokens:erc20-vault
+```
+
+**WARNING:** Make sure that a token obeys every limitation below before you
+allow it. No circuit removes a token, so an allowed token stays allowed for
+the life of the vault.
+
+### Limitations
+
+Consider these warnings when white listing assets.
+
+#### Do not allow fee-on-transfer ERC20s
+
+A fee-on-transfer token keeps part of each transfer, so the receiver gets less
+than the amount sent. The vault mints the amount that the request names. It
+does not check the amount that its EVM account receives.
+
+For example, a token keeps 5% of each transfer. A user deposits 10,000 tokens,
+the vault's EVM account receives 9,500, and the vault mints 10,000 vault coins.
+The vault now holds less than the vault coins it issued, so the last users to
+withdraw cannot get all their tokens back.
+
+To support such a token, a vault can store the token's transfer fee in its
+`allowedTokens` entry, next to its fees, and mint the amount requested minus
+that fee. If the token changes its fee, the operator must update the entry
+before the next deposit.
+
+#### Allow only ERC20s that return a bool
+
+The vault calls `transfer` and `approve` on the token. Its requests declare a
+`bool` output schema for these calls, and the vault mints or refunds on the
+decoded value. Some tokens, such as USDT on Ethereum, return no data from these
+calls. The return data then does not match the declared schema, and the MPC
+attests a request only when the two match (see
+[Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.25.1/README.md#output-recovery-and-serialisation)).
+So with this vault as written, allow only tokens whose `transfer` and `approve`
+return a `bool`.
+
+To support a token that returns no data, a vault can mark the token in its
+`allowedTokens` entry and declare an empty output schema for its requests. The
+MPC then attests `executed` with an empty output, or `failed` if the call
+reverted, and the vault settles on the attested kind.
+
+#### Take care if there are too many decimals
+
+Allow only tokens whose total supply, in base units, stays below `2^64`. A
+supply or redeem whose attested amount reaches `2^64` can never settle, and its
+funds stay locked. 6-decimal tokens such as USDC are inside the limit, but
+18-decimal tokens such as WETH and DAI are not. See
+[Supported tokens](#supported-tokens).
 
 # Releasing to npm
 

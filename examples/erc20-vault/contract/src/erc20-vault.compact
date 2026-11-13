@@ -197,7 +197,7 @@ export circuit initialise(
   feeRecipientEncryptionKey: Bytes<32>
 ): [] {
   assert(!initialised, "Already initialised");
-  assert(responseKeyVersion >= 1, "keyVersion must be >= 1");
+  assert(responseKeyVersion == 1, "keyVersion must be 1");
   requireDeployer();
   assert(chainId > 0 as Uint<64>, "Chain ID must be positive");
   assert(swapRouter as Field != 0 as Field, "Router cannot be zero");
