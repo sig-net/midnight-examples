@@ -184,6 +184,8 @@ jobs:
           timeout 180 bash -c 'until curl -fsS http://127.0.0.1:9944/health >/dev/null 2>&1; do sleep 3; done'
           timeout 60 bash -c 'until curl -s -o /dev/null http://127.0.0.1:6300; do sleep 3; done'
           timeout 180 bash -c 'until curl -fs -X POST -H "content-type: application/json" -d "{\"query\":\"{__typename}\"}" http://127.0.0.1:8088/api/v4/graphql >/dev/null 2>&1; do sleep 3; done'
+          # The setup's first wallet open throws on an indexer that reports no latest block.
+          timeout 180 bash -c 'until curl -fs -X POST -H "content-type: application/json" -d "{\"query\":\"{block{height}}\"}" http://127.0.0.1:8088/api/v4/graphql 2>/dev/null | grep -Eq "\"height\":[0-9]+"; do sleep 3; done'
           # Forking fetches the pinned block before serving, so wait for anvil to answer.
           timeout 120 bash -c 'until curl -fsS -X POST -H "content-type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}" http://127.0.0.1:8545 >/dev/null 2>&1; do sleep 3; done'
           curl -fsS -X POST -H 'content-type: application/json' \
