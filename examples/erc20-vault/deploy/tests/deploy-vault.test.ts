@@ -94,7 +94,7 @@ describe("estimateVaultDeploymentFee", () => {
   it("sums unequal fees and binds each insertion to its own maintenance counter", async () => {
     const deploy = new ledger.ContractDeploy(new ledger.ContractState());
     const transaction = ledger.Transaction.fromPartsRandomized(
-      "stagenet",
+      "preview",
       undefined,
       undefined,
       ledger.Intent.new(new Date(Date.now() + 60_000)).addDeploy(deploy),
@@ -113,7 +113,7 @@ describe("estimateVaultDeploymentFee", () => {
       .mockResolvedValueOnce(100n)
       .mockResolvedValueOnce(10n)
       .mockResolvedValueOnce(20n);
-    const total = await estimateVaultDeploymentFee(deployment, "stagenet", {}, estimateFee);
+    const total = await estimateVaultDeploymentFee(deployment, "preview", {}, estimateFee);
     expect(total).toBe(130n);
     expect(estimateFee.mock.calls.map(([bytes]) => bytes)).toEqual([
       deployment.serializedTransaction,
@@ -133,7 +133,7 @@ describe("estimateVaultDeploymentFee", () => {
   });
   it("rejects a transaction without a deployment", async () => {
     const transaction = ledger.Transaction.fromPartsRandomized(
-      "stagenet",
+      "preview",
       undefined,
       undefined,
       ledger.Intent.new(new Date(Date.now() + 60_000)),
@@ -145,7 +145,7 @@ describe("estimateVaultDeploymentFee", () => {
           serializedTransaction: transaction.serialize(),
           deferred: [],
         },
-        "stagenet",
+        "preview",
         {},
         (): Promise<bigint> => Promise.resolve(100n),
       ),
@@ -155,7 +155,7 @@ describe("estimateVaultDeploymentFee", () => {
   it("prices a deployment with no deferred circuits once", async () => {
     const deploy = new ledger.ContractDeploy(new ledger.ContractState());
     const transaction = ledger.Transaction.fromPartsRandomized(
-      "stagenet",
+      "preview",
       undefined,
       undefined,
       ledger.Intent.new(new Date(Date.now() + 60_000)).addDeploy(deploy),
@@ -168,7 +168,7 @@ describe("estimateVaultDeploymentFee", () => {
           serializedTransaction: transaction.serialize(),
           deferred: [],
         },
-        "stagenet",
+        "preview",
         {},
         (): Promise<bigint> => {
           estimates += 1;

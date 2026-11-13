@@ -15,10 +15,10 @@ import { join } from "node:path";
  * the workspace's toolchain pin, which moves together with the workflows'
  * launcher and compiler URLs and the README's prerequisites table.
  */
-export const COMPACT_COMPILER_VERSION = "0.33.0-rc.2";
+export const COMPACT_COMPILER_VERSION = "0.36.0";
 
 /** The launcher's own release, named in the fix printed when the compiler is missing. */
-export const COMPACT_LAUNCHER_VERSION = "compact-v0.5.1";
+export const COMPACT_LAUNCHER_VERSION = "compact-v0.5.3";
 
 /** The toolchain is absent, the wrong release, or refuses to run. */
 export class ToolchainError extends Error {}
@@ -119,22 +119,18 @@ export function runCompactCompile(
 }
 
 /**
- * The release string the pinned compiler reports, e.g. `0.33.0`.
+ * The release string the pinned compiler reports, e.g. `0.36.0`.
  *
  * @param env - The environment the launcher runs under.
- * @returns The trimmed output of `compact compile +<pin> --version`.
+ * @returns The release `compact compile +<pin> --version` names.
  * @throws {ToolchainError} If the launcher is not on `PATH` or the pinned release cannot run.
  */
 export async function reportedCompilerVersion(
   env: Record<string, string | undefined>,
 ): Promise<string> {
   try {
-    return (
-      (await runCompactCompile(["--version"], { cwd: process.cwd(), env, inherit: false }))
-        .trim()
-        .split("\n")
-        .at(-1)
-        ?.trim() ?? ""
+    return compilerReleaseOf(
+      await runCompactCompile(["--version"], { cwd: process.cwd(), env, inherit: false }),
     );
   } catch (error) {
     if (error instanceof CompileFailedError) {
@@ -144,6 +140,19 @@ export async function reportedCompilerVersion(
     }
     throw error;
   }
+}
+
+/**
+ * The release in the compiler's `--version` output: the first token of its
+ * last line, which a build may follow with its commit and date, as in
+ * `0.36.0 (b5d9e4dfc 2026-11-03)`. A manifest's `compiler-version` records
+ * the release alone.
+ *
+ * @param versionOutput - The captured stdout of `compact compile +<pin> --version`.
+ * @returns The release, or the empty string when the output holds none.
+ */
+export function compilerReleaseOf(versionOutput: string): string {
+  return versionOutput.trim().split("\n").at(-1)?.trim().split(/\s+/)[0] ?? "";
 }
 
 /**
@@ -165,7 +174,7 @@ export async function compileWithKeys(
   cwd: string,
   env: Record<string, string | undefined>,
 ): Promise<void> {
-  await runCompactCompile(["--feature-zkir-v3", source, target], {
+  await runCompactCompile([source, target], {
     cwd,
     env: { ...env, COMPACT_PATH: compactPath },
     inherit: true,

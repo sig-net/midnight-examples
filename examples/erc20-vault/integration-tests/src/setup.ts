@@ -1,20 +1,22 @@
 // The example's setup pipeline: compose the ordered steps
 // (environment check -> wallet seeds + root funding -> EVM chain + output
-// source + trace RPC check + test token + allowed tokens -> MPC key derivation -> signet deploy -> fakenet responder hand-off ->
+// source + trace RPC check + test token + allowed tokens -> MPC key derivation -> signet deploy -> signet responder deploy -> fakenet responder hand-off ->
 // vault zk compile + deploy -> MPC response key -> derived EVM addresses ->
 // fork dealing -> fork dependency check -> MPC hand-off printout) from the
 // harness's generic steps plus the vault-specific steps below. The vitest
 // globalSetup `setup` runs it via `runSetupPipeline` in vitest's main process,
 // and `scripts/setup-local.ts` runs the same steps outside vitest to bring up
-// a local stack by hand. The signet contract needs no zk-compile step: its
-// proving keys ship inside the published @sig-net/midnight-contract package
-// the deploy reads them from. The MPC response key step runs AFTER the vault
+// a local stack by hand. The signet signer and the signet responder need
+// no zk-compile step: their proving keys ship inside the published
+// @sig-net/midnight-signer and @sig-net/midnight-responder packages the
+// deploys read them from. The MPC response key step runs AFTER the vault
 // deploy: the key derives from the vault's own contract address, and the
 // initialise flow pins it on-chain.
 
 import { bytesToHex, deriveEvmAddress, getMpcOutputCacheUrl } from "@sig-net/midnight";
 import {
   deployedNetwork,
+  findSignerContractAddress,
   generateHexSeed,
   getMidnightNodeConfig,
   isLocalStandaloneNetwork,
@@ -30,7 +32,8 @@ import {
   appendRepoDotEnv,
   assertEnvironment,
   compileContractZk,
-  deploySignetContractStep,
+  deploySignetResponderStep,
+  deploySignetSignerStep,
   ensureMpcResponseKey,
   ensureMpcRootKey,
   ensureMpcSecp256k1Pubkey,
@@ -69,7 +72,8 @@ export const VAULT_PIPELINE_KEYS = [
   "EVM_ALLOWED_TOKENS",
   "MPC_ROOT_KEY",
   "MPC_SECP256K1_PUBKEY",
-  "MIDNIGHT_SIGNET_CONTRACT_ADDRESS",
+  "MIDNIGHT_SIGNER_CONTRACT_ADDRESS",
+  "MIDNIGHT_RESPONDER_CONTRACT_ADDRESS",
   "VAULT_DEPLOYER_SECRET_KEY",
   "MAINTENANCE_SIGNING_KEY",
   "MIDNIGHT_VAULT_CONTRACT_ADDRESS",
@@ -97,7 +101,7 @@ export const VAULT_PIPELINE_KEYS = [
  * without it.
  *
  * @param env - The suite's env accumulator (the deploy reads `DEPLOYER_SEED`,
- *   `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
+ *   `MIDNIGHT_SIGNER_CONTRACT_ADDRESS`, `MAINTENANCE_SIGNING_KEY` and node
  *   config from it).
  * @param wallets - The pipeline's registry, holding the deployer wallet the funding step synced.
  * @throws {SplitDeployAfterBaseSubmitError} If the deploy failed after its base
@@ -391,6 +395,28 @@ async function verifyForkDependencies(env: NodeJS.ProcessEnv): Promise<void> {
   );
 }
 
+/**
+ * Refuse a kept vault that no signet signer is named for. A vault seals its
+ * signer at deploy, so a signer deployed beside a kept vault is one the vault
+ * never notifies, and every signature poll would time out.
+ *
+ * @param env - The suite's env accumulator.
+ * @throws {Error} If `MIDNIGHT_VAULT_CONTRACT_ADDRESS` is set while neither
+ *   `MIDNIGHT_SIGNER_CONTRACT_ADDRESS` nor the SDK names a signet signer.
+ */
+export function assertKeptVaultNamesItsSigner(env: NodeJS.ProcessEnv): void {
+  const vaultContractAddress = optionalEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS");
+  if (vaultContractAddress === undefined || findSignerContractAddress(env) !== undefined) {
+    return;
+  }
+  throw new Error(
+    `MIDNIGHT_VAULT_CONTRACT_ADDRESS is set (${vaultContractAddress}) but MIDNIGHT_SIGNER_CONTRACT_ADDRESS is not: ` +
+      "the vault notifies only the signet signer sealed into it at deploy. Set " +
+      "MIDNIGHT_SIGNER_CONTRACT_ADDRESS to that signer, or unset MIDNIGHT_VAULT_CONTRACT_ADDRESS " +
+      "(with MPC_RESPONSE_KEY, EVM_VAULT_ADDRESS and EVM_USER_ADDRESS) to deploy a fresh pair.",
+  );
+}
+
 // Step names match what the operator greps for and what STEP_THROUGH prompts show.
 const STEPS: readonly SetupStep[] = [
   [
@@ -414,7 +440,14 @@ const STEPS: readonly SetupStep[] = [
       ensureMpcSecp256k1Pubkey(env);
     },
   ],
-  ["setup: deploy signet contract", deploySignetContractStep],
+  [
+    "setup: deploy signet signer",
+    async (env, wallets) => {
+      assertKeptVaultNamesItsSigner(env);
+      await deploySignetSignerStep(env, wallets);
+    },
+  ],
+  ["setup: deploy signet responder", deploySignetResponderStep],
   ["setup: persist fakenet hand-off values to .env (append-only)", persistFakenetHandoffToDotEnv],
   ["setup: start the fakenet responder (docker compose)", startFakenetResponder],
   [

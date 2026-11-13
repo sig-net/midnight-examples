@@ -11,35 +11,41 @@ import { readFileSync } from "node:fs";
 
 import {
   type CircuitContext,
+  ContractOperation,
   ContractState,
   createCircuitContext,
   createConstructorContext,
   rawTokenType,
   sampleContractAddress,
 } from "@midnight-ntwrk/compact-runtime";
-import { CallTxFailedError } from "@midnight-ntwrk/midnight-js/contracts";
-import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
+import { ProviderFailedError, TxFailedError } from "@midnight-ntwrk/midnight-js/contracts";
+import { CompiledContract } from "@midnight-ntwrk/midnight-js/protocol/v9";
 import {
+  createLedger9MidnightProvider,
+  createLedger9WalletProvider,
+  createProofProviderFromHandlers,
   FailEntirely,
   FailFallible,
-  type FinalizedTxData,
+  type FinalizedTxRead,
+  type LedgerTransaction,
+  type ProofProvider,
+  SerializedContractState,
+  SerializedLedgerParameters,
+  SerializedZswapChainState,
   SucceedEntirely,
   type TxStatus,
-  type UnboundTransaction,
 } from "@midnight-ntwrk/midnight-js/types";
-import { CompiledContract } from "@midnight-ntwrk/midnight-js-protocol/compact-js";
 import {
   ContractCall,
   ContractState as LedgerContractState,
   CostModel,
-  type FinalizedTransaction,
   LedgerParameters,
   type PreProof,
   QueryContext,
   Transaction,
   type UnprovenTransaction,
   ZswapChainState,
-} from "@midnight-ntwrk/midnight-js-protocol/ledger";
+} from "@midnight-ntwrk/midnight-js-protocol/v9";
 import {
   bytesToHex,
   hexToBytes,
@@ -47,8 +53,8 @@ import {
   respondBidirectionalEventToCircuitInput,
 } from "@sig-net/midnight";
 import { attestRespondBidirectional, secp256k1PublicKeyOf } from "@sig-net/midnight/testing";
-import * as SignetSigner from "@sig-net/midnight-contract/managed/contract/index.js";
-import { beforeAll, describe, expect, it } from "vitest";
+import * as SignetSigner from "@sig-net/midnight-signer/managed/contract/index.js";
+import { describe, expect, it } from "vitest";
 
 import {
   Contract,
@@ -70,6 +76,8 @@ import {
 // ---- Fixtures ----
 
 const NETWORK_ID = "undeployed";
+// The protocol version the fake chain reports: any 2.x node runs the v9 ledger.
+const PROTOCOL_VERSION = 2_000_000;
 const CPK = "c0".repeat(32);
 const SECRET_KEY = new Uint8Array(32).fill(7);
 const MPC_RESPONSE_SECRET = new Uint8Array(32).fill(0x42);
@@ -87,12 +95,25 @@ const VAULT_TOKEN_COLOR = hexToBytes(
 
 // The helpers hash flushQueue's on-chain verifier key into the call's key location, so
 // the served state must hold a key the ledger parses. The chain never checks a proof,
-// so any well-formed key serves: this one ships with the Signet contract.
+// so any well-formed key serves: this one ships with the Signet signer.
 const STAND_IN_VERIFIER_KEY = new Uint8Array(
   readFileSync(
-    new URL(import.meta.resolve("@sig-net/midnight-contract/managed/keys/respond.verifier")),
+    new URL(
+      import.meta.resolve("@sig-net/midnight-signer/managed/keys/signBidirectional.verifier"),
+    ),
   ),
 );
+
+// midnight-js refuses a call unless the zk config provider names the runtime the vault
+// was compiled against, which the compiler records beside the generated contract.
+const ARTIFACT_RUNTIME_VERSION = (
+  JSON.parse(
+    readFileSync(
+      new URL("../src/managed/erc20-vault/compiler/contract-info.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { "runtime-version": string }
+)["runtime-version"];
 
 const VAULT_WITH_WITNESSES = CompiledContract.withWitnesses(
   CompiledContract.make<Contract<VaultPrivateState>>("erc20-vault", Contract),
@@ -132,15 +153,37 @@ const EMPTY_VAULT: VaultArrangement = { attested: [], open: [], queued: [], with
 
 // ---- Harness: the vault, built with the simulator ----
 
-// The Signet contract the vault's send circuits call, served to the simulator at any
-// address, round-tripped through bytes into this tree's ContractState class.
+// The Signet signer the vault's send circuits call, served to the simulator at any
+// address, round-tripped through bytes into this tree's ContractState class, with the
+// verifier keys the published package ships, which the runtime matches against the
+// callee module's expected keys.
 const SIGNET_ADDRESS = sampleContractAddress();
-const signetStateProvider = async () => {
+// The verifier key the published signet signer package ships for each provable circuit, read once.
+const SIGNET_VERIFIER_KEYS: ReadonlyMap<string, Uint8Array> = new Map(
+  Object.entries(SignetSigner.circuitSignatures)
+    .filter(([, signature]) => signature.provable)
+    .map(([circuitId]) => [
+      circuitId,
+      readFileSync(
+        new URL(`../src/managed/SignetSigner/keys/${circuitId}.verifier`, import.meta.url),
+      ),
+    ]),
+);
+async function deployedSignetState(): Promise<ContractState> {
   const signet = await new SignetSigner.Contract({}).initialState(
     createConstructorContext(undefined, CPK),
   );
   const state = ContractState.deserialize(signet.currentContractState.serialize());
-  return { getContractState: () => Promise.resolve(state) };
+  for (const [circuitId, verifierKey] of SIGNET_VERIFIER_KEYS) {
+    const operation = new ContractOperation();
+    operation.verifierKey = verifierKey;
+    state.setOperation(circuitId, operation);
+  }
+  return state;
+}
+const signetCrossContract = {
+  stateProvider: { getContractState: deployedSignetState },
+  moduleProvider: { resolve: () => () => Promise.resolve(SignetSigner) },
 };
 
 type VaultContext = CircuitContext<VaultPrivateState>;
@@ -211,18 +254,15 @@ const arrangeVault = async (arrangement: VaultArrangement) => {
 
   let ctx = (
     await contract.circuits.initialise(
-      createCircuitContext(
-        "initialise",
-        VAULT_ADDRESS,
-        CPK,
-        deployed.currentContractState,
-        deployed.currentPrivateState,
-        await signetStateProvider(),
-        undefined,
-        undefined,
-        undefined,
-        "00".repeat(32),
-      ),
+      createCircuitContext({
+        circuitId: "initialise",
+        contractAddress: VAULT_ADDRESS,
+        coinPublicKeyOrZswapState: CPK,
+        contractState: deployed.currentContractState,
+        privateState: deployed.currentPrivateState,
+        parentBlockHash: "00".repeat(32),
+        crossContract: signetCrossContract,
+      }),
       new Uint8Array(20).fill(0xee),
       new Uint8Array(20).fill(0x11),
       new Uint8Array(20).fill(0xdd),
@@ -356,28 +396,66 @@ const fakeChain = (
 ): FakeChain => {
   let state = initial;
   const statuses: TxStatus[] = [];
-  const landed = new Map<string, { tx: FinalizedTransaction; status: TxStatus }>();
+  const landed = new Map<string, { tx: LedgerTransaction<"Finalized", "v9">; status: TxStatus }>();
   let pendingStatus: TxStatus = SucceedEntirely;
   let submitted = 0;
   let built = 0;
 
+  const contractStateRead = () => ({
+    protocolVersion: PROTOCOL_VERSION,
+    contractState: SerializedContractState.fromBytes("v9", state.serialize()),
+    ledgerParameters: SerializedLedgerParameters.fromBytes(
+      "v9",
+      LedgerParameters.initialParameters().serialize(),
+    ),
+  });
+
+  const proofProvider: ProofProvider = createProofProviderFromHandlers({
+    v8: undefined,
+    v9: async (unproven) => {
+      const landing = landings[submitted] ?? { kind: LandingKind.Runs };
+      submitted += 1;
+      if (landing.kind === LandingKind.ProverThrows) {
+        throw landing.error;
+      }
+      if (landing.kind === LandingKind.EndsWith) {
+        pendingStatus = landing.status;
+      } else {
+        if (landing.kind === LandingKind.RunsAfterCompetitor) state = landing.competitor;
+        const ran = runFlush(state, unproven.deserialize({ v9: Transaction }));
+        state = ran.state;
+        pendingStatus = ran.status;
+      }
+      statuses.push(pendingStatus);
+      return Transaction.fromParts(NETWORK_ID).prove(
+        { check: unused, prove: unused, lookupKey: unused },
+        CostModel.initialCostModel(),
+      );
+    },
+  });
+
   const providers: VaultProviders = {
     publicDataProvider: {
-      queryContractState: () => Promise.resolve(state),
+      queryContractState: () => Promise.resolve(contractStateRead()),
       queryZSwapAndContractState: () => {
         state = landedBeforeBuild[built] ?? state;
         built += 1;
-        return Promise.resolve([
-          new ZswapChainState(),
-          state,
-          LedgerParameters.initialParameters(),
-        ]);
+        return Promise.resolve({
+          ...contractStateRead(),
+          zswapChainState: SerializedZswapChainState.fromBytes(
+            "v9",
+            new ZswapChainState().serialize(),
+          ),
+        });
       },
-      queryBlock: () => Promise.resolve({ hash: "00".repeat(32), height: 1 }),
-      watchForTxData: (txId): Promise<FinalizedTxData> => {
+      queryBlock: () =>
+        Promise.resolve({ hash: "00".repeat(32), height: 1, protocolVersion: PROTOCOL_VERSION }),
+      queryLatestProtocolVersion: () => Promise.resolve(PROTOCOL_VERSION),
+      watchForTxData: (txId): Promise<FinalizedTxRead> => {
         const entry = landed.get(txId);
         if (!entry) throw new Error(`no flush landed as ${txId}`);
         return Promise.resolve({
+          era: "v9",
           tx: entry.tx,
           status: entry.status,
           txId,
@@ -388,7 +466,7 @@ const fakeChain = (
           blockTimestamp: 0,
           blockAuthor: null,
           indexerId: 0,
-          protocolVersion: 0,
+          protocolVersion: PROTOCOL_VERSION,
           fees: { paidFees: "0", estimatedFees: "0" },
           segmentStatusMap: undefined,
           unshielded: { created: [], spent: [] },
@@ -405,21 +483,25 @@ const fakeChain = (
       contractEventsObservable: unused,
     },
     privateStateProvider: {
-      setContractAddress: () => undefined,
-      get: () => Promise.resolve(createVaultPrivateState(SECRET_KEY)),
-      set: unused,
-      remove: unused,
-      clear: unused,
+      forContract: (contractAddress) => ({
+        contractAddress,
+        get: () => Promise.resolve(createVaultPrivateState(SECRET_KEY)),
+        set: unused,
+        remove: unused,
+        clear: unused,
+        exportPrivateStates: unused,
+        importPrivateStates: unused,
+      }),
+      clearAll: unused,
       setSigningKey: unused,
       getSigningKey: unused,
       removeSigningKey: unused,
       clearSigningKeys: unused,
-      exportPrivateStates: unused,
-      importPrivateStates: unused,
       exportSigningKeys: unused,
       importSigningKeys: unused,
     },
     zkConfigProvider: {
+      getArtifactRuntimeVersion: () => Promise.resolve(ARTIFACT_RUNTIME_VERSION),
       getZKIR: unused,
       getProverKey: unused,
       getVerifierKey: unused,
@@ -427,40 +509,18 @@ const fakeChain = (
       get: unused,
       asKeyMaterialProvider: unused,
     },
-    proofProvider: {
-      proveTx: async (tx): Promise<UnboundTransaction> => {
-        const landing = landings[submitted] ?? { kind: LandingKind.Runs };
-        submitted += 1;
-        if (landing.kind === LandingKind.ProverThrows) {
-          throw landing.error;
-        }
-        if (landing.kind === LandingKind.EndsWith) {
-          pendingStatus = landing.status;
-        } else {
-          if (landing.kind === LandingKind.RunsAfterCompetitor) state = landing.competitor;
-          const ran = runFlush(state, tx);
-          state = ran.state;
-          pendingStatus = ran.status;
-        }
-        statuses.push(pendingStatus);
-        return Transaction.fromParts(NETWORK_ID).prove(
-          { check: unused, prove: unused, lookupKey: unused },
-          CostModel.initialCostModel(),
-        );
-      },
-    },
-    walletProvider: {
-      balanceTx: (tx) => Promise.resolve(tx.bind()),
+    proofProvider,
+    walletProvider: createLedger9WalletProvider({
+      balanceTx: (unbound) => Promise.resolve(unbound.deserialize({ v9: Transaction }).bind()),
       getCoinPublicKey: () => CPK,
       getEncryptionPublicKey: () => "11".repeat(32),
-    },
-    midnightProvider: {
-      submitTx: (tx) => {
-        const txId = `flush-${String(statuses.length)}`;
-        landed.set(txId, { tx, status: pendingStatus });
-        return Promise.resolve(txId);
-      },
-    },
+    }),
+    midnightProvider: createLedger9MidnightProvider((tx) => {
+      const txId = `flush-${String(statuses.length)}`;
+      landed.set(txId, { tx, status: pendingStatus });
+      return Promise.resolve(txId);
+    }),
+    config: { networkId: NETWORK_ID, ttlSeconds: 300 },
   };
   return { providers, statuses, ledgerNow: () => ledger(state.data) };
 };
@@ -468,10 +528,6 @@ const fakeChain = (
 /** The input indexes still queued, in ascending order. */
 const queuedIndexes = (state: VaultLedgerState): bigint[] =>
   [...state.inputRequestBuffer].map(([inIndex]) => inIndex).sort((a, b) => (a < b ? -1 : 1));
-
-beforeAll(() => {
-  setNetworkId(NETWORK_ID);
-});
 
 // ---- Tests ----
 
@@ -640,7 +696,7 @@ const awaitedMoved = (state: VaultLedgerState): boolean =>
   !state.inputRequestBuffer.member(AWAITED.inIndex);
 
 describe("flushPending: a flush that loses its race", () => {
-  it("throws a CallTxFailedError with status FailFallible", async () => {
+  it("throws a TxFailedError with status FailFallible", async () => {
     const { contract, ctx, attestedIds, serve } = await arrangeVault(AWAITED_VAULT);
     const competitor = serve(
       (await contract.circuits.flushQueue(ctx, flushSlots([], attestedIds))).context,
@@ -649,8 +705,8 @@ describe("flushPending: a flush that loses its race", () => {
 
     const flushed = flushPending(chain.providers, VAULT_COMPILED_CONTRACT, VAULT_ADDRESS);
 
-    await expect(flushed).rejects.toThrow(CallTxFailedError);
-    await expect(flushed).rejects.toMatchObject({ finalizedTxData: { status: FailFallible } });
+    await expect(flushed).rejects.toThrow(TxFailedError);
+    await expect(flushed).rejects.toMatchObject({ record: { status: FailFallible } });
     expect(chain.statuses).toEqual([FailFallible]);
   });
 });
@@ -806,7 +862,7 @@ describe("flushUntil", () => {
     {
       name: "a flush that fails entirely",
       landing: { kind: LandingKind.EndsWith, status: FailEntirely } satisfies Landing,
-      throws: CallTxFailedError,
+      throws: TxFailedError,
       statuses: [FailEntirely],
     },
     {
@@ -815,7 +871,7 @@ describe("flushUntil", () => {
         kind: LandingKind.ProverThrows,
         error: new Error("proof server unavailable"),
       } satisfies Landing,
-      throws: /proof server unavailable/,
+      throws: ProviderFailedError,
       statuses: [],
     },
   ])("throws, without retrying, on $name", async ({ landing, throws, statuses }) => {

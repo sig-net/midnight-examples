@@ -196,7 +196,7 @@ We instantiate $\Hash$ with the \texttt{transientHash} implemented by Midnight.
 \input{table-vault}
 
 \noindent Also pinned at setup and public: the vault's own address $\vaultAddr$, the EVM chain
-identifier, the Signet singleton, and the deployer's identity commitment
+identifier, the Signet signer, and the deployer's identity commitment
 
 
 \vspace{5pt}
@@ -377,7 +377,7 @@ $\cktCompleteWithdraw$ included, is gated on the requester's ownership commitmen
 \medskip
 \noindent
 \textbf{Notification to $\SigSys$.} Every request call ends with a
-cross-contract call to the Signet singleton, which emits an event the MPC polls. We write
+cross-contract call to the Signet signer, which emits an event the MPC polls. We write
 $\notif(\vaultAddr, \rid, M)$ for that event: it carries the vault's address, the request
 identifier, and the identity of the ledger map $M$ in which the request record was stored, so
 that the MPC knows where to read $\req$ from.
@@ -391,7 +391,7 @@ that the MPC knows where to read $\req$ from.
 \begin{Steps}
 \item \textbf{Deploy the contract} on $\Lshd$ with two constructor arguments: the deployer's
       identity $\deplComm = \lnk{fn:userComm}{\userComm(\usersk_D)}$ and the address of the Signet
-      singleton. The contract's own address $\vaultAddr$ becomes known here, which is why the
+      signer. The contract's own address $\vaultAddr$ becomes known here, which is why the
       remaining values cannot be pinned in the constructor.
 \item \textbf{Derive off-chain}
       \[\begin{aligned}
@@ -403,7 +403,7 @@ that the MPC knows where to read $\req$ from.
       \cktref{ckt:approverouter}.
 \end{Steps}
 Output the public parameters:\\
-$\pp = (\vaultAddr, \vaultEvmAddr, \mpcRespKey, \chainId, \routerAddr, \text{singleton address})$.
+$\pp = (\vaultAddr, \vaultEvmAddr, \mpcRespKey, \chainId, \routerAddr, \text{signer address})$.
 \end{ProcBox}
 
 

@@ -13,7 +13,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { signetContractManagedPath } from "@sig-net/midnight-contract-deploy";
+import { signetSignerManagedPath } from "@sig-net/midnight-contract-deploy";
 import { VAULT_MANAGED_PATH } from "@sig-net/midnight-examples-erc20-vault-deploy";
 
 import { STATIC_METRICS_FILE, STATIC_METRICS_MARKDOWN_FILE } from "../src/benchmark/paths.ts";
@@ -28,7 +28,7 @@ const zkirV3 = resolveZkirV3Binary(process.env);
 
 const rows: CircuitStaticMetrics[] = [
   ...(await collectContractStaticMetrics(VAULT_MANAGED_PATH, "erc20-vault", zkirV3)),
-  ...(await collectContractStaticMetrics(signetContractManagedPath, "SignetSigner", zkirV3)),
+  ...(await collectContractStaticMetrics(signetSignerManagedPath, "SignetSigner", zkirV3)),
 ];
 
 const markdown = renderStaticMetricsMarkdown(rows);

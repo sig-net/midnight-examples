@@ -9,7 +9,9 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { VAULT_MANAGED_PATH } from "../src/vault-contract-binding.ts";
+import { assertVaultKeysPresent, VAULT_MANAGED_PATH } from "../src/vault-contract-binding.ts";
+
+const HAS_KEYS = existsSync(join(VAULT_MANAGED_PATH, "keys"));
 
 describe("vault contract binding", () => {
   it("resolves the vault's compiler output inside the contract package", () => {
@@ -17,5 +19,17 @@ describe("vault contract binding", () => {
     expect(existsSync(join(VAULT_MANAGED_PATH, "contract")), `run \`yarn compile\` first`).toBe(
       true,
     );
+  });
+
+  it.skipIf(HAS_KEYS)("names the fix when the compile wrote no keys", () => {
+    expect(() => {
+      assertVaultKeysPresent();
+    }).toThrow(/no zk keys under .*managed\/erc20-vault: run `yarn compile:erc20-vault:zk` first/);
+  });
+
+  it.skipIf(!HAS_KEYS)("accepts a compile that wrote keys", () => {
+    expect(() => {
+      assertVaultKeysPresent();
+    }).not.toThrow();
   });
 });

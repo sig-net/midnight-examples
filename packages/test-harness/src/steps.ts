@@ -1,7 +1,7 @@
 // The GENERIC setup steps every example's pipeline composes: environment
 // check → wallet seed resolution + root funding (wallets.ts) → EVM chain
-// resolution → MPC key derivation → singleton signet deploy → fakenet
-// responder hand-off → MPC hand-off printout. EVM token and account funding
+// resolution → MPC key derivation → signet signer deploy → signet
+// responder deploy → fakenet responder hand-off → MPC hand-off printout. EVM token and account funding
 // is example-specific and lives in the example itself.
 // Each step keeps its skip-if-env-var-set semantics (presence of the
 // canonical env var doubles as the skip signal) and mutates the shared env
@@ -17,13 +17,17 @@ import { join } from "node:path";
 import {
   deriveMidnightResponseKey,
   formatSecp256k1PublicKey,
+  getResponderContractAddress,
   normaliseSecp256k1PublicKey,
+  redactUrlQuery,
 } from "@sig-net/midnight";
 import {
   CounterpartyOrigin,
-  deploySignetContract,
+  deployedNetwork,
+  deploySignetResponder,
+  deploySignetSigner,
   findMpcRootPublicKey,
-  findSignetContractAddress,
+  findSignerContractAddress,
   getMidnightNodeConfig,
   isLocalStandaloneNetwork,
   type WalletRegistry,
@@ -36,7 +40,7 @@ import { runCommand, runRootScript } from "./exec.ts";
 import { deriveMpcKeys, generateMpcRootKey } from "./mpc-keys.ts";
 import { MpcKind, mpcKind } from "./mpc-kind.ts";
 import { banner, logSkip } from "./output.ts";
-import { assertCommandAvailable, assertHttpReachable } from "./preflight.ts";
+import { assertCommandAvailable, assertHttpReachable, nodeHealthUrl } from "./preflight.ts";
 
 const MINUTE = 60_000;
 
@@ -64,12 +68,14 @@ function mpcKeyOrigin(origin: CounterpartyOrigin): string {
  */
 export async function assertEnvironment(env: NodeJS.ProcessEnv): Promise<void> {
   const nodeConfig = getMidnightNodeConfig(env);
-  await assertHttpReachable("midnight node", new URL("/health", nodeConfig.nodeUrl).href);
+  await assertHttpReachable("midnight node", nodeHealthUrl(nodeConfig.nodeUrl));
   await assertHttpReachable("indexer", nodeConfig.indexerUrl);
   await assertHttpReachable("proof server", nodeConfig.proofServerUrl);
   await assertCommandAvailable("compact", ["--version"]);
   requireEnv(env, "EVM_RPC_URL");
-  console.log(`targeting the ${nodeConfig.networkId} network at ${nodeConfig.nodeUrl}`);
+  console.log(
+    `targeting the ${nodeConfig.networkId} network at ${redactUrlQuery(nodeConfig.nodeUrl)}`,
+  );
 }
 
 /**
@@ -145,7 +151,7 @@ export function ensureMpcRootKey(env: NodeJS.ProcessEnv): void {
       `${mpcKeyOrigin(preset.origin)} names a real MPC network (${preset.value}), whose root key this run does not hold`,
     );
     console.log(
-      ` ➜ no fakenet responder can serve that key: the real MPC answers the signet singleton`,
+      ` ➜ no fakenet responder can serve that key: the real MPC answers the signet signer`,
     );
     return;
   }
@@ -390,11 +396,11 @@ export async function explainDustSpendRejection<T>(
 }
 
 /**
- * Deploy the central signet contract (the Signature Network singleton every
+ * Deploy the central signet signer (the Signature Network contract every
  * example's requester contract notifies), unless one is already named:
- * `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` when set, else the singleton the SDK
+ * `MIDNIGHT_SIGNER_CONTRACT_ADDRESS` when set, else the one the SDK
  * publishes for a deployed network (which the real MPC listens to, so a
- * second singleton there would never be answered). The example's own
+ * second one there would never be answered). The example's own
  * requester contract deploy is the example's step — it runs AFTER this one
  * (requesters seal the signet address at deploy time).
  *
@@ -402,44 +408,88 @@ export async function explainDustSpendRejection<T>(
  * @param wallets - The pipeline's registry, holding the deployer wallet the funding step synced.
  * @throws {Error} If a preset address disagrees with the SDK's published one, or the deploy fails.
  */
-export async function deploySignetContractStep(
+export async function deploySignetSignerStep(
   env: NodeJS.ProcessEnv,
   wallets: WalletRegistry,
 ): Promise<void> {
   const { networkId } = getMidnightNodeConfig(env);
-  const found = findSignetContractAddress(env);
+  const found = findSignerContractAddress(env);
   if (found?.origin === CounterpartyOrigin.Environment) {
-    env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = found.value;
-    logSkip("deploy signet contract", `MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set (${found.value})`);
+    env.MIDNIGHT_SIGNER_CONTRACT_ADDRESS = found.value;
+    logSkip("deploy signet signer", `MIDNIGHT_SIGNER_CONTRACT_ADDRESS is set (${found.value})`);
     return;
   }
   if (found !== undefined) {
-    env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = found.value;
+    env.MIDNIGHT_SIGNER_CONTRACT_ADDRESS = found.value;
     logSkip(
-      "deploy signet contract",
-      `the SDK publishes the "${networkId}" signet singleton at ${found.value}`,
+      "deploy signet signer",
+      `the SDK publishes the "${networkId}" signet signer at ${found.value}`,
     );
-    console.log(` ➜ the real MPC listens to that singleton: requesters deployed here notify it`);
+    console.log(
+      ` ➜ the real MPC listens to that signet signer: requesters deployed here notify it`,
+    );
     return;
   }
-  const { contractAddress } = await explainDustSpendRejection("deploy signet contract", () =>
-    deploySignetContract(env, wallets),
+  const { contractAddress } = await explainDustSpendRejection("deploy signet signer", () =>
+    deploySignetSigner(env, wallets),
   );
-  env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS = contractAddress;
-  console.log(`deployed a fresh MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${contractAddress}`);
+  env.MIDNIGHT_SIGNER_CONTRACT_ADDRESS = contractAddress;
+  console.log(`deployed a fresh MIDNIGHT_SIGNER_CONTRACT_ADDRESS=${contractAddress}`);
+  console.log(` ➜ the Signet signer on Midnight: records signature requests`);
   console.log(
-    ` ➜ the Signet singleton on Midnight: append-only logs of signature requests and MPC responses`,
+    ` ➜ 💡 Set as MIDNIGHT_SIGNER_CONTRACT_ADDRESS in the environment to skip the deploy on the next run`,
   );
+}
+
+/**
+ * Deploy the signet responder (the contract the MPC posts its responses to,
+ * which every example's response reader polls), unless one is already named:
+ * `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS` when set, else the responder the SDK
+ * publishes for a deployed network (the real MPC posts only there).
+ *
+ * @param env - The suite's env accumulator.
+ * @param wallets - The pipeline's registry, holding the deployer wallet the funding step synced.
+ * @throws {Error} If the deploy fails.
+ */
+export async function deploySignetResponderStep(
+  env: NodeJS.ProcessEnv,
+  wallets: WalletRegistry,
+): Promise<void> {
+  if (env.MIDNIGHT_RESPONDER_CONTRACT_ADDRESS) {
+    logSkip(
+      "deploy signet responder",
+      `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS is set (${env.MIDNIGHT_RESPONDER_CONTRACT_ADDRESS})`,
+    );
+    return;
+  }
+  const { networkId } = getMidnightNodeConfig(env);
+  const network = deployedNetwork(networkId);
+  if (network !== undefined) {
+    const published = getResponderContractAddress(network);
+    env.MIDNIGHT_RESPONDER_CONTRACT_ADDRESS = published;
+    logSkip(
+      "deploy signet responder",
+      `the SDK publishes the "${networkId}" signet responder at ${published}`,
+    );
+    console.log(` ➜ the real MPC posts its responses to that responder`);
+    return;
+  }
+  const { contractAddress } = await explainDustSpendRejection("deploy signet responder", () =>
+    deploySignetResponder(env, wallets),
+  );
+  env.MIDNIGHT_RESPONDER_CONTRACT_ADDRESS = contractAddress;
+  console.log(`deployed a fresh MIDNIGHT_RESPONDER_CONTRACT_ADDRESS=${contractAddress}`);
+  console.log(` ➜ the signet responder on Midnight: emits the MPC's responses`);
   console.log(
-    ` ➜ 💡 Set as MIDNIGHT_SIGNET_CONTRACT_ADDRESS in the environment to skip the deploy on the next run`,
+    ` ➜ 💡 Set as MIDNIGHT_RESPONDER_CONTRACT_ADDRESS in the environment to skip the deploy on the next run`,
   );
 }
 
 // The fakenet responder hand-off, automated. docker compose interpolates the
 // fakenet service's environment from the repo-root .env, so the responder can
-// only start once MPC_ROOT_KEY and MIDNIGHT_SIGNET_CONTRACT_ADDRESS are IN
+// only start once MPC_ROOT_KEY and both protocol contract addresses are IN
 // THAT FILE — the two steps below persist them (append-only) and start the
-// container, right after the signet deploy so the responder boots and syncs
+// container, right after the protocol deploys so the responder boots and syncs
 // while the (long) example zk compile runs. Both steps skip when the run
 // faces a real MPC (see mpcKind: no root key to hand off), and under
 // FAKENET_MANAGED=0, which says you run the responder yourself (e.g.
@@ -447,7 +497,11 @@ export async function deploySignetContractStep(
 // development).
 
 /** The env keys docker compose interpolates into the fakenet service — the hand-off payload. */
-const FAKENET_HANDOFF_KEYS = ["MPC_ROOT_KEY", "MIDNIGHT_SIGNET_CONTRACT_ADDRESS"] as const;
+const FAKENET_HANDOFF_KEYS = [
+  "MPC_ROOT_KEY",
+  "MIDNIGHT_SIGNER_CONTRACT_ADDRESS",
+  "MIDNIGHT_RESPONDER_CONTRACT_ADDRESS",
+] as const;
 
 /**
  * Whether {@link persistFakenetHandoffToDotEnv} appended hand-off values to
@@ -488,7 +542,7 @@ export function persistFakenetHandoffToDotEnv(env: NodeJS.ProcessEnv): void {
   if (appended.length === 0) {
     logSkip(
       "persist fakenet hand-off to .env",
-      `${FAKENET_HANDOFF_KEYS.join(" and ")} are already in .env`,
+      `${FAKENET_HANDOFF_KEYS.join(", ")} are already in .env`,
     );
     return;
   }
@@ -558,12 +612,12 @@ export async function startFakenetResponder(env: NodeJS.ProcessEnv): Promise<voi
   }
   console.log("fakenet-responder container is running");
   console.log(" ➜ watch it: `docker logs -f fakenet-responder` — healthy startup prints");
-  console.log('   "MidnightMonitor: polling signet contract events at <signet address>"');
+  console.log('   "MidnightMonitor: polling signet signer events at <signet address>"');
 }
 
 /**
  * Print the MPC configuration banner: which MPC the run faces (a fakenet
- * responder, with its root key + signet address hand-off and how it was or
+ * responder, with its root key + protocol contract addresses hand-off and how it was or
  * must be started, or a real MPC network named by its root public key), and
  * the minimal `.env` block that lets the next run skip every derivation.
  *
@@ -576,7 +630,8 @@ export function printMpcServerConfig(
   pipelineKeys: readonly string[],
 ): void {
   const managed = env.FAKENET_MANAGED !== "0";
-  const signetContractAddress = requireEnv(env, "MIDNIGHT_SIGNET_CONTRACT_ADDRESS");
+  const signerContractAddress = requireEnv(env, "MIDNIGHT_SIGNER_CONTRACT_ADDRESS");
+  const responderContractAddress = requireEnv(env, "MIDNIGHT_RESPONDER_CONTRACT_ADDRESS");
   const minimalEnvBlock = [
     "",
     "Minimal .env block for THIS suite:",
@@ -589,9 +644,11 @@ export function printMpcServerConfig(
       "MPC configuration: a real MPC network answers this run.",
       "",
       `  MPC_SECP256K1_PUBKEY=${requireEnv(env, "MPC_SECP256K1_PUBKEY")}`,
-      `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${signetContractAddress}`,
-      "  # 💡 The MPC DISCOVERS requesters by polling this signet contract's",
-      "  #    emitted notification events, and its root key is not held here.",
+      `  MIDNIGHT_SIGNER_CONTRACT_ADDRESS=${signerContractAddress}`,
+      `  MIDNIGHT_RESPONDER_CONTRACT_ADDRESS=${responderContractAddress}`,
+      "  # 💡 The MPC DISCOVERS requesters by polling this signet signer's",
+      "  #    emitted notification events, and posts its responses to the",
+      "  #    signet responder. Its root key is not held here.",
       ...minimalEnvBlock,
     ]);
     return;
@@ -600,9 +657,11 @@ export function printMpcServerConfig(
     "MPC (fakenet) responder configuration:",
     "",
     `  MPC_ROOT_KEY=${requireEnv(env, "MPC_ROOT_KEY")}`,
-    `  MIDNIGHT_SIGNET_CONTRACT_ADDRESS=${signetContractAddress}`,
+    `  MIDNIGHT_SIGNER_CONTRACT_ADDRESS=${signerContractAddress}`,
+    `  MIDNIGHT_RESPONDER_CONTRACT_ADDRESS=${responderContractAddress}`,
     "  # 💡 The responder DISCOVERS requesters by polling this signet",
-    "  #    contract's emitted notification events — no requester contract list needed.",
+    "  #    signer's emitted notification events, and posts its responses",
+    "  #    to the signet responder.",
     "",
     ...(managed
       ? [
@@ -614,7 +673,7 @@ export function printMpcServerConfig(
           "`yarn response` in a checkout of sig-net/solana-signet-program.)",
         ]
       : [
-          "FAKENET_MANAGED=0 — make sure those two are in THIS repo's .env",
+          "FAKENET_MANAGED=0: make sure those three are in THIS repo's .env",
           "(docker compose reads it), then START THE RESPONDER container:",
           "",
           "  docker compose --profile fakenet up -d --force-recreate fakenet",

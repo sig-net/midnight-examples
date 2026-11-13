@@ -4,14 +4,16 @@ vi.mock("@sig-net/midnight-contract-deploy", async (importOriginal) => {
   return { ...actual };
 });
 
-import * as ledger from "@midnightntwrk/ledger-v9";
 import * as funding from "@sig-net/midnight-contract-deploy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureTransactionFee } from "../src/transaction-fees.ts";
 
-const KEYS = funding.deriveAccountKeys("01".repeat(32), "stagenet");
-const TRANSACTION = ledger.Transaction.fromParts("stagenet");
+type TransferRecipe = Awaited<ReturnType<funding.WalletFacade["transferTransaction"]>>;
+
+const KEYS = funding.deriveAccountKeys("01".repeat(32), "preview");
+// Every facade method is mocked and none reads the transaction, so a bare handle stands in.
+const TRANSACTION = {} as TransferRecipe["transaction"];
 
 afterEach(() => {
   vi.useRealTimers();
@@ -39,11 +41,9 @@ describe("transaction fee readiness", () => {
       } as Partial<funding.WalletFacade> as funding.WalletFacade;
       const expires: number = Date.now() + 120_000;
       await expect(
-        ensureTransactionFee(facade, KEYS, "stagenet", TRANSACTION, expires, "startDeposit"),
+        ensureTransactionFee(facade, KEYS, "preview", TRANSACTION, expires, "startDeposit"),
       ).resolves.toBe(fee);
-      expect(estimate).toHaveBeenCalledWith(TRANSACTION, KEYS.dustSecretKey, {
-        ttl: new Date(expires),
-      });
+      expect(estimate).toHaveBeenCalledWith(TRANSACTION, { ttl: new Date(expires) });
       expect(ensure).not.toHaveBeenCalled();
     },
   );
@@ -70,7 +70,7 @@ describe("transaction fee readiness", () => {
     const result = ensureTransactionFee(
       facade,
       KEYS,
-      "stagenet",
+      "preview",
       TRANSACTION,
       Date.now() + 120_000,
       "startDeposit",
@@ -87,7 +87,7 @@ describe("transaction fee readiness", () => {
       calculateTransactionFee: calculate,
     } as Partial<funding.WalletFacade> as funding.WalletFacade;
     await expect(
-      ensureTransactionFee(facade, KEYS, "stagenet", TRANSACTION, Date.now() + 30_000, "withdraw"),
+      ensureTransactionFee(facade, KEYS, "preview", TRANSACTION, Date.now() + 30_000, "withdraw"),
     ).rejects.toThrow("insufficient validity time");
     expect(calculate).not.toHaveBeenCalled();
   });
@@ -97,8 +97,9 @@ describe("transfer preparation failure", () => {
   it("releases prepared inputs without submitting when fee estimation fails", async () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const prepared: Awaited<ReturnType<funding.WalletFacade["transferTransaction"]>> = {
+    const prepared: TransferRecipe = {
       type: "UNPROVEN_TRANSACTION",
+      protocolVersion: 0n as TransferRecipe["protocolVersion"],
       transaction: TRANSACTION,
     };
     const revert = vi.fn<funding.WalletFacade["revert"]>().mockResolvedValue(undefined);
@@ -113,7 +114,7 @@ describe("transfer preparation failure", () => {
       revert,
       submitTransaction: submit,
     } as Partial<funding.WalletFacade> as funding.WalletFacade;
-    await expect(submitTransferTransaction(facade, KEYS, [], "stagenet")).rejects.toThrow(
+    await expect(submitTransferTransaction(facade, KEYS, [], "preview")).rejects.toThrow(
       "estimator unavailable",
     );
     expect(revert).toHaveBeenCalledExactlyOnceWith(prepared);

@@ -42,7 +42,7 @@ function isDeployedNetwork(networkId: string): networkId is DeployedNetwork {
  * Resolve a network id to a deployed network. The local standalone stack is
  * rejected, as every e2e run deploys its own vault there and it has no row.
  *
- * @param networkId - The network id to resolve, e.g. `stagenet`.
+ * @param networkId - The network id to resolve, e.g. `preview`.
  * @returns The id as a {@link DeployedNetwork}.
  * @throws {Error} If the id names no deployed network.
  */
@@ -62,7 +62,7 @@ const TABLE_NAME = "vaultContractAddresses";
 export interface RecordedContractAddress {
   /** The full vault-addresses.ts source with the entry rewritten. */
   source: string;
-  /** The table row as it was, e.g. `[MidnightNetwork.Stagenet]: ""`. */
+  /** The table row as it was, e.g. `[MidnightNetwork.Preview]: ""`. */
   previousEntry: string;
   /** The table row as it is now. */
   entry: string;

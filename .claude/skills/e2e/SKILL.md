@@ -26,7 +26,7 @@ Run everything from the repo root, in this order:
 ```sh
 corepack enable                # yarn 4 via the packageManager field
 yarn install                   # NEVER from inside a member package
-compact update 0.33.0-rc.2     # the ledger-9 rc toolchain, see the toolchain note
+compact update 0.36.0          # the pinned toolchain, see the toolchain note
 yarn compile                   # run before the e2e
 docker compose up -d           # node :9944, indexer :8088, proof server :6300, anvil :8545
 yarn test:erc20-vault:e2e > e2e-run.log 2>&1 &        # BACKGROUND it, watch the log
@@ -39,15 +39,12 @@ NOT run `yarn compile:erc20-vault:zk` separately first: the setup recompiles
 regardless and you pay keygen twice. Expect the whole first invocation to take
 ~20–25 minutes (keygen + fresh deploys + the flow tests).
 
-**Toolchain note:** the contracts declare `pragma language_version >= 0.25`,
-which needs the ledger-9 rc compiler (0.33.0-rc.2, pinned in
+**Toolchain note:** the compiler is pinned to 0.36.0 (in
 `.github/workflows/example-test.yaml` and `AGENTS.md`). A bare `compact update`
-installs latest STABLE (0.31.1, language 0.23), and DOWNGRADES the default if
-an rc is already active, after which the compile fails with
-`language version 0.23.0 mismatch`. If `compact` itself is missing, or the
-launcher's channel refuses the rc version, use the installer + direct-download
-recipe in `.github/workflows/example-test.yaml` (the `Install the compact
-toolchain` step).
+installs whatever stable is latest, which drifts from the pin and changes every
+compiled key. If `compact` itself is missing, use the installer +
+direct-download recipe in `.github/workflows/example-test.yaml` (the `Install
+the compact toolchain` step).
 
 One value MUST be in `.env` before the stack comes up: `SEPOLIA_FORK_RPC_URL`
 (an ARCHIVE Sepolia RPC, e.g. `https://sepolia.gateway.tenderly.co`). The
@@ -61,7 +58,7 @@ is pruned", so the unviable attestation never posts and the spec times out.
 it appends the generated wallet seeds (root + the deployer/user/mpc
 responder/bearer roles, funded from root), the MPC public key it derives from
 the root key (`MPC_SECP256K1_PUBKEY`) and the fakenet hand-off values
-(`MPC_ROOT_KEY`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`) plus prints a ready-to-paste
+(`MPC_ROOT_KEY`, `MIDNIGHT_SIGNER_CONTRACT_ADDRESS`, `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS`) plus prints a ready-to-paste
 block with everything else it deployed/derived. Appends are append-only:
 existing lines are never modified, and a value that conflicts with the shell
 environment is a hard error, not an overwrite. On the Sepolia-forked anvil
@@ -87,7 +84,8 @@ vault with every circuit).
   Setup steps log `SKIPPED: …` and run no compiles or deploys.
 - **`/e2e redeploy`**: a circuit changed (any `.compact` edit that alters a
   circuit, struct layout, or the request-id hash domain): comment out
-  `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
+  `MIDNIGHT_VAULT_CONTRACT_ADDRESS`, `MIDNIGHT_SIGNER_CONTRACT_ADDRESS`,
+  `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS`,
   `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS`, `EVM_USER_ADDRESS`
   in `.env`, then rerun. `MPC_RESPONSE_KEY`, `EVM_VAULT_ADDRESS` and
   `EVM_USER_ADDRESS` all derive from the vault's contract address, so a stale
@@ -156,12 +154,13 @@ vault with every circuit).
 The `fakenet` compose service (`ghcr.io/sig-net/fakenet`, version pinned in
 `docker-compose.yaml`, built from
 sig-net/solana-signet-program, Midnight-only via `DISABLE_SOLANA`) is the MPC
-stand-in: it polls the signet contract's emitted notification events via the
+stand-in: it polls the signet signer's emitted notification events via the
 indexer, signs EVM transactions with keys derived from `MPC_ROOT_KEY`, and
-posts responses through the proof server.
+posts responses to the signet responder through the proof server.
 
 - **Managed by setup (default):** the setup's hand-off steps append
-  `MPC_ROOT_KEY` + `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` to `.env` and run
+  `MPC_ROOT_KEY`, `MIDNIGHT_SIGNER_CONTRACT_ADDRESS` and
+  `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS` to `.env` and run
   `docker compose --profile fakenet up -d fakenet`, with `--force-recreate`
   exactly when values newly landed in `.env` (recreate re-reads `.env` AND
   resets the responder's container-local LevelDB state). A running responder
@@ -170,19 +169,19 @@ posts responses through the proof server.
   it, and a plain `docker compose down` does NOT remove it: use
   `docker compose --profile fakenet down` to tear the whole stack down.
 - **Healthy startup check:** `docker logs fakenet-responder` prints
-  `MidnightMonitor: polling signet contract events at <signet address>`.
+  `MidnightMonitor: polling signet signer events at <signet address>`.
   Verify the address matches your `.env`.
 - **Responder development:** set `FAKENET_MANAGED=0` so setup leaves the
   responder (and `.env`) alone, and run it yourself (`yarn response` in a
   solana-signet-program checkout, with the current signet address and root
   key in its config).
   Then a poll timeout is YOUR restart to do.
-- **Prover/verifier parity is by construction here:** the singleton is
-  always deployed from the published `@sig-net/midnight-contract`, the same
+- **Prover/verifier parity is by construction here:** the signet signer is
+  always deployed from the published `@sig-net/midnight-signer`, the same
   package the fakenet image proves with. Parity only breaks when a yarn link
   against a local protocol checkout is active AND that checkout's signet
-  contract diverges from the published package. In that case bind-mount the
-  checkout's `signet-contract/src/managed` over the responder's keys in the
+  signer diverges from the published package. In that case bind-mount the
+  checkout's `signet-signer/src/managed` over the responder's keys in the
   `fakenet` compose service. While a link is active, run the suite under
   `NODE_OPTIONS=--experimental-transform-types`: the published deploy package
   imports the linked SDK's TypeScript source natively through Node.
@@ -190,12 +189,12 @@ posts responses through the proof server.
 ## Running against the real MPC (a deployed network)
 
 The vault README's "Running against the real MPC on a deployed network"
-section is the runbook, the same on every deployed network (stagenet, preview,
-preprod, mainnet). The setup pipeline switches modes on `MPC_ROOT_KEY`
+section is the runbook, the same on every deployed network (preview, preprod,
+mainnet). The setup pipeline switches modes on `MPC_ROOT_KEY`
 (`mpcKind` in the test harness): absent on a deployed network, the run faces a
 real MPC named by `MPC_SECP256K1_PUBKEY` (NEAR `secp256k1:<base58>` or SEC1
 hex, canonicalised to `0x04…`, the SDK's published key filling it in when
-unset), takes the signet singleton the SDK publishes for the network instead
+unset), takes the signet signer the SDK publishes for the network instead
 of deploying one, skips the fakenet hand-off on its own, and skips anvil dealing on a
 non-anvil `EVM_RPC_URL` (fund the printed derived accounts by hand, `STEP_THROUGH=1`).
 Execution outputs come from `debug_traceTransaction` on `EVM_RPC_URL` on every
@@ -204,8 +203,7 @@ step "verify EVM_RPC_URL serves debug_traceTransaction" refuses an endpoint
 without it. Every attestation poll can instead download the attested
 bytes from the MPC's output cache, and the setup then skips that check:
 `RESPOND_OUTPUT_SOURCE=mpc-cache`, reading the cache the SDK publishes for the
-network (stagenet:
-`https://storage.googleapis.com/midnight-cache-storage-testnet/v1/stagenet`) unless
+network (`getMpcOutputCacheUrl` in `@sig-net/midnight`) unless
 `MPC_OUTPUT_CACHE_URL` overrides it (the cache's URL down to the MPC's object
 prefix; the poll appends `/<network>/<signet address>/<request id>.bin`). On
 the local stack no cache is published, so set
@@ -286,7 +284,7 @@ keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
   counting (the threshold is 100):
   ```bash
   curl -s http://127.0.0.1:8088/api/v4/graphql -H 'Content-Type: application/json' \
-    -d '{"query":"query { contractEvents(filter: { contractAddress: \"<MIDNIGHT_SIGNET_CONTRACT_ADDRESS>\" }, limit: 1000) { id } }"}'
+    -d '{"query":"query { contractEvents(filter: { contractAddress: \"<MIDNIGHT_SIGNER_CONTRACT_ADDRESS>\" }, limit: 1000) { id } }"}'
   ```
   Responder restarts do NOT help (the same first page is re-read, and each
   re-answered old request emits MORE events, pushing live traffic further past

@@ -92,7 +92,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // Wallet facade + vault context + MPC-style reader shared by every test in
 // this file (lazily built, so the offline path never touches the network),
 // stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // One deposit's worth of shielded vault tokens is arranged, burned by the
 // replaced withdraw, and re-minted: 0.1 USDC, the funding preflight's minimum.

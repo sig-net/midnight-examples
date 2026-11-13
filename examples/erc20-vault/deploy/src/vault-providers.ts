@@ -5,16 +5,13 @@
 // @sig-net/midnight-examples-lib. Both the deploy flows and the integration
 // tests compose this and call `findDeployedContract(providers, ...)`.
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
 import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
 import {
   type AccountKeys,
   type MidnightNodeConfig,
-  signetContractManagedPath,
+  signetSignerManagedPath,
   type WalletFacade,
 } from "@sig-net/midnight-contract-deploy";
 import type {
@@ -23,11 +20,14 @@ import type {
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
   createCrossContractProofServerProvider,
-  createWalletAndMidnightProvider,
+  createFacadeWalletProviders,
   type ProofServerObserver,
 } from "@sig-net/midnight-examples-lib";
 
-import { VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
+import { assertVaultKeysPresent, VAULT_MANAGED_PATH } from "./vault-contract-binding.ts";
+
+// Every call transaction this provider set builds expires 30 min out.
+const CALL_TTL_SECONDS = 30 * 60;
 
 /**
  * Build the midnight-js provider set for the vault. Proving reads the vault's
@@ -47,34 +47,33 @@ export function buildVaultProviders(
   config: MidnightNodeConfig,
   proofObserver?: ProofServerObserver,
 ): VaultProviders {
-  // Without this check the missing keys surface as an ENOENT inside the proof
-  // provider on the first circuit call, with no hint at the fix.
-  if (!existsSync(join(VAULT_MANAGED_PATH, "keys"))) {
-    throw new Error(
-      `no prover keys under ${VAULT_MANAGED_PATH}: run \`yarn compile:erc20-vault:zk\` first`,
-    );
-  }
+  assertVaultKeysPresent();
 
   // Retrieves the ZK artifacts of a contract needed to create proofs.
   // Key methods: getProverKey(id), getVerifierKey(id), getZKIR(id), with id
   // typed to the circuit-name union.
   const vaultZkConfigProvider = new NodeZkConfigProvider<VaultCircuitId>(VAULT_MANAGED_PATH);
 
-  // The callee (signet contract) circuits, resolved for the cross-contract
+  // The callee (signet signer) circuits, resolved for the cross-contract
   // proof provider so every send circuit's whole call tree proves.
-  const signetZkConfigProvider = new NodeZkConfigProvider<string>(signetContractManagedPath);
+  const signetZkConfigProvider = new NodeZkConfigProvider<string>(signetSignerManagedPath);
 
   // The wallet, adapted to midnight-js's balancer + submitter interfaces
   // (the facade itself does not implement WalletProvider/MidnightProvider).
-  const walletAndMidnightProvider = createWalletAndMidnightProvider(facade, keys, config.networkId);
-  const accountId = walletAndMidnightProvider.getCoinPublicKey();
+  const { walletProvider, midnightProvider } = createFacadeWalletProviders(
+    facade,
+    keys,
+    config.networkId,
+  );
+  const accountId = walletProvider.getCoinPublicKey();
 
   return {
     // Manages the private state of a contract, plus contract-maintenance
     // signing keys.
-    // Key methods: get(id)→PS|null, set(id, PS), remove, clear,
-    //              getSigningKey/setSigningKey (keyed by contract address),
-    //              exportPrivateStates/importPrivateStates.
+    // Key methods: forContract(addr), whose get(id)→PS|null, set(id, PS),
+    //              remove, clear and exportPrivateStates/importPrivateStates
+    //              act on that contract's states, plus
+    //              getSigningKey/setSigningKey (keyed by contract address).
     // Storage is LevelDB (browser: IndexedDB): clearing the store permanently
     // destroys it, and the package itself warns against production use where
     // loss matters. Fine here: our private state is just the identity secret
@@ -122,7 +121,7 @@ export function buildVaultProviders(
     // transcript). This is NOT the wallet's proving config: the facade's
     // proof server only proves the wallet's own balancing additions when it
     // finalizes a recipe. The call transcript is proven here first. Spans the
-    // vault AND the signet contract so each send circuit's cross-contract call
+    // vault AND the signet signer so each send circuit's cross-contract call
     // resolves keys for the whole call tree.
     proofProvider: createCrossContractProofServerProvider(
       config.proofServerUrl,
@@ -131,9 +130,18 @@ export function buildVaultProviders(
     ),
 
     // Creates proven, balanced transactions.
-    walletProvider: walletAndMidnightProvider,
+    walletProvider,
 
     // Submits proven, balanced transactions to the network.
-    midnightProvider: walletAndMidnightProvider,
+    midnightProvider,
+
+    config: { networkId: config.networkId, ttlSeconds: CALL_TTL_SECONDS },
+
+    // The vault's one cross-contract callee is the signet signer it seals,
+    // so every address resolves to the signet module: the runtime still
+    // refuses a callee whose deployed verifier keys differ from that module's.
+    contractModuleProvider: {
+      resolve: () => () => import("@sig-net/midnight-signer/managed/contract/index.js"),
+    },
   };
 }

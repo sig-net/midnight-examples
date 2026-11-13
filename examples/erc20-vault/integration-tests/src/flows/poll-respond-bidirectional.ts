@@ -1,5 +1,5 @@
-// `pollRespondBidirectional`: stage 2 of the MPC round trip. Poll the Signet
-// singleton's emitted respond-bidirectional events by request id until an MPC
+// `pollRespondBidirectional`: stage 2 of the MPC round trip. Poll the signet
+// responder's emitted respond-bidirectional events by request id until an MPC
 // attestation appears that VERIFIES, its signature against the vault's
 // response key and its attested width and hash against the serialized output
 // obtained for the request (recomputed from the EVM trace or downloaded from
@@ -35,7 +35,7 @@ export interface PollRespondBidirectionalOptions {
 }
 
 /**
- * Poll the signet contract until an MPC respond-bidirectional attestation
+ * Poll the signet responder until an MPC respond-bidirectional attestation
  * for `options.requestId` VERIFIES against the output obtained for it, and
  * return the resolved outcome.
  *
@@ -70,7 +70,7 @@ export async function pollRespondBidirectional(
   context: VaultContext,
   options: PollRespondBidirectionalOptions,
 ): Promise<RespondOutcome> {
-  console.log(`signet contract:   ${context.signetContractAddress}`);
+  console.log(`signet responder:  ${context.responderContractAddress}`);
   console.log(`request id:        ${options.requestId}`);
   console.log(`output source:     ${context.respondOutputSource}`);
   console.log(

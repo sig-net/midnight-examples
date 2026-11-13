@@ -6,6 +6,7 @@
 import { computeSha256Hex, parseZkArtifactManifest } from "@midnight-ntwrk/midnight-js/utils";
 import { describe, expect, it } from "vitest";
 
+import { compilerReleaseOf } from "../src/zk-assets/compact-toolchain.ts";
 import {
   hasProverKeys,
   isRunLeftover,
@@ -225,5 +226,24 @@ describe("missingServedEntries", () => {
       { relativePath: "keys/startDeposit.prover", reason: "missing" },
       { relativePath: "zkir/startDeposit.bzkir", reason: "missing" },
     ]);
+  });
+});
+
+describe("compilerReleaseOf", () => {
+  it.each([
+    { name: "a bare release", output: "0.36.0\n", release: "0.36.0" },
+    {
+      name: "a release followed by its commit and date",
+      output: "0.36.0 (b5d9e4dfc 2026-11-03)\n",
+      release: "0.36.0",
+    },
+    {
+      name: "the last line of several",
+      output: "first line\n0.36.0 (b5d9e4dfc 2026-11-03)\n",
+      release: "0.36.0",
+    },
+    { name: "empty output", output: "", release: "" },
+  ])("reads $name", ({ output, release }) => {
+    expect(compilerReleaseOf(output)).toBe(release);
   });
 });

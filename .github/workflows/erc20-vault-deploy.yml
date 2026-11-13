@@ -24,6 +24,10 @@
 # - DEPLOYER_SEED
 #   - wallet seed paying the fees, faucet-funded with NIGHT
 #   - example: c0ffee...c0ffee (32 or 64 bytes of hex) or a 24-word mnemonic
+# - BLOCKFROST_PROJECT_ID (preprod and mainnet only)
+#   - token of a Blockfrost project for that network, which serves its public
+#     node and indexer
+#   - example: nightpreprod... (the project id from the Blockfrost dashboard)
 # - VAULT_DEPLOYER_SECRET_KEY
 #   - identity sealed as `deployer`, the only one initialise accepts: KEEP
 #     it. Optional when DEPLOYER_SEED is itself 32 bytes of hex, which then
@@ -39,8 +43,8 @@
 #   - a JSON-RPC endpoint of the EVM chain the vault operates on. The
 #     initialise reads the chain id it seals from it
 #   - example: https://sepolia.infura.io/v3/<key>
-# - MIDNIGHT_SIGNET_CONTRACT_ADDRESS (optional)
-#   - the network's signet singleton, sealed as the vault's cross-contract
+# - MIDNIGHT_SIGNER_CONTRACT_ADDRESS (optional)
+#   - the network's signet signer, sealed as the vault's cross-contract
 #     signer. Unset, the one @sig-net/midnight publishes for the network is
 #     sealed, and a set value must agree with it
 #   - example: 0badf00d...1dea (64 hex chars, 0x optional)
@@ -75,8 +79,8 @@
 #     the deployer wallet's own shielded keys
 #   - example: 64 hex chars each
 # - MIDNIGHT_NODE_URL / MIDNIGHT_NODE_INDEXER_URL (optional)
-#   - endpoint overrides, defaulting to the committed per-network endpoints
-#   - example: https://rpc.stagenet.shielded.tools
+#   - endpoint overrides, defaulting to the SDK's per-network endpoints
+#   - example: https://rpc.preview.midnight.network
 
 name: erc20-vault-deploy
 
@@ -88,7 +92,6 @@ on:
         required: true
         type: choice
         options:
-          - stagenet
           - preview
           - preprod
           - mainnet
@@ -139,6 +142,22 @@ jobs:
         run: |
           echo "::error::mainnet deploys a stable erc20-vault-vX.Y.Z tag only, got the prerelease $TAG"
           exit 1
+      # The deploy step resolves its endpoints only after the toolchain
+      # install and the keygen, so an environment that cannot reach its
+      # network is refused here first.
+      - name: Preprod and mainnet need a Blockfrost token or both endpoint overrides
+        if: ${{ inputs.network == 'preprod' || inputs.network == 'mainnet' }}
+        env:
+          NETWORK_ID: ${{ inputs.network }}
+          BLOCKFROST_PROJECT_ID: ${{ secrets.BLOCKFROST_PROJECT_ID }}
+          MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}
+          MIDNIGHT_NODE_INDEXER_URL: ${{ vars.MIDNIGHT_NODE_INDEXER_URL }}
+        run: |
+          if [ -z "$BLOCKFROST_PROJECT_ID" ] &&
+            { [ -z "$MIDNIGHT_NODE_URL" ] || [ -z "$MIDNIGHT_NODE_INDEXER_URL" ]; }; then
+            echo "::error::$NETWORK_ID is served by Blockfrost: set the BLOCKFROST_PROJECT_ID secret on the $NETWORK_ID environment, or both the MIDNIGHT_NODE_URL and MIDNIGHT_NODE_INDEXER_URL variables"
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # refs/tags/ prefixed: a ref that is not a tag fails the checkout
@@ -174,34 +193,28 @@ jobs:
           export PATH="$HOME/.local/bin:$HOME/.compact/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.compact/bin" >> "$GITHUB_PATH"
-          # Launcher pinned to compact-v0.5.1 (never releases/latest): the
-          # toolchain is frozen, so bump this tag deliberately.
+          # Launcher pinned to compact-v0.5.3 (never releases/latest).
           if ! command -v compact >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -LsSf --retry 4 -o /tmp/compact-installer.sh \
-              https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.1/compact-installer.sh
-            echo "85e74a53ae4a67b31fa4d854f3b6ffb4c29f7c53e3372c5008b6a4729a8b4a73  /tmp/compact-installer.sh" | sha256sum -c
+              https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.3/compact-installer.sh
+            echo "5ad9c8f53dd09c39ebd4290dc47d1742d36b01ad65859eed41e7658ac65bdff8  /tmp/compact-installer.sh" | sha256sum -c
             sh /tmp/compact-installer.sh
           fi
-          # compactc 0.33.0-rc.2 is the PINNED compiler, part of the ledger-9
-          # MATCHED SET. It is a prerelease published on the toolchain's LF
-          # home (LFDT-Minokawa/compact), which the launcher's channel does not
-          # list: download it directly and let the launcher adopt it. A bare
-          # `compact update` would install latest stable and break the pin, so
-          # it is never run here.
-          RC_DIR="$HOME/.compact/versions/0.33.0-rc.2/x86_64-unknown-linux-musl"
-          if [ ! -x "$RC_DIR/compactc" ]; then
-            mkdir -p "$RC_DIR"
-            curl -fsSL --retry 4 -o /tmp/compactc-rc.zip \
-              https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.33.0-rc.2/compactc_v0.33.0-rc.2_x86_64-unknown-linux-musl.zip
-            echo "3055ab92bbc8d5bb0d6282b661b83761d2a0de2ee37e21cf7107e25aaf2a9aad  /tmp/compactc-rc.zip" | sha256sum -c
-            unzip -qo /tmp/compactc-rc.zip -d "$RC_DIR"
-            chmod +x "$RC_DIR"/*
+          # compactc 0.36.0, fetched by exact URL and checksum, then adopted by
+          # the launcher. Part of the ledger-9 matched set (see
+          # docker-compose.yaml). Bump it with the npm stack.
+          COMPACTC_DIR="$HOME/.compact/versions/0.36.0/x86_64-unknown-linux-musl"
+          if [ ! -x "$COMPACTC_DIR/compactc" ]; then
+            mkdir -p "$COMPACTC_DIR"
+            curl -fsSL --retry 4 -o /tmp/compactc.zip \
+              https://github.com/LFDT-Minokawa/compact/releases/download/compactc-v0.36.0/compactc_v0.36.0_x86_64-unknown-linux-musl.zip
+            echo "7017b6121ebb9d53a562984bca616d143ef84fc7ee18b4da6c3a0a6615cb5e97  /tmp/compactc.zip" | sha256sum -c
+            unzip -qo /tmp/compactc.zip -d "$COMPACTC_DIR"
+            chmod +x "$COMPACTC_DIR"/*
           fi
-          # `compact update <ver>` adopts an already-on-disk version without
-          # downloading. If the launcher refuses (version not in its channel),
-          # wire the default symlinks it would have created.
+          # Adopt the on-disk version. If the launcher refuses, wire its symlinks.
           mkdir -p "$HOME/.compact/bin"
-          compact update 0.33.0-rc.2 || ln -sfn "$RC_DIR"/* "$HOME/.compact/bin/"
+          compact update 0.36.0 || ln -sfn "$COMPACTC_DIR"/* "$HOME/.compact/bin/"
           compact compile --version
       - name: Install dependencies (frozen, from the committed yarn.lock)
         run: yarn install --immutable
@@ -231,7 +244,7 @@ jobs:
           # Optional: the SDK's published values for the network and the
           # chain id EVM_RPC_URL reports fill these in. A blank var falls
           # through, a set one must agree.
-          MIDNIGHT_SIGNET_CONTRACT_ADDRESS: ${{ vars.MIDNIGHT_SIGNET_CONTRACT_ADDRESS }}
+          MIDNIGHT_SIGNER_CONTRACT_ADDRESS: ${{ vars.MIDNIGHT_SIGNER_CONTRACT_ADDRESS }}
           MPC_SECP256K1_PUBKEY: ${{ vars.MPC_SECP256K1_PUBKEY }}
           EVM_CHAIN_ID: ${{ vars.EVM_CHAIN_ID }}
           # Optional per-environment EVM target overrides. Blank falls through
@@ -252,11 +265,13 @@ jobs:
           VAULT_FEE_REDEEM: ${{ vars.VAULT_FEE_REDEEM }}
           VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY: ${{ vars.VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY }}
           VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY: ${{ vars.VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY }}
-          # Optional per-environment endpoint overrides. Every network has
-          # committed defaults, and a blank var falls through to them.
+          # Per-environment endpoint overrides. A blank var falls through to
+          # the SDK's endpoints, which need the Blockfrost project token on
+          # preprod and mainnet.
           MIDNIGHT_NODE_URL: ${{ vars.MIDNIGHT_NODE_URL }}
           MIDNIGHT_NODE_INDEXER_URL: ${{ vars.MIDNIGHT_NODE_INDEXER_URL }}
           MIDNIGHT_NODE_PROOF_SERVER_URL: http://127.0.0.1:6300
+          BLOCKFROST_PROJECT_ID: ${{ secrets.BLOCKFROST_PROJECT_ID }}
           # $GITHUB_REF_NAME is the dispatching branch, so carry the tag over.
           TAG: ${{ inputs.tag }}
         run: |

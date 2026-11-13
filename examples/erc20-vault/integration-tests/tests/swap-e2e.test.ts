@@ -78,7 +78,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // Wallet facade + vault context shared by every test in this file (lazily
 // built, so the offline path never touches the network), stopped once in
 // afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // The USDC/EURC pool's fee tier.
 const FEE = 500n;
@@ -256,7 +256,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap e2e", () =
       });
 
       banner([
-        `MPC signed response for swap ${swapRequestId} found from Signet Contract.`,
+        `MPC signed response for swap ${swapRequestId} found on the signet responder.`,
         "",
         `Signed tx hash: ${signedTxHash(signedSwapTransaction)}`,
       ]);

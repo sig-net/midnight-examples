@@ -12,9 +12,8 @@ import { type DeployedNetwork, MidnightNetwork } from "@sig-net/midnight";
 // entry). An empty string means "not yet deployed or published" and makes
 // getVaultContractAddress throw for that network.
 const vaultContractAddresses: Record<DeployedNetwork, string> = {
-  [MidnightNetwork.Stagenet]: "f4275d6f907f0f68220120358dc45a8b140948ac6e87a88d61e76f82f5c510a3",
   [MidnightNetwork.Preview]: "",
-  [MidnightNetwork.Preprod]: "",
+  [MidnightNetwork.Preprod]: "8b7c17a8bd244d262e0b1221d8987d8bf9c016936d4b9e130dba451a195ee3d4",
   [MidnightNetwork.Mainnet]: "",
 };
 

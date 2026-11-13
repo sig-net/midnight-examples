@@ -5,7 +5,8 @@
 // assets, LevelDB vs IndexedDB for private state, a wallet facade vs a
 // connector API), so this package names the types and the consumer builds them.
 
-import type { createCallTxOptions, FoundContract } from "@midnight-ntwrk/midnight-js/contracts";
+import type { FoundContract } from "@midnight-ntwrk/midnight-js/contracts";
+import type { CompiledContract } from "@midnight-ntwrk/midnight-js/protocol/v9";
 import type { MidnightProviders } from "@midnight-ntwrk/midnight-js/types";
 
 import type { Contract } from "./managed/erc20-vault/contract/index.js";
@@ -49,6 +50,7 @@ export type DeployedVaultContract = FoundContract<Contract<VaultPrivateState>>;
  * the compiled assets, as midnight-js's call builders take it. Building one is
  * consumer territory, as the assets load differently per environment.
  */
-export type VaultCompiledContract = Parameters<
-  typeof createCallTxOptions<Contract<VaultPrivateState>, VaultCircuitId>
->[0];
+export type VaultCompiledContract = CompiledContract.CompiledContract<
+  Contract<VaultPrivateState>,
+  VaultPrivateState
+>;

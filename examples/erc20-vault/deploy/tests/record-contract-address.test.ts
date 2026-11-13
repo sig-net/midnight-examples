@@ -23,7 +23,6 @@ const UNRECORDED = contractAddressFromHex(UNRECORDED_HEX);
 
 describe("parseDeployedNetwork", () => {
   it.each([
-    ["stagenet", MidnightNetwork.Stagenet],
     ["preview", MidnightNetwork.Preview],
     ["preprod", MidnightNetwork.Preprod],
     ["mainnet", MidnightNetwork.Mainnet],
@@ -34,10 +33,10 @@ describe("parseDeployedNetwork", () => {
   it.each([
     ["the local standalone stack", "undeployed"],
     ["an unknown id", "nope"],
-    ["a member name instead of an id", "Stagenet"],
+    ["a member name instead of an id", "Preview"],
   ])("rejects %s", (_name, networkId) => {
     expect(() => parseDeployedNetwork(networkId)).toThrow(
-      /expected one of stagenet, preview, preprod, mainnet/,
+      /expected one of preview, preprod, mainnet/,
     );
   });
 });
@@ -48,9 +47,8 @@ describe("recordContractAddress", () => {
   const PREAMBLE = `import { type DeployedNetwork, MidnightNetwork } from "@sig-net/midnight";
 `;
   const ADDRESS_TABLE = `const vaultContractAddresses: Record<DeployedNetwork, string> = {
-  [MidnightNetwork.Stagenet]: "",
-  [MidnightNetwork.Preview]: "${EXISTING_HEX}",
-  [MidnightNetwork.Preprod]: "",
+  [MidnightNetwork.Preview]: "",
+  [MidnightNetwork.Preprod]: "${EXISTING_HEX}",
   [MidnightNetwork.Mainnet]: "",
 };
 `;
@@ -58,7 +56,7 @@ describe("recordContractAddress", () => {
 
   interface Case {
     name: string;
-    network: MidnightNetwork.Stagenet | MidnightNetwork.Preview;
+    network: MidnightNetwork.Preview | MidnightNetwork.Preprod;
     previousEntry: string;
     entry: string;
   }
@@ -66,15 +64,15 @@ describe("recordContractAddress", () => {
   const CASES: Case[] = [
     {
       name: "fills an empty row",
-      network: MidnightNetwork.Stagenet,
-      previousEntry: '[MidnightNetwork.Stagenet]: ""',
-      entry: `[MidnightNetwork.Stagenet]: "${ADDRESS_HEX}"`,
+      network: MidnightNetwork.Preview,
+      previousEntry: '[MidnightNetwork.Preview]: ""',
+      entry: `[MidnightNetwork.Preview]: "${ADDRESS_HEX}"`,
     },
     {
       name: "replaces a filled row",
-      network: MidnightNetwork.Preview,
-      previousEntry: `[MidnightNetwork.Preview]: "${EXISTING_HEX}"`,
-      entry: `[MidnightNetwork.Preview]: "${ADDRESS_HEX}"`,
+      network: MidnightNetwork.Preprod,
+      previousEntry: `[MidnightNetwork.Preprod]: "${EXISTING_HEX}"`,
+      entry: `[MidnightNetwork.Preprod]: "${ADDRESS_HEX}"`,
     },
   ];
 
@@ -87,8 +85,8 @@ describe("recordContractAddress", () => {
 
   it("normalises a 0x-prefixed uppercase address to bare lowercase hex", () => {
     const address = contractAddressFromHex(`0x${ADDRESS_HEX.toUpperCase()}`);
-    expect(recordContractAddress(SOURCE, MidnightNetwork.Stagenet, address).entry).toBe(
-      `[MidnightNetwork.Stagenet]: "${ADDRESS_HEX}"`,
+    expect(recordContractAddress(SOURCE, MidnightNetwork.Preview, address).entry).toBe(
+      `[MidnightNetwork.Preview]: "${ADDRESS_HEX}"`,
     );
   });
 
@@ -111,19 +109,18 @@ describe("recordContractAddress", () => {
     },
     {
       name: "a table without the network's row",
-      source: PREAMBLE + "\n" + ADDRESS_TABLE.replace('[MidnightNetwork.Stagenet]: "",\n', ""),
-      expectedMessage: /expected exactly one stagenet row in vaultContractAddresses, found 0/,
+      source: PREAMBLE + "\n" + ADDRESS_TABLE.replace('[MidnightNetwork.Preview]: "",\n', ""),
+      expectedMessage: /expected exactly one preview row in vaultContractAddresses, found 0/,
     },
     {
       name: "a table with the network's row twice",
-      source:
-        PREAMBLE + "\n" + ADDRESS_TABLE.replace('""', '"",\n  [MidnightNetwork.Stagenet]: ""'),
-      expectedMessage: /expected exactly one stagenet row in vaultContractAddresses, found 2/,
+      source: PREAMBLE + "\n" + ADDRESS_TABLE.replace('""', '"",\n  [MidnightNetwork.Preview]: ""'),
+      expectedMessage: /expected exactly one preview row in vaultContractAddresses, found 2/,
     },
   ];
 
   it.each(THROW_CASES)("throws on $name", ({ source, expectedMessage }) => {
-    expect(() => recordContractAddress(source, MidnightNetwork.Stagenet, ADDRESS)).toThrow(
+    expect(() => recordContractAddress(source, MidnightNetwork.Preview, ADDRESS)).toThrow(
       expectedMessage,
     );
   });
@@ -134,7 +131,6 @@ describe("recordContractAddress", () => {
     const real = readFileSync(VAULT_ADDRESSES_PATH, "utf8");
     expect(real).not.toContain(UNRECORDED_HEX);
     const networks: DeployedNetwork[] = [
-      MidnightNetwork.Stagenet,
       MidnightNetwork.Preview,
       MidnightNetwork.Preprod,
       MidnightNetwork.Mainnet,

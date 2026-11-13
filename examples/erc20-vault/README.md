@@ -65,7 +65,7 @@ anatomy: its exported circuits, its witness and its exported ledger fields.
 
 The edges it draws are the dashed key derivations (see
 [Derived keys and accounts](#derived-keys-and-accounts)) plus the three
-standing responsibilities of the dApp/relayer: picking up the singleton's
+standing responsibilities of the dApp/relayer: picking up the responder's
 `SignatureRespondedEvent`s and `RespondBidirectionalEvent`s, and broadcasting
 the MPC-signed transactions. Every other runtime interaction between these
 actors belongs to a specific MPC flow, and each flow's own walkthrough page
@@ -74,10 +74,10 @@ draws and describes its steps (see [The flows](#the-flows)).
 - **Sig Network Distributed MPC**: signs requested transactions with keys
   derived for the requesting contract, and attests their execution outcomes.
   It never broadcasts them.
-- **Midnight Blockchain (source chain)** hosts two contracts: the
-  **Sig Network Singleton Contract**, which the vault notifies of each request
-  and through which the MPC posts its responses as contract events, and the
-  **ERC20 Vault Contract**, this example's contract, whose exported circuits
+- **Midnight Blockchain (source chain)** hosts three contracts: the
+  **Sig Network Signer Contract**, which the vault notifies of each
+  request, the **Sig Network Responder Contract**, through which the MPC posts
+  its responses as contract events, and the **ERC20 Vault Contract**, this example's contract, whose exported circuits
   appear on the map and are listed in
   [The vault's circuits](#the-vaults-circuits).
 - **EVM Blockchain (target chain)** hosts what the vault transacts with:
@@ -89,7 +89,7 @@ draws and describes its steps (see [The flows](#the-flows)).
   token contracts: an approval started with `startApproveRouter` lets the
   Uniswap router spend an ERC20, and one started with `startApproveStata`
   lets the stataToken wrapper pull the underlying token during a supply.
-- **Vault dApp/Relayer**: the off-chain client. It polls the singleton's
+- **Vault dApp/Relayer**: the off-chain client. It polls the responder's
   emitted events for the MPC's signature, assembles and broadcasts the
   MPC-signed transaction to the EVM chain, then polls for the MPC's
   attestation and hands the attested output back for settling. The MPC never
@@ -242,18 +242,18 @@ The contract package's dependency list is the minimal integration surface:
 ```jsonc
 // contract/package.json
 "dependencies": {
-  "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
-  "@midnight-ntwrk/midnight-js": "5.0.0-beta.6",
-  "@midnight-ntwrk/midnight-js-protocol": "5.0.0-beta.6",
-  "@sig-net/midnight": "0.25.0",
-  "@sig-net/midnight-contract": "0.25.0"
+  "@midnight-ntwrk/compact-runtime": "0.21.0",
+  "@midnight-ntwrk/midnight-js": "5.0.0",
+  "@midnight-ntwrk/midnight-js-protocol": "5.0.0",
+  "@sig-net/midnight": "0.26.0-rc.15",
+  "@sig-net/midnight-signer": "0.26.0-rc.15"
 }
 ```
 
 `@sig-net/midnight` is the client-agnostic protocol library: the Compact
 module the contract imports, plus the TypeScript twins, state readers and
-derivation helpers used off-chain. `@sig-net/midnight-contract` supplies the
-Signet singleton's compiled artefacts, which the vault's cross-contract calls
+derivation helpers used off-chain. `@sig-net/midnight-signer` supplies the
+Signet signer's compiled artefacts, which the vault's cross-contract calls
 link against. The Midnight packages are what the generated module, the
 provider types and the vault's flush helpers
 ([`contract/src/vault-queue.ts`](contract/src/vault-queue.ts)) import.
@@ -267,14 +267,14 @@ import "@sig-net/midnight/src/Signet";
 ```
 
 The compile script resolves that import through `node_modules` with
-`COMPACT_PATH`, passes the mandatory `--feature-zkir-v3` flag, and links the
-Signet singleton's managed artefacts in as `src/managed/SignetSigner` for the
+`COMPACT_PATH` and links the
+Signet signer's managed artefacts in as `src/managed/SignetSigner` for the
 cross-contract call:
 
 ```sh
-COMPACT_PATH=../../../node_modules compact compile --feature-zkir-v3 \
+COMPACT_PATH=../../../node_modules compact compile \
   src/erc20-vault.compact src/managed/erc20-vault
-ln -sfn ../../../../../node_modules/@sig-net/midnight-contract/dist/managed \
+ln -sfn ../../../../../node_modules/@sig-net/midnight-signer/dist/managed \
   src/managed/SignetSigner
 ```
 
@@ -284,16 +284,16 @@ generating proving keys.
 
 ### Setup step 3: declare the ledger state
 
-The vault declares the protocol-required fields (the Signet singleton
+The vault declares the protocol-required fields (the Signet signer
 reference, the response key and, per action, the event map the MPC reads the
 requests from) plus its own state:
 
 ```compact
 // ==== Configuration ====
-// The Signet singleton the send circuits cross-contract call to notify the MPC.
+// The Signet signer the send circuits cross-contract call to notify the MPC.
 sealed ledger signetSigner: SignetSigner;
 
-// Verifies every attestation (the Signet singleton emits MPC posts unverified).
+// Verifies every attestation (the signet responder emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
 // ... then the vault's own configuration: the gas settings, initialised,
@@ -301,9 +301,9 @@ export ledger mpcResponseKey: Secp256k1Point;
 //     commitment, the pinned EVM contracts, allowedTokens (each token's
 //     per-action fees) and the fee recipient's keys ...
 
-constructor(deployerCommitment: Bytes<32>, signetContract: SignetSigner) {
+constructor(deployerCommitment: Bytes<32>, initialSignetSigner: SignetSigner) {
   deployer = disclose(deployerCommitment);
-  signetSigner = disclose(signetContract);
+  signetSigner = disclose(initialSignetSigner);
 }
 
 // ==== Request queue ====
@@ -360,7 +360,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.25.1/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.26.0-rc.15/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
@@ -502,7 +502,7 @@ the deposit round trip, from funding the deposit account through
 
 | Package | What it is |
 |---|---|
-| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads, the vault's flush helpers and the EVM constants, all browser-safe. Plus simulator unit tests. Its runtime dependencies are the SDK (`@sig-net/midnight`, `@sig-net/midnight-contract`) plus the three Midnight packages the generated module, the provider types and the flush helpers import (`@midnight-ntwrk/compact-runtime`, `@midnight-ntwrk/midnight-js`, `@midnight-ntwrk/midnight-js-protocol`). |
+| [`contract/`](contract/) | The Compact contract (`src/erc20-vault.compact`), its witnesses, and the curated environment-agnostic export surface a client uses: circuit-id/private-state/provider types, ledger reads, the vault's flush helpers and the EVM constants, all browser-safe. Plus simulator unit tests. Its runtime dependencies are the SDK (`@sig-net/midnight`, `@sig-net/midnight-signer`) plus the three Midnight packages the generated module, the provider types and the flush helpers import (`@midnight-ntwrk/compact-runtime`, `@midnight-ntwrk/midnight-js`, `@midnight-ntwrk/midnight-js-protocol`). |
 | [`deploy/`](deploy/) | Deploying and post-deploy initialisation: the split base-deploy-plus-maintenance-adds, the deployer-gated `initialise`, and the configuration those resolve, as typed functions taking an environment map plus thin CLI entrypoints over them, so a hand-run deploy and the e2e setup execute identical code. Also the Node half of the vault's client surface those flows and the integration tests share: the compiled-contract binding over the contract package's compiler output, and the midnight-js provider set built around a wallet. Everything here needs Node, which is why it is not in the contract package. |
 | [`integration-tests/`](integration-tests/) | The executable documentation: typed in-process flow functions (`src/flows/`) driving every runtime step above, the setup pipeline that deploys the whole stack, and the e2e specs. The EVM leg runs against a Sepolia fork, so the flows use real USDC (and Aave's USDC for the lending flows) dealt to the derived accounts with anvil cheatcodes, and swaps buy real EURC. |
 
@@ -527,7 +527,7 @@ contracts.
 corepack enable
 yarn install
 cp .env.example .env                # then set SEPOLIA_FORK_RPC_URL to an archive Sepolia RPC
-compact update 0.33.0-rc.2          # Exact version required.
+compact update 0.36.0               # Exact version required.
 yarn compile:erc20-vault            # no zk keys: the first e2e run generates them itself (~10 min)
 docker compose up -d                # node, indexer, proof server, anvil forking
                                     # Sepolia (NOT the fakenet responder: it is
@@ -574,6 +574,55 @@ you using this [skill](../../.claude/skills/e2e/SKILL.md). It knows the whole
 operational runbook (rerun vs redeploy modes, the fakenet responder hand-off,
 failure recovery) and will drive it for you.
 
+### The wallet sync cache
+
+A wallet opened fresh scans the whole chain, which takes several minutes per
+wallet on a deployed network. Every wallet the e2e suite and the deploy
+scripts open (the root and role wallets of the setup, each spec's session
+wallets, the deployer of every deploy script) keeps a cache file of its synced
+state, restores from it on the next run, and only catches up from where it
+left off. A restored wallet on preprod is synced in seconds.
+
+- **Location.** The cache files live in the repository root, one per wallet,
+  named `.wallet-cache-<networkId>-<label>-<fingerprint>.json`. The label is
+  the wallet's role (`root`, `deployer`, `user`, `bearer`, `mpc responder`,
+  `stranger`, `false claimer`, `recipient`) and the fingerprint comes from the
+  wallet's unshielded address, so two seeds used under one label keep separate
+  files. `.wallet-cache-*` is gitignored.
+- **Setting a path.** A wallet's cache path can be set with an environment
+  variable named after its label: upper case, every run of other characters
+  as `_`, then `_WALLET_CACHE_PATH` (`DEPLOYER_WALLET_CACHE_PATH`,
+  `USER_WALLET_CACHE_PATH`, `MPC_RESPONDER_WALLET_CACHE_PATH`). A relative
+  path resolves against the repository root.
+- **Integrity.** Every file carries a SHA-256 digest over all of its other
+  fields, every wallet snapshot included, and is refused when the digest is
+  missing or does not match, so a truncated, partly written or hand-edited
+  file is never trusted. A missing, empty or unknown field is refused too.
+- **Validation.** Beyond its digest, a cache is used only when it was written
+  for the same network (by the file and by each wallet snapshot), the same
+  seed (its addresses, the public keys inside every wallet snapshot and the
+  owner of every unshielded UTXO) and the same DUST history setting, when its
+  unshielded UTXOs agree with its transaction history, when it sits on the
+  same chain (the indexer still reports its genesis block and the last block
+  it recorded, which a wiped local stack or a reset network does not, and no
+  wallet's sync cursor is past the chain's newest transaction or ledger
+  event), and when the wallet SDK can restore every part of it.
+- **A refusal.** An invalid cache at the default location is deleted and the
+  wallet syncs from scratch, logging the reason on one line. An invalid cache
+  at a path set through the variable stops the run with an error naming the
+  variable, the path and the reason, and keeps the file: delete it or unset
+  the variable. An indexer that cannot be reached is an error, never a reason
+  to delete a cache.
+- **Writing.** A running wallet rewrites its cache every ten seconds when its
+  state changed, once when its first sync completes and when it stops, each
+  time through a temporary file renamed into place, so an interrupted run
+  resumes from at most ten seconds back.
+- **Contents.** The file holds no seed and no secret key, only the wallet
+  SDK's serialised state and the wallet's public addresses. It does reveal the
+  wallet's balances and transaction history, so it is written readable by its
+  owner only and is never committed. Delete the files to force every wallet to
+  sync from scratch.
+
 ### Running against the real Sepolia network
 
 By default the EVM leg runs on the local anvil chain from `docker-compose.yaml`,
@@ -614,13 +663,13 @@ What does NOT happen automatically on a real chain, by design:
 ### Running against the real MPC on a deployed network
 
 Point the Midnight side at a deployed network the SDK publishes values for
-(today only stagenet) and drop the fakenet: the real Signature Network MPC
-listens to the signet singleton the SDK publishes for that network, and signs
+(Preview) and drop the fakenet: the real Signature Network MPC
+listens to the signet signer the SDK publishes for that network, and signs
 and attests the requests it admits from any vault sealed to it. The minimal
-`.env`, with stagenet as the example network, is:
+`.env`, with Preview as the example network, is:
 
 ```sh
-NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
+NETWORK_ID=preview         # any deployed network the SDK publishes values for
 ROOT_SEED=                 # funded via the network's faucet (the first run prints the address and URL)
 MAINTENANCE_SIGNING_KEY=   # 32 bytes of hex, required on any deployed network
 EVM_RPC_URL=               # a REAL Sepolia RPC; must serve debug_traceTransaction unless mpc-cache below
@@ -632,9 +681,9 @@ EVM_RPC_URL=               # a REAL Sepolia RPC; must serve debug_traceTransacti
 
 What differs from the local loop:
 
-- **No signet deploy.** The setup takes the singleton address the SDK
-  publishes for the network (a set `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` must
-  agree with it).
+- **No signet deploy.** The setup takes the signet signer address the SDK
+  publishes for the network (a set `MIDNIGHT_SIGNER_CONTRACT_ADDRESS` must
+  agree with it), and the responder address it publishes beside it.
 - **No `MPC_ROOT_KEY`.** The MPC root public key the SDK publishes for the
   network names the real MPC, every derived account starts from it, and the
   fakenet hand-off steps skip on their own. A set `MPC_SECP256K1_PUBKEY` must
@@ -734,7 +783,7 @@ network needs is exercised on every local e2e run.
 # local, against the docker stack
 yarn deploy:erc20-vault
 
-# a remote network (stagenet): deploy, run the deployer-gated initialise,
+# a remote network (Preview): deploy, run the deployer-gated initialise,
 # then allow the ERC20s EVM_ALLOWED_TOKENS lists
 yarn deploy-initialise:erc20-vault
 
@@ -753,6 +802,13 @@ yarn add-allowed-tokens:erc20-vault
 # token prices (see design proposal 001's residual risk)
 yarn set-token-fees:erc20-vault
 
+# reset the gas settings of the transactions the vault's own EVM account signs:
+# each of VAULT_MAX_FEE_PER_GAS, VAULT_MAX_PRIORITY_FEE_PER_GAS (wei) and
+# VAULT_GAS_LIMIT_WITHDRAW / _APPROVE / _SWAP / _SUPPLY / _REDEEM replaces one
+# setting, an unset one keeps the vault's current value, and a vault already at
+# those settings is left alone. Requests in flight keep the gas they started with.
+yarn set-gas-params:erc20-vault
+
 # install the circuits a split deploy left missing (recovers a run that died
 # after its base deploy landed, named by MIDNIGHT_VAULT_CONTRACT_ADDRESS, and
 # is a no-op on a vault with every circuit). It does not initialise: run
@@ -761,7 +817,7 @@ yarn set-token-fees:erc20-vault
 yarn resume-deploy:erc20-vault
 ```
 
-All six read the repo-root `.env` overlaid with the real environment, the same
+All seven read the repo-root `.env` overlaid with the real environment, the same
 way the e2e setup does, so one set of variables drives every path. They refuse to
 run when that `.env` names a different `NETWORK_ID` than the run targets and
 still supplies a network-scoped value (a signet address, an MPC key): those are
@@ -773,13 +829,13 @@ On a deployed network a deploy needs four variables, plus
 not itself 32 bytes of hex:
 
 ```sh
-NETWORK_ID=stagenet        # any deployed network the SDK publishes values for
+NETWORK_ID=preview         # any deployed network the SDK publishes values for
 DEPLOYER_SEED=             # pays the fees, funded via the network's faucet
 MAINTENANCE_SIGNING_KEY=   # 32 bytes of hex, kept (see below)
 EVM_RPC_URL=               # the EVM chain the vault operates on
 ```
 
-Everything else is derived: the signet singleton and the MPC root public key
+Everything else is derived: the signet signer and the MPC root public key
 are the ones `@sig-net/midnight` publishes for the network, and the chain id is
 read from `EVM_RPC_URL`. The fees come from two variables. `VAULT_TOKEN_FEES`
 is a JSON object mapping an ERC20 address to its `withdraw`, `swap`, `supply`
@@ -793,11 +849,12 @@ defaults each to 1000). `VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY` with
 `VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY` name the wallet the fee coins are
 minted to, the deployer wallet's own shielded keys when unset. Reprice a token
 afterwards through the map and `yarn set-token-fees:erc20-vault`, and move the
-recipient with the deployer's `setFeeRecipient` circuit. `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`,
+recipient with the deployer's `setFeeRecipient` circuit. `MIDNIGHT_SIGNER_CONTRACT_ADDRESS`,
 `MPC_SECP256K1_PUBKEY` and `EVM_CHAIN_ID` remain as overrides, and a set value
 must agree with the published one or with what the chain reports. The local
-stack publishes nothing, so there the e2e setup deploys a singleton and mints a
-fakenet key and hands both over through those same variables.
+stack publishes nothing, so there the e2e setup deploys a signet signer and a
+responder and mints a fakenet key, and hands them over through those same
+variables and `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS`.
 
 `BASE_DEPLOY_CIRCUITS` names the circuit that goes in the base transaction.
 `buildDeployTransactionDeferring` returns the contract address plus the deferred
@@ -1003,7 +1060,7 @@ manifest, and writes:
 public/keys/<circuit>.prover, <circuit>.verifier    the vault's 29 circuits
 public/zkir/<circuit>.bzkir
 public/compiler/contract-manifest.json, contract-info.json
-public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-contract
+public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-signer
 ```
 
 A rerun verifies what is there and skips a tree that already matches.

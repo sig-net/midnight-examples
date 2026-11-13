@@ -2,8 +2,9 @@
 // with the generated `ledger()`. Takes the provider and address, so a browser
 // client, the deploy tooling and a read-only script all drive it the same way.
 
+import { ContractState } from "@midnight-ntwrk/compact-runtime";
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
-import type { CoinPublicKey, EncPublicKey } from "@midnight-ntwrk/midnight-js-protocol/ledger";
+import type { CoinPublicKey, EncPublicKey } from "@midnight-ntwrk/midnight-js-protocol/v9";
 import { bytesToHex, hexToBytes, toSignBidirectionalEventIndex } from "@sig-net/midnight";
 
 import { ledger, type TokenFees } from "./managed/erc20-vault/contract/index.js";
@@ -23,11 +24,11 @@ export async function readVaultLedger(
   publicDataProvider: PublicDataProvider,
   vaultContractAddress: string,
 ): Promise<VaultLedgerState> {
-  const contractState = await publicDataProvider.queryContractState(vaultContractAddress);
-  if (!contractState) {
+  const read = await publicDataProvider.queryContractState(vaultContractAddress);
+  if (!read) {
     throw new Error(`no contract state found at ${vaultContractAddress} — is the address right?`);
   }
-  return ledger(contractState.data);
+  return ledger(read.contractState.deserialize({ v9: ContractState }).data);
 }
 
 /**
