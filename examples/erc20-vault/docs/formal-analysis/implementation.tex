@@ -93,9 +93,10 @@ derived public key: the low $20$ bytes of $\Kec$ applied to its uncompressed enc
       never signs transactions.
 \end{itemize}
 
-\noindent The key version $\keyVer$ selects which root key is used and is carried in every
-request record; it is suppressed above, and throughout the document, since a single version
-is in use.
+\noindent The key version $\keyVer$ is the version of the MPC signing keys: a new version can
+change the root key pair, the inputs that Definition~\ref{def:derive} hashes, or both. It is
+carried in every request record and is suppressed above, and throughout the document, since a
+single version is in use.
 
 
 \medskip

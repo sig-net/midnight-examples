@@ -29,7 +29,7 @@ action.
 |---|---|
 | [`initialise`](#setup-step-4-pin-the-derived-addresses-and-the-response-key) | Deployment setup rather than an MPC flow: the deployer-gated one-shot that pins the vault's derived EVM address, the EVM chain, the Uniswap router, the Aave stataToken pair, the MPC response key and the EVM height attestations must exceed. |
 | `setGasParams` | The deployer resets the fee envelope and the per-action gas limits of the transactions the vault's own account signs. A request keeps the values it was started with. |
-| `addAllowedToken` / `setTokenFees` | The deployer allows one more ERC20 into the vault, with the flat fee each fee-charging action takes on it, and reprices an allowed token's fees later. `startDeposit` accepts only an allowed ERC20, and `startSwap` buys only an allowed `erc20AddressOut`. `initialise` allows the stata pair itself, and no circuit removes a token. Allow only [supported tokens](#supported-tokens). |
+| `addAllowedToken` / `setTokenFees` | The deployer allows one more ERC20 into the vault, with the flat fee each fee-charging action takes on it, and reprices an allowed token's fees later. `startDeposit` accepts only an allowed ERC20, and `startSwap` buys only an allowed `erc20AddressOut`. `initialise` allows the stata pair itself, and no circuit removes a token. Check a token against [Whitelisting](#whitelisting) before you allow it. |
 | `setFeeRecipient` | The deployer moves the wallet every fee coin is minted to: its coin public key and the encryption public key clients encrypt the coin's ciphertext to. `initialise` names the first one. |
 | [`flushQueue`](docs/contention-handling.md#the-flush) | The only writer of `globalLastSeen` after `initialise` and of `vaultAccountNonce`: moves up to 10 queued requests and attestations into the output buffers, assigning each vault-signed request the vault account's next EVM nonce. Anyone may submit it. |
 | [`queueAttestation`](docs/contention-handling.md#why-the-queue-needs-no-output) | Verify an MPC attestation's signature over the output width and hash it carries, and queue it for the flush, whatever the output's width. Anyone may submit one. |
@@ -117,13 +117,17 @@ the integration repository for the full detail.
 ## Supported tokens
 
 Midnight's mint API takes a `Uint<64>`, so one vault coin holds at most
-`2^64 - 1` base units. Every `start*` circuit rejects an input at or above
-`2^64`, but the attested output of a supply or redeem is not known at start. If
-it reaches `2^64`, the settle circuit can never succeed, and the funds stay
-locked. So the vault supports only ERC20s whose total supply, in base units,
-stays below `2^64` (~1.8 × 10^19), the stata pair included. 6-decimal USDC and
-8-decimal WBTC are well inside the limit. An 18-decimal token such as WETH or
-DAI is not: there, `2^64` base units is ~18.4 tokens.
+`2^64 - 1` base units. For an 18-decimal token such as WETH or DAI, that is
+~18.4 tokens. 6-decimal USDC and 8-decimal WBTC are well inside the limit.
+
+Every `start*` circuit rejects an input at or above `2^64`. So any allowed
+token can have 18 decimals: one deposit, withdraw or swap of it moves at most
+~18.4 tokens, and a larger amount is rejected before anything runs.
+
+The attested output of a supply or redeem is not known at start. If it reaches
+`2^64`, the settle circuit can never succeed, and the funds stay locked. So the
+stata pair must stay below `2^64` in total supply, in base units (see
+[Choosing the Supply and Redeem Pair](#choosing-the-supply-and-redeem-pair)).
 
 This limit is temporary. We are working to support 18-decimal tokens. Progress
 is tracked in [#100](https://github.com/sig-net/midnight-examples/issues/100).
@@ -922,10 +926,10 @@ ongoing care: fee setting and token whitelisting. The operator's choices decide
 three things:
 
 - that an attacker cannot drain the vault's EVM account by making it pay more
-  gas than the fees collect;
+  gas than the fees collect
 - that each vault coin stays backed by one base unit of its ERC20 on the vault's
-  EVM account;
-- that a deposit or a settlement does not leave funds locked.
+  EVM account
+- that a deposit or a settlement does not leave funds locked
 
 The vault is a reference implementation. The limitations below apply to its
 code as written. A vault built from it can support more tokens if it changes
@@ -938,6 +942,10 @@ transaction and pays its gas in ETH. `setGasParams` sets the EIP-1559 fields
 of those transactions: `maxFeePerGas`, `maxPriorityFeePerGas`, and a gas limit
 for each action. One transaction costs the vault at most its gas limit times
 `maxFeePerGas`.
+
+The operator must keep enough ETH in the vault's EVM account to pay this gas.
+The fees do not refill it: they go to the fee recipient, a wallet that the
+operator sets with `setFeeRecipient`.
 
 The user pays for this with a fee in the token itself. `setTokenFees` sets a
 flat fee for each action, in the token's base units, and the vault mints it to
@@ -975,7 +983,7 @@ the life of the vault.
 
 ### Limitations
 
-Consider these warnings when white listing assets.
+Consider these warnings when whitelisting assets.
 
 #### Do not allow fee-on-transfer ERC20s
 
@@ -997,25 +1005,36 @@ before the next deposit.
 
 The vault calls `transfer` and `approve` on the token. Its requests declare a
 `bool` output schema for these calls, and the vault mints or refunds on the
-decoded value. Some tokens, such as USDT on Ethereum, return no data from these
-calls. The return data then does not match the declared schema, and the MPC
-attests a request only when the two match (see
+decoded value. Some tokens, such as USDT on Ethereum, declare these functions
+with no return value. The return data then does not match the declared schema,
+and the MPC attests a request only when the two match (see
 [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.25.1/README.md#output-recovery-and-serialisation)).
 So with this vault as written, allow only tokens whose `transfer` and `approve`
-return a `bool`.
+return a `bool`. If the operator allows a token with no return value without
+the handling below, its transfers run on Ethereum but never get an attestation.
+The vault then cannot mint or refund, and the funds stay locked.
 
-To support a token that returns no data, a vault can mark the token in its
+To support a token with no return value, a vault can mark the token in its
 `allowedTokens` entry and declare an empty output schema for its requests. The
 MPC then attests `executed` with an empty output, or `failed` if the call
 reverted, and the vault settles on the attested kind.
 
-#### Take care if there are too many decimals
+## Choosing the Supply and Redeem Pair
 
-Allow only tokens whose total supply, in base units, stays below `2^64`. A
-supply or redeem whose attested amount reaches `2^64` can never settle, and its
-funds stay locked. 6-decimal tokens such as USDC are inside the limit, but
-18-decimal tokens such as WETH and DAI are not. See
-[Supported tokens](#supported-tokens).
+Supply and redeem use one pair of tokens: the `stataUnderlying` and `stataToken`
+that the operator passes to `initialise`. Supply deposits the first into Aave
+and gets back the second. Redeem does the opposite. This pair is fixed for the
+life of the vault.
+
+Choose a pair whose total supply, in base units, stays below `2^64`. The amount
+that a supply or redeem gets back is known only after it runs on Ethereum. If
+that amount reaches `2^64`, the request can never settle, and its funds stay
+locked. 6-decimal tokens such as USDC are inside the limit, but 18-decimal
+tokens such as WETH and DAI are not.
+
+Deposit, withdraw and swap do not have this limit. Their amounts are known at
+start, and the vault rejects any amount at or above `2^64` before it sends the
+request.
 
 # Releasing to npm
 
