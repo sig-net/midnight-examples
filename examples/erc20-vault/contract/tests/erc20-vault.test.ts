@@ -456,7 +456,10 @@ describe("initialise", () => {
     ).rejects.toThrow(/Not the deployer/);
   });
 
-  it("rejects key version 0", async () => {
+  it.each([
+    { name: "the legacy key version 0", keyVersion: 0n },
+    { name: "key version 2, beyond the latest the MPC supports", keyVersion: 2n },
+  ])("rejects $name", async ({ keyVersion }) => {
     const { contract, ctx } = await deployContract();
     await expect(
       contract.circuits.initialise(
@@ -467,14 +470,14 @@ describe("initialise", () => {
         STATA_TOKEN,
         CHAIN_ID,
         MPC_RESPONSE_KEY,
-        0n,
+        keyVersion,
         EVM_START_HEIGHT,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
         FEE_RECIPIENT_EPK,
       ),
-    ).rejects.toThrow(/keyVersion must be >= 1/);
+    ).rejects.toThrow(/keyVersion must be 1/);
   });
 
   it("is one-shot", async () => {

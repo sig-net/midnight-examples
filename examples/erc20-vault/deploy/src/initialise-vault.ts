@@ -65,7 +65,7 @@ export interface VaultInitialiseConfig {
    * (`queueAttestation`) accepts only attestations ECDSA-signed by it.
    */
   readonly mpcResponseKey: string;
-  /** The MPC root key version the response key and every vault request are derived under. */
+  /** The MPC signing key version (1) the response key and every vault request are derived under. */
   readonly mpcKeyVersion: bigint;
   /** The flat per-action fees sealed for the stata underlying, in its base units. */
   readonly stataUnderlyingFees: TokenFees;
