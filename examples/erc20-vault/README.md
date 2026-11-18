@@ -258,8 +258,8 @@ The contract package's dependency list is the minimal integration surface:
   "@midnight-ntwrk/compact-runtime": "0.21.0",
   "@midnight-ntwrk/midnight-js": "5.0.0",
   "@midnight-ntwrk/midnight-js-protocol": "5.0.0",
-  "@sig-net/midnight": "0.27.0-rc.2",
-  "@sig-net/midnight-signer": "0.27.0-rc.2"
+  "@sig-net/midnight": "0.27.0-rc.3",
+  "@sig-net/midnight-signer": "0.27.0-rc.3"
 }
 ```
 
@@ -373,7 +373,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.27.0-rc.2/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.27.0-rc.3/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
@@ -649,15 +649,12 @@ left off. A restored wallet on preprod is synced in seconds.
 ### Running the Tron deposit specs
 
 The `tron-*` specs run against the `tron` compose service, a TRE dev chain on
-`http://127.0.0.1:9090`, and skip unless `TRON_RPC_URL` is set. They also need
-a fakenet responder with Tron support, which the published image the compose
-file pins does not have yet: build one from a solana-signet-program checkout
-with Tron support (`docker build -f fakenet-signer/Dockerfile -t
-fakenet:tron-local .`) and name it in `.env`:
+`http://127.0.0.1:9090`, and skip unless `TRON_RPC_URL` is set. The fakenet
+image the compose file pins signs and attests Tron requests. Set the Tron node
+in `.env`:
 
 ```sh
 TRON_RPC_URL=http://127.0.0.1:9090
-FAKENET_IMAGE=fakenet:tron-local
 ```
 
 Then run the suite as usual. The setup deploys two test TRC-20s on TRE: a
