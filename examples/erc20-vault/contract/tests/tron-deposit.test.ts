@@ -79,6 +79,7 @@ const STATA_TOKEN = bytes(20, 0xcc);
 const ERC20 = bytes(20, 0xaa);
 const TRC20 = bytes(20, 0x7a);
 const UNLISTED_TRC20 = bytes(20, 0x99);
+const TRON_USDT = bytes(20, 0x75);
 const ZERO_ADDRESS = new Uint8Array(20);
 const CHAIN_ID = 11155111n;
 const NO_FEES = { withdraw: 0n, swap: 0n, supply: 0n, redeem: 0n };
@@ -206,6 +207,7 @@ const deployInitialised = async () => {
       MPC_KEY_VERSION,
       EVM_START_HEIGHT,
       TRON_START_HEIGHT,
+      TRON_USDT,
       NO_FEES,
       NO_FEES,
       { bytes: bytes(32, 0xfe) },
@@ -214,6 +216,7 @@ const deployInitialised = async () => {
   ).context;
   next = (await contract.circuits.addAllowedToken(next, ERC20, NO_FEES)).context;
   next = (await contract.circuits.addAllowedTronToken(next, TRC20, TRON_TOKEN_FEES)).context;
+  next = (await contract.circuits.addAllowedTronToken(next, TRON_USDT, NO_FEES)).context;
   return { contract, ctx: next };
 };
 
@@ -285,12 +288,20 @@ const coinsMinted = (before: VaultContext, settled: VaultContext) => {
 };
 
 const OUTPUT_EMPTY = new Uint8Array(0);
+const OUTPUT_TRUE = Uint8Array.of(1);
+const OUTPUT_FALSE = Uint8Array.of(0);
+const VAULT_OUTPUT_SCHEMA = new TextEncoder().encode('[{"name":"success","type":"bool"}]');
 
 describe("initialise", () => {
   it("seals each chain's start height in its own cell", async () => {
     const { ctx } = await deployInitialised();
     expect(ledgerOf(ctx).globalLastSeen).toBe(EVM_START_HEIGHT);
     expect(ledgerOf(ctx).tronLastSeen).toBe(TRON_START_HEIGHT);
+  });
+
+  it("stores the Tron USDT address", async () => {
+    const { ctx } = await deployInitialised();
+    expect(ledgerOf(ctx).tronUsdtAddress).toEqual(TRON_USDT);
   });
 });
 
@@ -317,12 +328,18 @@ describe("addAllowedTronToken", () => {
         MPC_RESPONSE_SECRET,
         requestId,
         OutputKind.executed,
-        OUTPUT_EMPTY,
+        OUTPUT_TRUE,
         TRON_ATTESTED_HEIGHT,
       ),
     );
     const next = (
-      await contract.circuits.completeTronDeposit(attested, requestId, MINT_NONCE, CALLER_RECIPIENT)
+      await contract.circuits.completeTronDeposit(
+        attested,
+        requestId,
+        OUTPUT_TRUE,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
     ).context;
     expect(coinsMinted(attested, next).map(({ coinInfo }) => coinInfo.value)).toEqual([AMOUNT]);
   });
@@ -416,7 +433,7 @@ describe("Tron deposit round-trip", () => {
     expect(record.algo).toBe(MPCSignatureAlgorithm.ecdsa);
     expect(record.signatureDest).toBe(MPCDestination.unused);
     expect(record.executionDest).toEqual(signetCircuits.tronCaip2Id());
-    expect(record.outputDeserializationSchema).toEqual(new Uint8Array(0));
+    expect(record.outputDeserializationSchema).toEqual(VAULT_OUTPUT_SCHEMA);
     expect(record.respondSerializationSchema).toEqual(new Uint8Array(0));
     expect(record.txParams).toEqual({
       ...VALID_TRON_DEPOSIT.tronTx,
@@ -633,12 +650,18 @@ describe("completeTronDeposit settle", () => {
         MPC_RESPONSE_SECRET,
         requestId,
         OutputKind.executed,
-        OUTPUT_EMPTY,
+        OUTPUT_TRUE,
         TRON_ATTESTED_HEIGHT,
       ),
     );
     const next = (
-      await contract.circuits.completeTronDeposit(attested, requestId, MINT_NONCE, recipient)
+      await contract.circuits.completeTronDeposit(
+        attested,
+        requestId,
+        OUTPUT_TRUE,
+        MINT_NONCE,
+        recipient,
+      )
     ).context;
 
     expect(coinsMinted(attested, next)).toEqual([
@@ -669,6 +692,7 @@ describe("completeTronDeposit settle", () => {
         await contract.circuits.completeTronDeposit(
           attested,
           requestId,
+          OUTPUT_FALSE,
           MINT_NONCE,
           CALLER_RECIPIENT,
         )
@@ -679,7 +703,10 @@ describe("completeTronDeposit settle", () => {
     },
   );
 
-  it("rejects an executed attestation over a non-empty output", async () => {
+  it.each([
+    { name: "a tampered output", attested: OUTPUT_TRUE, presented: OUTPUT_FALSE },
+    { name: "an output over an empty attestation", attested: OUTPUT_EMPTY, presented: OUTPUT_TRUE },
+  ])("rejects $name", async ({ attested: attestedOutput, presented }) => {
     const { contract, ctx } = await deployInitialised();
     const { context: sent, requestId } = await tronDeposit(contract, ctx, VALID_TRON_DEPOSIT);
     const attested = await attest(
@@ -689,12 +716,18 @@ describe("completeTronDeposit settle", () => {
         MPC_RESPONSE_SECRET,
         requestId,
         OutputKind.executed,
-        Uint8Array.of(1),
+        attestedOutput,
         TRON_ATTESTED_HEIGHT,
       ),
     );
     await expect(
-      contract.circuits.completeTronDeposit(attested, requestId, MINT_NONCE, CALLER_RECIPIENT),
+      contract.circuits.completeTronDeposit(
+        attested,
+        requestId,
+        presented,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      ),
     ).rejects.toThrow(/Output does not match the attestation/);
   });
 
@@ -708,7 +741,7 @@ describe("completeTronDeposit settle", () => {
         MPC_RESPONSE_SECRET,
         requestId,
         OutputKind.executed,
-        OUTPUT_EMPTY,
+        OUTPUT_TRUE,
         TRON_ATTESTED_HEIGHT,
       ),
     );
@@ -717,6 +750,7 @@ describe("completeTronDeposit settle", () => {
       contract.circuits.completeTronDeposit(
         stranger,
         requestId,
+        OUTPUT_TRUE,
         MINT_NONCE,
         OTHER_WALLET_RECIPIENT,
       ),
@@ -733,15 +767,27 @@ describe("completeTronDeposit settle", () => {
         MPC_RESPONSE_SECRET,
         requestId,
         OutputKind.executed,
-        OUTPUT_EMPTY,
+        OUTPUT_TRUE,
         TRON_ATTESTED_HEIGHT,
       ),
     );
     const next = (
-      await contract.circuits.completeTronDeposit(attested, requestId, MINT_NONCE, CALLER_RECIPIENT)
+      await contract.circuits.completeTronDeposit(
+        attested,
+        requestId,
+        OUTPUT_TRUE,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
     ).context;
     await expect(
-      contract.circuits.completeTronDeposit(next, requestId, MINT_NONCE, CALLER_RECIPIENT),
+      contract.circuits.completeTronDeposit(
+        next,
+        requestId,
+        OUTPUT_TRUE,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      ),
     ).rejects.toThrow(/Request not sent/);
   });
 
@@ -756,7 +802,7 @@ describe("completeTronDeposit settle", () => {
         MPC_RESPONSE_SECRET,
         tron.requestId,
         OutputKind.executed,
-        OUTPUT_EMPTY,
+        OUTPUT_TRUE,
         TRON_ATTESTED_HEIGHT,
       ),
     );
@@ -781,7 +827,13 @@ describe("completeTronDeposit settle", () => {
       ),
     ).rejects.toThrow(/Wrong action/);
     await expect(
-      contract.circuits.completeTronDeposit(attested, evm.requestId, MINT_NONCE, CALLER_RECIPIENT),
+      contract.circuits.completeTronDeposit(
+        attested,
+        evm.requestId,
+        OUTPUT_TRUE,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      ),
     ).rejects.toThrow(/Wrong action/);
   });
 
@@ -791,6 +843,103 @@ describe("completeTronDeposit settle", () => {
     await expect(
       contract.circuits.startReplaceNonce(sent, 77n, requestId, Action.tronDeposit),
     ).rejects.toThrow(/Deposit has no vault nonce/);
+  });
+});
+
+describe("completeTronDeposit expected transfer result", () => {
+  it.each([
+    { name: "USDT returning false mints", token: TRON_USDT, output: OUTPUT_FALSE, mints: true },
+    {
+      name: "USDT returning true mints nothing",
+      token: TRON_USDT,
+      output: OUTPUT_TRUE,
+      mints: false,
+    },
+    { name: "another TRC-20 returning true mints", token: TRC20, output: OUTPUT_TRUE, mints: true },
+    {
+      name: "another TRC-20 returning false mints nothing",
+      token: TRC20,
+      output: OUTPUT_FALSE,
+      mints: false,
+    },
+  ])("$name and closes the request", async ({ token, output, mints }) => {
+    const { contract, ctx } = await deployInitialised();
+    const { context: sent, requestId } = await tronDeposit(contract, ctx, {
+      ...VALID_TRON_DEPOSIT,
+      deposit: { tokenAddress: token, amount: AMOUNT },
+    });
+    const attested = await attest(
+      contract,
+      sent,
+      respond(MPC_RESPONSE_SECRET, requestId, OutputKind.executed, output, TRON_ATTESTED_HEIGHT),
+    );
+    const next = (
+      await contract.circuits.completeTronDeposit(
+        attested,
+        requestId,
+        output,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
+    ).context;
+
+    const color = hexToBytes(
+      rawTokenType(pureCircuits.vaultTronTokenDomainSeparator(token), VAULT_ADDRESS),
+    );
+    expect(coinsMinted(attested, next).map(({ coinInfo }) => coinInfo)).toEqual(
+      mints ? [{ nonce: MINT_NONCE, color, value: AMOUNT }] : [],
+    );
+    expect(ledgerOf(next).bidirectionalTronDepositMap.isEmpty()).toBe(true);
+    expect(ledgerOf(next).outputRequestBuffer.isEmpty()).toBe(true);
+  });
+
+  it("with the zero address as Tron USDT, every TRC-20 must return true", async () => {
+    const { contract, ctx } = await deployContract();
+    let next = (
+      await contract.circuits.initialise(
+        ctx,
+        VAULT_EVM,
+        ROUTER,
+        STATA_UNDERLYING,
+        STATA_TOKEN,
+        CHAIN_ID,
+        MPC_RESPONSE_KEY,
+        MPC_KEY_VERSION,
+        EVM_START_HEIGHT,
+        TRON_START_HEIGHT,
+        ZERO_ADDRESS,
+        NO_FEES,
+        NO_FEES,
+        { bytes: bytes(32, 0xfe) },
+        bytes(32, 0xef),
+      )
+    ).context;
+    next = (await contract.circuits.addAllowedTronToken(next, TRON_USDT, NO_FEES)).context;
+    const { context: sent, requestId } = await tronDeposit(contract, next, {
+      ...VALID_TRON_DEPOSIT,
+      deposit: { tokenAddress: TRON_USDT, amount: AMOUNT },
+    });
+    const attested = await attest(
+      contract,
+      sent,
+      respond(
+        MPC_RESPONSE_SECRET,
+        requestId,
+        OutputKind.executed,
+        OUTPUT_FALSE,
+        TRON_ATTESTED_HEIGHT,
+      ),
+    );
+    const settled = (
+      await contract.circuits.completeTronDeposit(
+        attested,
+        requestId,
+        OUTPUT_FALSE,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
+    ).context;
+    expect(settled.callContext.currentQueryContext.effects.shieldedMints.size).toBe(0);
   });
 });
 
@@ -805,7 +954,7 @@ describe("chain-aware queue: each chain's attestations raise only its own height
           MPC_RESPONSE_SECRET,
           requestId,
           OutputKind.executed,
-          OUTPUT_EMPTY,
+          OUTPUT_TRUE,
           TRON_ATTESTED_HEIGHT,
         ),
       )
@@ -842,12 +991,18 @@ describe("chain-aware queue: each chain's attestations raise only its own height
         MPC_RESPONSE_SECRET,
         requestId,
         OutputKind.executed,
-        OUTPUT_EMPTY,
+        OUTPUT_TRUE,
         TRON_ATTESTED_HEIGHT + 100n,
       ),
     );
     const settled = (
-      await contract.circuits.completeTronDeposit(raised, requestId, MINT_NONCE, CALLER_RECIPIENT)
+      await contract.circuits.completeTronDeposit(
+        raised,
+        requestId,
+        OUTPUT_TRUE,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
     ).context;
     const second = await tronDeposit(contract, settled, { ...VALID_TRON_DEPOSIT, inIndex: 2n });
     expect(ledgerOf(second.context).outputRequestBuffer.lookup(second.outIndex).lastSeen).toBe(
@@ -860,7 +1015,7 @@ describe("chain-aware queue: each chain's attestations raise only its own height
         MPC_RESPONSE_SECRET,
         second.requestId,
         OutputKind.executed,
-        OUTPUT_EMPTY,
+        OUTPUT_TRUE,
         TRON_ATTESTED_HEIGHT + 101n,
       ),
     );
@@ -910,7 +1065,7 @@ describe("chain-aware queue: each chain's attestations raise only its own height
           MPC_RESPONSE_SECRET,
           requestId,
           OutputKind.executed,
-          OUTPUT_EMPTY,
+          OUTPUT_TRUE,
           TRON_START_HEIGHT,
         ),
       ),

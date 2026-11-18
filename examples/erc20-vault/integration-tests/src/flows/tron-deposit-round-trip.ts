@@ -17,6 +17,7 @@ import { startTronDeposit } from "./start-tron-deposit.ts";
 /** */
 export interface TronDepositRoundTripOptions {
   readonly amount: bigint;
+  readonly tokenAddress?: Uint8Array;
   readonly reuseRequestId?: RequestIdHex;
   readonly claimRecipient?: ShieldedTokenRecipient;
   readonly skipClaim?: boolean;
@@ -46,7 +47,10 @@ export async function runTronDepositRoundTrip(
     requestId = opts.reuseRequestId;
     logSkip("Tron deposit", `resuming Tron deposit round trip from ${requestId}`);
   } else {
-    requestId = await startTronDeposit(context, tron, { amount: opts.amount });
+    requestId = await startTronDeposit(context, tron, {
+      amount: opts.amount,
+      tokenAddress: opts.tokenAddress,
+    });
   }
 
   const outcome = await withTronBlockPusher(tron.tronRpcUrl, tron.funder, async () => {
@@ -60,14 +64,16 @@ export async function runTronDepositRoundTrip(
     if (info.receiptResult !== "SUCCESS") {
       throw new Error(`Tron deposit transfer ${requestId} ran ${info.receiptResult}`);
     }
-    return pollTronRespondBidirectional(context, {
+    return pollTronRespondBidirectional(context, tron, {
       requestId,
       intervalMs: 1000,
       timeoutMs: POLL_TIMEOUT_MS,
     });
   });
   if (!outcome.succeeded) {
-    throw new Error(`the MPC attested Tron deposit ${requestId} as not executed`);
+    throw new Error(
+      `the MPC attested Tron deposit ${requestId} as not executed, or as returning an unexpected result`,
+    );
   }
 
   const ledger = await readVaultLedger(

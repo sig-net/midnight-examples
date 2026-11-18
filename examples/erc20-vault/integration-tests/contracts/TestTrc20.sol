@@ -5,13 +5,15 @@ contract TestTrc20 {
     string public constant symbol = "TT20";
     uint8 public constant decimals = 6;
     uint256 public totalSupply;
+    bool public immutable usdtLike;
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
 
-    constructor(uint256 supply) {
+    constructor(uint256 supply, bool usdtLike_) {
+        usdtLike = usdtLike_;
         totalSupply = supply;
         balanceOf[msg.sender] = supply;
         emit Transfer(address(0), msg.sender, supply);
@@ -19,7 +21,7 @@ contract TestTrc20 {
 
     function transfer(address to, uint256 value) external returns (bool) {
         _move(msg.sender, to, value);
-        return true;
+        return !usdtLike;
     }
 
     function approve(address spender, uint256 value) external returns (bool) {

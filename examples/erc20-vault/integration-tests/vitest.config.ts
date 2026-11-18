@@ -31,6 +31,7 @@ const FILE_ORDER = [
   "admin-replace-nonce-e2e.test.ts",
   "tron-allowed-tokens-e2e.test.ts",
   "tron-deposit-e2e.test.ts",
+  "tron-deposit-usdt-e2e.test.ts",
   "tron-deposit-failure-e2e.test.ts",
   "tron-deposit-expiry-e2e.test.ts",
   "tron-deposit-claimant-not-caller.test.ts",

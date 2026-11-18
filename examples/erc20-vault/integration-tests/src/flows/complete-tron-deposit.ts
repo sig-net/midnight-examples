@@ -5,6 +5,7 @@ import { VAULT_PRIVATE_STATE_ID } from "@sig-net/midnight-examples-erc20-vault-c
 import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-deploy";
 
 import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
+import type { TronContext } from "../tron-context.ts";
 import type { VaultContext } from "../vault-context.ts";
 import type { ShieldedTokenRecipient } from "./complete-deposit.ts";
 import { pollTronRespondBidirectional } from "./poll-tron-respond-bidirectional.ts";
@@ -24,11 +25,14 @@ export async function settleTronDeposit(
   console.log(`request id:      ${requestIdHex(outcome.event.requestId)}`);
   if (!outcome.succeeded) {
     console.log(
-      `the MPC attested the Tron transfer ${OutputKind[outcome.event.outputKind]}: ` +
+      `the MPC attested the Tron transfer ` +
+        `${outcome.event.outputKind === OutputKind.executed ? "returned an unexpected result" : OutputKind[outcome.event.outputKind]}: ` +
         "completeTronDeposit closes the request and mints nothing",
     );
   }
   await queueAndFlushAttestation(context, outcome);
+  const serializedOutput =
+    outcome.event.outputKind === OutputKind.executed ? outcome.serializedOutput : new Uint8Array(1);
 
   const requestId = outcome.event.requestId;
   const mintNonce = crypto.getRandomValues(new Uint8Array(32));
@@ -54,7 +58,7 @@ export async function settleTronDeposit(
       recipient !== undefined
         ? new Map([[recipient.coinPublicKey, recipient.encryptionPublicKey]])
         : undefined,
-      [requestId, mintNonce, mintRecipient],
+      [requestId, serializedOutput, mintNonce, mintRecipient],
     ),
     privateStateId: VAULT_PRIVATE_STATE_ID,
   });
@@ -69,14 +73,16 @@ export interface CompleteTronDepositOptions {
 
 /**
  * @param context - The flow context
+ * @param tron - The Tron context the transfer's receipt is read through
  * @param options - The request id and optional mint recipient
  * @throws {Error} If no verifying attestation posts within the poll's deadline
  */
 export async function completeTronDeposit(
   context: VaultContext,
+  tron: TronContext,
   options: CompleteTronDepositOptions,
 ): Promise<void> {
-  const outcome = await pollTronRespondBidirectional(context, {
+  const outcome = await pollTronRespondBidirectional(context, tron, {
     requestId: options.requestId,
     intervalMs: 1000,
     timeoutMs: POLL_TIMEOUT_MS,

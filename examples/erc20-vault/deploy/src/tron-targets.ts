@@ -55,6 +55,12 @@ export async function resolveTronStartHeight(
   }
 }
 
+function tronTokenEvmForm(entry: string): Uint8Array {
+  return entry.startsWith("T")
+    ? tronAddressFromBase58(entry).slice(1)
+    : evmAddressBytes(withHexPrefix(entry));
+}
+
 /**
  * @param env - The environment to read `TRON_ALLOWED_TOKENS` from
  * @returns The listed TRC-20s in the 20-byte form the vault keys them by
@@ -69,9 +75,7 @@ export function resolveAllowedTronTokens(
   for (const entry of listed.split(",")) {
     const trimmed = entry.trim();
     if (trimmed === "") continue;
-    const evmForm = trimmed.startsWith("T")
-      ? tronAddressFromBase58(trimmed).slice(1)
-      : evmAddressBytes(withHexPrefix(trimmed));
+    const evmForm = tronTokenEvmForm(trimmed);
     if (evmForm.every((byte) => byte === 0)) {
       throw new Error("TRON_ALLOWED_TOKENS lists the zero address, which the vault never allows.");
     }
@@ -79,4 +83,15 @@ export function resolveAllowedTronTokens(
     if (!tokens.includes(token)) tokens.push(token);
   }
   return tokens;
+}
+
+/**
+ * @param env - The environment to read `TRON_USDT_ADDRESS` from
+ * @returns The Tron USDT contract in the 20-byte form, or the zero address when unset
+ * @throws {Error} If the value is neither a base58 Tron address nor a 20-byte hex address
+ */
+export function resolveTronUsdtAddress(env: Record<string, string | undefined>): string {
+  const value = envOrUndefined(env, "TRON_USDT_ADDRESS")?.trim();
+  if (!value) return `0x${"00".repeat(20)}`;
+  return `0x${bytesToHex(tronTokenEvmForm(value))}`;
 }

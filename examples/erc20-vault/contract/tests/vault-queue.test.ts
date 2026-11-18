@@ -272,6 +272,7 @@ const arrangeVault = async (arrangement: VaultArrangement) => {
       1n,
       100n,
       5_000n,
+      new Uint8Array(20),
       NO_FEES,
       NO_FEES,
       { bytes: new Uint8Array(32).fill(0xfe) },

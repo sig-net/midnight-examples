@@ -37,7 +37,7 @@ import {
   resolveFeeRecipient,
   resolveTokenFeesFor,
 } from "./fee-config.ts";
-import { resolveTronStartHeight } from "./tron-targets.ts";
+import { resolveTronStartHeight, resolveTronUsdtAddress } from "./tron-targets.ts";
 
 /** What an {@link initialiseVaultContract} call did. */
 export enum InitialiseVaultOutcome {
@@ -66,6 +66,7 @@ export interface VaultInitialiseConfig {
    */
   readonly evmStartHeight: bigint;
   readonly tronStartHeight: bigint;
+  readonly tronUsdtAddress: string;
   /**
    * The MPC response key for THIS vault contract (SEC1 hex): `f(MPC root key,
    * vault contract address, "midnight response key")`. The queue circuit
@@ -161,6 +162,7 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
   evmChainId: bigint;
   evmStartHeight: bigint;
   tronStartHeight: bigint;
+  tronUsdtAddress: string;
   targets: VaultEvmTargets;
   stataUnderlyingFees: TokenFees;
   stataTokenFees: TokenFees;
@@ -172,6 +174,7 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
   const evmChainId = await resolveEvmChainId(env);
   const evmStartHeight = await resolveEvmStartHeight(env);
   const tronStartHeight = await resolveTronStartHeight(env);
+  const tronUsdtAddress = resolveTronUsdtAddress(env);
 
   // Parse the targets up front: a malformed override must fail before
   // anything is submitted, not mid-initialise.
@@ -187,6 +190,7 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
     evmChainId,
     evmStartHeight,
     tronStartHeight,
+    tronUsdtAddress,
     targets,
     stataUnderlyingFees,
     stataTokenFees,
@@ -245,6 +249,7 @@ export async function resolveInitialiseConfig(
     evmChainId,
     evmStartHeight,
     tronStartHeight,
+    tronUsdtAddress,
     targets,
     stataUnderlyingFees,
     stataTokenFees,
@@ -269,6 +274,7 @@ export async function resolveInitialiseConfig(
     evmChainId,
     evmStartHeight,
     tronStartHeight,
+    tronUsdtAddress,
     mpcResponseKey,
     mpcKeyVersion: SIGNET_DEFAULT_KEY_VERSION,
     stataUnderlyingFees,
@@ -356,6 +362,7 @@ export async function initialiseVaultContract(
   console.log(`EVM chain id:      ${String(config.evmChainId)}`);
   console.log(`EVM start height:  ${String(config.evmStartHeight)}`);
   console.log(`Tron start height: ${String(config.tronStartHeight)}`);
+  console.log(`Tron USDT:         ${config.tronUsdtAddress}`);
   console.log(`MPC response key:  ${config.mpcResponseKey}`);
   console.log(`MPC key version:   ${String(config.mpcKeyVersion)}`);
   console.log(`underlying fees:   ${formatTokenFees(config.stataUnderlyingFees)}`);
@@ -373,6 +380,7 @@ export async function initialiseVaultContract(
     config.mpcKeyVersion,
     config.evmStartHeight,
     config.tronStartHeight,
+    evmAddressBytes(config.tronUsdtAddress),
     config.stataUnderlyingFees,
     config.stataTokenFees,
     { bytes: hexToBytes(config.feeRecipient.coinPublicKey) },
@@ -423,6 +431,7 @@ export async function initialiseVault(
       EVM_START_HEIGHT: String(config.evmStartHeight),
       TRON_RPC_URL: tronRpcUrl === undefined ? undefined : new URL(tronRpcUrl).origin,
       TRON_START_HEIGHT: String(config.tronStartHeight),
+      TRON_USDT_ADDRESS: config.tronUsdtAddress,
       EVM_ROUTER: config.routerAddress,
       EVM_STATA_UNDERLYING: config.stataUnderlyingAddress,
       EVM_STATA_TOKEN: config.stataTokenAddress,

@@ -130,6 +130,7 @@ const MPC_RESPONSE_SECRET = bytes(32, 0x42);
 const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
 const EVM_START_HEIGHT = 100n;
 const TRON_START_HEIGHT = 5_000n;
+const TRON_USDT_ADDRESS = new Uint8Array(20);
 const MPC_KEY_VERSION = 1n;
 const ATTESTED_HEIGHT = 101n;
 
@@ -370,6 +371,7 @@ const deployInitialised = async (evmStartHeight: bigint = EVM_START_HEIGHT) => {
       MPC_KEY_VERSION,
       evmStartHeight,
       TRON_START_HEIGHT,
+      TRON_USDT_ADDRESS,
       STATA_UNDERLYING_FEES,
       STATA_TOKEN_FEES,
       { bytes: FEE_RECIPIENT_CPK },
@@ -493,6 +495,7 @@ describe("initialise", () => {
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
+        TRON_USDT_ADDRESS,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -518,6 +521,7 @@ describe("initialise", () => {
         keyVersion,
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
+        TRON_USDT_ADDRESS,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -540,6 +544,7 @@ describe("initialise", () => {
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
+        TRON_USDT_ADDRESS,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -562,6 +567,7 @@ describe("initialise", () => {
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
+        TRON_USDT_ADDRESS,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -606,6 +612,7 @@ describe("initialise", () => {
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
+        TRON_USDT_ADDRESS,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -638,6 +645,7 @@ describe("initialise", () => {
         MPC_KEY_VERSION,
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
+        TRON_USDT_ADDRESS,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },

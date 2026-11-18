@@ -83,6 +83,8 @@ export ledger allowedTokens: Map<Bytes<20>, AllowedTokenConfig>;
 
 export ledger allowedTronTokens: Map<Bytes<20>, AllowedTokenConfig>;
 
+export ledger tronUsdtAddress: Bytes<20>;
+
 // Details of the fee recipient, used in fee coin minting.
 // The encryption key is for clients to attach the ciphertext that lets
 // the recipient's wallet find the coin.
@@ -205,6 +207,7 @@ export circuit initialise(
   responseKeyVersion: Uint<8>,
   evmHeight: Uint<64>,
   tronHeight: Uint<64>,
+  tronUsdt: Bytes<20>,
   stataUnderlyingFees: TokenFees,
   stataTokenFees: TokenFees,
   feeRecipientCoinKey: ZswapCoinPublicKey,
@@ -235,6 +238,7 @@ export circuit initialise(
   mpcKeyVersion = disclose(responseKeyVersion);
   globalLastSeen = disclose(evmHeight);
   tronLastSeen = disclose(tronHeight);
+  tronUsdtAddress = disclose(tronUsdt);
 
   vaultMaxFeePerGas = 150000000000 as Uint<128>;
   vaultMaxPriorityFeePerGas = 1000000000 as Uint<128>;
@@ -1056,7 +1060,7 @@ export struct TronDepositArgs {
   tx: TronTxFields;
 }
 
-export ledger bidirectionalTronDepositMap: SignBidirectionalEventMapV1<TronTxParams<2>, 0>;
+export ledger bidirectionalTronDepositMap: SignBidirectionalEventMapV1<TronTxParams<2>, 34>;
 
 export ledger tronDepositArgsMap: Map<Uint<64>, TronDepositArgs>;
 
@@ -1136,12 +1140,12 @@ export circuit sendTronDeposit(outIndex: Bytes<32>): [] {
     callValue: 0 as Uint<64>,
     calldata: some<EvmCalldata<2>>(calldata)
   };
-  const request = constructSignBidirectionalEventV1<TronTxParams<2>, 0>(
+  const request = constructSignBidirectionalEventV1<TronTxParams<2>, 34>(
     mpcKeyVersion, kernel.self(), args.path,
     MPCSignatureAlgorithm.ecdsa, TxParamType.tron, txParams, tronCaip2Id(),
-    MPCDestination.unused, pad(64, ""), default<Bytes<0>>
+    MPCDestination.unused, pad(64, ""), vaultOutputSchema()
   );
-  const requestId = calculateTronRequestIdV1<2, 0>(request);
+  const requestId = calculateTronRequestIdV1<2, 34>(request);
   assert(!bidirectionalTronDepositMap.member(requestId), "Request already sent");
   bidirectionalTronDepositMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
@@ -1156,6 +1160,7 @@ export circuit sendTronDeposit(outIndex: Bytes<32>): [] {
 
 export circuit completeTronDeposit(
   requestId: RequestId,
+  serializedOutput: Bytes<1>,
   mintNonce: Bytes<32>,
   recipient: Maybe<Either<ZswapCoinPublicKey, ContractAddress>>,
 ): [] {
@@ -1169,20 +1174,25 @@ export circuit completeTronDeposit(
   assert(bidirectionalTronDepositMap.member(disclosedId), "Request event missing");
   bidirectionalTronDepositMap.remove(disclosedId);
 
-  if (record.outputKind == OutputKind.executed) {
+  const executed = record.outputKind == OutputKind.executed;
+  const output = disclose(serializedOutput);
+  const transferred = deserialize<VaultResponse, 1>(executed ? output : default<Bytes<1>>).success;
+  if (executed) {
     assert(
-      verifyAttestedOutputV1<0>(default<Bytes<0>>, record.serializedOutputLength, record.outputHash),
+      verifyAttestedOutputV1<1>(output, record.serializedOutputLength, record.outputHash),
       "Output does not match the attestation"
     );
-    const claimRecipient = disclose(recipient).is_some
-      ? disclose(recipient).value
-      : left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-    mintShieldedToken(
-      vaultTronTokenDomainSeparator(args.request.tokenAddress),
-      args.request.amount as Uint<64>,
-      disclose(mintNonce),
-      claimRecipient
-    );
+    if (transferred == (args.request.tokenAddress != tronUsdtAddress)) {
+      const claimRecipient = disclose(recipient).is_some
+        ? disclose(recipient).value
+        : left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
+      mintShieldedToken(
+        vaultTronTokenDomainSeparator(args.request.tokenAddress),
+        args.request.amount as Uint<64>,
+        disclose(mintNonce),
+        claimRecipient
+      );
+    }
   }
 }
 

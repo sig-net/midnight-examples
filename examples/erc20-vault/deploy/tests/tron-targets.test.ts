@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveAllowedTronTokens, resolveTronStartHeight } from "../src/tron-targets.ts";
+import {
+  resolveAllowedTronTokens,
+  resolveTronStartHeight,
+  resolveTronUsdtAddress,
+} from "../src/tron-targets.ts";
 
 const USDT_BASE58 = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const USDT_EVM_FORM = "0xa614f803b6fd780986a42c78ec9c7f77e6ded13c";
 const OTHER_TOKEN = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
+const NILE_USDT_BASE58 = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
+const ZERO_ADDRESS = `0x${"00".repeat(20)}`;
 
 describe("resolveAllowedTronTokens", () => {
   interface ResolvedCase {
@@ -73,5 +79,34 @@ describe("resolveTronStartHeight", () => {
     await expect(resolveTronStartHeight({ TRON_START_HEIGHT: preset })).rejects.toThrow(
       /TRON_START_HEIGHT/,
     );
+  });
+});
+
+describe("resolveTronUsdtAddress", () => {
+  it.each([
+    { name: "unset to the zero address", value: undefined, address: ZERO_ADDRESS },
+    { name: "blank to the zero address", value: "  ", address: ZERO_ADDRESS },
+    { name: "mainnet USDT in base58", value: USDT_BASE58, address: USDT_EVM_FORM },
+    { name: "a 20-byte hex address", value: USDT_EVM_FORM, address: USDT_EVM_FORM },
+    {
+      name: "a hex address without its 0x prefix, in upper case",
+      value: USDT_EVM_FORM.slice(2).toUpperCase(),
+      address: USDT_EVM_FORM,
+    },
+  ])("resolves $name", ({ value, address }) => {
+    expect(resolveTronUsdtAddress({ TRON_USDT_ADDRESS: value })).toBe(address);
+  });
+
+  it("resolves Nile USDT to a 20-byte address", () => {
+    expect(resolveTronUsdtAddress({ TRON_USDT_ADDRESS: NILE_USDT_BASE58 })).toMatch(
+      /^0x[0-9a-f]{40}$/,
+    );
+  });
+
+  it.each([
+    { name: "a base58 address with a bad checksum", value: `${USDT_BASE58.slice(0, -1)}u` },
+    { name: "a short hex address", value: "0x1234" },
+  ])("refuses $name", ({ value }) => {
+    expect(() => resolveTronUsdtAddress({ TRON_USDT_ADDRESS: value })).toThrow();
   });
 });

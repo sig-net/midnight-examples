@@ -1,6 +1,8 @@
 import {
   bytesToHex,
   evmAddressAbiWord,
+  type EvmTraceOutput,
+  EvmTraceOutputKind,
   hexToBytes,
   numericAbiWord,
   tronAddressFromEvm,
@@ -70,11 +72,13 @@ export function tronReference(block: TronHeadBlock): TronReference {
 export interface TronTransactionInfo {
   readonly blockNumber: bigint;
   readonly receiptResult: string;
+  readonly contractResult: readonly Uint8Array[];
 }
 
 interface TransactionInfoAnswer {
   readonly blockNumber?: number;
   readonly receipt?: { readonly result?: string };
+  readonly contractResult?: readonly string[];
 }
 
 /**
@@ -93,7 +97,19 @@ export async function getTronTransactionInfo(
   return {
     blockNumber: BigInt(answer.blockNumber),
     receiptResult: answer.receipt?.result ?? "SUCCESS",
+    contractResult: (answer.contractResult ?? []).map((data) => hexToBytes(data)),
   };
+}
+
+/**
+ * @param info - The transaction's receipt
+ * @returns The top call's return data, `contractResult[0]`, as the MPC reads it
+ */
+export function tronExecutionTrace(info: TronTransactionInfo): EvmTraceOutput {
+  const [returnData] = info.contractResult;
+  return returnData === undefined
+    ? { kind: EvmTraceOutputKind.NoReturnData }
+    : { kind: EvmTraceOutputKind.Output, returnData };
 }
 
 interface BroadcastAnswer {

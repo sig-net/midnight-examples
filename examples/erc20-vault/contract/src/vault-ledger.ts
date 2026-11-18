@@ -58,6 +58,7 @@ export async function printVaultState(
   console.log(`EVM chain id:      ${String(state.evmChainId)}`);
   console.log(`EVM last seen:     ${String(state.globalLastSeen)}`);
   console.log(`Tron last seen:    ${String(state.tronLastSeen)}`);
+  console.log(`Tron USDT:         0x${bytesToHex(state.tronUsdtAddress)}`);
   console.log(`vault EVM nonce:   ${String(state.vaultAccountNonce)}`);
   console.log(`fee recipient:     coin ${bytesToHex(state.feeRecipientCoinPublicKey.bytes)}`);
   console.log(`                   enc  ${bytesToHex(state.feeRecipientEncryptionPublicKey)}`);

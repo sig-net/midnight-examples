@@ -66,9 +66,9 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           return;
         }
         const falseClaimerContext = await falseClaimerSession.vaultContext();
-        await expect(completeTronDeposit(falseClaimerContext, { requestId })).rejects.toThrow(
-          /Not the requester/,
-        );
+        await expect(
+          completeTronDeposit(falseClaimerContext, await createTronContext(env), { requestId }),
+        ).rejects.toThrow(/Not the requester/);
         const context = await session.vaultContext();
         const ledger = await readVaultLedger(
           context.providers.publicDataProvider,
@@ -87,7 +87,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           return;
         }
         const context = await session.vaultContext();
-        await completeTronDeposit(context, { requestId });
+        await completeTronDeposit(context, await createTronContext(env), { requestId });
         const ledger = await readVaultLedger(
           context.providers.publicDataProvider,
           context.vaultContractAddress,

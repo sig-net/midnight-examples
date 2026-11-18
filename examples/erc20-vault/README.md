@@ -35,7 +35,7 @@ action.
 | [`flushQueue`](docs/contention-handling.md#the-flush) | The only writer of `globalLastSeen` and `tronLastSeen` after `initialise` and of `vaultAccountNonce`: moves up to 10 queued requests and attestations into the output buffers, assigning each vault-signed request the vault account's next EVM nonce. Anyone may submit it. |
 | [`queueAttestation`](docs/contention-handling.md#why-the-queue-needs-no-output) | Verify an MPC attestation's signature over the output width and hash it carries, and queue it for the flush, whatever the output's width. Anyone may submit one. |
 | [`startDeposit`](docs/deposit/deposit.md) → [`sendDeposit`](docs/deposit/deposit.md) → [`completeDeposit`](docs/deposit/deposit.md) | **The reference flow, documented step by step in the [deposit walkthrough](docs/deposit/deposit.md).** The depositor's derived EVM account transfers the ERC20 to the vault's account, and `completeDeposit` mints the shielded vault token when the attested transfer returned true. |
-| `startTronDeposit` → `sendTronDeposit` → `completeTronDeposit` | The deposit from Tron: the depositor's derived Tron account (the same key as their EVM account) transfers a TRC-20 to the vault's Tron account, `tronAddress(vaultEvmAddress)`, under the reference block, validity window and fee limit the depositor chose, and `completeTronDeposit` mints the shielded Tron vault token when the MPC attests the transfer executed. The MPC attests Tron executions over an empty output, so the transfer's bool return is not checked: allow only TRC-20s that revert on a failed transfer. |
+| `startTronDeposit` → `sendTronDeposit` → `completeTronDeposit` | The deposit from Tron: the depositor's derived Tron account (the same key as their EVM account) transfers a TRC-20 to the vault's Tron account, `tronAddress(vaultEvmAddress)`, under the reference block, validity window and fee limit the depositor chose, and `completeTronDeposit` mints the shielded Tron vault token when the MPC attests the transfer executed. The MPC attests the transfer's bool return, and `completeTronDeposit` mints only when it matches the expected result. |
 | [`startWithdraw`](docs/withdraw/withdraw.md) → [`sendWithdraw`](docs/withdraw/withdraw.md) → [`completeWithdraw`](docs/withdraw/withdraw.md) | The other direction, plus the coin-spend-as-authorisation pattern: `startWithdraw` burns the surrendered vault coin, the vault's account transfers the ERC20, and `completeWithdraw` re-mints the burned amount when the MPC attests the transfer failed or unviable, or that it returned false. |
 | `startApproveRouter` / `startApproveStata` → `sendApprove` → `completeApprove` | Deployer-gated: the vault's account grants the pinned Uniswap router, or the pinned stataToken wrapper, an unlimited allowance the later swaps and supplies draw on (see [Vault-signed requests](docs/contention-handling.md#vault-signed-requests)). |
 | [`startSwap`](docs/swap/swap.md) → [`sendSwap`](docs/swap/swap.md) → [`completeSwap`](docs/swap/swap.md) | `exactOutputSingle` on the pinned router: `startSwap` burns the surrendered `erc20AddressIn` coin, and `completeSwap` mints the exact `amountOut` of `erc20AddressOut` plus the unspent input as change, or re-mints the surrendered coin when the MPC attests the swap failed or unviable. |
@@ -48,6 +48,13 @@ transaction, a failed one (reverted on chain) and an unviable one (its nonce
 consumed by another transaction). See
 [Handling Failure](https://github.com/sig-net/midnight-integration/blob/main/README.md#handling-failure)
 for the protocol side.
+
+Tron USDT returns false on a successful transfer. Other TRC-20s return true.
+So `completeTronDeposit` expects false for the token at `tronUsdtAddress` and
+true for every other TRC-20. A transfer that fails reverts, and the MPC
+attests it failed. Set `TRON_USDT_ADDRESS` for each network: on mainnet
+`TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`, on Nile
+`TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf`.
 
 The four starts whose EVM transaction the vault's own account pays for
 (`startWithdraw`, `startSwap`, `startSupply`, `startRedeem`) take a flat,
@@ -431,6 +438,7 @@ export circuit initialise(
   responseKeyVersion: Uint<8>,
   evmHeight: Uint<64>,
   tronHeight: Uint<64>,
+  tronUsdt: Bytes<20>,
   stataUnderlyingFees: TokenFees,
   stataTokenFees: TokenFees,
   feeRecipientCoinKey: ZswapCoinPublicKey,
@@ -446,6 +454,7 @@ export circuit initialise(
   //     their fees), the fee recipient's keys, the chain id and the MPC key ...
   globalLastSeen = disclose(evmHeight);
   tronLastSeen = disclose(tronHeight);
+  tronUsdtAddress = disclose(tronUsdt);
   // ... then the default gas settings of the vault account's transactions ...
 }
 ```
@@ -462,7 +471,9 @@ The deploy tooling passes `EVM_START_HEIGHT` when set, otherwise the latest
 block `EVM_RPC_URL` reports, and zero when neither is set. `tronHeight` seeds
 `tronLastSeen`, the same bound for Tron requests: `TRON_START_HEIGHT` when set,
 otherwise the latest block `TRON_RPC_URL` reports (`/wallet/getnowblock`), and
-zero when neither is set.
+zero when neither is set. `tronUsdt` seeds `tronUsdtAddress`, the TRC-20 whose
+transfer must return false: `TRON_USDT_ADDRESS` (base58 or 20-byte hex), and
+the zero address when unset.
 
 The gate prevents front-running: nobody else can initialise the vault to
 point at their own address, chain or key. Flow function:
@@ -649,9 +660,11 @@ TRON_RPC_URL=http://127.0.0.1:9090
 FAKENET_IMAGE=fakenet:tron-local
 ```
 
-Then run the suite as usual. The setup deploys a test TRC-20 on TRE, names
-it in `TRON_ALLOWED_TOKENS`, derives the vault's and the user's
-Tron accounts, and funds the user's with TRX and the TRC-20 from TRE's first
+Then run the suite as usual. The setup deploys two test TRC-20s on TRE: a
+normal one, and a USDT-like one that returns false on a successful transfer.
+It sets the USDT-like one as `TRON_USDT_ADDRESS`, names both in
+`TRON_ALLOWED_TOKENS`, derives the vault's and the user's
+Tron accounts, and funds the user's with TRX and both TRC-20s from TRE's first
 prefunded account (private key `0x00…01`, or `TRON_FUNDER_PRIVATE_KEY`).
 `initialise` seals the Tron start height from `TRON_RPC_URL`, and
 `tron-deposit-e2e` checks it is above zero, so initialise the vault with
@@ -823,7 +836,8 @@ network needs is exercised on every local e2e run.
 yarn deploy:erc20-vault
 
 # a remote network (Preview): deploy, run the deployer-gated initialise,
-# then allow the ERC20s EVM_ALLOWED_TOKENS lists
+# then allow the ERC20s EVM_ALLOWED_TOKENS lists. Set TRON_USDT_ADDRESS to the
+# network's Tron USDT first: initialise seals it once.
 yarn deploy-initialise:erc20-vault
 
 # initialise a vault that already exists (recovers a run whose deploy landed

@@ -157,19 +157,19 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
     );
 
     it(
-      "the MPC attests the transfer executed, over the empty output",
+      "the MPC attests the transfer executed and returned true",
       async () => {
         const context = await session.vaultContext();
-        const { tronRpcUrl, funder } = await tron();
-        outcome = await withTronBlockPusher(tronRpcUrl, funder, () =>
-          pollTronRespondBidirectional(context, {
+        const t = await tron();
+        outcome = await withTronBlockPusher(t.tronRpcUrl, t.funder, () =>
+          pollTronRespondBidirectional(context, t, {
             requestId,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
           }),
         );
         expect(outcome.succeeded).toBe(true);
-        expect(outcome.serializedOutput).toEqual(new Uint8Array(0));
+        expect(outcome.serializedOutput).toEqual(Uint8Array.of(1));
       },
       POLL_TIMEOUT_MS + MINUTE,
     );

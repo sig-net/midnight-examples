@@ -59,6 +59,7 @@ import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
 import {
   ensureTestTrc20,
+  ensureTestUsdtLikeTrc20,
   ensureTronAddresses,
   ensureTronAllowedTokens,
   fundTronAccounts,
@@ -485,9 +486,13 @@ const STEPS: readonly SetupStep[] = [
     verifyForkDependencies,
   ],
   ["setup: deploy the test TRC-20 on the Tron chain (when TRON_RPC_URL is set)", ensureTestTrc20],
-  ["setup: default TRON_ALLOWED_TOKENS to the test TRC-20", ensureTronAllowedTokens],
+  [
+    "setup: deploy the USDT-like test TRC-20 as TRON_USDT_ADDRESS (when TRON_RPC_URL is set)",
+    ensureTestUsdtLikeTrc20,
+  ],
+  ["setup: default TRON_ALLOWED_TOKENS to the test TRC-20s", ensureTronAllowedTokens],
   ["setup: check/derive vault and user Tron addresses", ensureTronAddresses],
-  ["setup: fund the user's derived Tron account (TRX + test TRC-20)", fundTronAccounts],
+  ["setup: fund the user's derived Tron account (TRX + test TRC-20s)", fundTronAccounts],
   [
     "setup: print MPC server configuration",
     (env) => {

@@ -56,7 +56,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           });
           const info = await broadcastTron(tron, { ...signed, timeoutMs: POLL_TIMEOUT_MS });
           expect(info.receiptResult, "the over-balance transfer must revert").toBe("REVERT");
-          return pollTronRespondBidirectional(context, {
+          return pollTronRespondBidirectional(context, tron, {
             requestId: id,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,

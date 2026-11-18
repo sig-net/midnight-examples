@@ -47,7 +47,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
             timeoutMs: POLL_TIMEOUT_MS,
             expectedOwner: tron.tronUserAddress.base58,
           });
-          const attested = await pollTronRespondBidirectional(context, {
+          const attested = await pollTronRespondBidirectional(context, tron, {
             requestId,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS + Number(WINDOW_MS),
