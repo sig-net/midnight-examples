@@ -32,7 +32,7 @@ import { vaultTronTokenType } from "../src/vault-token.ts";
 const MINUTE = 60_000;
 
 const env = injectE2eEnv();
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 const DEPOSIT_AMOUNT = 1_000_000n;
 
@@ -122,13 +122,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
       "the MPC signs the Tron transaction id with the user's derived Tron key",
       async () => {
         const context = await session.vaultContext();
-        const { tronRpcUrl, funder, tronUserAddress } = await tron();
+        const { tronRpcUrl, funder, mpcRootPublicKey } = await tron();
         signed = await withTronBlockPusher(tronRpcUrl, funder, () =>
           pollTronSignedTransaction(context, {
             requestId,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
-            expectedOwner: tronUserAddress.base58,
+            mpcRootPublicKey,
           }),
         );
         expect(signed.signedTransaction.length).toBeGreaterThan(0);

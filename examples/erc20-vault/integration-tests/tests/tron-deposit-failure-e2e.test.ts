@@ -18,7 +18,7 @@ import { createVaultSession } from "../src/vault-session.ts";
 const MINUTE = 60_000;
 
 const env = injectE2eEnv();
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
   "erc20-vault Tron deposit failure e2e: a reverted transfer closes the request with no mint",
@@ -52,7 +52,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
             requestId: id,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
-            expectedOwner: tron.tronUserAddress.base58,
+            mpcRootPublicKey: tron.mpcRootPublicKey,
           });
           const info = await broadcastTron(tron, { ...signed, timeoutMs: POLL_TIMEOUT_MS });
           expect(info.receiptResult, "the over-balance transfer must revert").toBe("REVERT");

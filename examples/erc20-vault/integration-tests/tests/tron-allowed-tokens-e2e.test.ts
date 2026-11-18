@@ -15,14 +15,17 @@ import { createVaultSession } from "../src/vault-session.ts";
 const MINUTE = 60_000;
 
 const env = injectE2eEnv();
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 const STRANGER_SEED = "0000000000000000000000000000000000000000000000000000000000000044";
-const strangerSession = createVaultSession({
-  ...env,
-  USER_SEED: STRANGER_SEED,
-  VAULT_USER_SECRET_KEY: STRANGER_SEED,
-});
+const strangerSession = createVaultSession(
+  {
+    ...env,
+    USER_SEED: STRANGER_SEED,
+    VAULT_USER_SECRET_KEY: STRANGER_SEED,
+  },
+  "stranger",
+);
 
 const UNLISTED_TRC20 = `0x${bytesToHex(crypto.getRandomValues(new Uint8Array(20)))}`;
 

@@ -1,9 +1,8 @@
 import {
   bytesToHex,
   evmAddressAbiWord,
-  type EvmTraceOutput,
-  EvmTraceOutputKind,
   hexToBytes,
+  type JsonValue,
   numericAbiWord,
   tronAddressFromEvm,
 } from "@sig-net/midnight";
@@ -72,44 +71,33 @@ export function tronReference(block: TronHeadBlock): TronReference {
 export interface TronTransactionInfo {
   readonly blockNumber: bigint;
   readonly receiptResult: string;
-  readonly contractResult: readonly Uint8Array[];
+  readonly receipt: JsonValue;
 }
 
 interface TransactionInfoAnswer {
   readonly blockNumber?: number;
   readonly receipt?: { readonly result?: string };
-  readonly contractResult?: readonly string[];
 }
 
 /**
  * @param rpcUrl - The node's HTTP API base URL
  * @param txid - The 32-byte transaction id
- * @returns The block and the execution result
+ * @returns The block, the execution result and the whole receipt
  */
 export async function getTronTransactionInfo(
   rpcUrl: string,
   txid: Uint8Array,
 ): Promise<TronTransactionInfo | undefined> {
-  const answer = (await tronPost(rpcUrl, "/wallet/gettransactioninfobyid", {
+  const receipt = (await tronPost(rpcUrl, "/wallet/gettransactioninfobyid", {
     value: bytesToHex(txid),
-  })) as TransactionInfoAnswer;
+  })) as JsonValue;
+  const answer = receipt as TransactionInfoAnswer;
   if (answer.blockNumber === undefined) return undefined;
   return {
     blockNumber: BigInt(answer.blockNumber),
     receiptResult: answer.receipt?.result ?? "SUCCESS",
-    contractResult: (answer.contractResult ?? []).map((data) => hexToBytes(data)),
+    receipt,
   };
-}
-
-/**
- * @param info - The transaction's receipt
- * @returns The top call's return data, `contractResult[0]`, as the MPC reads it
- */
-export function tronExecutionTrace(info: TronTransactionInfo): EvmTraceOutput {
-  const [returnData] = info.contractResult;
-  return returnData === undefined
-    ? { kind: EvmTraceOutputKind.NoReturnData }
-    : { kind: EvmTraceOutputKind.Output, returnData };
 }
 
 interface BroadcastAnswer {

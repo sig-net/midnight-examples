@@ -17,7 +17,7 @@ import { createVaultSession } from "../src/vault-session.ts";
 const MINUTE = 60_000;
 
 const env = injectE2eEnv();
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 const WINDOW_MS = 60_000n;
 
@@ -45,7 +45,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
             requestId,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
-            expectedOwner: tron.tronUserAddress.base58,
+            mpcRootPublicKey: tron.mpcRootPublicKey,
           });
           const attested = await pollTronRespondBidirectional(context, tron, {
             requestId,

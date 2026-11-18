@@ -20,7 +20,7 @@ import { vaultTronTokenType } from "../src/vault-token.ts";
 const MINUTE = 60_000;
 
 const env = injectE2eEnv();
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 const DEPOSIT_AMOUNT = 1_000_000n;
 

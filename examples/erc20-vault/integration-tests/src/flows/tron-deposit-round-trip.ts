@@ -58,7 +58,7 @@ export async function runTronDepositRoundTrip(
       requestId,
       intervalMs: 1000,
       timeoutMs: POLL_TIMEOUT_MS,
-      expectedOwner: tron.tronUserAddress.base58,
+      mpcRootPublicKey: tron.mpcRootPublicKey,
     });
     const info = await broadcastTron(tron, { ...signed, timeoutMs: POLL_TIMEOUT_MS });
     if (info.receiptResult !== "SUCCESS") {

@@ -1,7 +1,7 @@
 import {
   buildTronRawTransaction,
+  deriveSignBidirectionalEventSignerTronAddress,
   type RequestIdHex,
-  tronAddressFromBase58,
   tronTransactionId,
 } from "@sig-net/midnight";
 import { VAULT_TRON_DEPOSIT_REQUESTS_PATH } from "@sig-net/midnight-examples-erc20-vault-contract";
@@ -15,7 +15,7 @@ export interface PollTronSignedTransactionOptions {
   readonly requestId: RequestIdHex;
   readonly intervalMs: number;
   readonly timeoutMs: number;
-  readonly expectedOwner: string;
+  readonly mpcRootPublicKey: string;
 }
 
 /** */
@@ -35,12 +35,11 @@ export async function pollTronSignedTransaction(
   options: PollTronSignedTransactionOptions,
 ): Promise<SignedTronTransaction> {
   console.log(`request id:         ${options.requestId}`);
-  console.log(`expected owner:     ${options.expectedOwner}`);
   const reader = createResponseReader(context, VAULT_TRON_DEPOSIT_REQUESTS_PATH);
   const request = await reader.getTronSignatureRequest(options.requestId);
-  const txid = tronTransactionId(
-    buildTronRawTransaction(request.txParams, tronAddressFromBase58(options.expectedOwner)),
-  );
+  const owner = deriveSignBidirectionalEventSignerTronAddress(options.mpcRootPublicKey, request);
+  console.log(`expected owner:     ${owner.base58}`);
+  const txid = tronTransactionId(buildTronRawTransaction(request.txParams, owner.bytes));
   const progress = new PollProgress(`Tron signature ${options.requestId}`, options.timeoutMs);
   const giveUp = new AbortController();
   const timer = setTimeout(() => {
@@ -50,7 +49,7 @@ export async function pollTronSignedTransaction(
     while (!giveUp.signal.aborted) {
       const signedTransaction = await reader.getSignedTronTransaction(
         options.requestId,
-        options.expectedOwner,
+        options.mpcRootPublicKey,
       );
       if (signedTransaction !== undefined) {
         console.log("valid Tron signature found");

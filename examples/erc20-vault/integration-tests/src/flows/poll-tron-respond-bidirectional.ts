@@ -1,6 +1,7 @@
 import {
   assembleCalldata,
   buildTronRawTransaction,
+  evmTraceOutputFromTronReceipt,
   executedEvmRespondOutput,
   isEvmContractCall,
   OutputKind,
@@ -16,7 +17,7 @@ import { EMPTY_OUTPUT } from "../empty-output.ts";
 import { PollProgress } from "../poll-progress.ts";
 import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
 import type { TronContext } from "../tron-context.ts";
-import { getTronTransactionInfo, tronExecutionTrace } from "../tron-http.ts";
+import { getTronTransactionInfo } from "../tron-http.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import type { RespondOutcome } from "./respond-output.ts";
 
@@ -83,7 +84,7 @@ export async function pollTronRespondBidirectional(
           output = executedEvmRespondOutput(
             request.outputDeserializationSchema,
             isContractCall,
-            tronExecutionTrace(info),
+            evmTraceOutputFromTronReceipt(info.receipt),
           );
         } catch (error) {
           progress.failure("decode", `Tron execution output decode failed: ${String(error)}`);

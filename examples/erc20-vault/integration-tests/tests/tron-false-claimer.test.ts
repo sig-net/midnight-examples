@@ -13,14 +13,17 @@ import { createVaultSession } from "../src/vault-session.ts";
 const MINUTE = 60_000;
 
 const env = injectE2eEnv();
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 const FALSE_CLAIMER_SEED = "0000000000000000000000000000000000000000000000000000000000000043";
-const falseClaimerSession = createVaultSession({
-  ...env,
-  USER_SEED: FALSE_CLAIMER_SEED,
-  VAULT_USER_SECRET_KEY: FALSE_CLAIMER_SEED,
-});
+const falseClaimerSession = createVaultSession(
+  {
+    ...env,
+    USER_SEED: FALSE_CLAIMER_SEED,
+    VAULT_USER_SECRET_KEY: FALSE_CLAIMER_SEED,
+  },
+  "false claimer",
+);
 
 const DEPOSIT_AMOUNT = 1_000_000n;
 

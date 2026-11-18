@@ -17,7 +17,7 @@ import { vaultTronTokenType } from "../src/vault-token.ts";
 const MINUTE = 60_000;
 
 const env = injectE2eEnv();
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 const DEPOSIT_AMOUNT = 1_000_000n;
 
@@ -43,7 +43,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
         );
         const readRecipientBalance = (): Promise<bigint> =>
-          withSyncedWalletFacade(keys, nodeConfig, (_facade, state) =>
+          withSyncedWalletFacade(keys, nodeConfig, "recipient", env, (_facade, state) =>
             Promise.resolve(state.shielded.balances[color] ?? 0n),
           );
         const before = await readRecipientBalance();

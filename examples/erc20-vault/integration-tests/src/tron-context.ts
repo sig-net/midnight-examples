@@ -10,6 +10,7 @@ export interface TronContext {
   readonly trc20Address: Uint8Array;
   readonly tronUserAddress: TronAddress;
   readonly tronVaultAddress: TronAddress;
+  readonly mpcRootPublicKey: string;
   readonly funder: TronFunder;
 }
 
@@ -50,6 +51,7 @@ export async function createTronContext(env: NodeJS.ProcessEnv): Promise<TronCon
     trc20Address: evmAddressBytes(requireEnv(env, "TRC20_ADDRESS")),
     tronUserAddress: { bytes: userBytes, base58: requireEnv(env, "TRON_USER_ADDRESS") },
     tronVaultAddress: { bytes: vaultBytes, base58: requireEnv(env, "TRON_VAULT_ADDRESS") },
+    mpcRootPublicKey: requireEnv(env, "MPC_SECP256K1_PUBKEY"),
     funder: await resolveTronFunder(env),
   };
 }
