@@ -15,21 +15,26 @@ export interface BroadcastTronOptions {
   readonly timeoutMs: number;
 }
 
+/** */
+export interface BroadcastTronResult extends TronTransactionInfo {
+  readonly alreadyLanded: boolean;
+}
+
 /**
  * @param tron - The Tron context
  * @param options - The transaction and how long to wait
- * @returns Where and how it executed
+ * @returns Where and how it executed, and whether it was already in a block before this call
  * @throws {Error} If the node refuses the transaction
  */
 export async function broadcastTron(
   tron: TronContext,
   options: BroadcastTronOptions,
-): Promise<TronTransactionInfo> {
+): Promise<BroadcastTronResult> {
   const txidHex = bytesToHex(options.txid);
   const landed = await getTronTransactionInfo(tron.tronRpcUrl, options.txid);
   if (landed !== undefined) {
     console.log(`Tron transaction ${txidHex} already in block ${String(landed.blockNumber)}`);
-    return landed;
+    return { ...landed, alreadyLanded: true };
   }
   const submitted = await broadcastTronHex(tron.tronRpcUrl, options.signedTransaction);
   console.log(
@@ -39,5 +44,5 @@ export async function broadcastTron(
   console.log(
     `Tron transaction ${txidHex} in block ${String(info.blockNumber)}: ${info.receiptResult}`,
   );
-  return info;
+  return { ...info, alreadyLanded: false };
 }

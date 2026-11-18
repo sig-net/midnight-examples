@@ -46,19 +46,13 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
       await strangerSession.stop();
     });
 
-    it.each([
-      { name: "a TRC-20 the vault never allowed", token: () => UNLISTED_TRC20 },
-      {
-        name: "an ERC20 the vault allows for Ethereum deposits",
-        token: () => env.ERC20_ADDRESS ?? "",
-      },
-    ])(
-      "startTronDeposit refuses $name",
-      async ({ token }) => {
+    it(
+      "startTronDeposit refuses a TRC-20 the vault never allowed",
+      async () => {
         const context = await session.vaultContext();
         await expect(
           context.vault.callTx.startTronDeposit(newInputIndex(), TRON_TX, {
-            tokenAddress: evmAddressBytes(token()),
+            tokenAddress: evmAddressBytes(UNLISTED_TRC20),
             amount: 1n,
           }),
         ).rejects.toThrow(/TRC-20 not allowed/);

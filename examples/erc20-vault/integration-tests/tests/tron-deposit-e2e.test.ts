@@ -147,7 +147,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         );
         expect(info.receiptResult).toBe("SUCCESS");
         const vaultAfter = await getTrc20Balance(t.tronRpcUrl, token, t.tronVaultAddress.bytes);
-        if (vaultAfter === vaultBefore) {
+        if (info.alreadyLanded) {
           logSkip("vault balance delta", "the transfer landed in a prior run");
           return;
         }
