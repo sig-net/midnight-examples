@@ -1,14 +1,14 @@
 import {
-  CallTxFailedError,
   createCallTxOptions,
   createUnprovenCallTx,
   submitTx,
+  TxFailedError,
 } from "@midnight-ntwrk/midnight-js/contracts";
-import { getNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import {
   encodeContractKeyLocation,
   FailFallible,
   hashVerifierKey,
+  LedgerTransaction,
   SucceedEntirely,
 } from "@midnight-ntwrk/midnight-js/types";
 import {
@@ -17,7 +17,7 @@ import {
   ContractState,
   Intent,
   Transaction,
-} from "@midnight-ntwrk/midnight-js-protocol/ledger";
+} from "@midnight-ntwrk/midnight-js-protocol/v9";
 import { bytesToHex } from "@sig-net/midnight";
 
 import {
@@ -156,10 +156,9 @@ async function submitFlush(
     privateStateId: VAULT_PRIVATE_STATE_ID,
   });
   const [guaranteed, fallible] = call.public.partitionedTranscript;
-  const raw = await providers.publicDataProvider.queryContractState(vaultContractAddress);
-  // The indexer's state is the runtime's ContractState class, and ContractCallPrototype
-  // accepts only the ledger's own ContractOperation: round-trip through bytes.
-  const state = raw && ContractState.deserialize(raw.serialize());
+  const read = await providers.publicDataProvider.queryContractState(vaultContractAddress);
+  // ContractCallPrototype accepts only the ledger's own ContractOperation.
+  const state = read?.contractState.deserialize({ v9: ContractState });
   const operation = state?.operation("flushQueue");
   if (!operation?.verifierKey) {
     throw new Error(`flushQueue has no verifier key on chain at ${vaultContractAddress}`);
@@ -181,10 +180,21 @@ async function submitFlush(
     }),
   );
   const intent = Intent.new(new Date(Date.now() + FLUSH_TTL_MS)).addCall(prototype);
-  const unprovenTx = Transaction.fromPartsRandomized(getNetworkId(), undefined, undefined, intent);
-  const finalized = await submitTx(providers, { unprovenTx, circuitId: "flushQueue" });
+  const unprovenTx = Transaction.fromPartsRandomized(
+    providers.config.networkId,
+    undefined,
+    undefined,
+    intent,
+  );
+  const finalized = await submitTx(providers, {
+    unprovenTx: LedgerTransaction.seal("v9", "Unproven", unprovenTx),
+    circuitId: "flushQueue",
+  });
   if (finalized.status !== SucceedEntirely) {
-    throw new CallTxFailedError(finalized, "flushQueue");
+    throw new TxFailedError("call", finalized, {
+      circuitId: "flushQueue",
+      contractAddress: vaultContractAddress,
+    });
   }
 }
 
@@ -241,7 +251,7 @@ function movableItems(state: VaultLedgerState, first: FlushItems): FlushItems {
  * read and the flush is built on a second, so another flush landing between them fails
  * the build with one of `flushQueue`'s own asserts. The
  * flush's ledger work runs in the transaction's fallible section, so a flush that loses
- * a race to another flush after it is built lands as a {@link CallTxFailedError} with
+ * a race to another flush after it is built lands as a {@link TxFailedError} with
  * status `FailFallible` and still pays its fee.
  *
  * @param providers - The vault's provider set, whose wallet pays for the flush.
@@ -249,7 +259,7 @@ function movableItems(state: VaultLedgerState, first: FlushItems): FlushItems {
  * @param vaultContractAddress - The vault's contract address.
  * @param first - Items to carry ahead of every other waiting item.
  * @returns How many slots the flush filled, 0 when it submitted nothing.
- * @throws {CallTxFailedError} When the flush lands but does not succeed entirely.
+ * @throws {TxFailedError} When the flush lands but does not succeed entirely.
  * @throws {Error} With `flushQueue`'s assert message when another flush moved an
  *   item after it was chosen.
  */
@@ -307,8 +317,8 @@ export async function flushUntil(
       carried = await flushPending(providers, compiledContract, vaultContractAddress, first);
     } catch (error) {
       const lostRace =
-        error instanceof CallTxFailedError
-          ? error.finalizedTxData.status === FailFallible
+        error instanceof TxFailedError
+          ? error.record.status === FailFallible
           : error instanceof Error && FLUSH_RACE_ASSERT.test(error.message);
       if (!lostRace) throw error;
       console.log(`flush attempt ${String(attempt + 1)} lost a race to another flush`);

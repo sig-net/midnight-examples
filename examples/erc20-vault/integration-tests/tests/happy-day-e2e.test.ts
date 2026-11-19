@@ -98,13 +98,16 @@ const calldataWordAt = (words: readonly Uint8Array[], index: number): Uint8Array
 // Wallet facade + vault context + MPC-style reader shared by every test in
 // this file (lazily built, so the offline path never touches the network);
 // stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // The fee recipient's session: the deployer wallet, which the local initialise
 // names as the recipient of every fee coin. Only its wallet is read, to see the
 // withdraw fee arrive. Read leniently at module scope: offline the injected env
 // is empty and the suite skips before any test touches it.
-const feeRecipientSession = createVaultSession({ ...env, USER_SEED: env.DEPLOYER_SEED ?? "" });
+const feeRecipientSession = createVaultSession(
+  { ...env, USER_SEED: env.DEPLOYER_SEED ?? "" },
+  "deployer",
+);
 
 // The withdraw leg drives 0.1 USDC back OUT of the vault: the deposit leg funds
 // that principal plus the withdraw fee the start takes on top of it.
@@ -125,7 +128,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       const readLedger = () =>
         readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress);
 
-      // The same arguments the stagenet deploy+initialise entrypoint resolves, from the
+      // The same arguments the deploy+initialise entrypoint resolves, from the
       // same env. A rerun against a kept, initialised contract is a no-op inside initialise.
       const config = await resolveInitialiseConfig(env, context.vaultContractAddress);
       const outcome = await initialise(context, config);
@@ -254,8 +257,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
         "",
         `  request id: ${depositTransactionSignatureRequestId}`,
         "",
-        "The response server (MIDNIGHT_SIGNET_CONTRACT_ADDRESS set) polls the",
-        "signet contract's emitted notification events and should pick it up",
+        "The response server (MIDNIGHT_SIGNER_CONTRACT_ADDRESS set) polls the",
+        "signet signer's emitted notification events and should pick it up",
         "on its next poll — resolving it from THIS vault's ledger — and sign the EVM tx.",
       ]);
     },
@@ -263,11 +266,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   it(
-    "golden notification: the vault's deposit emitted a decodable notification event on the signet contract",
+    "golden notification: the vault's deposit emitted a decodable notification event on the signet signer",
     async () => {
       // Pins the SignBidirectionalNotification payload layout against a LIVE
       // indexer, read exactly the way the MPC reads it — the signet
-      // contract's emitted Misc events through the shared event decoders.
+      // signer's emitted Misc events through the shared event decoders.
       // The vault's deposit cross-contract-called signBidirectional to emit
       // this.
       expect(depositTransactionSignatureRequestId).toBeDefined();
@@ -305,7 +308,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   let signedDepositSweepTransaction: Transaction;
 
   it(
-    "pollSignatureResponse: poll signet contract for sweep transaction signature response",
+    "pollSignatureResponse: poll signet responder for sweep transaction signature response",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
@@ -320,7 +323,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       });
 
       banner([
-        `MPC signed Response for request ${depositTransactionSignatureRequestId} found from Signet Contract.`,
+        `MPC signed Response for request ${depositTransactionSignatureRequestId} found on the signet responder.`,
         "",
         `Signature: ${signedDepositSweepTransaction.serialized}`,
       ]);
@@ -374,7 +377,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   let depositSweepTransactionRespondBidirectional: RespondOutcome;
 
   it(
-    "pollRespondBidirectional: poll signet contract for sweep transaction attestation",
+    "pollRespondBidirectional: poll signet responder for sweep transaction attestation",
     async () => {
       expect(depositTransactionSignatureRequestId).toBeDefined();
 
@@ -419,7 +422,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       );
 
       banner([
-        `Found deposit RespondBidirectionalEvent (verified) on the signet contract: ` +
+        `Found deposit RespondBidirectionalEvent (verified) on the signet responder: ` +
           `success '${String(outcome.succeeded)}' ` +
           `(payload 0x${bytesToHex(outcome.serializedOutput)}, ${String(outcome.serializedOutput.length)} byte(s), ` +
           `kind ${OutputKind[outcome.event.outputKind]}, block ${String(outcome.event.blockHeight)})`,
@@ -614,7 +617,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   );
 
   it(
-    "watch withdraw signature request: the withdraw emitted a notification event on the signet contract",
+    "watch withdraw signature request: the withdraw emitted a notification event on the signet signer",
     async () => {
       // The same event poll the MPC runs for discovery: sendWithdraw
       // cross-contract-called signBidirectional to emit this.
@@ -646,7 +649,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   let signedWithdrawTransaction: Transaction;
 
   it(
-    "pollSignatureResponse: poll signet contract for withdraw transaction signature response",
+    "pollSignatureResponse: poll signet responder for withdraw transaction signature response",
     async () => {
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
 
@@ -662,7 +665,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       });
 
       banner([
-        `MPC signed response for withdraw request ${withdrawTransactionSignatureRequestId} found from Signet Contract.`,
+        `MPC signed response for withdraw request ${withdrawTransactionSignatureRequestId} found on the signet responder.`,
         "",
         `Signature: ${signedWithdrawTransaction.serialized}`,
       ]);
@@ -717,7 +720,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
   let withdrawRespondBidirectional: RespondOutcome;
 
   it(
-    "pollRespondBidirectional: poll signet contract for withdraw transaction attestation",
+    "pollRespondBidirectional: poll signet responder for withdraw transaction attestation",
     async () => {
       expect(withdrawTransactionSignatureRequestId).toBeDefined();
 
@@ -737,7 +740,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault happy-day e2e",
       ).toBe(true);
 
       banner([
-        `Found withdraw RespondBidirectionalEvent (verified) on the signet contract: ` +
+        `Found withdraw RespondBidirectionalEvent (verified) on the signet responder: ` +
           `success '${String(withdrawRespondBidirectional.succeeded)}' ` +
           `(payload 0x${bytesToHex(withdrawRespondBidirectional.serializedOutput)})`,
       ]);

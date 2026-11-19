@@ -48,17 +48,20 @@ const MINUTE = 60_000;
 const env = injectE2eEnv();
 
 // The deployer's session: the suites' user identity is the deployer's.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // The stranger's seed AND identity secret: one fixed constant serving as both,
 // different from every other suite's (`…42`, `…43`).
 const STRANGER_SEED = "0000000000000000000000000000000000000000000000000000000000000044";
 
-const strangerSession = createVaultSession({
-  ...env,
-  USER_SEED: STRANGER_SEED,
-  VAULT_USER_SECRET_KEY: STRANGER_SEED,
-});
+const strangerSession = createVaultSession(
+  {
+    ...env,
+    USER_SEED: STRANGER_SEED,
+    VAULT_USER_SECRET_KEY: STRANGER_SEED,
+  },
+  "stranger",
+);
 
 // An ERC20 no vault has allowed: fresh each run.
 const UNLISTED_ERC20 = `0x${bytesToHex(crypto.getRandomValues(new Uint8Array(20)))}`;

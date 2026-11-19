@@ -90,7 +90,7 @@ As illustrated, the flow comprises 9 steps:
     whose width is part of the redeem map's ledger type.
   - The record goes into `bidirectionalRedeemMap` under its request id, signed
     for the vault's own account (path `pad(32, "vault")`) at the assigned
-    nonce and the gas the start copied, and the singleton's
+    nonce and the gas the start copied, and the signet signer's
     `signBidirectional(...)` call carries the map's path
     ([`VAULT_REDEEM_REQUESTS_PATH`](../../contract/src/index.ts)).
 - **4.** poll for the MPC's signature
@@ -156,7 +156,7 @@ integration tests take it from the `VAULT_USER_SECRET_KEY` environment
 variable, falling back to the `USER_SEED` bytes when it is unset.
 
 The two polling steps (4 and 6) each build a `SignetRequestResponseReader` over
-the vault and singleton pair through
+the vault and responder pair through
 [`createResponseReader`](../../integration-tests/src/vault-context.ts),
 pointed at the redeem map's ledger-tree path. The expected signer is the
 vault's own account, whose derivation path is the contract-fixed

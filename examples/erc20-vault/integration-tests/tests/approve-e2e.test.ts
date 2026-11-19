@@ -74,7 +74,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // The deployer's session: wallet facade + vault context shared by every test in
 // this file (lazily built, so the offline path never touches the network),
 // stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 /** The ERC20 an approval is sent to and the spender it grants, as 0x hex. */
 interface Allowance {
@@ -229,7 +229,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
           });
 
           banner([
-            `MPC signed response for the ${name} ${requestId} found from Signet Contract.`,
+            `MPC signed response for the ${name} ${requestId} found on the signet responder.`,
             "",
             `Signed tx hash: ${signedTxHash(signedTransaction)}`,
           ]);

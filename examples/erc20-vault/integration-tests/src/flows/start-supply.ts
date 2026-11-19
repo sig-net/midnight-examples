@@ -7,7 +7,7 @@
 // (path "vault"). The request id is recomputed off-chain with the library's TS twin
 // of the request-id circuit and asserted against the ledger map index before it is
 // returned. The settle side lives in complete-supply.ts.
-import { withContractScopedTransaction } from "@midnight-ntwrk/midnight-js/contracts";
+import { createCallTxOptions, submitCallTx } from "@midnight-ntwrk/midnight-js/contracts";
 import {
   bytesToHex,
   calculateRequestId,
@@ -29,8 +29,10 @@ import {
   newInputIndex,
   readVaultLedger,
   VAULT_PATH_BYTES,
+  VAULT_PRIVATE_STATE_ID,
   vaultTokenFees,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-deploy";
 
 import { logEvmFeeCap, logTokenAmount } from "../evm-logging.ts";
 import { STATA_DEPOSIT_SELECTOR } from "../evm-stata.ts";
@@ -108,13 +110,17 @@ export async function startSupply(
   };
 
   const inIndex = newInputIndex();
-  const queued = await withContractScopedTransaction(
-    context.providers,
-    async (txCtx) => {
-      await context.vault.callTx.startSupply(txCtx, inIndex, { amount: options.amount }, coin);
-    },
-    { additionalCoinEncPublicKeyMappings: feeRecipientEncryptionMapping(before) },
-  );
+  const queued = await submitCallTx(context.providers, {
+    ...createCallTxOptions(
+      vaultCompiledContract,
+      "startSupply",
+      context.vaultContractAddress,
+      VAULT_PRIVATE_STATE_ID,
+      feeRecipientEncryptionMapping(before),
+      [inIndex, { amount: options.amount }, coin],
+    ),
+    privateStateId: VAULT_PRIVATE_STATE_ID,
+  });
   console.log(`supply queued in tx ${queued.public.txId}`);
   const flushed = await flushUntil(context, (state) => !state.inputRequestBuffer.member(inIndex), {
     inIndexes: [inIndex],

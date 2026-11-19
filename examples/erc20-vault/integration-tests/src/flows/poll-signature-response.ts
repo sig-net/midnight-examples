@@ -1,5 +1,5 @@
-// `pollSignatureResponse` — stage 1 of the MPC round trip: poll the central
-// signet contract's emitted signature response events by request id until the
+// `pollSignatureResponse`: stage 1 of the MPC round trip. Poll the signet
+// responder's emitted signature response events by request id until the
 // MPC's ECDSA signature over a request's EVM transaction appears, verifying
 // every post on the way. There is deliberately no push/websocket alternative.
 import { type RequestIdHex, signBidirectionalEventToSignedEvmTransaction } from "@sig-net/midnight";
@@ -33,7 +33,7 @@ export interface PollSignatureResponseOptions {
 }
 
 /**
- * Poll the signet contract until a VALID signature response for
+ * Poll the signet responder until a VALID signature response for
  * `options.requestId` appears among its emitted response events, then
  * reconstruct and return the fully signed EVM transaction as a typed ethers
  * {@link Transaction}, ready to hand straight to `broadcastEvm`. Serialize
@@ -63,7 +63,7 @@ export async function pollSignatureResponse(
   context: VaultContext,
   options: PollSignatureResponseOptions,
 ): Promise<Transaction> {
-  console.log(`signet contract:   ${context.signetContractAddress}`);
+  console.log(`signet responder:   ${context.responderContractAddress}`);
   console.log(`request id:         ${options.requestId}`);
   console.log(`expected signer:    ${options.expectedSigner}`);
   console.log(

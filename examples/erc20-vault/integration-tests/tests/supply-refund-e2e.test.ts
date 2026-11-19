@@ -83,7 +83,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // Wallet facade + vault context shared by every test in this file (lazily
 // built, so the offline path never touches the network), stopped once in
 // afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // 1 USDC (6 decimals): deposited, burned by the doomed supply, and re-minted whole.
 const SUPPLY_AMOUNT = 1_000_000n;
@@ -280,7 +280,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         banner([
-          `MPC signed response for doomed supply ${supplyRequestId} found from Signet Contract.`,
+          `MPC signed response for doomed supply ${supplyRequestId} found on the signet responder.`,
           "",
           `Signed tx hash: ${signedTxHash(signedSupplyTransaction)}`,
         ]);

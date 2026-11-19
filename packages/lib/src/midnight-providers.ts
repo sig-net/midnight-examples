@@ -8,52 +8,57 @@
 // lives with each contract package, since it depends on that package's
 // compiled assets.
 import {
-  createProofProvider,
+  createLedger9MidnightProvider,
+  createLedger9ProofProvider,
+  createLedger9WalletProvider,
   type MidnightProvider,
   type ProofProvider,
-  type UnboundTransaction,
   type WalletProvider,
   type ZKConfigProvider,
   ZKConfigRegistry,
-  zkConfigToProvingKeyMaterial,
 } from "@midnight-ntwrk/midnight-js/types";
 import { httpClientProvingProvider } from "@midnight-ntwrk/midnight-js-http-client-proof-provider";
-import type { ProvingKeyMaterial, ProvingProvider } from "@midnightntwrk/ledger-v9";
-import { ContractCall } from "@midnightntwrk/ledger-v9";
+import type { ProvingProvider } from "@midnightntwrk/ledger-v9";
+import { ContractCall, Transaction } from "@midnightntwrk/ledger-v9";
 import type { AccountKeys, NetworkId, WalletFacade } from "@sig-net/midnight-contract-deploy";
 
 import { withOperationProgress } from "./operation-progress.ts";
 import { ensureTransactionFee } from "./transaction-fees.ts";
+
+/** The wallet halves of a midnight-js provider set, both backed by one facade. */
+export interface FacadeWalletProviders {
+  /** Balances, signs and proves midnight-js's unbound transactions. */
+  readonly walletProvider: WalletProvider;
+  /** Submits midnight-js's finalized transactions. */
+  readonly midnightProvider: MidnightProvider;
+}
 
 // Balancing recipes expire 30 min out (same TTL as submitUnprovenTransaction).
 const BALANCE_TTL_MS = 30 * 60 * 1000;
 
 /**
  * Adapt a started {@link WalletFacade} + {@link AccountKeys} to midnight-js's
- * `WalletProvider & MidnightProvider`. `balanceTx` balances the unbound
- * transaction with the account's shielded/dust keys, signs, then finalizes
- * (which proves); `submitTx` relays through the facade.
- *
- * The midnight-js ledger types come from `midnight-js-protocol`; the facade
- * uses `ledger-v9`. They are the same underlying classes, so the values pass
- * straight through — the casts only bridge the two packages' nominal type
- * identities.
+ * ledger-9 `WalletProvider` and `MidnightProvider`. `balanceTx` funds the
+ * fee, balances, signs, then finalizes (which proves). Transactions cross
+ * between the two SDKs as bytes: midnight-js and the facade each seal them in
+ * their own handle type.
  *
  * @param facade - A started (and synced) wallet facade.
- * @param keys - The key material of the same wallet, for balancing and signing.
+ * @param keys - The key material of the same wallet, whose keystore signs the balancing inputs.
  * @param networkId - The network used for wallet funding addresses.
- * @returns The provider pair midnight-js uses as balancer + submitter.
+ * @returns The balancer and submitter midnight-js uses.
  */
-export function createWalletAndMidnightProvider(
+export function createFacadeWalletProviders(
   facade: WalletFacade,
   keys: AccountKeys,
   networkId: NetworkId,
-): WalletProvider & MidnightProvider {
-  return {
+): FacadeWalletProviders {
+  const walletProvider = createLedger9WalletProvider({
     getCoinPublicKey: () => keys.shieldedSecretKeys.coinPublicKey,
     getEncryptionPublicKey: () => keys.shieldedSecretKeys.encryptionPublicKey,
-    async balanceTx(tx: UnboundTransaction, ttl?: Date) {
-      const intents = [...(tx.intents?.values() ?? [])];
+    async balanceTx(tx, ttl) {
+      const unbound = facade.adoptTransaction(tx.serialize(), "Unbound");
+      const intents = [...(tx.deserialize({ v9: Transaction }).intents?.values() ?? [])];
       const expires: number = Math.min(
         ttl?.getTime() ?? Date.now() + BALANCE_TTL_MS,
         ...intents.map((intent) => intent.ttl.getTime()),
@@ -68,15 +73,10 @@ export function createWalletAndMidnightProvider(
         )
         .join(", ");
       const label = `Midnight ${calls || "transaction"}`;
-      await ensureTransactionFee(facade, keys, networkId, tx, expires, label);
+      await ensureTransactionFee(facade, keys, networkId, unbound, expires, label);
       const recipe = await withOperationProgress(
         `${label} balancing`,
-        () =>
-          facade.balanceUnboundTransaction(
-            tx,
-            { shieldedSecretKeys: keys.shieldedSecretKeys, dustSecretKey: keys.dustSecretKey },
-            { ttl: new Date(expires) },
-          ),
+        () => facade.balanceUnboundTransaction(unbound, { ttl: new Date(expires) }),
         deadline,
       );
       const signed = await facade.signRecipe(recipe, keys.unshieldedKeystore.signDataAsync);
@@ -86,14 +86,17 @@ export function createWalletAndMidnightProvider(
         expires,
       );
     },
-    async submitTx(tx) {
-      return await withOperationProgress("Midnight submission", async () => {
-        const id = await facade.submitTransaction(tx);
-        console.log(`Midnight submitted transaction: ${id}`);
-        return id;
-      });
-    },
-  };
+  });
+  const midnightProvider = createLedger9MidnightProvider((tx) =>
+    withOperationProgress("Midnight submission", async () => {
+      const id = await facade.submitTransaction(
+        facade.adoptTransaction(tx.serialize(), "Finalized"),
+      );
+      console.log(`Midnight submitted transaction: ${id}`);
+      return id;
+    }),
+  );
+  return { walletProvider, midnightProvider };
 }
 
 /** Phase of one proof-server round trip reported to a {@link ProofServerObserver}. */
@@ -182,11 +185,9 @@ async function withConnectionRetry<T>(what: string, call: () => Promise<T>): Pro
  * circuit-name collisions across contracts. Pass one `ZKConfigProvider` per
  * compiled contract the call can reach (the caller plus every callee).
  *
- * Exists instead of midnight-js's own `httpClientProofProvider` because it
+ * Exists beside midnight-js's own `httpClientProofProvider` because it
  * adds a retry of connection-level failures on every /check and /prove and
- * the per-attempt {@link ProofServerObserver}. Its `lookupKey` was first
- * grafted on because midnight-js 5.0.0-beta.3 had none, which the ledger-v9
- * 1.0.0-rc.3 WASM rejects; the 5.0.0-beta.6 this workspace pins provides one.
+ * the per-attempt {@link ProofServerObserver}.
  *
  * @param proofServerUrl - The proof server's HTTP endpoint.
  * @param zkConfigProviders - One provider per compiled contract in the call tree; must be non-empty.
@@ -205,43 +206,17 @@ export function createCrossContractProofServerProvider(
     );
   }
 
-  const registry = new ZKConfigRegistry([...zkConfigProviders]);
-
-  // Pass the REGISTRY (not a single provider) to the base: its /check and
-  // /prove key resolution (`makeKeyMaterialResolver`) special-cases a
-  // ZKConfigRegistry and resolves every contract in the call tree through it.
-  // Passing one provider would leave /check unable to find a *callee* circuit's
-  // key (its verifier-key join has only the caller), which fails a
-  // cross-contract call at the check step. The `as` bridges the nominal type:
-  // the base only ever calls `.resolveKeyLocation` on a registry argument.
+  // Pass the REGISTRY (not a single provider) to the base: a single provider
+  // leaves /check unable to find a *callee* circuit's key, which fails a
+  // cross-contract call at the check step.
   // The timeout raises midnight-js's 5-minute default: a cross-contract prove
   // takes minutes even unloaded, and on a busy host the default aborts proves
   // that would have completed ("'prove' returned an error: AbortError").
   const base = httpClientProvingProvider(
     proofServerUrl,
-    registry as unknown as ZKConfigProvider<string>,
+    new ZKConfigRegistry([...zkConfigProviders]),
     { timeout: 15 * 60 * 1000 },
   );
-
-  // Same resolution order as midnight-js's internal key-material resolver:
-  // canonical contract key locations through the registry's verifier-key
-  // join; otherwise try the location as a bare circuit name against each flat
-  // provider in turn; protocol builtins ("midnight/...") resolve to undefined
-  // and are supplied by the proof server itself.
-  const lookupKey = async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => {
-    const resolved = await registry.resolveKeyLocation(keyLocation);
-    if (resolved !== undefined) {
-      return zkConfigToProvingKeyMaterial(resolved);
-    }
-    for (const provider of zkConfigProviders) {
-      try {
-        return zkConfigToProvingKeyMaterial(await provider.get(keyLocation));
-      } catch {
-        // try the next provider
-      }
-    }
-    return undefined;
-  };
 
   // The observer sits INSIDE the connection retry, wrapping the base HTTP client
   // directly: each attempt is one observation with its own ms and (on failure) its
@@ -303,8 +278,7 @@ export function createCrossContractProofServerProvider(
         };
 
   const provingProvider: ProvingProvider = {
-    ...base,
-    lookupKey,
+    lookupKey: (keyLocation) => base.lookupKey(keyLocation),
     check: (serializedPreimage, keyLocation) =>
       withOperationProgress(`proof check ${keyLocation}`, () =>
         withConnectionRetry("check", () => observed.check(serializedPreimage, keyLocation)),
@@ -316,5 +290,5 @@ export function createCrossContractProofServerProvider(
         ),
       ),
   };
-  return createProofProvider(provingProvider);
+  return createLedger9ProofProvider(provingProvider);
 }
