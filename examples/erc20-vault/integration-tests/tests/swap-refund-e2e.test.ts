@@ -37,7 +37,7 @@ import { formatEther, formatUnits, parseEther, type Transaction } from "ethers";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { fundingSummary } from "../src/evm-logging.ts";
-import { quoteExactOutputSingle } from "../src/evm-swap.ts";
+import { SWAP_FEE, SWAP_REFUND_AMOUNT_OUT, swapRefundDoomedCap } from "../src/evm-swap.ts";
 import { broadcastEvm } from "../src/flows/broadcast-evm.ts";
 import { settleSwap } from "../src/flows/complete-swap.ts";
 import { runDepositRoundTrip } from "../src/flows/deposit-round-trip.ts";
@@ -81,22 +81,6 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // afterAll.
 const session = createVaultSession(env, "user");
 
-// The USDC/EURC pool's fee tier.
-const FEE = 500n;
-// exactOutput: ask for EXACTLY 3 EURC while capping the spend below its cost.
-const AMOUNT_OUT = 3_000_000n;
-
-/**
- * The input cap the doomed swap surrenders: half the live quote for
- * {@link AMOUNT_OUT}, below its real cost whatever the fork pool's price.
- *
- * @param rpcUrl - The EVM JSON-RPC endpoint.
- * @param erc20Address - The sold ERC20.
- * @returns The `amountInMaximum` the router must revert above.
- */
-const doomedCap = async (rpcUrl: string, erc20Address: string): Promise<bigint> =>
-  (await quoteExactOutputSingle(rpcUrl, erc20Address, SEPOLIA_EURC, FEE, AMOUNT_OUT)).amountIn / 2n;
-
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e", () => {
   installFlowHooks();
 
@@ -123,7 +107,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e
       // A resumed deposit already swept its ERC20, so nothing is required then.
       const required = env.SWAP_REFUND_DEPOSIT_REQUEST_ID
         ? 0n
-        : await doomedCap(rpcUrl, erc20Address);
+        : await swapRefundDoomedCap(rpcUrl, erc20Address, SEPOLIA_EURC);
       const { balance, decimals } = await getErc20Balance(rpcUrl, erc20Address, userAddress);
       console.log(
         `${userAddress}: ${fundingSummary(balance, required, decimals, erc20Address)} (deposited cap)`,
@@ -175,7 +159,11 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e
   it(
     "arrange: deposit round trip mints the shielded USDC the doomed swap will surrender",
     async () => {
-      amountInMaximum = await doomedCap(requireEnv("EVM_RPC_URL"), requireEnv("ERC20_ADDRESS"));
+      amountInMaximum = await swapRefundDoomedCap(
+        requireEnv("EVM_RPC_URL"),
+        requireEnv("ERC20_ADDRESS"),
+        SEPOLIA_EURC,
+      );
       // The swap surrenders the cap plus the swap fee: fund both.
       const swapFee = (await vaultFeesOf(await session.vaultContext(), requireEnv("ERC20_ADDRESS")))
         .swap;
@@ -212,8 +200,8 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)("erc20-vault swap refund e2e
       const context = await session.vaultContext();
       swapRequestId = await startSwap(context, {
         erc20AddressOut: SEPOLIA_EURC,
-        fee: FEE,
-        amountOut: AMOUNT_OUT,
+        fee: SWAP_FEE,
+        amountOut: SWAP_REFUND_AMOUNT_OUT,
         amountInMaximum,
       });
       expect(swapRequestId).toMatch(/^[0-9a-f]{64}$/);
