@@ -35,7 +35,7 @@ import {
   decodeSignetLogEvents,
   evmAddressAbiWord,
   hexToBytes,
-  isEvmType2SignBidirectionalEvent,
+  isEvmRequest,
   MPCDestination,
   MPCSignatureAlgorithm,
   numericAbiWord,
@@ -298,7 +298,7 @@ const evmEventIndex = (
 ): Map<RequestIdHex, SignBidirectionalEvent> => {
   const index = new Map<RequestIdHex, SignBidirectionalEvent>();
   for (const [idHex, record] of toSignBidirectionalEventIndex(map)) {
-    if (!isEvmType2SignBidirectionalEvent(record)) {
+    if (!isEvmRequest(record)) {
       throw new Error(`request ${idHex} is not an evmType2 record`);
     }
     index.set(idHex, record);

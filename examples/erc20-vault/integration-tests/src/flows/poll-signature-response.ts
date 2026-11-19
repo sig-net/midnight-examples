@@ -83,7 +83,7 @@ export async function pollSignatureResponse(
   }, options.timeoutMs);
   try {
     while (!giveUp.signal.aborted) {
-      const { verified, verdicts } = await reader.getVerifiedSignatureRespondedEvent(
+      const { verified, verdicts } = await reader.getSignatureResponseVerdicts(
         options.requestId,
         options.expectedSigner,
       );

@@ -47,10 +47,10 @@ describe("signature timeout diagnostics", () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const query = vi
-      .fn<SignetRequestResponseReader["getVerifiedSignatureRespondedEvent"]>()
+      .fn<SignetRequestResponseReader["getSignatureResponseVerdicts"]>()
       .mockResolvedValue({ verdicts });
     const reader = {
-      getVerifiedSignatureRespondedEvent: query,
+      getSignatureResponseVerdicts: query,
     } as Partial<SignetRequestResponseReader> as SignetRequestResponseReader;
     vi.spyOn(contextModule, "createResponseReader").mockReturnValue(reader);
     await Promise.all([
