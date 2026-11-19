@@ -37,7 +37,12 @@ import {
   resolveFeeRecipient,
   resolveTokenFeesFor,
 } from "./fee-config.ts";
-import { resolveTronStartHeight, resolveTronUsdtAddress } from "./tron-targets.ts";
+import {
+  assertTronUsdtSealedIfAllowed,
+  resolveAllowedTronTokens,
+  resolveTronStartHeight,
+  resolveTronUsdtAddress,
+} from "./tron-targets.ts";
 
 /** What an {@link initialiseVaultContract} call did. */
 export enum InitialiseVaultOutcome {
@@ -175,6 +180,7 @@ async function resolveAddressFreeInputs(env: Record<string, string | undefined>)
   const evmStartHeight = await resolveEvmStartHeight(env);
   const tronStartHeight = await resolveTronStartHeight(env);
   const tronUsdtAddress = resolveTronUsdtAddress(env);
+  assertTronUsdtSealedIfAllowed(resolveAllowedTronTokens(env), tronUsdtAddress);
 
   // Parse the targets up front: a malformed override must fail before
   // anything is submitted, not mid-initialise.

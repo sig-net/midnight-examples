@@ -27,7 +27,16 @@ export async function resolveTronFunder(env: NodeJS.ProcessEnv): Promise<TronFun
   const preset = env.TRON_FUNDER_PRIVATE_KEY;
   if (preset) return tronFunder(preset.startsWith("0x") ? preset : `0x${preset}`);
   const rpcUrl = requireEnv(env, "TRON_RPC_URL");
-  const response = await fetch(`${rpcUrl.replace(/\/+$/, "")}/admin/accounts-json`);
+  const response = await fetch(`${rpcUrl.replace(/\/+$/, "")}/admin/accounts-json`, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `TRON_FUNDER_PRIVATE_KEY is unset and ${rpcUrl}/admin/accounts-json answered HTTP ` +
+        `${String(response.status)}: set TRON_FUNDER_PRIVATE_KEY or point TRON_RPC_URL at a node ` +
+        "that lists prefunded keys",
+    );
+  }
   const accounts = (await response.json()) as TreAccounts;
   const key = accounts.privateKeys?.[0];
   if (key === undefined) {

@@ -40,7 +40,6 @@ export interface StartTronDepositOptions {
   readonly amount: bigint;
   readonly tokenAddress?: Uint8Array;
   readonly windowMs?: bigint;
-  readonly feeLimit?: bigint;
   readonly allowUnfunded?: boolean;
 }
 
@@ -87,7 +86,7 @@ export async function startTronDeposit(
     ...tronReference(head),
     timestamp,
     expiration: timestamp + (options.windowMs ?? TRON_DEPOSIT_WINDOW_MS),
-    feeLimit: options.feeLimit ?? TRON_DEPOSIT_FEE_LIMIT,
+    feeLimit: TRON_DEPOSIT_FEE_LIMIT,
   };
 
   const expectedRecord: SignBidirectionalEvent<TronTxParams> = {

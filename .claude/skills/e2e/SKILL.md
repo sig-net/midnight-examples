@@ -12,8 +12,9 @@ description: Run the erc20-vault example's e2e suite (examples/erc20-vault/integ
 This runbook is plain markdown on purpose: any agent or human can follow it,
 not just Claude Code. It assumes NOTHING beyond a clone of this repository.
 Follow the quickstart top to bottom and a bare checkout ends at a green
-suite (193 tests: fourteen e2e specs carrying 137, plus seven offline
-specs carrying 56). The pipeline itself (globalSetup steps + flow test
+suite (216 tests: twenty-one e2e specs carrying 155, of which the seven
+Tron specs carry 18 and run only when `TRON_RPC_URL` is set, plus eight
+offline specs carrying 61). The pipeline itself (globalSetup steps + flow test
 files) lives in `examples/erc20-vault/integration-tests/`. Setup (compile,
 deploy, key and address derivation, responder hand-off) runs in vitest
 globalSetup before ANY flow file (including single-file runs), and flow files
@@ -118,8 +119,12 @@ vault with every circuit).
   `bearer-transfer` **10**, `approve-e2e` **14**, `swap-e2e` **8**,
   `supply-redeem-e2e` **13**, `supply-refund-e2e` **9**,
   `swap-refund-e2e` **8**, `redeem-refund-e2e` **10**,
-  `admin-replace-nonce-e2e` **12**, `concurrent-flush-e2e` **10**,
-  then the seven unpinned offline specs (**56**) last. 193 total. The setup
+  `admin-replace-nonce-e2e` **12**, `tron-allowed-tokens-e2e` **3**,
+  `tron-deposit-e2e` **7**, `tron-deposit-usdt-e2e` **2**,
+  `tron-deposit-failure-e2e` **1**, `tron-deposit-expiry-e2e` **1**,
+  `tron-deposit-claimant-not-caller` **1**, `tron-false-claimer` **3**,
+  `concurrent-flush-e2e` **10**,
+  then the eight unpinned offline specs (**61**) last. 216 total. The setup
   pipeline verifies Uniswap and the stataUSDC wrapper are deployed on the fork,
   so a fork missing either fails the run at setup rather than mid-spec.
 - **Wallets are role wallets funded from ROOT at setup.** The setup's
@@ -250,6 +255,13 @@ keeps happy-day's 8 initialise + deposit tests and skips its 7 withdraw tests).
     `REDEEM_REFUND_SUPPLY_REQUEST_ID` / `REDEEM_REFUND_REDEEM_REQUEST_ID`
   - `admin-replace-nonce-e2e`: `REPLACE_NONCE_DEPOSIT_REQUEST_ID` /
     `REPLACE_NONCE_WITHDRAW_REQUEST_ID` / `REPLACE_NONCE_REPLACEMENT_REQUEST_ID`
+  - `tron-deposit-e2e`: `TRON_DEPOSIT_REQUEST_ID`
+  - `tron-deposit-usdt-e2e`: `TRON_USDT_DEPOSIT_REQUEST_ID`
+  - `tron-deposit-failure-e2e`: `TRON_FAILURE_DEPOSIT_REQUEST_ID`
+  - `tron-deposit-expiry-e2e`: `TRON_EXPIRY_DEPOSIT_REQUEST_ID`
+  - `tron-deposit-claimant-not-caller`:
+    `TRON_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID`
+  - `tron-false-claimer`: `TRON_FALSE_CLAIMER_DEPOSIT_REQUEST_ID`
   - `concurrent-flush-e2e`: `CONCURRENT_FLUSH_DEPOSIT_REQUEST_ID` /
     `CONCURRENT_FLUSH_CANARY_REQUEST_ID`
 

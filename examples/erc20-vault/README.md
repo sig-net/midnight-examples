@@ -52,9 +52,9 @@ for the protocol side.
 Tron USDT returns false on a successful transfer. Other TRC-20s return true.
 So `completeTronDeposit` expects false for the token at `tronUsdtAddress` and
 true for every other TRC-20. A transfer that fails reverts, and the MPC
-attests it failed. Set `TRON_USDT_ADDRESS` for each network: on mainnet
-`TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`, on Nile
-`TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf`.
+attests it failed. `TRON_USDT_ADDRESS` names it, and unset it defaults to the
+network's known USDT: on mainnet `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`, on
+preprod Nile's `TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf`.
 
 The four starts whose EVM transaction the vault's own account pays for
 (`startWithdraw`, `startSwap`, `startSupply`, `startRedeem`) take a flat,
@@ -258,8 +258,8 @@ The contract package's dependency list is the minimal integration surface:
   "@midnight-ntwrk/compact-runtime": "0.21.0",
   "@midnight-ntwrk/midnight-js": "5.0.0",
   "@midnight-ntwrk/midnight-js-protocol": "5.0.0",
-  "@sig-net/midnight": "0.27.0-rc.3",
-  "@sig-net/midnight-signer": "0.27.0-rc.3"
+  "@sig-net/midnight": "0.27.0-rc.4",
+  "@sig-net/midnight-signer": "0.27.0-rc.4"
 }
 ```
 
@@ -373,7 +373,7 @@ nonce replacement: its settle verifies at width 0 and closes the request on
 every verdict.
 
 The mapping from ABI types to Compact types is documented in the protocol
-repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.27.0-rc.3/README.md#output-recovery-and-serialisation).
+repository's [Output Recovery and Serialisation](https://github.com/sig-net/midnight-integration/blob/v0.27.0-rc.4/README.md#output-recovery-and-serialisation).
 The local stack uses the fakenet image pinned in [Docker Compose](../../docker-compose.yaml).
 
 Three vault-specific points:
@@ -472,8 +472,10 @@ block `EVM_RPC_URL` reports, and zero when neither is set. `tronHeight` seeds
 `tronLastSeen`, the same bound for Tron requests: `TRON_START_HEIGHT` when set,
 otherwise the latest block `TRON_RPC_URL` reports (`/wallet/getnowblock`), and
 zero when neither is set. `tronUsdt` seeds `tronUsdtAddress`, the TRC-20 whose
-transfer must return false: `TRON_USDT_ADDRESS` (base58 or 20-byte hex), and
-the zero address when unset.
+transfer must return false: `TRON_USDT_ADDRESS` (base58 or 20-byte hex), else
+the network's known USDT on preprod and mainnet, else the zero address. The
+deploy refuses to allow a known USDT in `TRON_ALLOWED_TOKENS` while this is the
+zero address.
 
 The gate prevents front-running: nobody else can initialise the vault to
 point at their own address, chain or key. Flow function:
@@ -834,7 +836,8 @@ yarn deploy:erc20-vault
 
 # a remote network (Preview): deploy, run the deployer-gated initialise,
 # then allow the ERC20s EVM_ALLOWED_TOKENS lists. Set TRON_USDT_ADDRESS to the
-# network's Tron USDT first: initialise seals it once.
+# network's Tron USDT first (preprod and mainnet default to theirs):
+# initialise seals it once.
 yarn deploy-initialise:erc20-vault
 
 # initialise a vault that already exists (recovers a run whose deploy landed
@@ -946,8 +949,9 @@ failed after that point, the PR says to run it by hand before merging).
 
 ## The e2e suite
 
-Fourteen e2e specs run serially in a pinned order (`FILE_ORDER` in
+Twenty-one e2e specs run serially in a pinned order (`FILE_ORDER` in
 [`integration-tests/vitest.config.ts`](integration-tests/vitest.config.ts)).
+The seven `tron-*` specs run only when `TRON_RPC_URL` is set, and skip otherwise.
 `happy-day-e2e` runs first because it initialises the vault, and allows the
 ERC20s, that the later flows build on, and `approve-e2e` runs before the swap and lending specs
 because it grants the allowances they draw on.
@@ -969,10 +973,18 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `swap-refund-e2e` | 8 | A swap that reverts on its input cap re-mints the burned `amountInMaximum` | `SWAP_REFUND_DEPOSIT_REQUEST_ID` / `SWAP_REFUND_SWAP_REQUEST_ID` |
 | `redeem-refund-e2e` | 10 | A redeem whose wrapper redeem reverts re-mints the burned shares | `REDEEM_REFUND_DEPOSIT_REQUEST_ID` / `REDEEM_REFUND_SUPPLY_REQUEST_ID` / `REDEEM_REFUND_REDEEM_REQUEST_ID` |
 | `admin-replace-nonce-e2e` | 12 | The deployer replaces an unbroadcast withdrawal's nonce with a self-transfer, and the withdrawal, attested unviable, re-mints its burned vault tokens | `REPLACE_NONCE_DEPOSIT_REQUEST_ID` / `REPLACE_NONCE_WITHDRAW_REQUEST_ID` / `REPLACE_NONCE_REPLACEMENT_REQUEST_ID` |
+| `tron-allowed-tokens-e2e` | 3 | Tron deposits refuse a TRC-20 the vault does not allow, only the deployer can allow one, and once allowed the ledger holds it in the Tron map only | none |
+| `tron-deposit-e2e` | 7 | A full Tron deposit round trip: the MPC signs the Tron transaction with the user's derived key, the transfer executes on Tron, the MPC attests it returned true, and `completeTronDeposit` mints the Tron vault token | `TRON_DEPOSIT_REQUEST_ID` |
+| `tron-deposit-usdt-e2e` | 2 | A deposit of the token sealed as `tronUsdtAddress`, whose transfer returns false on success, is attested and still mints | `TRON_USDT_DEPOSIT_REQUEST_ID` |
+| `tron-deposit-failure-e2e` | 1 | A Tron transfer that reverts is attested failed and closes the request with no mint | `TRON_FAILURE_DEPOSIT_REQUEST_ID` |
+| `tron-deposit-expiry-e2e` | 1 | A signed Tron deposit left unbroadcast past its expiration is attested unviable and closes with no mint | `TRON_EXPIRY_DEPOSIT_REQUEST_ID` |
+| `tron-deposit-claimant-not-caller` | 1 | `completeTronDeposit` can direct the mint to a different wallet's coin public key | `TRON_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID` |
+| `tron-false-claimer` | 3 | A Tron deposit recorded for identity A is NOT claimable by identity B, and the rightful identity then claims it | `TRON_FALSE_CLAIMER_DEPOSIT_REQUEST_ID` |
 | `concurrent-flush-e2e` | 10 | Two wallets race to flush the same items: the user's transactions never fail, the losing flush is retried, and a lone canary deposit afterwards shows the stack is healthy. Runs last, as its concurrent load is the most likely to strain the local stack | `CONCURRENT_FLUSH_DEPOSIT_REQUEST_ID` / `CONCURRENT_FLUSH_CANARY_REQUEST_ID` |
 
-134 tests total across these specs. The seven offline specs (56 tests, no stack
-needed) are not pinned and run after them, so a full run reports 193. The
+155 tests total across these specs (137 in the fourteen EVM specs, 18 in the
+seven Tron specs). The eight offline specs (61 tests, no stack needed) are not
+pinned and run after them, so a full run reports 216. The
 suite runs against a Sepolia fork, and the setup pipeline
 verifies that the Uniswap router and the stataUSDC wrapper are deployed on it
 before any spec runs, so a fork missing either fails the run at setup with an

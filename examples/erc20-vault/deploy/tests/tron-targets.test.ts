@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assertTronUsdtSealedIfAllowed,
   resolveAllowedTronTokens,
   resolveTronStartHeight,
   resolveTronUsdtAddress,
@@ -97,6 +98,18 @@ describe("resolveTronUsdtAddress", () => {
     expect(resolveTronUsdtAddress({ TRON_USDT_ADDRESS: value })).toBe(address);
   });
 
+  it.each([
+    { network: "preprod", base58: NILE_USDT_BASE58 },
+    { network: "mainnet", base58: USDT_BASE58 },
+  ])("resolves blank on $network to its known USDT", ({ network, base58 }) => {
+    const known = resolveTronUsdtAddress({ TRON_USDT_ADDRESS: base58 });
+    expect(resolveTronUsdtAddress({ NETWORK_ID: network, TRON_USDT_ADDRESS: " " })).toBe(known);
+  });
+
+  it("resolves blank on preview to the zero address", () => {
+    expect(resolveTronUsdtAddress({ NETWORK_ID: "preview" })).toBe(ZERO_ADDRESS);
+  });
+
   it("resolves Nile USDT to a 20-byte address", () => {
     expect(resolveTronUsdtAddress({ TRON_USDT_ADDRESS: NILE_USDT_BASE58 })).toMatch(
       /^0x[0-9a-f]{40}$/,
@@ -108,5 +121,23 @@ describe("resolveTronUsdtAddress", () => {
     { name: "a short hex address", value: "0x1234" },
   ])("refuses $name", ({ value }) => {
     expect(() => resolveTronUsdtAddress({ TRON_USDT_ADDRESS: value })).toThrow();
+  });
+});
+
+describe("assertTronUsdtSealedIfAllowed", () => {
+  it.each([USDT_BASE58, NILE_USDT_BASE58])("refuses %s allowed with a zero USDT", (base58) => {
+    const usdt = resolveTronUsdtAddress({ TRON_USDT_ADDRESS: base58 });
+    expect(() => {
+      assertTronUsdtSealedIfAllowed([OTHER_TOKEN, usdt], ZERO_ADDRESS);
+    }).toThrow(/TRON_USDT_ADDRESS/);
+  });
+
+  it.each([
+    { name: "a known USDT allowed with USDT sealed", tokens: [USDT_EVM_FORM], usdt: USDT_EVM_FORM },
+    { name: "other tokens allowed with a zero USDT", tokens: [OTHER_TOKEN], usdt: ZERO_ADDRESS },
+  ])("accepts $name", ({ tokens, usdt }) => {
+    expect(() => {
+      assertTronUsdtSealedIfAllowed(tokens, usdt);
+    }).not.toThrow();
   });
 });

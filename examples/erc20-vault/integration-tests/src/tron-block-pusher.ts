@@ -4,6 +4,7 @@ import { sleepUnlessAborted } from "./sleep-unless-aborted.ts";
 import { sendTrx, type TronFunder } from "./tron-http.ts";
 
 const PUSHER_SINK = tronAddressFromEvm("0x000000000000000000000000000000000000dEaD");
+const PUSH_INTERVAL_MS = 2_000;
 
 /** */
 export interface TronBlockPusher {
@@ -14,14 +15,9 @@ export interface TronBlockPusher {
 /**
  * @param rpcUrl - The node's HTTP API base URL
  * @param funder - The account that pays for the transfers
- * @param intervalMs - The pause between transfers
  * @returns The running pusher
  */
-export function startTronBlockPusher(
-  rpcUrl: string,
-  funder: TronFunder,
-  intervalMs = 2_000,
-): TronBlockPusher {
+export function startTronBlockPusher(rpcUrl: string, funder: TronFunder): TronBlockPusher {
   const halt = new AbortController();
   const loop = (async (): Promise<void> => {
     while (!halt.signal.aborted) {
@@ -30,7 +26,7 @@ export function startTronBlockPusher(
       } catch (error) {
         console.warn(`Tron block pusher transfer failed, retrying: ${String(error)}`);
       }
-      await sleepUnlessAborted(intervalMs, halt.signal);
+      await sleepUnlessAborted(PUSH_INTERVAL_MS, halt.signal);
     }
   })();
   return {

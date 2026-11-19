@@ -16,7 +16,7 @@ import {
   decodeSignetLogEvents,
   evmAddressAbiWord,
   hexToBytes,
-  isTronSignBidirectionalEvent,
+  isTronRequest,
   MPCDestination,
   MPCSignatureAlgorithm,
   numericAbiWord,
@@ -409,7 +409,7 @@ describe("Tron deposit round-trip", () => {
     const rawLedger = readSignetRequestsLedgerFromState(state, VAULT_TRON_DEPOSIT_REQUESTS_PATH);
     expect(rawLedger.requestsIndex.size).toBe(1);
     const record = first(rawLedger.requestsIndex.values(), "raw Tron request");
-    if (!isTronSignBidirectionalEvent(record)) {
+    if (!isTronRequest(record)) {
       throw new Error("expected a Tron request record");
     }
     expect(requestIdHex(calculateRequestId(record))).toBe(requestIdHex(requestId));
@@ -981,7 +981,7 @@ describe("chain-aware queue: each chain's attestations raise only its own height
     expect(ledgerOf(flushed).tronLastSeen).toBe(TRON_START_HEIGHT);
   });
 
-  it("an attestation below its chain's height leaves that height unchanged", async () => {
+  it("a later request reads the raised Tron height, and a higher attestation raises it again", async () => {
     const { contract, ctx } = await deployInitialised();
     const { context: sent, requestId } = await tronDeposit(contract, ctx, VALID_TRON_DEPOSIT);
     const raised = await attest(
@@ -1020,6 +1020,44 @@ describe("chain-aware queue: each chain's attestations raise only its own height
       ),
     );
     expect(ledgerOf(attested).tronLastSeen).toBe(TRON_ATTESTED_HEIGHT + 101n);
+  });
+
+  it("a Tron attestation below tronLastSeen leaves it unchanged", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const higher = await tronDeposit(contract, ctx, VALID_TRON_DEPOSIT);
+    const lower = await tronDeposit(contract, higher.context, {
+      ...VALID_TRON_DEPOSIT,
+      inIndex: 2n,
+      deposit: { tokenAddress: TRC20, amount: AMOUNT + 1n },
+    });
+    const lowerId = [...ledgerOf(lower.context).evictionMap].find(
+      ([, index]) => bytesToHex(index) === bytesToHex(lower.outIndex),
+    )?.[0];
+    if (lowerId === undefined) throw new Error("no send recorded the second Tron request");
+    const raisedHeight = TRON_ATTESTED_HEIGHT + 100n;
+
+    const raised = await attest(
+      contract,
+      lower.context,
+      respond(
+        MPC_RESPONSE_SECRET,
+        higher.requestId,
+        OutputKind.executed,
+        OUTPUT_TRUE,
+        raisedHeight,
+      ),
+    );
+    const lowerFolded = await attest(
+      contract,
+      raised,
+      respond(MPC_RESPONSE_SECRET, lowerId, OutputKind.executed, OUTPUT_TRUE, TRON_ATTESTED_HEIGHT),
+    );
+
+    expect(ledgerOf(raised).tronLastSeen).toBe(raisedHeight);
+    expect(ledgerOf(lowerFolded).outputAttestationBuffer.lookup(lowerId).blockHeight).toBe(
+      TRON_ATTESTED_HEIGHT,
+    );
+    expect(ledgerOf(lowerFolded).tronLastSeen).toBe(raisedHeight);
   });
 
   it("a Tron request takes tronLastSeen as its lastSeen, an Ethereum request globalLastSeen", async () => {

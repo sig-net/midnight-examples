@@ -8,17 +8,18 @@ import {
 } from "@sig-net/midnight";
 import { computeAddress, SigningKey } from "ethers";
 
-async function tronPost(rpcUrl: string, path: string, body: object): Promise<unknown> {
+async function tronPost(rpcUrl: string, path: string, body: object): Promise<JsonValue> {
   const response = await fetch(`${rpcUrl.replace(/\/+$/, "")}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
   });
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`Tron ${path} answered HTTP ${String(response.status)}: ${text}`);
   }
-  return JSON.parse(text) as unknown;
+  return JSON.parse(text) as JsonValue;
 }
 
 /** */
@@ -68,15 +69,34 @@ export function tronReference(block: TronHeadBlock): TronReference {
 }
 
 /** */
+export type TronReceiptResult =
+  | "SUCCESS"
+  | "DEFAULT"
+  | "REVERT"
+  | "BAD_JUMP_DESTINATION"
+  | "OUT_OF_MEMORY"
+  | "PRECOMPILED_CONTRACT"
+  | "STACK_TOO_SMALL"
+  | "STACK_TOO_LARGE"
+  | "ILLEGAL_OPERATION"
+  | "STACK_OVERFLOW"
+  | "OUT_OF_ENERGY"
+  | "OUT_OF_TIME"
+  | "JVM_STACK_OVER_FLOW"
+  | "UNKNOWN"
+  | "TRANSFER_FAILED"
+  | "INVALID_CODE";
+
+/** */
 export interface TronTransactionInfo {
   readonly blockNumber: bigint;
-  readonly receiptResult: string;
+  readonly receiptResult: TronReceiptResult;
   readonly receipt: JsonValue;
 }
 
 interface TransactionInfoAnswer {
   readonly blockNumber?: number;
-  readonly receipt?: { readonly result?: string };
+  readonly receipt?: { readonly result?: TronReceiptResult };
 }
 
 /**
@@ -88,9 +108,9 @@ export async function getTronTransactionInfo(
   rpcUrl: string,
   txid: Uint8Array,
 ): Promise<TronTransactionInfo | undefined> {
-  const receipt = (await tronPost(rpcUrl, "/wallet/gettransactioninfobyid", {
+  const receipt = await tronPost(rpcUrl, "/wallet/gettransactioninfobyid", {
     value: bytesToHex(txid),
-  })) as JsonValue;
+  });
   const answer = receipt as TransactionInfoAnswer;
   if (answer.blockNumber === undefined) return undefined;
   return {
