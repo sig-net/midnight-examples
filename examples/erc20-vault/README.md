@@ -1139,6 +1139,20 @@ To support a token with no return value, a vault can mark the token in its
 MPC then attests `executed` with an empty output, or `failed` if the call
 reverted, and the vault settles on the attested kind.
 
+#### The same limits apply to TRC-20s
+
+Tron deposits use the same `transfer` call and the same `bool` output schema.
+So before you allow a TRC-20 with `yarn add-allowed-tron-tokens:erc20-vault`,
+make sure that it takes no fee on transfer and that its `transfer` returns a
+`bool`. A fee-on-transfer TRC-20 makes the vault mint more than its Tron
+account receives. A TRC-20 with no return value never gets an attestation, so
+its deposits stay locked.
+
+USDT on Tron is the one exception that the vault handles: its `transfer`
+returns `false` on success. The vault mints a USDT deposit on `false`, but
+only for the address that `initialise` sealed as `tronUsdtAddress`. Do not
+allow a USDT whose address differs from the sealed one.
+
 ## Choosing the Supply and Redeem Pair
 
 Supply and redeem use one pair of tokens: the `stataUnderlying` and `stataToken`

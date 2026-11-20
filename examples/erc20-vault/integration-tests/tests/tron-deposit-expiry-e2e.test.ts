@@ -19,7 +19,7 @@ const MINUTE = 60_000;
 const env = injectE2eEnv();
 const session = createVaultSession(env, "user");
 
-const WINDOW_MS = 60_000n;
+const WINDOW_MS = 600_000n;
 
 describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
   "erc20-vault Tron deposit expiry e2e: an expired transaction is attested unviable and closes",
