@@ -13,20 +13,22 @@ import {
   VAULT_SUPPLY_REQUESTS_PATH,
   VAULT_SWAP_REQUESTS_PATH,
   VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+  VAULT_TRON_WITHDRAW_REQUESTS_PATH,
   VAULT_WITHDRAW_REQUESTS_PATH,
 } from "../src/index.ts";
 import { compiledFieldIndex } from "./compiled-ledger.ts";
 
 describe("exported ledger paths match the compiled contract-info.json", () => {
   it.each([
-    ["bidirectionalDepositMap", VAULT_DEPOSIT_REQUESTS_PATH, [2, 3]],
-    ["bidirectionalTronDepositMap", VAULT_TRON_DEPOSIT_REQUESTS_PATH, [2, 5]],
-    ["bidirectionalWithdrawMap", VAULT_WITHDRAW_REQUESTS_PATH, [2, 7]],
-    ["bidirectionalApproveMap", VAULT_APPROVE_REQUESTS_PATH, [2, 1]],
-    ["bidirectionalReplaceNonceMap", VAULT_REPLACE_NONCE_REQUESTS_PATH, [1, 14]],
-    ["bidirectionalSwapMap", VAULT_SWAP_REQUESTS_PATH, [2, 9]],
-    ["bidirectionalSupplyMap", VAULT_SUPPLY_REQUESTS_PATH, [2, 11]],
-    ["bidirectionalRedeemMap", VAULT_REDEEM_REQUESTS_PATH, [2, 13]],
+    ["bidirectionalDepositMap", VAULT_DEPOSIT_REQUESTS_PATH, [2, 14]],
+    ["bidirectionalTronDepositMap", VAULT_TRON_DEPOSIT_REQUESTS_PATH, [3, 1]],
+    ["bidirectionalWithdrawMap", VAULT_WITHDRAW_REQUESTS_PATH, [3, 3]],
+    ["bidirectionalTronWithdrawMap", VAULT_TRON_WITHDRAW_REQUESTS_PATH, [3, 12]],
+    ["bidirectionalApproveMap", VAULT_APPROVE_REQUESTS_PATH, [2, 12]],
+    ["bidirectionalReplaceNonceMap", VAULT_REPLACE_NONCE_REQUESTS_PATH, [2, 10]],
+    ["bidirectionalSwapMap", VAULT_SWAP_REQUESTS_PATH, [3, 5]],
+    ["bidirectionalSupplyMap", VAULT_SUPPLY_REQUESTS_PATH, [3, 7]],
+    ["bidirectionalRedeemMap", VAULT_REDEEM_REQUESTS_PATH, [3, 9]],
     // The literal column is deliberate: the notification vectors in
     // erc20-vault.compact are hand-written, so a re-chunk that moves a path
     // must fail here even when the exported constant was updated with it.

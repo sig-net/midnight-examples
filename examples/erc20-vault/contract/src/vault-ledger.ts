@@ -148,6 +148,22 @@ export function vaultTokenFees(state: VaultLedgerState, erc20Address: Uint8Array
 }
 
 /**
+ * The flat per-action fees the ledger holds for a TRC-20's vault coin, which
+ * `startTronWithdraw` adds to the surrendered principal and takes from the coin.
+ *
+ * @param state - The decoded vault ledger state.
+ * @param tokenAddress - The TRC-20 the vault coin stands for, as its 20 EVM-form bytes.
+ * @returns That token's fees, in its base units.
+ * @throws {Error} If the vault does not allow the TRC-20.
+ */
+export function vaultTronTokenFees(state: VaultLedgerState, tokenAddress: Uint8Array): TokenFees {
+  if (!state.allowedTronTokens.member(tokenAddress)) {
+    throw new Error(`the vault does not allow TRC-20 0x${bytesToHex(tokenAddress)}`);
+  }
+  return state.allowedTronTokens.lookup(tokenAddress).fees;
+}
+
+/**
  * The coin-to-encryption key mapping a fee-charging call passes midnight-js, so the
  * fee coin's ciphertext is encrypted to the recipient wallet the ledger names and that
  * wallet discovers the coin.
