@@ -9,7 +9,7 @@
 # included: the address is final at that point, and the PR says when the
 # initialise is still to be run by hand.
 #
-# The 29 circuits do not fit one block: a base transaction registers one
+# The 33 circuits do not fit one block: a base transaction registers one
 # and a maintenance update adds each of the rest. A run that fails AFTER
 # printing "deployed erc20-vault base at ..." has a live contract (the
 # failure step below repeats that address in the step summary): do not
@@ -241,6 +241,10 @@ jobs:
           VAULT_DEPLOYER_SECRET_KEY: ${{ secrets.VAULT_DEPLOYER_SECRET_KEY }}
           MAINTENANCE_SIGNING_KEY: ${{ secrets.MAINTENANCE_SIGNING_KEY }}
           EVM_RPC_URL: ${{ vars.EVM_RPC_URL }}
+          TRON_RPC_URL: ${{ vars.TRON_RPC_URL }}
+          TRON_START_HEIGHT: ${{ vars.TRON_START_HEIGHT }}
+          TRON_ALLOWED_TOKENS: ${{ vars.TRON_ALLOWED_TOKENS }}
+          TRON_USDT_ADDRESS: ${{ vars.TRON_USDT_ADDRESS }}
           # Optional: the SDK's published values for the network and the
           # chain id EVM_RPC_URL reports fill these in. A blank var falls
           # through, a set one must agree.

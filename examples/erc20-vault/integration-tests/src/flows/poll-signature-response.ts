@@ -83,7 +83,7 @@ export async function pollSignatureResponse(
   }, options.timeoutMs);
   try {
     while (!giveUp.signal.aborted) {
-      const { verified, verdicts } = await reader.getVerifiedSignatureRespondedEvent(
+      const { verified, verdicts } = await reader.getSignatureResponseVerdicts(
         options.requestId,
         options.expectedSigner,
       );
@@ -106,7 +106,7 @@ export async function pollSignatureResponse(
         // Reconstruct the broadcast-ready signed transaction from the request
         // record and this response. The reader's request fetch is cached (its
         // verification already fetched it), so this adds no extra query.
-        const request = await reader.getSignatureRequest(options.requestId);
+        const request = await reader.getEvmType2SignatureRequest(options.requestId);
         return signBidirectionalEventToSignedEvmTransaction(request, verified);
       }
       await sleepUnlessAborted(options.intervalMs, giveUp.signal);

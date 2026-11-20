@@ -1,0 +1,143 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  assertTronUsdtSealedIfAllowed,
+  resolveAllowedTronTokens,
+  resolveTronStartHeight,
+  resolveTronUsdtAddress,
+} from "../src/tron-targets.ts";
+
+const USDT_BASE58 = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+const USDT_EVM_FORM = "0xa614f803b6fd780986a42c78ec9c7f77e6ded13c";
+const OTHER_TOKEN = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
+const NILE_USDT_BASE58 = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
+const ZERO_ADDRESS = `0x${"00".repeat(20)}`;
+
+describe("resolveAllowedTronTokens", () => {
+  interface ResolvedCase {
+    readonly name: string;
+    readonly listed: string | undefined;
+    readonly tokens: readonly string[];
+  }
+
+  const RESOLVED: readonly ResolvedCase[] = [
+    { name: "an unset list to nothing", listed: undefined, tokens: [] },
+    { name: "a blank list to nothing", listed: "  ", tokens: [] },
+    { name: "a base58 address to its 20-byte form", listed: USDT_BASE58, tokens: [USDT_EVM_FORM] },
+    { name: "a 20-byte hex address", listed: OTHER_TOKEN, tokens: [OTHER_TOKEN] },
+    {
+      name: "a hex address without its 0x prefix, in upper case",
+      listed: OTHER_TOKEN.slice(2).toUpperCase(),
+      tokens: [OTHER_TOKEN],
+    },
+    {
+      name: "both forms in listed order",
+      listed: ` ${OTHER_TOKEN} , ${USDT_BASE58} ,`,
+      tokens: [OTHER_TOKEN, USDT_EVM_FORM],
+    },
+    {
+      name: "the same token in both forms to one entry",
+      listed: `${USDT_BASE58},${USDT_EVM_FORM}`,
+      tokens: [USDT_EVM_FORM],
+    },
+  ];
+
+  it.each(RESOLVED)("resolves $name", ({ listed, tokens }) => {
+    expect(resolveAllowedTronTokens({ TRON_ALLOWED_TOKENS: listed })).toEqual(tokens);
+  });
+
+  interface RefusedCase {
+    readonly name: string;
+    readonly listed: string;
+    readonly error: RegExp;
+  }
+
+  const REFUSED: readonly RefusedCase[] = [
+    {
+      name: "a base58 address with a bad checksum",
+      listed: `${USDT_BASE58.slice(0, -1)}u`,
+      error: /checksum|base58/,
+    },
+    { name: "a short hex address", listed: "0x1234", error: /20-byte 0x hex EVM address/ },
+    { name: "the zero address", listed: `0x${"00".repeat(20)}`, error: /zero address/ },
+  ];
+
+  it.each(REFUSED)("refuses $name", ({ listed, error }) => {
+    expect(() => resolveAllowedTronTokens({ TRON_ALLOWED_TOKENS: listed })).toThrow(error);
+  });
+});
+
+describe("resolveTronStartHeight", () => {
+  it.each([
+    { name: "unset with no TRON_RPC_URL to zero", env: {}, height: 0n },
+    { name: "a preset height", env: { TRON_START_HEIGHT: "64100" }, height: 64_100n },
+    { name: "a preset zero", env: { TRON_START_HEIGHT: "0" }, height: 0n },
+  ])("resolves $name", async ({ env, height }) => {
+    await expect(resolveTronStartHeight(env)).resolves.toBe(height);
+  });
+
+  it.each(["-1", "01", "1.5", "abc"])("refuses TRON_START_HEIGHT=%s", async (preset) => {
+    await expect(resolveTronStartHeight({ TRON_START_HEIGHT: preset })).rejects.toThrow(
+      /TRON_START_HEIGHT/,
+    );
+  });
+});
+
+describe("resolveTronUsdtAddress", () => {
+  it.each([
+    { name: "unset to the zero address", value: undefined, address: ZERO_ADDRESS },
+    { name: "blank to the zero address", value: "  ", address: ZERO_ADDRESS },
+    { name: "mainnet USDT in base58", value: USDT_BASE58, address: USDT_EVM_FORM },
+    { name: "a 20-byte hex address", value: USDT_EVM_FORM, address: USDT_EVM_FORM },
+    {
+      name: "a hex address without its 0x prefix, in upper case",
+      value: USDT_EVM_FORM.slice(2).toUpperCase(),
+      address: USDT_EVM_FORM,
+    },
+  ])("resolves $name", ({ value, address }) => {
+    expect(resolveTronUsdtAddress({ TRON_USDT_ADDRESS: value })).toBe(address);
+  });
+
+  it.each([
+    { network: "preprod", base58: NILE_USDT_BASE58 },
+    { network: "mainnet", base58: USDT_BASE58 },
+  ])("resolves blank on $network to its known USDT", ({ network, base58 }) => {
+    const known = resolveTronUsdtAddress({ TRON_USDT_ADDRESS: base58 });
+    expect(resolveTronUsdtAddress({ NETWORK_ID: network, TRON_USDT_ADDRESS: " " })).toBe(known);
+  });
+
+  it("resolves blank on preview to the zero address", () => {
+    expect(resolveTronUsdtAddress({ NETWORK_ID: "preview" })).toBe(ZERO_ADDRESS);
+  });
+
+  it("resolves Nile USDT to a 20-byte address", () => {
+    expect(resolveTronUsdtAddress({ TRON_USDT_ADDRESS: NILE_USDT_BASE58 })).toMatch(
+      /^0x[0-9a-f]{40}$/,
+    );
+  });
+
+  it.each([
+    { name: "a base58 address with a bad checksum", value: `${USDT_BASE58.slice(0, -1)}u` },
+    { name: "a short hex address", value: "0x1234" },
+  ])("refuses $name", ({ value }) => {
+    expect(() => resolveTronUsdtAddress({ TRON_USDT_ADDRESS: value })).toThrow();
+  });
+});
+
+describe("assertTronUsdtSealedIfAllowed", () => {
+  it.each([USDT_BASE58, NILE_USDT_BASE58])("refuses %s allowed with a zero USDT", (base58) => {
+    const usdt = resolveTronUsdtAddress({ TRON_USDT_ADDRESS: base58 });
+    expect(() => {
+      assertTronUsdtSealedIfAllowed([OTHER_TOKEN, usdt], ZERO_ADDRESS);
+    }).toThrow(/TRON_USDT_ADDRESS/);
+  });
+
+  it.each([
+    { name: "a known USDT allowed with USDT sealed", tokens: [USDT_EVM_FORM], usdt: USDT_EVM_FORM },
+    { name: "other tokens allowed with a zero USDT", tokens: [OTHER_TOKEN], usdt: ZERO_ADDRESS },
+  ])("accepts $name", ({ tokens, usdt }) => {
+    expect(() => {
+      assertTronUsdtSealedIfAllowed(tokens, usdt);
+    }).not.toThrow();
+  });
+});

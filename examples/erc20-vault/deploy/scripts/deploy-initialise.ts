@@ -13,6 +13,7 @@
 import { getDeployConfig, WalletRegistry } from "@sig-net/midnight-contract-deploy";
 
 import { addAllowedTokensToVault } from "../src/add-allowed-tokens.ts";
+import { addAllowedTronTokensToVault } from "../src/add-allowed-tron-tokens.ts";
 import { deployVault } from "../src/deploy-vault.ts";
 import { logDeployerFundingAddress } from "../src/deployer-run-report.ts";
 import { buildEntrypointEnv } from "../src/entrypoint-env.ts";
@@ -22,6 +23,7 @@ import {
   assertNoVaultBoundPresets,
   initialiseVault,
 } from "../src/initialise-vault.ts";
+import { resolveAllowedTronTokens } from "../src/tron-targets.ts";
 
 const env = buildEntrypointEnv();
 
@@ -30,6 +32,7 @@ const env = buildEntrypointEnv();
 // fail now, not after the contract exists.
 await assertInitialiseInputsPresent(env);
 resolveAllowedTokens(env);
+resolveAllowedTronTokens(env);
 assertNoVaultBoundPresets(env);
 
 // One registry for the whole run, so the deployer wallet syncs once and the
@@ -42,6 +45,7 @@ try {
   ({ contractAddress } = await deployVault(env, wallets));
   await initialiseVault(env, contractAddress, wallets);
   await addAllowedTokensToVault(env, contractAddress, wallets);
+  await addAllowedTronTokensToVault(env, contractAddress, wallets);
 } finally {
   await wallets.close();
 }
