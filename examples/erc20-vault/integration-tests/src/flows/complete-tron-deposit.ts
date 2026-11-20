@@ -1,7 +1,10 @@
 import { encodeCoinPublicKey } from "@midnight-ntwrk/compact-runtime";
 import { createCallTxOptions, submitCallTx } from "@midnight-ntwrk/midnight-js/contracts";
 import { OutputKind, type RequestIdHex, requestIdHex } from "@sig-net/midnight";
-import { VAULT_PRIVATE_STATE_ID } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  VAULT_PRIVATE_STATE_ID,
+  VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-deploy";
 
 import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
@@ -84,6 +87,7 @@ export async function completeTronDeposit(
 ): Promise<void> {
   const outcome = await pollTronRespondBidirectional(context, tron, {
     requestId: options.requestId,
+    requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
     intervalMs: 1000,
     timeoutMs: POLL_TIMEOUT_MS,
   });

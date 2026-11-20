@@ -57,6 +57,15 @@ export const TRANSFER_RESULT_MPC_ROUTING: VaultMpcRouting = {
 };
 
 /**
+ * The routing of a Tron withdraw event: {@link TRANSFER_RESULT_MPC_ROUTING}'s fields with
+ * the MPC's Tron routing key as the execution destination.
+ */
+export const TRON_TRANSFER_RESULT_MPC_ROUTING: VaultMpcRouting = {
+  ...TRANSFER_RESULT_MPC_ROUTING,
+  executionDest: pureCircuits.tronCaip2Id(),
+};
+
+/**
  * The routing of a nonce replacement event: {@link TRANSFER_RESULT_MPC_ROUTING}'s
  * fields with the empty output schema, since a plain transfer returns nothing and
  * the MPC attests its execution over the empty output.
