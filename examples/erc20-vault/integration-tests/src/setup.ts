@@ -492,7 +492,10 @@ const STEPS: readonly SetupStep[] = [
   ],
   ["setup: default TRON_ALLOWED_TOKENS to the test TRC-20s", ensureTronAllowedTokens],
   ["setup: check/derive vault and user Tron addresses", ensureTronAddresses],
-  ["setup: fund the user's derived Tron account (TRX + test TRC-20s)", fundTronAccounts],
+  [
+    "setup: fund the derived Tron accounts (user: TRX + test TRC-20s; vault: TRX)",
+    fundTronAccounts,
+  ],
   [
     "setup: print MPC server configuration",
     (env) => {
