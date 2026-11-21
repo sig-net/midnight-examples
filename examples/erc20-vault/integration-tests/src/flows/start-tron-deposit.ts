@@ -1,6 +1,7 @@
 import {
   calculateRequestId,
   evmAddressAbiWord,
+  getSolidifiedTronReferenceBlock,
   hexToBytes,
   MPC_PARAMS_BYTES,
   MPCDestination,
@@ -25,7 +26,7 @@ import {
 
 import { ERC20_TRANSFER_SELECTOR } from "../evm-transfer.ts";
 import type { TronContext } from "../tron-context.ts";
-import { getTrc20Balance, getTronHeadBlock, tronReference } from "../tron-http.ts";
+import { getTrc20Balance } from "../tron-http.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { flushUntil } from "./vault-queue.ts";
 
@@ -80,10 +81,11 @@ export async function startTronDeposit(
     throw new Error("vault is not initialised, run the initialise flow first");
   }
 
-  const head = await getTronHeadBlock(tron.tronRpcUrl);
+  const reference = await getSolidifiedTronReferenceBlock(tron.tronRpcUrl);
   const timestamp = BigInt(Date.now());
   const tronTx = {
-    ...tronReference(head),
+    refBlockBytes: reference.refBlockBytes,
+    refBlockHash: reference.refBlockHash,
     timestamp,
     expiration: timestamp + (options.windowMs ?? TRON_DEPOSIT_WINDOW_MS),
     feeLimit: TRON_DEPOSIT_FEE_LIMIT,

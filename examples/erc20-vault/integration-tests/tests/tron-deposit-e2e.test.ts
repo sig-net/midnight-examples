@@ -126,6 +126,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         signed = await withTronBlockPusher(tronRpcUrl, funder, () =>
           pollTronSignedTransaction(context, {
             requestId,
+            requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
             mpcRootPublicKey,
@@ -164,6 +165,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         outcome = await withTronBlockPusher(t.tronRpcUrl, t.funder, () =>
           pollTronRespondBidirectional(context, t, {
             requestId,
+            requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
           }),

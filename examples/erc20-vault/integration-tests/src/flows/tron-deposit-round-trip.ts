@@ -1,5 +1,8 @@
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
-import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  readVaultLedger,
+  VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import { logSkip } from "@sig-net/midnight-examples-test-harness";
 
 import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
@@ -56,16 +59,20 @@ export async function runTronDepositRoundTrip(
   const outcome = await withTronBlockPusher(tron.tronRpcUrl, tron.funder, async () => {
     const signed = await pollTronSignedTransaction(context, {
       requestId,
+      requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
       intervalMs: 1000,
       timeoutMs: POLL_TIMEOUT_MS,
       mpcRootPublicKey: tron.mpcRootPublicKey,
     });
     const info = await broadcastTron(tron, { ...signed, timeoutMs: POLL_TIMEOUT_MS });
     if (info.receiptResult !== "SUCCESS") {
-      throw new Error(`Tron deposit transfer ${requestId} ran ${info.receiptResult}`);
+      throw new Error(
+        `Tron deposit transfer ${requestId} ran ${info.result ?? info.receiptResult ?? "with no result"}`,
+      );
     }
     return pollTronRespondBidirectional(context, tron, {
       requestId,
+      requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
       intervalMs: 1000,
       timeoutMs: POLL_TIMEOUT_MS,
     });

@@ -137,6 +137,9 @@ export function ensureTronAddresses(env: NodeJS.ProcessEnv): void {
 
 const USER_TRX_FLOOR = 2_000_000_000n;
 
+// The vault's own Tron account pays its withdrawals' energy, up to the fee limit each.
+const VAULT_TRX_FLOOR = 2_000_000_000n;
+
 const USER_TRC20_FLOOR = 100_000_000n;
 
 /**
@@ -149,11 +152,17 @@ export async function fundTronAccounts(env: NodeJS.ProcessEnv): Promise<void> {
   const funder = await resolveTronFunder(env);
   const user = tronAddressFromBase58(requireEnv(env, "TRON_USER_ADDRESS"));
 
-  const trx = await getTrxBalance(rpcUrl, user);
-  if (trx < USER_TRX_FLOOR) {
-    const txid = await sendTrx(rpcUrl, funder, user, USER_TRX_FLOOR - trx);
-    await waitForTronTransaction(rpcUrl, txid, TRON_TX_TIMEOUT_MS);
-    console.log(`sent ${String(USER_TRX_FLOOR - trx)} sun to ${env.TRON_USER_ADDRESS ?? ""}`);
+  for (const [name, floor] of [
+    ["TRON_USER_ADDRESS", USER_TRX_FLOOR],
+    ["TRON_VAULT_ADDRESS", VAULT_TRX_FLOOR],
+  ] as const) {
+    const account = tronAddressFromBase58(requireEnv(env, name));
+    const trx = await getTrxBalance(rpcUrl, account);
+    if (trx < floor) {
+      const txid = await sendTrx(rpcUrl, funder, account, floor - trx);
+      await waitForTronTransaction(rpcUrl, txid, TRON_TX_TIMEOUT_MS);
+      console.log(`sent ${String(floor - trx)} sun to ${name} ${env[name] ?? ""}`);
+    }
   }
   for (const name of ["TRC20_ADDRESS", "TRON_USDT_ADDRESS"]) {
     const address = name === "TRC20_ADDRESS" ? requireEnv(env, name) : env[name];
