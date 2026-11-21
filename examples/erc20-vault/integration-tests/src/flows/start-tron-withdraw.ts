@@ -116,9 +116,9 @@ function expectedTronWithdrawRecord(
 /**
  * Queue a Tron withdrawal with `startTronWithdraw` under a fresh input index and flush it.
  * The window is fresh unless `options.window` names one: a timestamp of now on the
- * solidified head, which cannot be reorganised away, expiring `windowMs` later. Fields an
- * earlier Tron withdrawal used are refused by the vault, so a fresh window moves its
- * timestamp on until its request id is unused.
+ * solidified head, which cannot be reorganised away, expiring `windowMs` later. The vault
+ * does not refuse the fields of an earlier Tron withdrawal, which name a transaction Tron
+ * takes only once, so an `options.window` must not repeat an earlier withdrawal's.
  *
  * @param context - The flow context
  * @param tron - The Tron context
