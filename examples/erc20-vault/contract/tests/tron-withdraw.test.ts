@@ -998,6 +998,260 @@ describe("completeTronWithdraw", () => {
   });
 });
 
+// VALID_TRON_WITHDRAW expires at h = NOW + 3600 whole seconds: sendTronWithdraw admits it
+// below block time h - 60 and refuses it from h - 60 on, where the refund opens.
+const LAST_SEND_TIME = NOW + 3600 - SEND_MIN_REMAINING - 1;
+const SEND_CLOSED_TIME = NOW + 3600 - SEND_MIN_REMAINING;
+
+/** How far an unsent Tron withdrawal got before its window closed to sends. */
+enum UnsentStage {
+  Queued = "queued",
+  Flushed = "flushed",
+}
+
+/** Start VALID_TRON_WITHDRAW at NOW and, for {@link UnsentStage.Flushed}, flush it. */
+const unsentTronWithdraw = async (
+  contract: Contract<VaultPrivateState>,
+  ctx: VaultContext,
+  stage: UnsentStage,
+): Promise<VaultContext> =>
+  stage === UnsentStage.Queued
+    ? (await startTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context
+    : (await flushedTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context;
+
+describe("refundUnsentTronWithdraw", () => {
+  it.each([UnsentStage.Queued, UnsentStage.Flushed])(
+    "re-mints the amount of a %s withdrawal once sends are refused, keeping the fee and the id",
+    async (stage) => {
+      const { contract, ctx } = await deployInitialised();
+      const unsent = await unsentTronWithdraw(contract, ctx, stage);
+      const requestId = first(ledgerOf(unsent).tronWithdrawRequestIds, "used request id");
+      const closed = atBlockTime(unsent, SEND_CLOSED_TIME);
+      const refunded = (
+        await contract.circuits.refundUnsentTronWithdraw(
+          closed,
+          VALID_TRON_WITHDRAW.inIndex,
+          MINT_NONCE,
+        )
+      ).context;
+
+      expect(shieldedMintsSince(closed, refunded)).toEqual([
+        [bytesToHex(pureCircuits.vaultTronTokenDomainSeparator(TRC20)), AMOUNT],
+      ]);
+      expect(
+        coinsMinted(closed, refunded).map(({ coinInfo, recipient }) => [
+          coinInfo.color,
+          coinInfo.value,
+          recipient.left.bytes,
+        ]),
+      ).toEqual([[TRON_TOKEN_COLOR, AMOUNT, hexToBytes(CPK)]]);
+      const state = ledgerOf(refunded);
+      expect(state.inputRequestBuffer.isEmpty()).toBe(true);
+      expect(state.outputRequestBuffer.isEmpty()).toBe(true);
+      expect(state.tronWithdrawArgsMap.isEmpty()).toBe(true);
+      expect(state.bidirectionalTronWithdrawMap.isEmpty()).toBe(true);
+      expect(state.evictionMap.isEmpty()).toBe(true);
+      expect(state.tronWithdrawRequestIds.member(requestId)).toBe(true);
+    },
+  );
+
+  it.each([UnsentStage.Queued, UnsentStage.Flushed])(
+    "refuses a %s withdrawal in the last block time a send is admitted",
+    async (stage) => {
+      const { contract, ctx } = await deployInitialised();
+      const unsent = await unsentTronWithdraw(contract, ctx, stage);
+      await expect(
+        contract.circuits.refundUnsentTronWithdraw(
+          atBlockTime(unsent, LAST_SEND_TIME),
+          VALID_TRON_WITHDRAW.inIndex,
+          MINT_NONCE,
+        ),
+      ).rejects.toThrow(/Tron withdrawal can still be sent/);
+    },
+  );
+
+  it.each([UnsentStage.Queued, UnsentStage.Flushed])(
+    "refuses a caller other than the withdrawer of a %s withdrawal",
+    async (stage) => {
+      const { contract, ctx } = await deployInitialised();
+      const unsent = await unsentTronWithdraw(contract, ctx, stage);
+      await expect(
+        contract.circuits.refundUnsentTronWithdraw(
+          atBlockTime(unsent, SEND_CLOSED_TIME, OTHER_SECRET_KEY),
+          VALID_TRON_WITHDRAW.inIndex,
+          MINT_NONCE,
+        ),
+      ).rejects.toThrow(/Not the requester/);
+    },
+  );
+
+  it("refuses a withdrawal sent in the last block time a send is admitted", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const { context: flushed, outIndex } = await flushedTronWithdraw(
+      contract,
+      ctx,
+      VALID_TRON_WITHDRAW,
+    );
+    const sent = (
+      await contract.circuits.sendTronWithdraw(atBlockTime(flushed, LAST_SEND_TIME), outIndex)
+    ).context;
+    await expect(
+      contract.circuits.refundUnsentTronWithdraw(
+        atBlockTime(sent, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Request already sent/);
+  });
+
+  it("refunds once", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const unsent = await unsentTronWithdraw(contract, ctx, UnsentStage.Flushed);
+    const refunded = (
+      await contract.circuits.refundUnsentTronWithdraw(
+        atBlockTime(unsent, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      )
+    ).context;
+    await expect(
+      contract.circuits.refundUnsentTronWithdraw(
+        atBlockTime(refunded, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Tron withdrawal not open/);
+  });
+
+  // The ledger, not the block time, keeps a refunded withdrawal from being sent: a send
+  // that its own block time would still admit is refused.
+  it("leaves nothing a send or a flush can reach", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const { context: flushed, outIndex } = await flushedTronWithdraw(
+      contract,
+      ctx,
+      VALID_TRON_WITHDRAW,
+    );
+    const refundedFlushed = (
+      await contract.circuits.refundUnsentTronWithdraw(
+        atBlockTime(flushed, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      )
+    ).context;
+    await expect(
+      contract.circuits.sendTronWithdraw(atBlockTime(refundedFlushed, LAST_SEND_TIME), outIndex),
+    ).rejects.toThrow(/Request not flushed/);
+
+    const queued = await unsentTronWithdraw(contract, ctx, UnsentStage.Queued);
+    const refundedQueued = (
+      await contract.circuits.refundUnsentTronWithdraw(
+        atBlockTime(queued, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      )
+    ).context;
+    await expect(
+      flush(contract, refundedQueued, [VALID_TRON_WITHDRAW.inIndex], []),
+    ).rejects.toThrow(/Request not queued/);
+  });
+
+  // Only the simulator can start the twin back at NOW; on a chain its window would be
+  // refused first, so this isolates the used-id check.
+  it("refuses a twin of a refunded withdrawal: its request id stays used", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const unsent = await unsentTronWithdraw(contract, ctx, UnsentStage.Queued);
+    const refunded = (
+      await contract.circuits.refundUnsentTronWithdraw(
+        atBlockTime(unsent, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      )
+    ).context;
+    await expect(
+      startTronWithdraw(contract, atBlockTime(refunded, NOW), {
+        ...VALID_TRON_WITHDRAW,
+        inIndex: 31n,
+      }),
+    ).rejects.toThrow(/Tron transaction already requested/);
+  });
+
+  it("refunds a flushed withdrawal whose index another action's queued request now holds", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const flushed = await unsentTronWithdraw(contract, ctx, UnsentStage.Flushed);
+    const deposit = (
+      await contract.circuits.startTronDeposit(
+        flushed,
+        VALID_TRON_WITHDRAW.inIndex,
+        { ...VALID_TRON_WITHDRAW.tronTx, feeLimit: DEFAULT_TRON_FEE_LIMIT },
+        { tokenAddress: TRC20, amount: AMOUNT },
+      )
+    ).context;
+    const refunded = (
+      await contract.circuits.refundUnsentTronWithdraw(
+        atBlockTime(deposit, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      )
+    ).context;
+    const state = ledgerOf(refunded);
+    expect(state.outputRequestBuffer.isEmpty()).toBe(true);
+    expect(state.tronWithdrawArgsMap.isEmpty()).toBe(true);
+    expect(state.inputRequestBuffer.lookup(VALID_TRON_WITHDRAW.inIndex).action).toBe(
+      Action.tronDeposit,
+    );
+  });
+
+  it("refuses before initialise", async () => {
+    const contract = new Contract<VaultPrivateState>(witnesses);
+    const { currentContractState } = await contract.initialState(
+      createConstructorContext<VaultPrivateState>(createVaultPrivateState(SECRET_KEY), CPK),
+      DEPLOYER_COMMITMENT,
+      { bytes: hexToBytes(SIGNET_ADDRESS) },
+    );
+    await expect(
+      contract.circuits.refundUnsentTronWithdraw(
+        contextOf(currentContractState, SECRET_KEY, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Not initialised/);
+  });
+
+  it("refuses an index that holds no Tron withdrawal", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(
+      contract.circuits.refundUnsentTronWithdraw(
+        atBlockTime(ctx, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/Tron withdrawal not open/);
+  });
+
+  it.each([
+    ["understates", -1n],
+    ["overstates", 1n],
+  ] as const)("refuses a witness that %s the expiration's seconds", async (_name, offset) => {
+    const { contract, ctx } = await deployInitialised();
+    const unsent = await unsentTronWithdraw(contract, ctx, UnsentStage.Flushed);
+    const lying = new Contract<VaultPrivateState>({
+      ...witnesses,
+      secondsOfMillis: ({ privateState }, millis): [VaultPrivateState, bigint] => [
+        privateState,
+        millis / 1000n + offset,
+      ],
+    });
+    await expect(
+      lying.circuits.refundUnsentTronWithdraw(
+        atBlockTime(unsent, SEND_CLOSED_TIME),
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      ),
+    ).rejects.toThrow(/expirationSeconds is not the expiration in whole seconds/);
+  });
+});
+
 describe("Tron withdraw attestations", () => {
   it.each([
     ["at the Tron height the flush recorded", TRON_START_HEIGHT],

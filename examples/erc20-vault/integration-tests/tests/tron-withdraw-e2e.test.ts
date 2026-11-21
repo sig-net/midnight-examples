@@ -8,6 +8,11 @@ import { waitForFacadeState } from "@sig-net/midnight-examples-lib";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
+import {
+  refundUnsentTronWithdraw,
+  tronWithdrawRefundOpensAtMs,
+} from "../src/flows/refund-unsent-tron-withdraw.ts";
+import { queueTronWithdraw, sendTronWithdraw } from "../src/flows/start-tron-withdraw.ts";
 import { runTronDepositRoundTrip } from "../src/flows/tron-deposit-round-trip.ts";
 import { runTronWithdrawRoundTrip } from "../src/flows/tron-withdraw-round-trip.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
@@ -22,6 +27,9 @@ const env = injectE2eEnv();
 const session = createVaultSession(env, "user");
 
 const WITHDRAW_AMOUNT = 400_000n;
+// Two minutes above the start's tronWithdrawStartMinRemainingSeconds(), which the block
+// including the start must still clear after proving: the refund spec waits out most of it.
+const REFUND_WINDOW_MS = 12n * 60_000n;
 
 let tronContext: TronContext | undefined;
 const tron = async (): Promise<TronContext> => (tronContext ??= await createTronContext(env));
@@ -56,7 +64,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
     );
 
     it(
-      "a Tron deposit gives the user the vault coin the withdrawal surrenders",
+      "a Tron deposit gives the user the vault coins the two withdrawals surrender",
       async () => {
         const context = await session.vaultContext();
         const t = await tron();
@@ -64,7 +72,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
-        const needed = WITHDRAW_AMOUNT + vaultTronTokenFees(state, t.trc20Address).withdraw;
+        const needed = 2n * (WITHDRAW_AMOUNT + vaultTronTokenFees(state, t.trc20Address).withdraw);
         const wallet = await session.wallet();
         const color = vaultTronTokenType(t.trc20Address, context.vaultContractAddress);
         const held = (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
@@ -125,6 +133,44 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         );
       },
       2 * POLL_TIMEOUT_MS + 15 * MINUTE,
+    );
+
+    it(
+      "a withdrawal nobody sent before its window closed to sends is refunded, fee kept",
+      async () => {
+        const context = await session.vaultContext();
+        const t = await tron();
+        const wallet = await session.wallet();
+        const color = vaultTronTokenType(t.trc20Address, context.vaultContractAddress);
+        const coinsBefore =
+          (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
+
+        const queued = await queueTronWithdraw(context, t, {
+          amount: WITHDRAW_AMOUNT,
+          destTronAddress: tronAddressFromEvm(crypto.getRandomValues(new Uint8Array(20))),
+          windowMs: REFUND_WINDOW_MS,
+        });
+        const opensAt = tronWithdrawRefundOpensAtMs(queued.window.expiration);
+        await new Promise((resolve) => setTimeout(resolve, Number(opensAt) - Date.now()));
+        await expect(sendTronWithdraw(context, queued)).rejects.toThrow(/too close/);
+        await refundUnsentTronWithdraw(context, { inIndex: queued.inIndex });
+
+        const after = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        expect(after.outputRequestBuffer.member(queued.outIndex)).toBe(false);
+        expect(after.bidirectionalTronWithdrawMap.member(requestIdBytes(queued.requestId))).toBe(
+          false,
+        );
+        expect(after.tronWithdrawRequestIds.member(requestIdBytes(queued.requestId))).toBe(true);
+        const fee = vaultTronTokenFees(after, t.trc20Address).withdraw;
+        await waitForFacadeState(
+          wallet.facade,
+          (synced) => (synced.shielded.balances[color] ?? 0n) === coinsBefore - fee,
+        );
+      },
+      Number(REFUND_WINDOW_MS) + 15 * MINUTE,
     );
   },
 );

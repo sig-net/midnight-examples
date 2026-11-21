@@ -37,6 +37,7 @@ action.
 | [`startDeposit`](docs/deposit/deposit.md) → [`sendDeposit`](docs/deposit/deposit.md) → [`completeDeposit`](docs/deposit/deposit.md) | **The reference flow, documented step by step in the [deposit walkthrough](docs/deposit/deposit.md).** The depositor's derived EVM account transfers the ERC20 to the vault's account, and `completeDeposit` mints the shielded vault token when the attested transfer returned true. |
 | `startTronDeposit` → `sendTronDeposit` → `completeTronDeposit` | The deposit from Tron: the depositor's derived Tron account (the same key as their EVM account) transfers a TRC-20 to the vault's Tron account, `tronAddress(vaultEvmAddress)`, under the reference block, validity window and fee limit the depositor chose, and `completeTronDeposit` mints the shielded Tron vault token when the MPC attests the transfer executed. The MPC attests the transfer's bool return, and `completeTronDeposit` mints only when it matches the expected result. |
 | `startTronWithdraw` → `sendTronWithdraw` → `completeTronWithdraw` | The withdrawal to Tron, the ETH withdrawal's twin: `startTronWithdraw` burns the surrendered Tron vault coin, the vault's Tron account, `tronAddress(vaultEvmAddress)`, transfers the TRC-20 under the reference block and validity window the withdrawer chose and the vault's fee limit, and `completeTronWithdraw` re-mints the burned amount when the MPC attests the transfer failed or unviable, or that it moved nothing (see [Tron withdrawals](#tron-withdrawals)). |
+| `refundUnsentTronWithdraw` | The withdrawer takes back a Tron withdrawal nobody sent in time: once the block time reaches the point from which `sendTronWithdraw` refuses it, the withdrawal is removed from the request buffers and the burned amount re-minted, with the fee kept and its request id still used (see [Tron withdrawals](#tron-withdrawals)). |
 | [`startWithdraw`](docs/withdraw/withdraw.md) → [`sendWithdraw`](docs/withdraw/withdraw.md) → [`completeWithdraw`](docs/withdraw/withdraw.md) | The other direction, plus the coin-spend-as-authorisation pattern: `startWithdraw` burns the surrendered vault coin, the vault's account transfers the ERC20, and `completeWithdraw` re-mints the burned amount when the MPC attests the transfer failed or unviable, or that it returned false. |
 | `startApproveRouter` / `startApproveStata` → `sendApprove` → `completeApprove` | Deployer-gated: the vault's account grants the pinned Uniswap router, or the pinned stataToken wrapper, an unlimited allowance the later swaps and supplies draw on (see [Vault-signed requests](docs/contention-handling.md#vault-signed-requests)). |
 | [`startSwap`](docs/swap/swap.md) → [`sendSwap`](docs/swap/swap.md) → [`completeSwap`](docs/swap/swap.md) | `exactOutputSingle` on the pinned router: `startSwap` burns the surrendered `erc20AddressIn` coin, and `completeSwap` mints the exact `amountOut` of `erc20AddressOut` plus the unspent input as change, or re-mints the surrendered coin when the MPC attests the swap failed or unviable. |
@@ -79,9 +80,18 @@ checks the window against the block time before the MPC sees the request:
 `startTronWithdraw` requires `tronWithdrawStartMinRemainingSeconds()` left
 before the expiration (room for the flush and the send) and the expiration at
 least `tronWithdrawCapMarginSeconds()` inside the 24 hour cap, and
-`sendTronWithdraw` requires `tronWithdrawSendMinRemainingSeconds()` left. A
-send refused this way leaves the withdrawal flushed with its coin burned and
-nothing to settle it, so send right after the flush. `startTronWithdraw` also
+`sendTronWithdraw` requires `tronWithdrawSendMinRemainingSeconds()` left. Both
+hold at the block that includes the call, not when it is proved, so leave room
+for proving and inclusion: a start that lands too late fails with nothing
+burned. A refused send writes nothing, so a withdrawal nobody sent in time stays queued
+or flushed with its coin burned. From the first block time at which
+`sendTronWithdraw` refuses it, the expiration's whole seconds minus
+`tronWithdrawSendMinRemainingSeconds()`, the withdrawer calls
+`refundUnsentTronWithdraw` with the withdrawal's input index: it removes the
+withdrawal and re-mints the burned amount, keeps the fee as a failed
+withdrawal does, and leaves the request id used. The ledger keeps the send and
+the refund apart: the refund needs the request unsent, and the send needs the
+flushed entry the refund removes. `startTronWithdraw` also
 refuses fields an earlier Tron withdrawal used, open or settled: the same
 fields name the same Tron transaction, which the MPC would sign and attest
 again at its old height. Pick another timestamp.
@@ -856,7 +866,7 @@ an unattended/backgrounded run.
 
 ## Deploying
 
-The contract has 36 circuits and their verifier keys do not fit in one block, so
+The contract has 37 circuits and their verifier keys do not fit in one block, so
 a deploy is two phases:
 
 1. The base transaction registers the whole ledger state and ONE small circuit.
@@ -992,9 +1002,9 @@ failed after that point, the PR says to run it by hand before merging).
 
 ## The e2e suite
 
-Twenty-one e2e specs run serially in a pinned order (`FILE_ORDER` in
+Twenty-two e2e specs run serially in a pinned order (`FILE_ORDER` in
 [`integration-tests/vitest.config.ts`](integration-tests/vitest.config.ts)).
-The seven `tron-*` specs run only when `TRON_RPC_URL` is set, and skip otherwise.
+The eight `tron-*` specs run only when `TRON_RPC_URL` is set, and skip otherwise.
 `happy-day-e2e` runs first because it initialises the vault, and allows the
 ERC20s, that the later flows build on, and `approve-e2e` runs before the swap and lending specs
 because it grants the allowances they draw on.
@@ -1023,11 +1033,12 @@ ids in banners as it goes, for recovering a run that died mid-flow.
 | `tron-deposit-expiry-e2e` | 1 | A signed Tron deposit left unbroadcast past its expiration is attested unviable and closes with no mint | `TRON_EXPIRY_DEPOSIT_REQUEST_ID` |
 | `tron-deposit-claimant-not-caller` | 1 | `completeTronDeposit` can direct the mint to a different wallet's coin public key | `TRON_CLAIMANT_NOT_CALLER_DEPOSIT_REQUEST_ID` |
 | `tron-false-claimer` | 3 | A Tron deposit recorded for identity A is NOT claimable by identity B, and the rightful identity then claims it | `TRON_FALSE_CLAIMER_DEPOSIT_REQUEST_ID` |
+| `tron-withdraw-e2e` | 4 | A full Tron withdraw round trip pays the recipient on Tron and keeps the burn, and a withdrawal left unsent until `sendTronWithdraw` refuses it is refunded by `refundUnsentTronWithdraw`, fee kept (it waits out a 12 minute window) | none |
 | `concurrent-flush-e2e` | 10 | Two wallets race to flush the same items: the user's transactions never fail, the losing flush is retried, and a lone canary deposit afterwards shows the stack is healthy. Runs last, as its concurrent load is the most likely to strain the local stack | `CONCURRENT_FLUSH_DEPOSIT_REQUEST_ID` / `CONCURRENT_FLUSH_CANARY_REQUEST_ID` |
 
-155 tests total across these specs (137 in the fourteen EVM specs, 18 in the
-seven Tron specs). The eight offline specs (61 tests, no stack needed) are not
-pinned and run after them, so a full run reports 216. The
+159 tests total across these specs (137 in the fourteen EVM specs, 22 in the
+eight Tron specs). The nine offline specs (63 tests, no stack needed) are not
+pinned and run after them, so a full run reports 222. The
 suite runs against a Sepolia fork, and the setup pipeline
 verifies that the Uniswap router and the stataUSDC wrapper are deployed on it
 before any spec runs, so a fork missing either fails the run at setup with an
@@ -1266,7 +1277,7 @@ prefix. The tag carries the example name, the npm version does not:
 
 ## A note on package size
 
-The package ships the verifier keys of the vault's 36 circuits, which also go
+The package ships the verifier keys of the vault's 37 circuits, which also go
 on-chain, and publishes their prover keys nowhere: the package packs to well
 under a megabyte, and the workflow logs the packed and unpacked size before it
 publishes anything.
@@ -1299,7 +1310,7 @@ It compiles the shipped `src/erc20-vault.compact` with the pinned compiler
 manifest, and writes:
 
 ```
-public/keys/<circuit>.prover, <circuit>.verifier    the vault's 36 circuits
+public/keys/<circuit>.prover, <circuit>.verifier    the vault's 37 circuits
 public/zkir/<circuit>.bzkir
 public/compiler/contract-manifest.json, contract-info.json
 public/signet/{keys,zkir,compiler}/...              the signet callee, copied from @sig-net/midnight-signer

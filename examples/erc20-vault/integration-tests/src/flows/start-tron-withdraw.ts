@@ -5,7 +5,8 @@
 // Tron account (path "vault") under the vault's fee limit. Tron has no nonce: the
 // transaction names a solidified reference block and expires, so the withdrawer picks the
 // window, and a transaction that never lands is attested unviable and refunded. The
-// settle side lives in complete-tron-withdraw.ts.
+// settle side lives in complete-tron-withdraw.ts, and the refund of a withdrawal nobody
+// sent in time in refund-unsent-tron-withdraw.ts.
 import { createCallTxOptions, submitCallTx } from "@midnight-ntwrk/midnight-js/contracts";
 import {
   calculateRequestId,
@@ -71,6 +72,8 @@ export interface StartTronWithdrawOptions {
 export interface QueuedTronWithdraw {
   /** The request id the send records, computed off-chain from the start's arguments. */
   readonly requestId: RequestIdHex;
+  /** The input index the start queued it under, which a refund names. */
+  readonly inIndex: bigint;
   readonly outIndex: Uint8Array;
   readonly window: TronTxWindow;
 }
@@ -207,7 +210,7 @@ export async function queueTronWithdraw(
     inIndexes: [inIndex],
     requestIds: [],
   });
-  return { requestId, outIndex, window };
+  return { requestId, inIndex, outIndex, window };
 }
 
 /**
