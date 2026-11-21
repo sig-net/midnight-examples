@@ -123,7 +123,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           context.vaultContractAddress,
         );
         expect(after.bidirectionalTronWithdrawMap.member(requestIdBytes(requestId))).toBe(false);
-        expect(after.tronWithdrawRequestIds.member(requestIdBytes(requestId))).toBe(true);
         expect(after.tronLastSeen).toBeGreaterThanOrEqual(outcome.event.blockHeight);
         const fee = vaultTronTokenFees(after, t.trc20Address).withdraw;
         await waitForFacadeState(
@@ -163,7 +162,6 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         expect(after.bidirectionalTronWithdrawMap.member(requestIdBytes(queued.requestId))).toBe(
           false,
         );
-        expect(after.tronWithdrawRequestIds.member(requestIdBytes(queued.requestId))).toBe(true);
         const fee = vaultTronTokenFees(after, t.trc20Address).withdraw;
         await waitForFacadeState(
           wallet.facade,

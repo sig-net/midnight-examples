@@ -349,7 +349,6 @@ describe("startTronWithdraw", () => {
       tx: { ...VALID_TRON_WITHDRAW.tronTx, feeLimit: DEFAULT_TRON_FEE_LIMIT },
       fee: TRON_TOKEN_FEES.withdraw,
     });
-    expect(state.tronWithdrawRequestIds.size()).toBe(1n);
   });
 
   it("burns the coin, principal plus fee, and mints the fee in the TRC-20's colour", async () => {
@@ -589,89 +588,23 @@ describe("startTronWithdraw: the window at the start block", () => {
   });
 });
 
-describe("startTronWithdraw: request ids are never reused", () => {
+describe("startTronWithdraw: twins", () => {
   const TWIN = { ...VALID_TRON_WITHDRAW, inIndex: 31n };
 
-  it("records the request id the send will record", async () => {
-    const { contract, ctx } = await deployInitialised();
-    const { context: sent, requestId } = await sentTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW);
-    expect([...ledgerOf(sent).tronWithdrawRequestIds]).toEqual([requestId]);
-  });
-
-  it("refuses a twin while the first is still queued, before any coin is burned", async () => {
+  it("admits a twin at start: the vault keeps no record of used request ids", async () => {
     const { contract, ctx } = await deployInitialised();
     const started = (await startTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context;
-    await expect(startTronWithdraw(contract, started, TWIN)).rejects.toThrow(
-      /Tron transaction already requested/,
-    );
+    const second = (await startTronWithdraw(contract, started, TWIN)).context;
+    expect(ledgerOf(second).inputRequestBuffer.member(TWIN.inIndex)).toBe(true);
   });
 
-  it("refuses a twin while the first is sent and open", async () => {
+  it("holds a twin at the flush while the first is flushed and open", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: sent } = await sentTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW);
-    await expect(startTronWithdraw(contract, sent, TWIN)).rejects.toThrow(
-      /Tron transaction already requested/,
+    const { context: flushed } = await flushedTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW);
+    const twinStarted = (await startTronWithdraw(contract, flushed, TWIN)).context;
+    await expect(flush(contract, twinStarted, [TWIN.inIndex], [])).rejects.toThrow(
+      /Identical request open/,
     );
-  });
-
-  it("refuses a twin after the first settled", async () => {
-    const { contract, ctx } = await deployInitialised();
-    const { context: sent, requestId } = await sentTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW);
-    const attested = await attest(
-      contract,
-      sent,
-      respond(requestId, OutputKind.executed, OUTPUT_TRUE, TRON_ATTESTED_HEIGHT),
-    );
-    const settled = (
-      await contract.circuits.completeTronWithdraw(attested, requestId, OUTPUT_TRUE, MINT_NONCE)
-    ).context;
-    expect(ledgerOf(settled).outputRequestBuffer.isEmpty()).toBe(true);
-    await expect(startTronWithdraw(contract, settled, TWIN)).rejects.toThrow(
-      /Tron transaction already requested/,
-    );
-  });
-
-  it("refuses a twin under a different fee: the fee is not in the transaction", async () => {
-    const { contract, ctx } = await deployInitialised();
-    const started = (await startTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context;
-    const repriced = (await contract.circuits.addAllowedTronToken(started, TRC20, NO_FEES)).context;
-    await expect(
-      startTronWithdraw(contract, repriced, { ...TWIN, coin: vaultCoin(AMOUNT) }),
-    ).rejects.toThrow(/Tron transaction already requested/);
-  });
-
-  it.each([
-    ["another timestamp", { tronTx: { ...VALID_TRON_WITHDRAW.tronTx, timestamp: ms(NOW - 6) } }],
-    [
-      "another expiration",
-      { tronTx: { ...VALID_TRON_WITHDRAW.tronTx, expiration: ms(NOW + 3600, 251) } },
-    ],
-    [
-      "another reference block",
-      { tronTx: { ...VALID_TRON_WITHDRAW.tronTx, refBlockHash: bytes(8, 0x57) } },
-    ],
-    [
-      "another recipient",
-      { withdraw: { ...VALID_TRON_WITHDRAW.withdraw, destTronAddress: bytes(20, 0x78) } },
-    ],
-  ] as const)(
-    "admits a withdrawal differing only in %s",
-    async (_name, delta: Partial<TronWithdrawCallArgs>) => {
-      const { contract, ctx } = await deployInitialised();
-      const started = (await startTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context;
-      const second = (await startTronWithdraw(contract, started, { ...TWIN, ...delta })).context;
-      expect(ledgerOf(second).tronWithdrawRequestIds.size()).toBe(2n);
-    },
-  );
-
-  it("admits the same fields under a new fee limit: the transaction differs", async () => {
-    const { contract, ctx } = await deployInitialised();
-    const started = (await startTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context;
-    const reconfigured = (
-      await contract.circuits.setGasParams(started, 1n, 1n, 1n, 1n, 1n, 1n, 1n, 42_000_000n)
-    ).context;
-    const second = (await startTronWithdraw(contract, reconfigured, TWIN)).context;
-    expect(ledgerOf(second).tronWithdrawRequestIds.size()).toBe(2n);
   });
 
   it("settles many distinct withdrawals flushed together", async () => {
@@ -706,7 +639,6 @@ describe("startTronWithdraw: request ids are never reused", () => {
     }
     expect(ledgerOf(next).bidirectionalTronWithdrawMap.isEmpty()).toBe(true);
     expect(ledgerOf(next).tronWithdrawArgsMap.isEmpty()).toBe(true);
-    expect(ledgerOf(next).tronWithdrawRequestIds.size()).toBe(3n);
   });
 });
 
@@ -726,7 +658,6 @@ describe("sendTronWithdraw", () => {
     const [idHex, record] = first(raw.requestsIndex.entries(), "Tron withdraw record");
     if (!isTronRequest(record)) throw new Error("expected a Tron record");
     expect(idHex).toBe(requestIdHex(calculateRequestId(record)));
-    expect([...ledger(state).tronWithdrawRequestIds]).toEqual([requestIdBytes(idHex)]);
 
     expect(record.sender).toEqual({ bytes: VAULT_ADDRESS_BYTES });
     expect(record.path).toEqual(asciiPadded("vault", 32));
@@ -1021,11 +952,10 @@ const unsentTronWithdraw = async (
 
 describe("refundUnsentTronWithdraw", () => {
   it.each([UnsentStage.Queued, UnsentStage.Flushed])(
-    "re-mints the amount of a %s withdrawal once sends are refused, keeping the fee and the id",
+    "re-mints the amount of a %s withdrawal once sends are refused, keeping the fee",
     async (stage) => {
       const { contract, ctx } = await deployInitialised();
       const unsent = await unsentTronWithdraw(contract, ctx, stage);
-      const requestId = first(ledgerOf(unsent).tronWithdrawRequestIds, "used request id");
       const closed = atBlockTime(unsent, SEND_CLOSED_TIME);
       const refunded = (
         await contract.circuits.refundUnsentTronWithdraw(
@@ -1051,7 +981,6 @@ describe("refundUnsentTronWithdraw", () => {
       expect(state.tronWithdrawArgsMap.isEmpty()).toBe(true);
       expect(state.bidirectionalTronWithdrawMap.isEmpty()).toBe(true);
       expect(state.evictionMap.isEmpty()).toBe(true);
-      expect(state.tronWithdrawRequestIds.member(requestId)).toBe(true);
     },
   );
 
@@ -1154,26 +1083,6 @@ describe("refundUnsentTronWithdraw", () => {
     await expect(
       flush(contract, refundedQueued, [VALID_TRON_WITHDRAW.inIndex], []),
     ).rejects.toThrow(/Request not queued/);
-  });
-
-  // Only the simulator can start the twin back at NOW; on a chain its window would be
-  // refused first, so this isolates the used-id check.
-  it("refuses a twin of a refunded withdrawal: its request id stays used", async () => {
-    const { contract, ctx } = await deployInitialised();
-    const unsent = await unsentTronWithdraw(contract, ctx, UnsentStage.Queued);
-    const refunded = (
-      await contract.circuits.refundUnsentTronWithdraw(
-        atBlockTime(unsent, SEND_CLOSED_TIME),
-        VALID_TRON_WITHDRAW.inIndex,
-        MINT_NONCE,
-      )
-    ).context;
-    await expect(
-      startTronWithdraw(contract, atBlockTime(refunded, NOW), {
-        ...VALID_TRON_WITHDRAW,
-        inIndex: 31n,
-      }),
-    ).rejects.toThrow(/Tron transaction already requested/);
   });
 
   it("refunds a flushed withdrawal whose index another action's queued request now holds", async () => {

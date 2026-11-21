@@ -88,13 +88,14 @@ or flushed with its coin burned. From the first block time at which
 `sendTronWithdraw` refuses it, the expiration's whole seconds minus
 `tronWithdrawSendMinRemainingSeconds()`, the withdrawer calls
 `refundUnsentTronWithdraw` with the withdrawal's input index: it removes the
-withdrawal and re-mints the burned amount, keeps the fee as a failed
-withdrawal does, and leaves the request id used. The ledger keeps the send and
-the refund apart: the refund needs the request unsent, and the send needs the
-flushed entry the refund removes. `startTronWithdraw` also
-refuses fields an earlier Tron withdrawal used, open or settled: the same
-fields name the same Tron transaction, which the MPC would sign and attest
-again at its old height. Pick another timestamp.
+withdrawal and re-mints the burned amount, and keeps the fee as a failed
+withdrawal does. The ledger keeps the send and the refund apart: the refund
+needs the request unsent, and the send needs the flushed entry the refund
+removes. Tron has no nonce, so the same fields name the same Tron transaction,
+which Tron takes only once. The vault keeps no record of used fields: a client
+that reuses the fields of an earlier withdrawal that already landed gets a
+transaction Tron refuses, and that withdrawal's coin is left with nothing to
+settle it. Pick a fresh timestamp for every withdrawal.
 
 The vault's Tron account signs and pays every withdrawal: fund
 `tronAddress(vaultEvmAddress)` with TRX, which the network burns for the
@@ -443,8 +444,8 @@ Three vault-specific points:
   compiler chunks the state tree from the last field back: chunk 0 holds
   fields 0–1, chunks 1, 2 and 3 hold fields 2–16, 17–31 and 32–46, and every
   path is depth 2. The
-  deposit map has the path `[2, 14]`, and `sendDeposit` packs
-  `requestsPathDepth` 2 + `requestsPath` [2, 14, 0, 0] into its notification.
+  deposit map has the path `[2, 0]`, and `sendDeposit` packs
+  `requestsPathDepth` 2 + `requestsPath` [2, 0, 0, 0] into its notification.
   The compiler records the same paths as each field's "index" in the compiled
   `contract-info.json`, and a ledger declaration change re-chunks the tree, so
   re-read them there and update every notification vector in the same change.

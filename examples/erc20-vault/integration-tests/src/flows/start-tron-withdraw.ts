@@ -161,15 +161,6 @@ export async function queueTronWithdraw(
       timestamp,
       expiration: timestamp + (options.windowMs ?? TRON_WITHDRAW_WINDOW_MS),
     };
-    while (
-      state.tronWithdrawRequestIds.member(
-        calculateRequestId(
-          expectedTronWithdrawRecord(context, state, tokenAddress, options, window),
-        ),
-      )
-    ) {
-      window = { ...window, timestamp: window.timestamp + 1n };
-    }
   }
   const requestId = requestIdHex(
     calculateRequestId(expectedTronWithdrawRecord(context, state, tokenAddress, options, window)),
