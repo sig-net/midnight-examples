@@ -65,6 +65,7 @@ import {
   fundTronAccounts,
   TRON_PIPELINE_KEYS,
 } from "./tron-setup.ts";
+import { ensureSunswapRouter } from "./tron-sunswap.ts";
 import { resolveUserIdentity } from "./vault-identity.ts";
 
 /**
@@ -489,6 +490,10 @@ const STEPS: readonly SetupStep[] = [
   [
     "setup: deploy the USDT-like test TRC-20 as TRON_USDT_ADDRESS (when TRON_RPC_URL is set)",
     ensureTestUsdtLikeTrc20,
+  ],
+  [
+    "setup: deploy SunSwap V3 with a pool of the two test TRC-20s as TRON_SUNSWAP_ROUTER",
+    ensureSunswapRouter,
   ],
   ["setup: default TRON_ALLOWED_TOKENS to the test TRC-20s", ensureTronAllowedTokens],
   ["setup: check/derive vault and user Tron addresses", ensureTronAddresses],

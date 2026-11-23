@@ -23,6 +23,7 @@ import { resolveUserIdentity } from "./vault-identity.ts";
 export const TRON_PIPELINE_KEYS = [
   "TRC20_ADDRESS",
   "TRON_USDT_ADDRESS",
+  "TRON_SUNSWAP_ROUTER",
   "TRON_ALLOWED_TOKENS",
   "TRON_VAULT_ADDRESS",
   "TRON_USER_ADDRESS",
