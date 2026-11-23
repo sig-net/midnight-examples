@@ -25,6 +25,16 @@ export interface VaultGasParams {
   readonly gasLimits: Readonly<Record<VaultGasKind, bigint>>;
   /** The fee limit of every vault-signed Tron transaction, sun. */
   readonly tronFeeLimit: bigint;
+  /** The fee limit of the vault's Tron router approval and of its Tron swap, sun. */
+  readonly tronFeeLimits: VaultTronFeeLimits;
+}
+
+/** The per-action Tron fee limits the vault's `setGasParams` circuit stores, in sun. */
+export interface VaultTronFeeLimits {
+  /** The fee limit of the vault's Tron router approval. */
+  readonly approve: bigint;
+  /** The fee limit of the vault's Tron swap. */
+  readonly swap: bigint;
 }
 
 /** The variable naming the max total fee per gas, in wei. */
@@ -35,6 +45,12 @@ export const VAULT_MAX_PRIORITY_FEE_PER_GAS_VARIABLE = "VAULT_MAX_PRIORITY_FEE_P
 
 /** The variable naming the Tron fee limit, in sun. */
 export const VAULT_TRON_FEE_LIMIT_VARIABLE = "VAULT_TRON_FEE_LIMIT";
+
+/** The variable naming the Tron approve and swap fee limits, in sun. */
+export const VAULT_TRON_FEE_LIMIT_VARIABLES: Readonly<Record<keyof VaultTronFeeLimits, string>> = {
+  approve: "VAULT_TRON_FEE_LIMIT_APPROVE",
+  swap: "VAULT_TRON_FEE_LIMIT_SWAP",
+};
 
 /** The variable naming each kind's gas limit. */
 export const VAULT_GAS_LIMIT_VARIABLES: Readonly<Record<VaultGasKind, string>> = {
@@ -73,8 +89,8 @@ function resolveGasSetting(
  * replacing its setting.
  *
  * @param env - The environment: {@link VAULT_MAX_FEE_PER_GAS_VARIABLE},
- *   {@link VAULT_MAX_PRIORITY_FEE_PER_GAS_VARIABLE}, {@link VAULT_GAS_LIMIT_VARIABLES} and
- *   {@link VAULT_TRON_FEE_LIMIT_VARIABLE}.
+ *   {@link VAULT_MAX_PRIORITY_FEE_PER_GAS_VARIABLE}, {@link VAULT_GAS_LIMIT_VARIABLES},
+ *   {@link VAULT_TRON_FEE_LIMIT_VARIABLE} and {@link VAULT_TRON_FEE_LIMIT_VARIABLES}.
  * @param current - The settings the vault holds, which every unset variable keeps.
  * @returns The settings to store.
  * @throws {Error} If a variable is not a positive integer, exceeds the circuit's width for it
@@ -87,6 +103,13 @@ export function resolveVaultGasParams(
 ): VaultGasParams {
   const limit = (kind: VaultGasKind): bigint =>
     resolveGasSetting(env, VAULT_GAS_LIMIT_VARIABLES[kind], current.gasLimits[kind], UINT64_MAX);
+  const tronLimit = (kind: keyof VaultTronFeeLimits): bigint =>
+    resolveGasSetting(
+      env,
+      VAULT_TRON_FEE_LIMIT_VARIABLES[kind],
+      current.tronFeeLimits[kind],
+      INT64_MAX,
+    );
   const params: VaultGasParams = {
     maxFeePerGas: resolveGasSetting(
       env,
@@ -113,6 +136,7 @@ export function resolveVaultGasParams(
       current.tronFeeLimit,
       INT64_MAX,
     ),
+    tronFeeLimits: { approve: tronLimit("approve"), swap: tronLimit("swap") },
   };
   if (params.maxPriorityFeePerGas > params.maxFeePerGas) {
     throw new Error(
@@ -127,7 +151,7 @@ export function resolveVaultGasParams(
  * Render gas settings for a log line.
  *
  * @param params - The settings to render.
- * @returns The fee envelope in wei, each kind's gas limit, then the Tron fee limit in sun.
+ * @returns The fee envelope in wei, each kind's gas limit, then the Tron fee limits in sun.
  */
 export function formatVaultGasParams(params: VaultGasParams): string {
   const { withdraw, approve, swap, supply, redeem } = params.gasLimits;
@@ -136,7 +160,9 @@ export function formatVaultGasParams(params: VaultGasParams): string {
     `max priority fee ${String(params.maxPriorityFeePerGas)} wei, gas limits ` +
     `withdraw ${String(withdraw)}, approve ${String(approve)}, swap ${String(swap)}, ` +
     `supply ${String(supply)}, redeem ${String(redeem)}, ` +
-    `Tron fee limit ${String(params.tronFeeLimit)} sun`
+    `Tron fee limit ${String(params.tronFeeLimit)} sun, ` +
+    `Tron approve fee limit ${String(params.tronFeeLimits.approve)} sun, ` +
+    `Tron swap fee limit ${String(params.tronFeeLimits.swap)} sun`
   );
 }
 
@@ -176,6 +202,7 @@ export async function setGasParamsOnVaultContract(
     maxPriorityFeePerGas: state.vaultMaxPriorityFeePerGas,
     gasLimits: state.vaultGasLimits,
     tronFeeLimit: state.vaultTronFeeLimit,
+    tronFeeLimits: state.vaultTronFeeLimits,
   };
   const params = resolveVaultGasParams(env, current);
   if (sameGasParams(current, params)) {
@@ -191,6 +218,8 @@ export async function setGasParamsOnVaultContract(
     params.gasLimits.supply,
     params.gasLimits.redeem,
     params.tronFeeLimit,
+    params.tronFeeLimits.approve,
+    params.tronFeeLimits.swap,
   );
   console.log(
     `vault gas settings were ${formatVaultGasParams(current)}\n` +
@@ -227,6 +256,7 @@ export async function setGasParamsOnVault(
     VAULT_MAX_PRIORITY_FEE_PER_GAS_VARIABLE,
     ...Object.values(VAULT_GAS_LIMIT_VARIABLES),
     VAULT_TRON_FEE_LIMIT_VARIABLE,
+    ...Object.values(VAULT_TRON_FEE_LIMIT_VARIABLES),
   ];
   return withDeployerVault(
     env,

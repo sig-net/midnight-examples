@@ -59,6 +59,11 @@ export async function printVaultState(
   console.log(`EVM last seen:     ${String(state.globalLastSeen)}`);
   console.log(`Tron last seen:    ${String(state.tronLastSeen)}`);
   console.log(`Tron USDT:         0x${bytesToHex(state.tronUsdtAddress)}`);
+  console.log(`SunSwap router:    0x${bytesToHex(state.sunswapRouter)}`);
+  console.log(
+    `Tron fee limits:   approve ${String(state.vaultTronFeeLimits.approve)}, ` +
+      `swap ${String(state.vaultTronFeeLimits.swap)}`,
+  );
   console.log(`vault EVM nonce:   ${String(state.vaultAccountNonce)}`);
   console.log(`fee recipient:     coin ${bytesToHex(state.feeRecipientCoinPublicKey.bytes)}`);
   console.log(`                   enc  ${bytesToHex(state.feeRecipientEncryptionPublicKey)}`);
@@ -79,6 +84,8 @@ export async function printVaultState(
 
   printRequestMap("deposit", state.bidirectionalDepositMap);
   printRequestMap("Tron deposit", state.bidirectionalTronDepositMap);
+  printRequestMap("Tron approve", state.bidirectionalTronApproveMap);
+  printRequestMap("Tron swap", state.bidirectionalTronSwapMap);
   printRequestMap("withdraw", state.bidirectionalWithdrawMap);
   printRequestMap("approve", state.bidirectionalApproveMap);
   printRequestMap("nonce replacement", state.bidirectionalReplaceNonceMap);

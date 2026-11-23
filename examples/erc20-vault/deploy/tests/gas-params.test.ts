@@ -20,6 +20,7 @@ const CURRENT: VaultGasParams = {
     redeem: 500_000n,
   },
   tronFeeLimit: 100_000_000n,
+  tronFeeLimits: { approve: 100_000_000n, swap: 300_000_000n },
 };
 
 describe("resolveVaultGasParams", () => {
@@ -56,13 +57,26 @@ describe("resolveVaultGasParams", () => {
         VAULT_GAS_LIMIT_SUPPLY: "4",
         VAULT_GAS_LIMIT_REDEEM: "5",
         VAULT_TRON_FEE_LIMIT: "6",
+        VAULT_TRON_FEE_LIMIT_APPROVE: "7",
+        VAULT_TRON_FEE_LIMIT_SWAP: "8",
       },
       expected: {
         maxFeePerGas: 9n,
         maxPriorityFeePerGas: 8n,
         gasLimits: { withdraw: 1n, approve: 2n, swap: 3n, supply: 4n, redeem: 5n },
         tronFeeLimit: 6n,
+        tronFeeLimits: { approve: 7n, swap: 8n },
       },
+    },
+    {
+      name: "replaces only the Tron swap fee limit",
+      env: { VAULT_TRON_FEE_LIMIT_SWAP: "500000000" },
+      expected: { ...CURRENT, tronFeeLimits: { approve: 100_000_000n, swap: 500_000_000n } },
+    },
+    {
+      name: "keeps a Tron fee limit whose variable is blank",
+      env: { VAULT_TRON_FEE_LIMIT_SWAP: "" },
+      expected: CURRENT,
     },
     {
       name: "accepts the widest limit and fee the circuit takes",
@@ -70,12 +84,14 @@ describe("resolveVaultGasParams", () => {
         VAULT_GAS_LIMIT_SWAP: "18446744073709551615",
         VAULT_MAX_FEE_PER_GAS: "340282366920938463463374607431768211455",
         VAULT_TRON_FEE_LIMIT: "9223372036854775807",
+        VAULT_TRON_FEE_LIMIT_SWAP: "9223372036854775807",
       },
       expected: {
         ...CURRENT,
         maxFeePerGas: 2n ** 128n - 1n,
         gasLimits: { ...CURRENT.gasLimits, swap: 2n ** 64n - 1n },
         tronFeeLimit: 2n ** 63n - 1n,
+        tronFeeLimits: { approve: 100_000_000n, swap: 2n ** 63n - 1n },
       },
     },
   ])("$name", ({ env, expected }) => {
@@ -127,6 +143,17 @@ describe("resolveVaultGasParams", () => {
       error: "VAULT_TRON_FEE_LIMIT must be at most 9223372036854775807, got 9223372036854775808.",
     },
     {
+      name: "refuses a zero Tron approve fee limit",
+      env: { VAULT_TRON_FEE_LIMIT_APPROVE: "0" },
+      error: 'VAULT_TRON_FEE_LIMIT_APPROVE must be a positive integer, got "0".',
+    },
+    {
+      name: "refuses a Tron swap fee limit wider than int64",
+      env: { VAULT_TRON_FEE_LIMIT_SWAP: "9223372036854775808" },
+      error:
+        "VAULT_TRON_FEE_LIMIT_SWAP must be at most 9223372036854775807, got 9223372036854775808.",
+    },
+    {
       name: "refuses a priority fee above the total fee it is set with",
       env: { VAULT_MAX_FEE_PER_GAS: "5", VAULT_MAX_PRIORITY_FEE_PER_GAS: "6" },
       error: "VAULT_MAX_PRIORITY_FEE_PER_GAS (6) cannot exceed VAULT_MAX_FEE_PER_GAS (5).",
@@ -147,7 +174,8 @@ describe("formatVaultGasParams", () => {
     expect(formatVaultGasParams(CURRENT)).toBe(
       "max fee 150000000000 wei, max priority fee 1000000000 wei, gas limits " +
         "withdraw 100000, approve 100000, swap 700000, supply 500000, redeem 500000, " +
-        "Tron fee limit 100000000 sun",
+        "Tron fee limit 100000000 sun, Tron approve fee limit 100000000 sun, " +
+        "Tron swap fee limit 300000000 sun",
     );
   });
 });
