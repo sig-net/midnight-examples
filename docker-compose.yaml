@@ -92,6 +92,7 @@ services:
   tron:
     container_name: 'local-tron'
     image: 'tronbox/tre:2.0.0'
+    profiles: ['tron']
     environment:
       useDefaultPrivateKey: 'true'
     ports:
@@ -123,6 +124,7 @@ services:
         condition: service_started
       tron:
         condition: service_started
+        required: false
     extra_hosts: # To let the container reach services on the HOST (e.g. a hardhat node)
       - 'host.docker.internal:host-gateway'
     # The responder's output cache simulation: the exact bytes of every

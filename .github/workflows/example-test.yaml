@@ -178,7 +178,7 @@ jobs:
           # Fail fast if the fork args don't render, instead of an opaque bare-anvil failure later.
           docker compose config | grep -q -- '--fork-url' \
             || { echo "::error::compose rendered no --fork-url despite SEPOLIA_FORK_RPC_URL being set"; exit 1; }
-          docker compose up -d
+          docker compose --profile tron up -d
       - name: Wait for the stack
         run: |
           timeout 180 bash -c 'until curl -fsS http://127.0.0.1:9944/health >/dev/null 2>&1; do sleep 3; done'
@@ -226,9 +226,9 @@ jobs:
         # collected nothing and `|| true` reported success anyway.
         run: |
           mkdir -p ci-logs
-          docker compose --profile fakenet config --services | while read -r service; do
+          docker compose --profile fakenet --profile tron config --services | while read -r service; do
             echo "collecting ${service} logs"
-            timeout 30 docker compose --profile fakenet logs --no-color --tail 3000 "$service" \
+            timeout 30 docker compose --profile fakenet --profile tron logs --no-color --tail 3000 "$service" \
               > "ci-logs/${service}.log" 2>&1 || true
           done
           timeout 60 docker ps -a > ci-logs/docker-ps.txt 2>&1 || true

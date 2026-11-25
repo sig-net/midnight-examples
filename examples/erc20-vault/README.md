@@ -555,7 +555,7 @@ cp .env.example .env                # then set SEPOLIA_FORK_RPC_URL to an archiv
 compact update 0.36.0               # Exact version required.
 yarn compile:erc20-vault            # no zk keys: the first e2e run generates them itself (~10 min)
 docker compose up -d                # node, indexer, proof server, anvil forking
-                                    # Sepolia, TRE (NOT the fakenet responder: it is
+                                    # Sepolia (NOT the fakenet responder: it is
                                     # behind the `fakenet` profile, the test setup
                                     # starts it mid-run)
 yarn test:erc20-vault:e2e           # the full e2e suite, serially, bail on first failure
@@ -651,7 +651,9 @@ left off. A restored wallet on preprod is synced in seconds.
 ### Running the Tron deposit specs
 
 The `tron-*` specs run against the `tron` compose service, a TRE dev chain on
-`http://127.0.0.1:9090`, and skip unless `TRON_RPC_URL` is set. The fakenet
+`http://127.0.0.1:9090`, and skip unless `TRON_RPC_URL` is set. The service
+sits behind the `tron` profile: start it with
+`docker compose --profile tron up -d`. The fakenet
 image the compose file pins signs and attests Tron requests. Set the Tron node
 in `.env`:
 
