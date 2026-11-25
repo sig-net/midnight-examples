@@ -7,12 +7,17 @@ import type {
   TransactionIdentifier,
   WalletFacade,
 } from "@midnightntwrk/wallet-sdk-facade";
-
-export { isAwaiting } from "@midnightntwrk/wallet-sdk-facade";
 import type { AccountKeys, NetworkId } from "@sig-net/midnight-contract-deploy";
 
 import { withOperationProgress } from "./operation-progress.ts";
 import { ensureTransactionFee } from "./transaction-fees.ts";
+
+/**
+ * Whether a transaction in a wallet's lifecycle records still awaits an answer
+ * (balanced, finalized or submitted), so its coins stay booked: the wallet
+ * SDK's own predicate, for callers that poll with {@link waitForFacadeState}.
+ */
+export { isAwaiting } from "@midnightntwrk/wallet-sdk-facade";
 
 // Recipes (balancing plans for submitted transactions) expire 30 min out.
 const RECIPE_TTL_MS = 30 * 60 * 1000;
