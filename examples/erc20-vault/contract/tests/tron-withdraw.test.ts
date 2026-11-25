@@ -662,7 +662,7 @@ describe("sendTronWithdraw", () => {
     expect(record.sender).toEqual({ bytes: VAULT_ADDRESS_BYTES });
     expect(record.path).toEqual(asciiPadded("vault", 32));
     expect(record.keyVersion).toBe(MPC_KEY_VERSION);
-    expect(record.txParamType).toBe(TxParamType.tron);
+    expect(record.txParamType).toBe(TxParamType.tronTriggerSmartContract);
     expect(record.executionDest).toEqual(signetCircuits.tronCaip2Id());
     expect(record.outputDeserializationSchema).toEqual(VAULT_OUTPUT_SCHEMA);
     expect(record.txParams).toEqual({

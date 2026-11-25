@@ -21,7 +21,7 @@ import {
   stripHexPrefix,
   toSignBidirectionalEventIndex,
   tronAddressFromEvm,
-  type TronTxParams,
+  type TronTriggerSmartContractTxParams,
   TxParamType,
 } from "@sig-net/midnight";
 import {
@@ -86,13 +86,13 @@ function expectedTronWithdrawRecord(
   tokenAddress: Uint8Array,
   options: StartTronWithdrawOptions,
   window: TronTxWindow,
-): SignBidirectionalEvent<TronTxParams> {
+): SignBidirectionalEvent<TronTriggerSmartContractTxParams> {
   return {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: VAULT_PATH_BYTES,
     ...TRON_TRANSFER_RESULT_MPC_ROUTING,
-    txParamType: TxParamType.tron,
+    txParamType: TxParamType.tronTriggerSmartContract,
     txParams: {
       ...window,
       feeLimit: state.vaultTronFeeLimit,

@@ -3,7 +3,7 @@ import {
   bytesToHex,
   getSolidifiedTronTransactionInfo,
   TronBroadcastOutcome,
-  type TronTransactionReceipt,
+  type TronTransactionInfo,
 } from "@sig-net/midnight";
 
 import { PollProgress } from "../poll-progress.ts";
@@ -18,7 +18,7 @@ export interface BroadcastTronOptions {
 }
 
 /** The final receipt, and whether the transaction was final before this call. */
-export interface BroadcastTronResult extends TronTransactionReceipt {
+export interface BroadcastTronResult extends TronTransactionInfo {
   readonly alreadyLanded: boolean;
 }
 
@@ -26,7 +26,7 @@ async function waitForSolidifiedReceipt(
   rpcUrl: string,
   txid: Uint8Array,
   timeoutMs: number,
-): Promise<TronTransactionReceipt> {
+): Promise<TronTransactionInfo> {
   const progress = new PollProgress(`Tron receipt ${bytesToHex(txid)}`, timeoutMs);
   const giveUp = new AbortController();
   const timer = setTimeout(() => {

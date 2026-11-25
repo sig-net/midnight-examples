@@ -15,7 +15,7 @@ import {
   stripHexPrefix,
   toSignBidirectionalEventIndex,
   tronAddressFromEvm,
-  type TronTxParams,
+  type TronTriggerSmartContractTxParams,
   TxParamType,
 } from "@sig-net/midnight";
 import {
@@ -91,7 +91,7 @@ export async function startTronDeposit(
     feeLimit: TRON_DEPOSIT_FEE_LIMIT,
   };
 
-  const expectedRecord: SignBidirectionalEvent<TronTxParams> = {
+  const expectedRecord: SignBidirectionalEvent<TronTriggerSmartContractTxParams> = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: context.identity.commitment,
@@ -101,7 +101,7 @@ export async function startTronDeposit(
     executionDest: signetCircuits.tronCaip2Id(),
     outputDeserializationSchema: new Uint8Array(0),
     respondSerializationSchema: new Uint8Array(0),
-    txParamType: TxParamType.tron,
+    txParamType: TxParamType.tronTriggerSmartContract,
     txParams: {
       ...tronTx,
       contractAddress: token,

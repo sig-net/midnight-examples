@@ -111,7 +111,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         expect(outcome.serializedOutput).toEqual(Uint8Array.of(1));
         const record = await session
           .responseReader(VAULT_TRON_WITHDRAW_REQUESTS_PATH)
-          .getTronSignatureRequest(requestId)
+          .getTronTriggerSmartContractSignatureRequest(requestId)
           .catch(() => undefined);
         expect(record, "completeTronWithdraw removes the record").toBeUndefined();
         expect(await getTrc20Balance(t.tronRpcUrl, token, recipient)).toBe(WITHDRAW_AMOUNT);

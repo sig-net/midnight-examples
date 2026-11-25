@@ -40,7 +40,7 @@ export async function pollTronSignedTransaction(
 ): Promise<SignedTronTransaction> {
   console.log(`request id:         ${options.requestId}`);
   const reader = createResponseReader(context, options.requestsPath);
-  const request = await reader.getTronSignatureRequest(options.requestId);
+  const request = await reader.getTronTriggerSmartContractSignatureRequest(options.requestId);
   const unsigned = signBidirectionalEventToUnsignedTronTransaction(
     request,
     options.mpcRootPublicKey,

@@ -52,7 +52,7 @@ export async function pollTronRespondBidirectional(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  const request = await reader.getTronSignatureRequest(options.requestId);
+  const request = await reader.getTronTriggerSmartContractSignatureRequest(options.requestId);
   const { txId } = signBidirectionalEventToUnsignedTronTransaction(request, tron.mpcRootPublicKey);
   const isContractCall = isEvmContractCall(assembleCalldata(request.txParams.calldata));
   const token = request.txParams.contractAddress.subarray(1);
