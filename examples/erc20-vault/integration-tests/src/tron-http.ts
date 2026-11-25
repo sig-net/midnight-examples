@@ -23,52 +23,6 @@ async function tronPost(rpcUrl: string, path: string, body: object): Promise<Jso
 }
 
 /** */
-export interface TronHeadBlock {
-  readonly number: bigint;
-  readonly blockId: Uint8Array;
-  readonly timestamp: bigint;
-}
-
-interface NowBlockAnswer {
-  readonly blockID?: string;
-  readonly block_header?: { readonly raw_data?: { readonly number?: number; timestamp?: number } };
-}
-
-/**
- * @param rpcUrl - The node's HTTP API base URL
- * @returns The head block's number
- * @throws {Error} If the node does not answer with a block
- */
-export async function getTronHeadBlock(rpcUrl: string): Promise<TronHeadBlock> {
-  const answer = (await tronPost(rpcUrl, "/wallet/getnowblock", {})) as NowBlockAnswer;
-  const raw = answer.block_header?.raw_data;
-  if (answer.blockID === undefined || raw?.number === undefined || raw.timestamp === undefined) {
-    throw new Error("Tron getnowblock returned no block id, number or timestamp");
-  }
-  return {
-    number: BigInt(raw.number),
-    blockId: hexToBytes(answer.blockID),
-    timestamp: BigInt(raw.timestamp),
-  };
-}
-
-/** */
-export interface TronReference {
-  readonly refBlockBytes: Uint8Array;
-  readonly refBlockHash: Uint8Array;
-}
-
-/**
- * @param block - The reference block
- * @returns The two reference fields
- */
-export function tronReference(block: TronHeadBlock): TronReference {
-  const number = new Uint8Array(8);
-  new DataView(number.buffer).setBigUint64(0, block.number);
-  return { refBlockBytes: number.slice(6, 8), refBlockHash: block.blockId.slice(8, 16) };
-}
-
-/** */
 export type TronReceiptResult =
   | "SUCCESS"
   | "DEFAULT"
@@ -127,24 +81,6 @@ interface BroadcastAnswer {
 }
 
 const DUPLICATE_TRANSACTION = "DUP_TRANSACTION_ERROR";
-
-/**
- * @param rpcUrl - The node's HTTP API base URL
- * @param signedTransaction - The signed `Transaction` bytes
- * @returns Whether this call submitted it
- * @throws {Error} If the node refuses it
- */
-export async function broadcastTronHex(
-  rpcUrl: string,
-  signedTransaction: Uint8Array,
-): Promise<boolean> {
-  const answer = (await tronPost(rpcUrl, "/wallet/broadcasthex", {
-    transaction: bytesToHex(signedTransaction),
-  })) as BroadcastAnswer;
-  if (answer.result === true) return true;
-  if (answer.code === DUPLICATE_TRANSACTION) return false;
-  throw new Error(`Tron broadcasthex refused the transaction: ${JSON.stringify(answer)}`);
-}
 
 interface UnsignedTronTransaction {
   readonly txID: string;

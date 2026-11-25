@@ -24,11 +24,16 @@ export const createVaultPrivateState = (secretKey: Uint8Array): VaultPrivateStat
 /**
  * Witness implementations, typed against the generated `Witnesses` shape.
  * `callerSecretKey` feeds the contract's identity commitment (and thereby the
- * MPC derivation path) from private state.
+ * MPC derivation path) from private state. `secondsOfMillis` divides a Tron
+ * time by 1000, which Compact cannot; the circuit checks the quotient.
  */
 export const witnesses: Witnesses<VaultPrivateState> = {
   callerSecretKey: ({ privateState }): [VaultPrivateState, Uint8Array] => [
     privateState,
     privateState.secretKey,
+  ],
+  secondsOfMillis: ({ privateState }, millis): [VaultPrivateState, bigint] => [
+    privateState,
+    millis / 1000n,
   ],
 };

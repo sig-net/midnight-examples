@@ -36,6 +36,7 @@ const FILE_ORDER = [
   "tron-deposit-expiry-e2e.test.ts",
   "tron-deposit-claimant-not-caller.test.ts",
   "tron-false-claimer.test.ts",
+  "tron-withdraw-e2e.test.ts",
   // Last: its concurrent submissions are the load most likely to poison the local stack.
   "concurrent-flush-e2e.test.ts",
 ];

@@ -106,7 +106,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           reuse ?? (await startTronDeposit(context, await tron(), { amount: DEPOSIT_AMOUNT }));
         const record = await session
           .responseReader(VAULT_TRON_DEPOSIT_REQUESTS_PATH)
-          .getTronSignatureRequest(requestId);
+          .getTronTriggerSmartContractSignatureRequest(requestId);
         expect(record.path).toEqual(context.identity.commitment);
         expect(record.txParams.callValue).toBe(0n);
         expect(record.txParams.expiration - record.txParams.timestamp).toBe(3_600_000n);
@@ -126,6 +126,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         signed = await withTronBlockPusher(tronRpcUrl, funder, () =>
           pollTronSignedTransaction(context, {
             requestId,
+            requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
             mpcRootPublicKey,
@@ -164,6 +165,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         outcome = await withTronBlockPusher(t.tronRpcUrl, t.funder, () =>
           pollTronRespondBidirectional(context, t, {
             requestId,
+            requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
           }),

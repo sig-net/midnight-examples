@@ -1,5 +1,8 @@
 import { OutputKind, requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
-import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  readVaultLedger,
+  VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import { banner } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
@@ -43,19 +46,21 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         const outcome = await withTronBlockPusher(tron.tronRpcUrl, tron.funder, async () => {
           const signed = await pollTronSignedTransaction(context, {
             requestId,
+            requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
             mpcRootPublicKey: tron.mpcRootPublicKey,
           });
           const attested = await pollTronRespondBidirectional(context, tron, {
             requestId,
+            requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS + Number(WINDOW_MS),
           });
           await expect(
             broadcastTron(tron, { ...signed, timeoutMs: MINUTE }),
             "the node refuses an expired transaction",
-          ).rejects.toThrow(/broadcasthex refused/);
+          ).rejects.toThrow(/Tron node refused the transaction: TRANSACTION_EXPIRATION_ERROR/);
           return attested;
         });
         expect(OutputKind[outcome.event.outputKind]).toBe(OutputKind[OutputKind.unviable]);

@@ -125,12 +125,13 @@ export pure circuit feeMintNonce(coinNonce: Bytes<32>): Bytes<32> {
 
 // Burns the surrendered coin whole and mints the fee of the same colour to the fee
 // recipient, so principal + fee leaves the caller and only the fee leaves the burn.
-circuit takeFee(erc20Address: Bytes<20>, coin: ShieldedCoinInfo, fee: Uint<64>): [] {
+// coinDomainSeparator is the domain separator of the coin's colour.
+circuit takeFee(coinDomainSeparator: Bytes<32>, coin: ShieldedCoinInfo, fee: Uint<64>): [] {
   receiveShielded(disclose(coin));
   sendImmediateShielded(disclose(coin), shieldedBurnAddress(), disclose(coin).value);
   if (fee > 0 as Uint<64>) {
     mintShieldedToken(
-      vaultTokenDomainSeparator(disclose(erc20Address)),
+      disclose(coinDomainSeparator),
       fee,
       feeMintNonce(disclose(coin).nonce),
       left<ZswapCoinPublicKey, ContractAddress>(feeRecipientCoinPublicKey)
@@ -250,11 +251,13 @@ export circuit initialise(
     supply: 500000 as Uint<64>,
     redeem: 500000 as Uint<64>
   };
+  // 100 TRX, in sun.
+  vaultTronFeeLimit = 100000000 as Uint<64>;
 }
 
 // ==== Gas settings ===================================================================
-// The deployer resets the vault account's fee envelope and per-action gas limits. A
-// request keeps the values it was started with.
+// The deployer resets the vault account's fee envelope and per-action gas limits, and the
+// fee limit of its Tron transactions. A request keeps the values it was started with.
 
 export circuit setGasParams(
   newMaxFeePerGas: Uint<128>,
@@ -263,7 +266,8 @@ export circuit setGasParams(
   newApproveGasLimit: Uint<64>,
   newSwapGasLimit: Uint<64>,
   newSupplyGasLimit: Uint<64>,
-  newRedeemGasLimit: Uint<64>
+  newRedeemGasLimit: Uint<64>,
+  newTronFeeLimit: Uint<64>
 ): [] {
   requireInitialised();
   requireDeployer();
@@ -278,6 +282,8 @@ export circuit setGasParams(
   assert(newSwapGasLimit > 0 as Uint<64>, "Gas limit must be positive");
   assert(newSupplyGasLimit > 0 as Uint<64>, "Gas limit must be positive");
   assert(newRedeemGasLimit > 0 as Uint<64>, "Gas limit must be positive");
+  assert(newTronFeeLimit > 0 as Uint<64>, "Tron fee limit must be positive");
+  assert(newTronFeeLimit <= tronInt64Max(), "Tron fee limit exceeds int64");
 
   vaultMaxFeePerGas = disclose(newMaxFeePerGas);
   vaultMaxPriorityFeePerGas = disclose(newMaxPriorityFeePerGas);
@@ -288,6 +294,7 @@ export circuit setGasParams(
     supply: disclose(newSupplyGasLimit),
     redeem: disclose(newRedeemGasLimit)
   };
+  vaultTronFeeLimit = disclose(newTronFeeLimit);
 }
 
 // ==== Allowed tokens and fees ========================================================
@@ -331,7 +338,7 @@ export circuit setFeeRecipient(coinPublicKey: ZswapCoinPublicKey, encryptionPubl
 // Keep at least two variants: a one-variant enum in a hashed struct compiles to a
 // field element the ledger parses as zero bytes, and proofs then fail the proof
 // server's alignment check.
-export enum Action { deposit, withdraw, swap, supply, redeem, approve, replaceNonce, tronDeposit }
+export enum Action { deposit, withdraw, swap, supply, redeem, approve, replaceNonce, tronDeposit, tronWithdraw }
 
 export enum Chain { ethereum, tron }
 
@@ -571,7 +578,7 @@ export pure circuit replaceNonceOutputSchema(): Bytes<2> {
 }
 
 // Nonce replacement requests (no calldata, 2-byte output schema).
-// Compiled path for MPC notification: [1, 14] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [1, 11] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger bidirectionalReplaceNonceMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 2>;
 
 // inIndex -> the arguments of the replacement queued under it, from start to complete.
@@ -588,6 +595,7 @@ circuit replaceNonceArgsHash(args: ReplaceNonceArgs): Bytes<32> {
 // map. A deposit signs with the caller's account, so it holds no vault nonce.
 circuit sentVaultNonce(requestId: RequestId, action: Action): Uint<64> {
   assert(action != Action.deposit && action != Action.tronDeposit, "Deposit has no vault nonce");
+  assert(action != Action.tronWithdraw, "Tron request has no vault nonce");
   if (action == Action.withdraw) {
     assert(bidirectionalWithdrawMap.member(requestId), "Request not sent");
     return bidirectionalWithdrawMap.lookup(requestId).txParams.nonce;
@@ -681,11 +689,11 @@ export circuit sendReplaceNonce(outIndex: Bytes<32>): [] {
   bidirectionalReplaceNonceMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
 
-  // Notify the MPC (bidirectionalReplaceNonceMap's compiled ledger path, [1, 14]).
+  // Notify the MPC (bidirectionalReplaceNonceMap's compiled ledger path, [1, 11]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [1, 14, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [1, 11, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -726,7 +734,7 @@ export struct ApproveArgs {
 }
 
 // Approve requests of both spenders (2-word ERC20 approve, 34-byte output schema).
-// Compiled path for MPC notification: [2, 1] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [1, 13] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger bidirectionalApproveMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34>;
 
 // inIndex -> the arguments of the approval queued under it, from start to complete.
@@ -840,11 +848,11 @@ export circuit sendApprove(outIndex: Bytes<32>): [] {
   bidirectionalApproveMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
 
-  // Notify the MPC (bidirectionalApproveMap's compiled ledger path, [2, 1]).
+  // Notify the MPC (bidirectionalApproveMap's compiled ledger path, [1, 13]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [2, 1, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [1, 13, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -895,7 +903,7 @@ export struct DepositArgs {
 }
 
 // Deposit requests (2-word ERC20 transfer, 34-byte output schema).
-// Compiled path for MPC notification: [2, 3] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [2, 0] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger bidirectionalDepositMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34>;
 
 // inIndex -> the arguments of the deposit queued under it, from start to complete.
@@ -987,11 +995,11 @@ export circuit sendDeposit(outIndex: Bytes<32>): [] {
   bidirectionalDepositMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
 
-  // Notify the MPC (bidirectionalDepositMap's compiled ledger path, [2, 3]).
+  // Notify the MPC (bidirectionalDepositMap's compiled ledger path, [2, 0]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [2, 3, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 0, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -1060,7 +1068,7 @@ export struct TronDepositArgs {
   tx: TronTxFields;
 }
 
-export ledger bidirectionalTronDepositMap: SignBidirectionalEventMapV1<TronTxParams<2>, 34>;
+export ledger bidirectionalTronDepositMap: SignBidirectionalEventMapV1<TronTriggerSmartContractTxParams<2>, 34>;
 
 export ledger tronDepositArgsMap: Map<Uint<64>, TronDepositArgs>;
 
@@ -1069,10 +1077,6 @@ circuit tronDepositArgsHash(args: TronDepositArgs): Bytes<32> {
     pad(32, "vault:tronDeposit:args"),
     args
   ]));
-}
-
-pure circuit tronInt64Max(): Uint<64> {
-  return 9223372036854775807;
 }
 
 export circuit startTronDeposit(
@@ -1130,7 +1134,7 @@ export circuit sendTronDeposit(outIndex: Bytes<32>): [] {
       numericAbiWord(args.request.amount),
     ]
   };
-  const txParams = TronTxParams<2> {
+  const txParams = TronTriggerSmartContractTxParams<2> {
     refBlockBytes: args.tx.refBlockBytes,
     refBlockHash: args.tx.refBlockHash,
     timestamp: args.tx.timestamp,
@@ -1140,12 +1144,12 @@ export circuit sendTronDeposit(outIndex: Bytes<32>): [] {
     callValue: 0 as Uint<64>,
     calldata: some<EvmCalldata<2>>(calldata)
   };
-  const request = constructSignBidirectionalEventV1<TronTxParams<2>, 34>(
+  const request = constructSignBidirectionalEventV1<TronTriggerSmartContractTxParams<2>, 34>(
     mpcKeyVersion, kernel.self(), args.path,
-    MPCSignatureAlgorithm.ecdsa, TxParamType.tron, txParams, tronCaip2Id(),
+    MPCSignatureAlgorithm.ecdsa, TxParamType.tronTriggerSmartContract, txParams, tronCaip2Id(),
     MPCDestination.unused, pad(64, ""), vaultOutputSchema()
   );
-  const requestId = calculateTronRequestIdV1<2, 34>(request);
+  const requestId = calculateTronTriggerSmartContractRequestIdV1<2, 34>(request);
   assert(!bidirectionalTronDepositMap.member(requestId), "Request already sent");
   bidirectionalTronDepositMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
@@ -1153,7 +1157,7 @@ export circuit sendTronDeposit(outIndex: Bytes<32>): [] {
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [2, 5, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 2, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -1213,7 +1217,7 @@ export struct WithdrawArgs {
 }
 
 // Withdraw requests (2-word ERC20 transfer, 34-byte output schema).
-// Compiled path for MPC notification: [2, 7] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [2, 4] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger bidirectionalWithdrawMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 34>;
 
 // inIndex -> the arguments of the withdrawal queued under it, from start to complete.
@@ -1257,7 +1261,7 @@ export circuit startWithdraw(
     coin.value == (withdrawRequest.amount + fee) as Uint<128>,
     "Coin value must equal the withdraw amount plus fee"
   );
-  takeFee(withdrawRequest.erc20Address, coin, fee);
+  takeFee(vaultTokenDomainSeparator(withdrawRequest.erc20Address), coin, fee);
 
   const args = disclose(WithdrawArgs {
     request: withdrawRequest,
@@ -1320,11 +1324,11 @@ export circuit sendWithdraw(outIndex: Bytes<32>): [] {
   bidirectionalWithdrawMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
 
-  // Notify the MPC (bidirectionalWithdrawMap's compiled ledger path, [2, 7]).
+  // Notify the MPC (bidirectionalWithdrawMap's compiled ledger path, [2, 4]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [2, 7, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 4, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -1399,7 +1403,7 @@ export pure circuit swapOutputSchema(): Bytes<38> {
 }
 
 // Swap requests (7-word exactOutputSingle, 38-byte output schema).
-// Compiled path for MPC notification: [2, 9] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [2, 6] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger bidirectionalSwapMap: SignBidirectionalEventMapV1<EvmType2TxParams<7, 0, 0>, 38>;
 
 // inIndex -> the arguments of the swap queued under it, from start to complete.
@@ -1450,7 +1454,7 @@ export circuit startSwap(
     coin.value == (swapRequest.amountInMaximum + fee) as Uint<128>,
     "Coin value must equal amountInMaximum plus fee"
   );
-  takeFee(swapRequest.erc20AddressIn, coin, fee);
+  takeFee(vaultTokenDomainSeparator(swapRequest.erc20AddressIn), coin, fee);
 
   const args = disclose(SwapArgs {
     request: swapRequest,
@@ -1521,11 +1525,11 @@ export circuit sendSwap(outIndex: Bytes<32>): [] {
   bidirectionalSwapMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
 
-  // Notify the MPC (bidirectionalSwapMap's compiled ledger path, [2, 9]).
+  // Notify the MPC (bidirectionalSwapMap's compiled ledger path, [2, 6]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [2, 9, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 6, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -1621,7 +1625,7 @@ export struct SupplyArgs {
 }
 
 // Supply requests (2-word ERC-4626 deposit, 36-byte output schema).
-// Compiled path for MPC notification: [2, 11] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [2, 8] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger bidirectionalSupplyMap: SignBidirectionalEventMapV1<EvmType2TxParams<2, 0, 0>, 36>;
 
 // inIndex -> the arguments of the supply queued under it, from start to complete.
@@ -1663,7 +1667,7 @@ export circuit startSupply(
     coin.value == (supplyRequest.amount + fee) as Uint<128>,
     "Coin value must equal the supply amount plus fee"
   );
-  takeFee(stataUnderlying, coin, fee);
+  takeFee(vaultTokenDomainSeparator(stataUnderlying), coin, fee);
 
   const args = disclose(SupplyArgs {
     request: supplyRequest,
@@ -1727,11 +1731,11 @@ export circuit sendSupply(outIndex: Bytes<32>): [] {
   bidirectionalSupplyMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
 
-  // Notify the MPC (bidirectionalSupplyMap's compiled ledger path, [2, 11]).
+  // Notify the MPC (bidirectionalSupplyMap's compiled ledger path, [2, 8]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [2, 11, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 8, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -1811,7 +1815,7 @@ export struct RedeemArgs {
 }
 
 // Redeem requests (3-word ERC-4626 redeem, 36-byte output schema).
-// Compiled path for MPC notification: [2, 13] (read from managed/erc20-vault/compiler/contract-info.json).
+// Compiled path for MPC notification: [2, 10] (read from managed/erc20-vault/compiler/contract-info.json).
 export ledger bidirectionalRedeemMap: SignBidirectionalEventMapV1<EvmType2TxParams<3, 0, 0>, 36>;
 
 // inIndex -> the arguments of the redeem queued under it, from start to complete.
@@ -1853,7 +1857,7 @@ export circuit startRedeem(
     coin.value == (redeemRequest.shares + fee) as Uint<128>,
     "Coin value must equal shares plus fee"
   );
-  takeFee(stataToken, coin, fee);
+  takeFee(vaultTokenDomainSeparator(stataToken), coin, fee);
 
   const args = disclose(RedeemArgs {
     request: redeemRequest,
@@ -1919,11 +1923,11 @@ export circuit sendRedeem(outIndex: Bytes<32>): [] {
   bidirectionalRedeemMap.insert(requestId, request);
   evictionMap.insert(requestId, disclosedIndex);
 
-  // Notify the MPC (bidirectionalRedeemMap's compiled ledger path, [2, 13]).
+  // Notify the MPC (bidirectionalRedeemMap's compiled ledger path, [2, 10]).
   signetSigner.signBidirectional(
     requestId,
     constructSignBidirectionalEventNotificationV1(
-      kernel.self(), 2 as Uint<8>, [2, 13, 0, 0] as Vector<4, Uint<8>>,
+      kernel.self(), 2 as Uint<8>, [2, 10, 0, 0] as Vector<4, Uint<8>>,
     ),
   );
 }
@@ -1977,4 +1981,329 @@ export circuit completeRedeem(
       caller
     );
   }
+}
+
+// ==== Tron withdraw ==================================================================
+// transfer(destTronAddress, amount) on the TRC-20, signed by the MPC with the vault's own
+// account (path "vault": its Tron address is 0x41 ‖ vaultEvmAddress) under the vault's fee
+// limit. Tron has no nonce: the withdrawer names the reference block and the validity
+// window, and a transaction that never lands expires, which the MPC attests unviable, so
+// the withdrawal is refunded. A withdrawal nobody sent before its window closed to sends
+// never reaches the MPC, so its withdrawer refunds it with refundUnsentTronWithdraw. The
+// vault's Tron account pays the energy and bandwidth, in staked resources or burned TRX up
+// to the fee limit.
+
+export struct TronWithdrawRequest {
+  tokenAddress: Bytes<20>;
+  amount: Uint<128>;
+  // The recipient's Tron address without its 0x41 prefix: the 20 bytes the TRC-20
+  // transfer's ABI address argument carries.
+  destTronAddress: Bytes<20>;
+}
+
+// The withdrawer's TaPoS reference and validity window, in Tron's milliseconds.
+export struct TronTxWindow {
+  refBlockBytes: Bytes<2>;
+  refBlockHash: Bytes<8>;
+  timestamp: Uint<64>;
+  expiration: Uint<64>;
+}
+
+export struct TronWithdrawArgs {
+  request: TronWithdrawRequest;
+  // The withdrawer's window and the vault's fee limit at start.
+  tx: TronTxFields;
+  fee: Uint<64>;
+}
+
+// The fee limit, in sun, of the vault's Tron transactions: set by initialise() and
+// setGasParams(), read at start.
+export ledger vaultTronFeeLimit: Uint<64>;
+
+// Tron withdraw requests (2-word TRC-20 transfer, 34-byte output schema).
+// Compiled path for MPC notification: [2, 13] (read from managed/erc20-vault/compiler/contract-info.json).
+export ledger bidirectionalTronWithdrawMap: SignBidirectionalEventMapV1<TronTriggerSmartContractTxParams<2>, 34>;
+
+// inIndex -> the arguments of the Tron withdrawal queued under it, from start to complete.
+export ledger tronWithdrawArgsMap: Map<Uint<64>, TronWithdrawArgs>;
+
+// The margins, in seconds, by which the expiration must clear the MPC's admission bounds
+// at the block that runs the check (see assertTronExpirationWindowV1). The start keeps
+// room for the flush and the send; the send keeps room for the gap between the block
+// time the ledger checks and the one the MPC reads.
+export pure circuit tronWithdrawStartMinRemainingSeconds(): Uint<64> {
+  return 600;
+}
+
+export pure circuit tronWithdrawSendMinRemainingSeconds(): Uint<64> {
+  return 60;
+}
+
+export pure circuit tronWithdrawCapMarginSeconds(): Uint<64> {
+  return 60;
+}
+
+// floor(millis / 1000), which assertTronExpirationWindowV1 checks: Compact cannot divide.
+witness secondsOfMillis(millis: Uint<64>): Uint<64>;
+
+circuit assertTronWithdrawWindow(expiration: Uint<64>, minRemainingSeconds: Uint<64>): [] {
+  assertTronExpirationWindowV1(
+    expiration,
+    secondsOfMillis(expiration),
+    minRemainingSeconds,
+    tronWithdrawCapMarginSeconds()
+  );
+}
+
+circuit tronWithdrawArgsHash(args: TronWithdrawArgs): Bytes<32> {
+  return upgradeFromTransient(transientHash<[Bytes<32>, TronWithdrawArgs]>([
+    pad(32, "vault:tronWithdraw:args"),
+    args
+  ]));
+}
+
+circuit tronTokenFees(tokenAddress: Bytes<20>): TokenFees {
+  requireTronTokenAllowed(tokenAddress);
+  return allowedTronTokens.lookup(disclose(tokenAddress)).fees;
+}
+
+// The withdrawal's SignBidirectionalEvent. Its args fix every field, so the start knows
+// the request id the send will record.
+circuit tronWithdrawEvent(
+  args: TronWithdrawArgs
+): SignBidirectionalEventV1<TronTriggerSmartContractTxParams<2>, 34, 0> {
+  const calldata = EvmCalldata<2> {
+    selector: Bytes [0xa9, 0x05, 0x9c, 0xbb], // transfer(address,uint256)
+    noWords: 2 as Uint<16>,
+    words: [
+      evmAddressAbiWord(args.request.destTronAddress),
+      numericAbiWord(args.request.amount),
+    ]
+  };
+  const txParams = TronTriggerSmartContractTxParams<2> {
+    refBlockBytes: args.tx.refBlockBytes,
+    refBlockHash: args.tx.refBlockHash,
+    timestamp: args.tx.timestamp,
+    expiration: args.tx.expiration,
+    feeLimit: args.tx.feeLimit,
+    contractAddress: tronAddress(args.request.tokenAddress),
+    callValue: 0 as Uint<64>,
+    calldata: some<EvmCalldata<2>>(calldata)
+  };
+  return constructSignBidirectionalEventV1<TronTriggerSmartContractTxParams<2>, 34>(
+    mpcKeyVersion, kernel.self(), pad(32, "vault"),
+    MPCSignatureAlgorithm.ecdsa, TxParamType.tronTriggerSmartContract, txParams, tronCaip2Id(),
+    MPCDestination.unused, pad(64, ""), vaultOutputSchema()
+  );
+}
+
+// Queues the Tron withdrawal under inIndex, a caller-chosen random index (must be fresh,
+// else no unlinkability is guaranteed), burns the surrendered vault coin and takes the
+// withdraw fee: the coin spend is the authorisation. The vault's account signs and pays, so
+// the fee limit is the vault's own setting at start. The checks refuse a request the MPC
+// would never answer: fields Tron cannot encode, and a window the MPC would not admit by
+// the send (with tronWithdrawStartMinRemainingSeconds left for the flush and the send).
+// Fields an earlier Tron withdrawal used name the same Tron transaction, which Tron takes
+// only once, so such a twin's coin can be left with nothing to settle it: the client picks
+// a fresh timestamp.
+export circuit startTronWithdraw(
+  inIndex: Uint<64>,
+  withdrawRequest: TronWithdrawRequest,
+  tronTx: TronTxWindow,
+  coin: ShieldedCoinInfo
+): [] {
+  requireInitialised();
+  assert(withdrawRequest.destTronAddress as Field != 0 as Field, "Destination address cannot be zero");
+  assert(withdrawRequest.amount > 0 as Uint<128>, "Amount must be positive");
+  // completeTronWithdraw re-mints via a Uint<64> API, so reject unrefundable amounts.
+  assert(withdrawRequest.amount <= 18446744073709551615 as Uint<128>, "Amount exceeds Uint<64> max");
+
+  const disclosedIndex = disclose(inIndex);
+  assert(
+    !inputRequestBuffer.member(disclosedIndex) && !tronWithdrawArgsMap.member(disclosedIndex),
+    "Index already in use"
+  );
+
+  const fee = tronTokenFees(withdrawRequest.tokenAddress).withdraw;
+  assert(
+    coin.color == tokenType(vaultTronTokenDomainSeparator(withdrawRequest.tokenAddress), kernel.self()),
+    "Coin is not the vault token for this TRC-20"
+  );
+  assert(
+    coin.value == (withdrawRequest.amount + fee) as Uint<128>,
+    "Coin value must equal the withdraw amount plus fee"
+  );
+  takeFee(vaultTronTokenDomainSeparator(withdrawRequest.tokenAddress), coin, fee);
+
+  const args = disclose(TronWithdrawArgs {
+    request: withdrawRequest,
+    tx: TronTxFields {
+      refBlockBytes: tronTx.refBlockBytes,
+      refBlockHash: tronTx.refBlockHash,
+      timestamp: tronTx.timestamp,
+      expiration: tronTx.expiration,
+      feeLimit: vaultTronFeeLimit,
+    },
+    fee: fee,
+  });
+  const request = tronWithdrawEvent(args);
+  assertTronTriggerSmartContractTxParamsV1<2>(request.txParams);
+  assertTronWithdrawWindow(args.tx.expiration, tronWithdrawStartMinRemainingSeconds());
+
+  tronWithdrawArgsMap.insert(disclosedIndex, args);
+  inputRequestBuffer.insert(disclosedIndex, disclose(RequestBufferEntry {
+    action: Action.tronWithdraw,
+    chain: Chain.tron,
+    useNextVaultAccountNonce: false,
+    evmNonce: 0 as Uint<64>,
+    inIndex: inIndex,
+    commitment: ownershipCommitment(inIndex, callerSecretKey()),
+    argsHash: tronWithdrawArgsHash(args),
+  }));
+}
+
+// Records the flushed Tron withdrawal's SignBidirectionalEvent and notifies the MPC, once
+// its window still clears the MPC's admission at this block with
+// tronWithdrawSendMinRemainingSeconds to spare. Permissionless: the entry and its args fix
+// every byte of the Tron transaction, so a second send of the same entry names the same
+// request id and is refused.
+export circuit sendTronWithdraw(outIndex: Bytes<32>): [] {
+  requireInitialised();
+  const disclosedIndex = disclose(outIndex);
+  assert(outputRequestBuffer.member(disclosedIndex), "Request not flushed");
+  const entry = outputRequestBuffer.lookup(disclosedIndex).entry;
+  assert(entry.action == Action.tronWithdraw, "Wrong action");
+  const args = tronWithdrawArgsMap.lookup(entry.inIndex);
+  assertTronWithdrawWindow(args.tx.expiration, tronWithdrawSendMinRemainingSeconds());
+  const request = tronWithdrawEvent(args);
+  const requestId = calculateTronTriggerSmartContractRequestIdV1<2, 34>(request);
+  assert(!bidirectionalTronWithdrawMap.member(requestId), "Request already sent");
+  bidirectionalTronWithdrawMap.insert(requestId, request);
+  evictionMap.insert(requestId, disclosedIndex);
+
+  // Notify the MPC (bidirectionalTronWithdrawMap's compiled ledger path, [2, 13]).
+  signetSigner.signBidirectional(
+    requestId,
+    constructSignBidirectionalEventNotificationV1(
+      kernel.self(), 2 as Uint<8>, [2, 13, 0, 0] as Vector<4, Uint<8>>,
+    ),
+  );
+}
+
+// Settles a Tron withdrawal on any verdict. Executed: checks the output against the
+// attestation. A transfer that returned true moved the tokens, so the burn stands; so did
+// one of tronUsdtAddress that returned false, which is how that token reports success. Any
+// other false return, or a failed or unviable transaction, moved nothing, so the
+// surrendered amount is re-minted to the caller, and on a failure serializedOutput is
+// ignored. Withdrawer-gated, one settle per request. mintNonce is caller-chosen and must be
+// random, else no hiding property is guaranteed.
+export circuit completeTronWithdraw(
+  requestId: RequestId,
+  serializedOutput: Bytes<1>,
+  mintNonce: Bytes<32>,
+): [] {
+  requireInitialised();
+  const disclosedId = disclose(requestId);
+  const settled = settleRequest(disclosedId, Action.tronWithdraw);
+  const entry = settled[0];
+  const record = settled[1];
+  const args = tronWithdrawArgsMap.lookup(entry.inIndex);
+  tronWithdrawArgsMap.remove(entry.inIndex);
+  assert(bidirectionalTronWithdrawMap.member(disclosedId), "Request event missing");
+  bidirectionalTronWithdrawMap.remove(disclosedId);
+
+  const executed = record.outputKind == OutputKind.executed;
+  const output = disclose(serializedOutput);
+  if (executed) {
+    assert(
+      verifyAttestedOutputV1<1>(output, record.serializedOutputLength, record.outputHash),
+      "Output does not match the attestation"
+    );
+  }
+  // compactc 0.36 fails with an internal error on a deserialize under a branch, so it runs
+  // unguarded, over a zero byte unless the request executed.
+  const transferred = deserialize<VaultResponse, 1>(executed ? output : default<Bytes<1>>).success;
+  if (
+    outcomeRefunds(record.outputKind) ||
+      (!transferred && args.request.tokenAddress != tronUsdtAddress)
+  ) {
+    mintShieldedToken(
+      vaultTronTokenDomainSeparator(args.request.tokenAddress),
+      args.request.amount as Uint<64>,
+      disclose(mintNonce),
+      left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey())
+    );
+  }
+}
+
+// Asserts the block time has reached the first one at which sendTronWithdraw refuses a
+// withdrawal expiring at `expiration`: assertTronWithdrawWindow admits a send only while
+// the block time is below h - tronWithdrawSendMinRemainingSeconds(), h the expiration's
+// whole seconds, so this asserts the complement, at least that. The start admitted only an
+// h above tronWithdrawStartMinRemainingSeconds(), so the difference cannot underflow.
+circuit assertTronWithdrawSendClosed(expiration: Uint<64>): [] {
+  const ms = disclose(expiration);
+  const seconds = disclose(secondsOfMillis(expiration));
+  assert(
+    seconds * 1000 <= ms && ms < seconds * 1000 + 1000,
+    "expirationSeconds is not the expiration in whole seconds"
+  );
+  assert(
+    blockTimeGte((seconds - tronWithdrawSendMinRemainingSeconds()) as Uint<64>),
+    "Tron withdrawal can still be sent"
+  );
+}
+
+// Re-mints the amount of the Tron withdrawal queued under inIndex that was never sent and
+// can no longer be: sendTronWithdraw refuses it from the block time this checks, and its
+// coin was burned at start. Takes the withdrawal out of whichever request buffer holds it
+// and out of tronWithdrawArgsMap, so no flush or send can reach it again, and keeps the
+// withdraw fee, as a failed withdrawal does.
+// A send and a refund of one withdrawal exclude each other through the ledger: the send
+// needs the flushed entry this removes, and this needs the request id the send records to
+// be absent. Withdrawer-gated, once. mintNonce is caller-chosen and must be random, else
+// no hiding property is guaranteed.
+export circuit refundUnsentTronWithdraw(inIndex: Uint<64>, mintNonce: Bytes<32>): [] {
+  requireInitialised();
+  const disclosedIndex = disclose(inIndex);
+  assert(tronWithdrawArgsMap.member(disclosedIndex), "Tron withdrawal not open");
+  const args = tronWithdrawArgsMap.lookup(disclosedIndex);
+  const requestId = calculateTronTriggerSmartContractRequestIdV1<2, 34>(tronWithdrawEvent(args));
+  assert(!bidirectionalTronWithdrawMap.member(requestId), "Request already sent");
+  assertTronWithdrawSendClosed(args.tx.expiration);
+
+  // Unflushed, the entry sits under inIndex. Flushed, the inIndex may hold another
+  // action's entry, and the entry sits under its requestIndex, which reads only the nonce
+  // (always 0 on Tron) and the args hash.
+  const queued = inputRequestBuffer.member(disclosedIndex) &&
+    inputRequestBuffer.lookup(disclosedIndex).action == Action.tronWithdraw;
+  const outIndex = requestIndex(RequestBufferEntry {
+    action: Action.tronWithdraw,
+    chain: Chain.tron,
+    useNextVaultAccountNonce: false,
+    evmNonce: 0 as Uint<64>,
+    inIndex: disclosedIndex,
+    commitment: default<Bytes<32>>,
+    argsHash: tronWithdrawArgsHash(args),
+  });
+  const entry = queued
+    ? inputRequestBuffer.lookup(disclosedIndex)
+    : outputRequestBuffer.lookup(outIndex).entry;
+  assert(
+    entry.commitment == ownershipCommitment(entry.inIndex, callerSecretKey()),
+    "Not the requester"
+  );
+
+  if (queued) {
+    inputRequestBuffer.remove(disclosedIndex);
+  } else {
+    outputRequestBuffer.remove(outIndex);
+  }
+  tronWithdrawArgsMap.remove(disclosedIndex);
+  mintShieldedToken(
+    vaultTronTokenDomainSeparator(args.request.tokenAddress),
+    args.request.amount as Uint<64>,
+    disclose(mintNonce),
+    left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey())
+  );
 }

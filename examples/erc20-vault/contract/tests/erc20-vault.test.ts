@@ -6431,6 +6431,7 @@ const DEFAULT_APPROVE_GAS_LIMIT = 200_000n;
 const DEFAULT_SWAP_GAS_LIMIT = 700_000n;
 const DEFAULT_SUPPLY_GAS_LIMIT = 500_000n;
 const DEFAULT_REDEEM_GAS_LIMIT = 500_000n;
+const DEFAULT_TRON_FEE_LIMIT = 100_000_000n;
 
 const NEW_MAX_FEE_PER_GAS = 750_000_000_000n;
 const NEW_MAX_PRIORITY_FEE_PER_GAS = 3_000_000_000n;
@@ -6439,6 +6440,7 @@ const NEW_APPROVE_GAS_LIMIT = 122_000n;
 const NEW_SWAP_GAS_LIMIT = 733_000n;
 const NEW_SUPPLY_GAS_LIMIT = 544_000n;
 const NEW_REDEEM_GAS_LIMIT = 555_000n;
+const NEW_TRON_FEE_LIMIT = 66_000_000n;
 
 interface GasParamArgs {
   maxFeePerGas: bigint;
@@ -6448,6 +6450,7 @@ interface GasParamArgs {
   swapGasLimit: bigint;
   supplyGasLimit: bigint;
   redeemGasLimit: bigint;
+  tronFeeLimit: bigint;
 }
 
 const NEW_GAS_PARAMS: GasParamArgs = {
@@ -6458,6 +6461,7 @@ const NEW_GAS_PARAMS: GasParamArgs = {
   swapGasLimit: NEW_SWAP_GAS_LIMIT,
   supplyGasLimit: NEW_SUPPLY_GAS_LIMIT,
   redeemGasLimit: NEW_REDEEM_GAS_LIMIT,
+  tronFeeLimit: NEW_TRON_FEE_LIMIT,
 };
 
 const setGasParams = (
@@ -6474,6 +6478,7 @@ const setGasParams = (
     args.swapGasLimit,
     args.supplyGasLimit,
     args.redeemGasLimit,
+    args.tronFeeLimit,
   );
 
 const envelopeOf = (
@@ -6732,6 +6737,7 @@ describe("gas parameters: initialise defaults", () => {
     expect(state.vaultGasLimits.swap).toBe(DEFAULT_SWAP_GAS_LIMIT);
     expect(state.vaultGasLimits.supply).toBe(DEFAULT_SUPPLY_GAS_LIMIT);
     expect(state.vaultGasLimits.redeem).toBe(DEFAULT_REDEEM_GAS_LIMIT);
+    expect(state.vaultTronFeeLimit).toBe(DEFAULT_TRON_FEE_LIMIT);
   });
 
   it("the default cap clears the highest base fee of the last year", async () => {
@@ -6790,6 +6796,7 @@ describe("setGasParams", () => {
     expect(state.vaultGasLimits.swap).toBe(NEW_SWAP_GAS_LIMIT);
     expect(state.vaultGasLimits.supply).toBe(NEW_SUPPLY_GAS_LIMIT);
     expect(state.vaultGasLimits.redeem).toBe(NEW_REDEEM_GAS_LIMIT);
+    expect(state.vaultTronFeeLimit).toBe(NEW_TRON_FEE_LIMIT);
   });
 
   it("is repeatable: the fee envelope tracks the market, unlike one-shot initialise", async () => {
@@ -6812,6 +6819,8 @@ describe("setGasParams", () => {
     ["a zero supply gas limit", { supplyGasLimit: 0n }, /Gas limit must be positive/],
     ["a zero redeem gas limit", { redeemGasLimit: 0n }, /Gas limit must be positive/],
     ["a zero fee cap", { maxFeePerGas: 0n }, /maxFeePerGas must be positive/],
+    ["a zero Tron fee limit", { tronFeeLimit: 0n }, /Tron fee limit must be positive/],
+    ["a Tron fee limit past int64", { tronFeeLimit: 2n ** 63n }, /Tron fee limit exceeds int64/],
     [
       "a tip above the cap",
       { maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 2_000_000_000n },

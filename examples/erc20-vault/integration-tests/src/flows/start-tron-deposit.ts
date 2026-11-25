@@ -1,6 +1,7 @@
 import {
   calculateRequestId,
   evmAddressAbiWord,
+  getSolidifiedTronReferenceBlock,
   hexToBytes,
   MPC_PARAMS_BYTES,
   MPCDestination,
@@ -14,7 +15,7 @@ import {
   stripHexPrefix,
   toSignBidirectionalEventIndex,
   tronAddressFromEvm,
-  type TronTxParams,
+  type TronTriggerSmartContractTxParams,
   TxParamType,
 } from "@sig-net/midnight";
 import {
@@ -25,7 +26,7 @@ import {
 
 import { ERC20_TRANSFER_SELECTOR } from "../evm-transfer.ts";
 import type { TronContext } from "../tron-context.ts";
-import { getTrc20Balance, getTronHeadBlock, tronReference } from "../tron-http.ts";
+import { getTrc20Balance } from "../tron-http.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { flushUntil } from "./vault-queue.ts";
 
@@ -80,16 +81,17 @@ export async function startTronDeposit(
     throw new Error("vault is not initialised, run the initialise flow first");
   }
 
-  const head = await getTronHeadBlock(tron.tronRpcUrl);
+  const reference = await getSolidifiedTronReferenceBlock(tron.tronRpcUrl);
   const timestamp = BigInt(Date.now());
   const tronTx = {
-    ...tronReference(head),
+    refBlockBytes: reference.refBlockBytes,
+    refBlockHash: reference.refBlockHash,
     timestamp,
     expiration: timestamp + (options.windowMs ?? TRON_DEPOSIT_WINDOW_MS),
     feeLimit: TRON_DEPOSIT_FEE_LIMIT,
   };
 
-  const expectedRecord: SignBidirectionalEvent<TronTxParams> = {
+  const expectedRecord: SignBidirectionalEvent<TronTriggerSmartContractTxParams> = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
     path: context.identity.commitment,
@@ -99,7 +101,7 @@ export async function startTronDeposit(
     executionDest: signetCircuits.tronCaip2Id(),
     outputDeserializationSchema: new Uint8Array(0),
     respondSerializationSchema: new Uint8Array(0),
-    txParamType: TxParamType.tron,
+    txParamType: TxParamType.tronTriggerSmartContract,
     txParams: {
       ...tronTx,
       contractAddress: token,

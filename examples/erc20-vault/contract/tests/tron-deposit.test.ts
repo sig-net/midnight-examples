@@ -427,7 +427,7 @@ describe("Tron deposit round-trip", () => {
       requestsPath: [...VAULT_TRON_DEPOSIT_REQUESTS_PATH],
     });
 
-    expect(record.txParamType).toBe(TxParamType.tron);
+    expect(record.txParamType).toBe(TxParamType.tronTriggerSmartContract);
     expect(record.path).toEqual(DEPLOYER_COMMITMENT);
     expect(record.keyVersion).toBe(MPC_KEY_VERSION);
     expect(record.algo).toBe(MPCSignatureAlgorithm.ecdsa);

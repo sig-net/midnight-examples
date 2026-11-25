@@ -1,5 +1,8 @@
 import { requestIdBytes, type RequestIdHex, tronAddressFromEvm } from "@sig-net/midnight";
-import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  readVaultLedger,
+  VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 import { banner } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
@@ -50,6 +53,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         const outcome = await withTronBlockPusher(tron.tronRpcUrl, tron.funder, async () => {
           const signed = await pollTronSignedTransaction(context, {
             requestId: id,
+            requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
             mpcRootPublicKey: tron.mpcRootPublicKey,
@@ -58,6 +62,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           expect(info.receiptResult, "the over-balance transfer must revert").toBe("REVERT");
           return pollTronRespondBidirectional(context, tron, {
             requestId: id,
+            requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
           });

@@ -1,41 +1,45 @@
 import {
   assembleCalldata,
-  buildTronRawTransaction,
   evmTraceOutputFromTronReceipt,
   executedEvmRespondOutput,
+  getSolidifiedTronTransactionInfo,
   isEvmContractCall,
   OutputKind,
   type RequestIdHex,
-  tronTransactionId,
+  signBidirectionalEventToUnsignedTronTransaction,
+  TronExecutionResult,
+  tronReceiptExecutionResult,
 } from "@sig-net/midnight";
-import {
-  readVaultLedger,
-  VAULT_TRON_DEPOSIT_REQUESTS_PATH,
-} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { EMPTY_OUTPUT } from "../empty-output.ts";
 import { PollProgress } from "../poll-progress.ts";
 import { sleepUnlessAborted } from "../sleep-unless-aborted.ts";
 import type { TronContext } from "../tron-context.ts";
-import { getTronTransactionInfo } from "../tron-http.ts";
 import { createResponseReader, type VaultContext } from "../vault-context.ts";
 import type { RespondOutcome } from "./respond-output.ts";
 
-/** */
+/** What {@link pollTronRespondBidirectional} polls for and how patiently. */
 export interface PollTronRespondBidirectionalOptions {
   readonly requestId: RequestIdHex;
+  /** The ledger path of the vault map holding the request (a deposit or a withdrawal). */
+  readonly requestsPath: readonly number[];
   readonly intervalMs: number;
   readonly timeoutMs: number;
 }
 
 /**
+ * Polls the responder for the MPC's attestation of a Tron request's transfer. An executed
+ * verdict is checked over the output rebuilt from the transaction's final receipt, read from
+ * the solidity router the MPC reads.
+ *
  * @param context - The flow context
  * @param tron - The Tron context: its node serves the receipt the executed output is rebuilt from
  * @param options - What to poll for and how patiently
  * @returns The verified outcome: `succeeded` when the transfer executed and
  *   returned the result the vault expects for the token (false for the token
  *   at `tronUsdtAddress`, true for every other TRC-20)
- * @throws {Error} When the contract has no state on-chain
+ * @throws {Error} When the contract has no state on-chain, or on timeout
  */
 export async function pollTronRespondBidirectional(
   context: VaultContext,
@@ -43,15 +47,13 @@ export async function pollTronRespondBidirectional(
   options: PollTronRespondBidirectionalOptions,
 ): Promise<RespondOutcome> {
   console.log(`request id:        ${options.requestId}`);
-  const reader = createResponseReader(context, VAULT_TRON_DEPOSIT_REQUESTS_PATH);
+  const reader = createResponseReader(context, options.requestsPath);
   const { mpcResponseKey, tronUsdtAddress } = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
-  const request = await reader.getTronSignatureRequest(options.requestId);
-  const txid = tronTransactionId(
-    buildTronRawTransaction(request.txParams, tron.tronUserAddress.bytes),
-  );
+  const request = await reader.getTronTriggerSmartContractSignatureRequest(options.requestId);
+  const { txId } = signBidirectionalEventToUnsignedTronTransaction(request, tron.mpcRootPublicKey);
   const isContractCall = isEvmContractCall(assembleCalldata(request.txParams.calldata));
   const token = request.txParams.contractAddress.subarray(1);
   const expectedResult =
@@ -77,14 +79,23 @@ export async function pollTronRespondBidirectional(
         );
         return { event: failure, serializedOutput: EMPTY_OUTPUT, succeeded: false };
       }
-      const info = await getTronTransactionInfo(tron.tronRpcUrl, txid);
-      if (info?.receiptResult === "SUCCESS") {
+      const receipt = await getSolidifiedTronTransactionInfo(tron.tronRpcUrl, txId);
+      let executed = false;
+      try {
+        executed =
+          receipt !== undefined &&
+          tronReceiptExecutionResult(receipt) === TronExecutionResult.Succeeded;
+      } catch (error) {
+        // The MPC keeps polling a receipt it cannot classify; so does the client.
+        progress.failure("receipt", `Tron receipt not classifiable yet: ${String(error)}`);
+      }
+      if (receipt !== undefined && executed) {
         let output: Uint8Array | undefined;
         try {
           output = executedEvmRespondOutput(
             request.outputDeserializationSchema,
             isContractCall,
-            evmTraceOutputFromTronReceipt(info.receipt),
+            evmTraceOutputFromTronReceipt(receipt.body),
           );
         } catch (error) {
           progress.failure("decode", `Tron execution output decode failed: ${String(error)}`);
