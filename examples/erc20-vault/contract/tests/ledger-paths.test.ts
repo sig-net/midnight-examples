@@ -12,7 +12,9 @@ import {
   VAULT_REPLACE_NONCE_REQUESTS_PATH,
   VAULT_SUPPLY_REQUESTS_PATH,
   VAULT_SWAP_REQUESTS_PATH,
+  VAULT_TRON_APPROVE_REQUESTS_PATH,
   VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+  VAULT_TRON_SWAP_REQUESTS_PATH,
   VAULT_TRON_WITHDRAW_REQUESTS_PATH,
   VAULT_WITHDRAW_REQUESTS_PATH,
 } from "../src/index.ts";
@@ -20,15 +22,17 @@ import { compiledFieldIndex } from "./compiled-ledger.ts";
 
 describe("exported ledger paths match the compiled contract-info.json", () => {
   it.each([
-    ["bidirectionalDepositMap", VAULT_DEPOSIT_REQUESTS_PATH, [2, 0]],
-    ["bidirectionalTronDepositMap", VAULT_TRON_DEPOSIT_REQUESTS_PATH, [2, 2]],
-    ["bidirectionalWithdrawMap", VAULT_WITHDRAW_REQUESTS_PATH, [2, 4]],
-    ["bidirectionalTronWithdrawMap", VAULT_TRON_WITHDRAW_REQUESTS_PATH, [2, 13]],
-    ["bidirectionalApproveMap", VAULT_APPROVE_REQUESTS_PATH, [1, 13]],
-    ["bidirectionalReplaceNonceMap", VAULT_REPLACE_NONCE_REQUESTS_PATH, [1, 11]],
-    ["bidirectionalSwapMap", VAULT_SWAP_REQUESTS_PATH, [2, 6]],
-    ["bidirectionalSupplyMap", VAULT_SUPPLY_REQUESTS_PATH, [2, 8]],
-    ["bidirectionalRedeemMap", VAULT_REDEEM_REQUESTS_PATH, [2, 10]],
+    ["bidirectionalDepositMap", VAULT_DEPOSIT_REQUESTS_PATH, [2, 8]],
+    ["bidirectionalTronDepositMap", VAULT_TRON_DEPOSIT_REQUESTS_PATH, [2, 10]],
+    ["bidirectionalWithdrawMap", VAULT_WITHDRAW_REQUESTS_PATH, [2, 12]],
+    ["bidirectionalTronWithdrawMap", VAULT_TRON_WITHDRAW_REQUESTS_PATH, [3, 6]],
+    ["bidirectionalApproveMap", VAULT_APPROVE_REQUESTS_PATH, [2, 6]],
+    ["bidirectionalReplaceNonceMap", VAULT_REPLACE_NONCE_REQUESTS_PATH, [2, 4]],
+    ["bidirectionalSwapMap", VAULT_SWAP_REQUESTS_PATH, [2, 14]],
+    ["bidirectionalSupplyMap", VAULT_SUPPLY_REQUESTS_PATH, [3, 1]],
+    ["bidirectionalRedeemMap", VAULT_REDEEM_REQUESTS_PATH, [3, 3]],
+    ["bidirectionalTronApproveMap", VAULT_TRON_APPROVE_REQUESTS_PATH, [3, 11]],
+    ["bidirectionalTronSwapMap", VAULT_TRON_SWAP_REQUESTS_PATH, [3, 13]],
     // The literal column is deliberate: the notification vectors in
     // erc20-vault.compact are hand-written, so a re-chunk that moves a path
     // must fail here even when the exported constant was updated with it.

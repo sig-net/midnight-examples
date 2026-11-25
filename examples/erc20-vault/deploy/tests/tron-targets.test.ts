@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertTronUsdtSealedIfAllowed,
   resolveAllowedTronTokens,
+  resolveSunswapRouter,
   resolveTronStartHeight,
   resolveTronUsdtAddress,
 } from "../src/tron-targets.ts";
@@ -139,5 +140,32 @@ describe("assertTronUsdtSealedIfAllowed", () => {
     expect(() => {
       assertTronUsdtSealedIfAllowed(tokens, usdt);
     }).not.toThrow();
+  });
+});
+
+describe("resolveSunswapRouter", () => {
+  it.each([
+    { name: "unset to the zero address", env: {}, router: ZERO_ADDRESS },
+    {
+      name: "a 20-byte hex address",
+      env: { TRON_SUNSWAP_ROUTER: OTHER_TOKEN },
+      router: OTHER_TOKEN,
+    },
+    {
+      name: "blank on preprod to Nile's SwapRouter",
+      env: { NETWORK_ID: "preprod", TRON_SUNSWAP_ROUTER: " " },
+      router: "0x3f7bdad42e54928e736be47d2b47d4ab9c6e788e",
+    },
+    {
+      name: "blank on mainnet to the mainnet SwapRouter",
+      env: { NETWORK_ID: "mainnet" },
+      router: "0x9bc8fbecba5d240b977b6fd4e9ac25b0012ef843",
+    },
+  ])("resolves $name", ({ env, router }) => {
+    expect(resolveSunswapRouter(env)).toBe(router);
+  });
+
+  it("refuses a short hex address", () => {
+    expect(() => resolveSunswapRouter({ TRON_SUNSWAP_ROUTER: "0x1234" })).toThrow();
   });
 });

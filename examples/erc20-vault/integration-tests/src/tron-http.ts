@@ -171,6 +171,33 @@ const FUNDER_FEE_LIMIT = 1_000_000_000;
 /**
  * @param rpcUrl - The node's HTTP API base URL
  * @param funder - The paying account
+ * @param contract - The 21-byte contract
+ * @param functionSelector - The function signature, as `name(type,...)`
+ * @param parameter - The ABI-encoded arguments, as hex
+ * @returns The transaction id
+ * @throws {Error} If the node refuses the call
+ */
+export async function callTronContract(
+  rpcUrl: string,
+  funder: TronFunder,
+  contract: Uint8Array,
+  functionSelector: string,
+  parameter: string,
+): Promise<Uint8Array> {
+  const { txid } = await buildSignAndBroadcast(rpcUrl, funder, "/wallet/triggersmartcontract", {
+    owner_address: bytesToHex(funder.address),
+    contract_address: bytesToHex(contract),
+    function_selector: functionSelector,
+    parameter,
+    fee_limit: FUNDER_FEE_LIMIT,
+    call_value: 0,
+  });
+  return txid;
+}
+
+/**
+ * @param rpcUrl - The node's HTTP API base URL
+ * @param funder - The paying account
  * @param token - The 21-byte TRC-20 contract
  * @param to - The 21-byte recipient
  * @param amount - The amount
@@ -184,15 +211,13 @@ export async function sendTrc20(
   to: Uint8Array,
   amount: bigint,
 ): Promise<Uint8Array> {
-  const { txid } = await buildSignAndBroadcast(rpcUrl, funder, "/wallet/triggersmartcontract", {
-    owner_address: bytesToHex(funder.address),
-    contract_address: bytesToHex(token),
-    function_selector: "transfer(address,uint256)",
-    parameter: bytesToHex(evmAddressAbiWord(to.slice(1))) + bytesToHex(numericAbiWord(amount)),
-    fee_limit: FUNDER_FEE_LIMIT,
-    call_value: 0,
-  });
-  return txid;
+  return callTronContract(
+    rpcUrl,
+    funder,
+    token,
+    "transfer(address,uint256)",
+    bytesToHex(evmAddressAbiWord(to.slice(1))) + bytesToHex(numericAbiWord(amount)),
+  );
 }
 
 /**
@@ -231,6 +256,26 @@ interface ConstantCallAnswer {
   readonly constant_result?: readonly string[];
 }
 
+async function readTronWord(
+  rpcUrl: string,
+  contract: Uint8Array,
+  caller: Uint8Array,
+  functionSelector: string,
+  parameter: string,
+): Promise<bigint> {
+  const answer = (await tronPost(rpcUrl, "/wallet/triggerconstantcontract", {
+    owner_address: bytesToHex(caller),
+    contract_address: bytesToHex(contract),
+    function_selector: functionSelector,
+    parameter,
+  })) as ConstantCallAnswer;
+  const word = answer.constant_result?.[0];
+  if (word === undefined) {
+    throw new Error(`Tron ${functionSelector} returned no result: ${JSON.stringify(answer)}`);
+  }
+  return BigInt(`0x${word}`);
+}
+
 /**
  * @param rpcUrl - The node's HTTP API base URL
  * @param token - The 21-byte TRC-20 contract
@@ -243,17 +288,36 @@ export async function getTrc20Balance(
   token: Uint8Array,
   owner: Uint8Array,
 ): Promise<bigint> {
-  const answer = (await tronPost(rpcUrl, "/wallet/triggerconstantcontract", {
-    owner_address: bytesToHex(owner),
-    contract_address: bytesToHex(token),
-    function_selector: "balanceOf(address)",
-    parameter: bytesToHex(evmAddressAbiWord(owner.slice(1))),
-  })) as ConstantCallAnswer;
-  const word = answer.constant_result?.[0];
-  if (word === undefined) {
-    throw new Error(`Tron balanceOf returned no result: ${JSON.stringify(answer)}`);
-  }
-  return BigInt(`0x${word}`);
+  return readTronWord(
+    rpcUrl,
+    token,
+    owner,
+    "balanceOf(address)",
+    bytesToHex(evmAddressAbiWord(owner.slice(1))),
+  );
+}
+
+/**
+ * @param rpcUrl - The node's HTTP API base URL
+ * @param token - The 21-byte TRC-20 contract
+ * @param owner - The 21-byte holder
+ * @param spender - The 21-byte spender
+ * @returns The allowance
+ * @throws {Error} If the node returns no result
+ */
+export async function getTrc20Allowance(
+  rpcUrl: string,
+  token: Uint8Array,
+  owner: Uint8Array,
+  spender: Uint8Array,
+): Promise<bigint> {
+  return readTronWord(
+    rpcUrl,
+    token,
+    owner,
+    "allowance(address,address)",
+    bytesToHex(evmAddressAbiWord(owner.slice(1))) + bytesToHex(evmAddressAbiWord(spender.slice(1))),
+  );
 }
 
 interface AccountAnswer {

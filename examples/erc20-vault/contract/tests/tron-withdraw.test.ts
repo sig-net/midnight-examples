@@ -228,6 +228,7 @@ const deployInitialised = async () => {
       EVM_START_HEIGHT,
       TRON_START_HEIGHT,
       TRON_USDT,
+      new Uint8Array(20),
       NO_FEES,
       NO_FEES,
       { bytes: FEE_RECIPIENT_CPK },
@@ -380,7 +381,7 @@ describe("startTronWithdraw", () => {
   it("snapshots the fee limit setGasParams last set", async () => {
     const { contract, ctx } = await deployInitialised();
     const reconfigured = (
-      await contract.circuits.setGasParams(ctx, 1n, 1n, 1n, 1n, 1n, 1n, 1n, 42_000_000n)
+      await contract.circuits.setGasParams(ctx, 1n, 1n, 1n, 1n, 1n, 1n, 1n, 42_000_000n, 1n, 1n)
     ).context;
     const started = (await startTronWithdraw(contract, reconfigured, VALID_TRON_WITHDRAW)).context;
     expect(
@@ -1321,8 +1322,9 @@ describe("Tron withdraw attestations", () => {
 describe("setGasParams: the Tron fee limit", () => {
   it("accepts the int64 maximum", async () => {
     const { contract, ctx } = await deployInitialised();
-    const next = (await contract.circuits.setGasParams(ctx, 1n, 1n, 1n, 1n, 1n, 1n, 1n, INT64_MAX))
-      .context;
+    const next = (
+      await contract.circuits.setGasParams(ctx, 1n, 1n, 1n, 1n, 1n, 1n, 1n, INT64_MAX, 1n, 1n)
+    ).context;
     expect(ledgerOf(next).vaultTronFeeLimit).toBe(INT64_MAX);
   });
 });

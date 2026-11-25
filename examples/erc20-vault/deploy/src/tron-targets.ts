@@ -129,3 +129,21 @@ export function assertTronUsdtSealedIfAllowed(
       "failure. Set TRON_USDT_ADDRESS to that USDT, or remove it from TRON_ALLOWED_TOKENS.",
   );
 }
+
+const KNOWN_SUNSWAP_ROUTER: Partial<Record<NetworkId, string>> = {
+  [MidnightNetwork.Preprod]: "TFkswj6rUfK3cQtFGzungCkNXxD2UCpEVD",
+  [MidnightNetwork.Mainnet]: "TQAvWQpT9H916GckwWDJNhYZvQMkuRL7PN",
+};
+
+/**
+ * @param env - The environment to read `TRON_SUNSWAP_ROUTER` and `NETWORK_ID` from
+ * @returns The SunSwap V3 SwapRouter in the 20-byte form: `TRON_SUNSWAP_ROUTER` when set, else
+ *   the network's known router (Nile on preprod, mainnet on mainnet), else the zero address
+ * @throws {Error} If the value is neither a base58 Tron address nor a 20-byte hex address
+ */
+export function resolveSunswapRouter(env: Record<string, string | undefined>): string {
+  const value =
+    envOrUndefined(env, "TRON_SUNSWAP_ROUTER") ?? KNOWN_SUNSWAP_ROUTER[getNetworkId(env)];
+  if (!value) return `0x${"00".repeat(20)}`;
+  return `0x${bytesToHex(tronTokenEvmForm(value))}`;
+}

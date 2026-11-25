@@ -29,37 +29,26 @@ export interface PollTronRespondBidirectionalOptions {
 }
 
 /**
- * Polls the responder for the MPC's attestation of a Tron request's transfer. An executed
- * verdict is checked over the output rebuilt from the transaction's final receipt, read from
- * the solidity router the MPC reads.
- *
  * @param context - The flow context
  * @param tron - The Tron context: its node serves the receipt the executed output is rebuilt from
  * @param options - What to poll for and how patiently
- * @returns The verified outcome: `succeeded` when the transfer executed and
- *   returned the result the vault expects for the token (false for the token
- *   at `tronUsdtAddress`, true for every other TRC-20)
+ * @returns The verified outcome: `succeeded` when the transaction executed
  * @throws {Error} When the contract has no state on-chain, or on timeout
  */
-export async function pollTronRespondBidirectional(
+export async function pollTronExecution(
   context: VaultContext,
   tron: TronContext,
   options: PollTronRespondBidirectionalOptions,
 ): Promise<RespondOutcome> {
   console.log(`request id:        ${options.requestId}`);
   const reader = createResponseReader(context, options.requestsPath);
-  const { mpcResponseKey, tronUsdtAddress } = await readVaultLedger(
+  const { mpcResponseKey } = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
   const request = await reader.getTronSignatureRequest(options.requestId);
   const { txId } = signBidirectionalEventToUnsignedTronTransaction(request, tron.mpcRootPublicKey);
   const isContractCall = isEvmContractCall(assembleCalldata(request.txParams.calldata));
-  const token = request.txParams.contractAddress.subarray(1);
-  const expectedResult =
-    token.length !== tronUsdtAddress.length ||
-    token.some((byte, index) => byte !== tronUsdtAddress[index]);
-  const expectedOutput = Uint8Array.of(expectedResult ? 1 : 0);
 
   const progress = new PollProgress(`Tron attestation ${options.requestId}`, options.timeoutMs);
   const giveUp = new AbortController();
@@ -107,13 +96,8 @@ export async function pollTronRespondBidirectional(
             mpcResponseKey,
           );
           if (event?.outputKind === OutputKind.executed) {
-            const succeeded =
-              output.length === expectedOutput.length && output[0] === expectedOutput[0];
-            console.log(
-              `Tron execution attested executed at block ${String(event.blockHeight)}, ` +
-                `returning ${output[0] === 1 ? "true" : "false"} (expected ${String(expectedResult)})`,
-            );
-            return { event, serializedOutput: output, succeeded };
+            console.log(`Tron execution attested executed at block ${String(event.blockHeight)}`);
+            return { event, serializedOutput: output, succeeded: true };
           }
         }
       }
@@ -124,4 +108,44 @@ export async function pollTronRespondBidirectional(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Polls the responder for the MPC's attestation of a Tron request's transfer. An executed
+ * verdict is checked over the output rebuilt from the transaction's final receipt, read from
+ * the solidity router the MPC reads.
+ *
+ * @param context - The flow context
+ * @param tron - The Tron context: its node serves the receipt the executed output is rebuilt from
+ * @param options - What to poll for and how patiently
+ * @returns The verified outcome: `succeeded` when the transfer executed and
+ *   returned the result the vault expects for the token (false for the token
+ *   at `tronUsdtAddress`, true for every other TRC-20)
+ * @throws {Error} When the contract has no state on-chain, or on timeout
+ */
+export async function pollTronRespondBidirectional(
+  context: VaultContext,
+  tron: TronContext,
+  options: PollTronRespondBidirectionalOptions,
+): Promise<RespondOutcome> {
+  const reader = createResponseReader(context, options.requestsPath);
+  const { tronUsdtAddress } = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+  const request = await reader.getTronSignatureRequest(options.requestId);
+  const token = request.txParams.contractAddress.subarray(1);
+  const expectedResult =
+    token.length !== tronUsdtAddress.length ||
+    token.some((byte, index) => byte !== tronUsdtAddress[index]);
+  const outcome = await pollTronExecution(context, tron, options);
+  if (outcome.event.outputKind !== OutputKind.executed) return outcome;
+  const returned = outcome.serializedOutput[0] === 1;
+  console.log(
+    `the Tron transfer returned ${String(returned)} (expected ${String(expectedResult)})`,
+  );
+  return {
+    ...outcome,
+    succeeded: outcome.serializedOutput.length === 1 && returned === expectedResult,
+  };
 }

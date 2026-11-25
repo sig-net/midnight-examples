@@ -131,6 +131,7 @@ const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
 const EVM_START_HEIGHT = 100n;
 const TRON_START_HEIGHT = 5_000n;
 const TRON_USDT_ADDRESS = new Uint8Array(20);
+const SUNSWAP_ROUTER = new Uint8Array(20);
 const MPC_KEY_VERSION = 1n;
 const ATTESTED_HEIGHT = 101n;
 
@@ -372,6 +373,7 @@ const deployInitialised = async (evmStartHeight: bigint = EVM_START_HEIGHT) => {
       evmStartHeight,
       TRON_START_HEIGHT,
       TRON_USDT_ADDRESS,
+      SUNSWAP_ROUTER,
       STATA_UNDERLYING_FEES,
       STATA_TOKEN_FEES,
       { bytes: FEE_RECIPIENT_CPK },
@@ -496,6 +498,7 @@ describe("initialise", () => {
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
         TRON_USDT_ADDRESS,
+        SUNSWAP_ROUTER,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -522,6 +525,7 @@ describe("initialise", () => {
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
         TRON_USDT_ADDRESS,
+        SUNSWAP_ROUTER,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -545,6 +549,7 @@ describe("initialise", () => {
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
         TRON_USDT_ADDRESS,
+        SUNSWAP_ROUTER,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -568,6 +573,7 @@ describe("initialise", () => {
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
         TRON_USDT_ADDRESS,
+        SUNSWAP_ROUTER,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -613,6 +619,7 @@ describe("initialise", () => {
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
         TRON_USDT_ADDRESS,
+        SUNSWAP_ROUTER,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -646,6 +653,7 @@ describe("initialise", () => {
         EVM_START_HEIGHT,
         TRON_START_HEIGHT,
         TRON_USDT_ADDRESS,
+        SUNSWAP_ROUTER,
         STATA_UNDERLYING_FEES,
         STATA_TOKEN_FEES,
         { bytes: FEE_RECIPIENT_CPK },
@@ -6479,6 +6487,8 @@ const setGasParams = (
     args.supplyGasLimit,
     args.redeemGasLimit,
     args.tronFeeLimit,
+    1n,
+    1n,
   );
 
 const envelopeOf = (
