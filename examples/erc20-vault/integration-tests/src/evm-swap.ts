@@ -19,7 +19,6 @@ export const SWAP_FEE = 500n;
  * headroom so the swap fits and leaves change.
  */
 export const SWAP_AMOUNT_OUT = 1_000_000n;
-const SWAP_CAP_SLIPPAGE_BPS = 1000n;
 /** The swap refund suite's exactOutput: ask for EXACTLY 3 EURC while capping the spend below its cost. */
 export const SWAP_REFUND_AMOUNT_OUT = 3_000_000n;
 
@@ -72,6 +71,7 @@ export async function quoteExactOutputSingle(
   return { amountIn, amountInMaximum };
 }
 
+const SWAP_CAP_SLIPPAGE_BPS = 1000n;
 /**
  * The input cap the swap suite surrenders: the live quote for {@link SWAP_AMOUNT_OUT} plus
  * {@link SWAP_CAP_SLIPPAGE_BPS} of headroom.
