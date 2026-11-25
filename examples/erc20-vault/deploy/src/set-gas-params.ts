@@ -124,9 +124,23 @@ export function formatVaultGasParams(params: VaultGasParams): string {
   );
 }
 
-// Two settings holding the same figure everywhere.
-function sameGasParams(a: VaultGasParams, b: VaultGasParams): boolean {
-  return formatVaultGasParams(a) === formatVaultGasParams(b);
+/**
+ * Whether two settings hold the same figure everywhere.
+ *
+ * @param a - One set of settings.
+ * @param b - The settings to compare it with.
+ * @returns True when both fees and every kind's gas limit are equal.
+ */
+export function sameGasParams(a: VaultGasParams, b: VaultGasParams): boolean {
+  return (
+    a.maxFeePerGas === b.maxFeePerGas &&
+    a.maxPriorityFeePerGas === b.maxPriorityFeePerGas &&
+    a.gasLimits.withdraw === b.gasLimits.withdraw &&
+    a.gasLimits.approve === b.gasLimits.approve &&
+    a.gasLimits.swap === b.gasLimits.swap &&
+    a.gasLimits.supply === b.gasLimits.supply &&
+    a.gasLimits.redeem === b.gasLimits.redeem
+  );
 }
 
 /**

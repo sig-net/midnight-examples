@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatVaultGasParams,
   resolveVaultGasParams,
+  sameGasParams,
   type VaultGasParams,
 } from "../src/set-gas-params.ts";
 
@@ -133,5 +134,59 @@ describe("formatVaultGasParams", () => {
       "max fee 150000000000 wei, max priority fee 1000000000 wei, gas limits " +
         "withdraw 100000, approve 100000, swap 700000, supply 500000, redeem 500000",
     );
+  });
+});
+
+describe("sameGasParams", () => {
+  /** Settings compared with `CURRENT` and whether they hold the same figures. */
+  interface SameCase {
+    readonly name: string;
+    readonly other: VaultGasParams;
+    readonly expected: boolean;
+  }
+
+  it.each<SameCase>([
+    {
+      name: "matches settings holding the same figures",
+      other: { ...CURRENT, gasLimits: { ...CURRENT.gasLimits } },
+      expected: true,
+    },
+    {
+      name: "tells a different max fee apart",
+      other: { ...CURRENT, maxFeePerGas: 150_000_000_001n },
+      expected: false,
+    },
+    {
+      name: "tells a different max priority fee apart",
+      other: { ...CURRENT, maxPriorityFeePerGas: 1_000_000_001n },
+      expected: false,
+    },
+    {
+      name: "tells a different withdraw limit apart",
+      other: { ...CURRENT, gasLimits: { ...CURRENT.gasLimits, withdraw: 100_001n } },
+      expected: false,
+    },
+    {
+      name: "tells a different approve limit apart",
+      other: { ...CURRENT, gasLimits: { ...CURRENT.gasLimits, approve: 100_001n } },
+      expected: false,
+    },
+    {
+      name: "tells a different swap limit apart",
+      other: { ...CURRENT, gasLimits: { ...CURRENT.gasLimits, swap: 700_001n } },
+      expected: false,
+    },
+    {
+      name: "tells a different supply limit apart",
+      other: { ...CURRENT, gasLimits: { ...CURRENT.gasLimits, supply: 500_001n } },
+      expected: false,
+    },
+    {
+      name: "tells a different redeem limit apart",
+      other: { ...CURRENT, gasLimits: { ...CURRENT.gasLimits, redeem: 500_001n } },
+      expected: false,
+    },
+  ])("$name", ({ other, expected }) => {
+    expect(sameGasParams(CURRENT, other)).toBe(expected);
   });
 });
