@@ -13,8 +13,8 @@ export interface UserIdentity {
   /** The 32-byte secret answering the vault's `callerSecretKey` witness. */
   readonly secretKey: Uint8Array;
   /**
-   * `userCommitment(secretKey)`: the only identity form that reaches the
-   * ledger. Doubles as the MPC derivation path of the user's deposit events
+   * `userCommitment(secretKey)`: the identity form that reaches the ledger.
+   * Doubles as the MPC derivation path of the user's Ethereum deposit events
    * (the path field is 32 opaque bytes of the contract's choosing, and the
    * vault chooses the caller's commitment; the contract recomputes it
    * in-circuit, so it is never a circuit argument).
@@ -28,6 +28,8 @@ export interface UserIdentity {
    * this rendering.
    */
   readonly commitmentHex: string;
+  readonly tronPath: Uint8Array;
+  readonly tronPathHex: string;
 }
 
 /**
@@ -42,9 +44,12 @@ export interface UserIdentity {
 export function resolveUserIdentity(env: NodeJS.ProcessEnv): UserIdentity {
   const secretKey = parseIdentitySecretKey("VAULT_USER_SECRET_KEY", env, resolveUserSeed(env));
   const commitment = pureCircuits.userCommitment(secretKey);
+  const tronPath = pureCircuits.tronUserCommitment(secretKey);
   return {
     secretKey,
     commitment,
     commitmentHex: bytesToHex(commitment),
+    tronPath,
+    tronPathHex: bytesToHex(tronPath),
   };
 }

@@ -170,12 +170,19 @@ export pure circuit vaultTronTokenDomainSeparator(tokenAddress: Bytes<20>): Byte
 
 witness callerSecretKey(): Bytes<32>;
 
-// Identity commitment, doubling as the MPC key-derivation path of deposit requests. A
+// Identity commitment, doubling as the MPC key-derivation path of Ethereum deposit requests. A
 // transientHash change at a fork re-indexes derived accounts and orphans pinned commitments.
 export pure circuit userCommitment(sk: Bytes<32>): Bytes<32> {
   return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([
     sk,
     pad(32, "vault:user:")
+  ]));
+}
+
+export pure circuit tronUserCommitment(sk: Bytes<32>): Bytes<32> {
+  return upgradeFromTransient(transientHash<Vector<2, Bytes<32>>>([
+    sk,
+    pad(32, "vault:tron:user:")
   ]));
 }
 
@@ -1100,7 +1107,7 @@ export circuit startTronDeposit(
 
   const args = disclose(TronDepositArgs {
     request: tronDepositRequest,
-    path: userCommitment(callerSecretKey()),
+    path: tronUserCommitment(callerSecretKey()),
     tx: tronTx,
   });
   tronDepositArgsMap.insert(disclosedIndex, args);

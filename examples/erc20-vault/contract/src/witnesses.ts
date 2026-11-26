@@ -1,7 +1,7 @@
 // Handwritten witnesses live beside the contract they serve. The vault's
 // identity model: callerSecretKey supplies the user's secret from private
-// state; only its commitment (userCommitment in the contract) ever reaches
-// the ledger.
+// state; only its commitments (userCommitment and tronUserCommitment in the
+// contract) ever reach the ledger.
 
 import type { Witnesses } from "./managed/erc20-vault/contract/index.js";
 

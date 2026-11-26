@@ -131,7 +131,7 @@ export function ensureTronAddresses(env: NodeJS.ProcessEnv): void {
   ensureDerivedTronAddress(
     env,
     "TRON_USER_ADDRESS",
-    deriveTronAddress(mpcKey, vaultAddress, resolveUserIdentity(env).commitmentHex).base58,
+    deriveTronAddress(mpcKey, vaultAddress, resolveUserIdentity(env).tronPathHex).base58,
   );
 }
 

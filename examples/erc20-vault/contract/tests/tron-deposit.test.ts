@@ -59,6 +59,7 @@ const first = <T>(items: Iterable<T>, what: string): T => {
 const SECRET_KEY = bytes(32, 7);
 const OTHER_SECRET_KEY = bytes(32, 8);
 const DEPLOYER_COMMITMENT = pureCircuits.userCommitment(SECRET_KEY);
+const TRON_PATH = pureCircuits.tronUserCommitment(SECRET_KEY);
 
 const MPC_RESPONSE_SECRET = bytes(32, 0x42);
 const MPC_RESPONSE_KEY = secp256k1PublicKeyOf(MPC_RESPONSE_SECRET);
@@ -396,6 +397,13 @@ describe("vaultTronTokenDomainSeparator", () => {
   });
 });
 
+describe("tronUserCommitment", () => {
+  it("differs from the Ethereum deposit path for the same secret key", () => {
+    expect(TRON_PATH).toHaveLength(32);
+    expect(TRON_PATH).not.toEqual(DEPLOYER_COMMITMENT);
+  });
+});
+
 describe("Tron deposit round-trip", () => {
   it("stores a contract-composed Tron event readable via ledger() and the RAW reader", async () => {
     const { contract, ctx } = await deployInitialised();
@@ -428,7 +436,7 @@ describe("Tron deposit round-trip", () => {
     });
 
     expect(record.txParamType).toBe(TxParamType.tron);
-    expect(record.path).toEqual(DEPLOYER_COMMITMENT);
+    expect(record.path).toEqual(TRON_PATH);
     expect(record.keyVersion).toBe(MPC_KEY_VERSION);
     expect(record.algo).toBe(MPCSignatureAlgorithm.ecdsa);
     expect(record.signatureDest).toBe(MPCDestination.unused);
@@ -462,7 +470,7 @@ describe("Tron deposit round-trip", () => {
     expect(lastSeen).toBe(TRON_START_HEIGHT);
     expect(ledgerOf(sent).tronDepositArgsMap.lookup(VALID_TRON_DEPOSIT.inIndex)).toEqual({
       request: VALID_TRON_DEPOSIT.deposit,
-      path: DEPLOYER_COMMITMENT,
+      path: TRON_PATH,
       tx: VALID_TRON_DEPOSIT.tronTx,
     });
     expect(ledgerOf(sent).evictionMap.lookup(requestId)).toEqual(outIndex);
@@ -1137,5 +1145,18 @@ describe("chain-aware queue: each chain's attestations raise only its own height
     expect(next.callContext.currentQueryContext.effects.shieldedMints.size).toBe(1);
     expect(ledgerOf(next).bidirectionalTronDepositMap.member(tron.requestId)).toBe(true);
     expect(ledgerOf(next).tronLastSeen).toBe(TRON_START_HEIGHT);
+  });
+
+  it("a Tron deposit records the Tron path, an Ethereum deposit the identity commitment", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const tron = await tronDeposit(contract, ctx, VALID_TRON_DEPOSIT);
+    const evm = await evmDeposit(contract, tron.context);
+    const state = ledgerOf(evm.context);
+    expect(state.bidirectionalTronDepositMap.lookup(tron.requestId).path).toEqual(TRON_PATH);
+    expect(state.tronDepositArgsMap.lookup(VALID_TRON_DEPOSIT.inIndex).path).toEqual(TRON_PATH);
+    expect(state.bidirectionalDepositMap.lookup(evm.requestId).path).toEqual(DEPLOYER_COMMITMENT);
+    expect(state.depositArgsMap.lookup(VALID_EVM_DEPOSIT.inIndex).path).toEqual(
+      DEPLOYER_COMMITMENT,
+    );
   });
 });

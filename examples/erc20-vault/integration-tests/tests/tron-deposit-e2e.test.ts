@@ -107,7 +107,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         const record = await session
           .responseReader(VAULT_TRON_DEPOSIT_REQUESTS_PATH)
           .getTronSignatureRequest(requestId);
-        expect(record.path).toEqual(context.identity.commitment);
+        expect(record.path).toEqual(context.identity.tronPath);
         expect(record.txParams.callValue).toBe(0n);
         expect(record.txParams.expiration - record.txParams.timestamp).toBe(3_600_000n);
         banner([

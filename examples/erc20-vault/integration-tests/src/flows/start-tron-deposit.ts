@@ -92,7 +92,7 @@ export async function startTronDeposit(
   const expectedRecord: SignBidirectionalEvent<TronTxParams> = {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
     keyVersion: SIGNET_DEFAULT_KEY_VERSION,
-    path: context.identity.commitment,
+    path: context.identity.tronPath,
     algo: MPCSignatureAlgorithm.ecdsa,
     signatureDest: MPCDestination.unused,
     params: new Uint8Array(MPC_PARAMS_BYTES),
