@@ -7,7 +7,11 @@ import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import type { CoinPublicKey, EncPublicKey } from "@midnight-ntwrk/midnight-js-protocol/v9";
 import { bytesToHex, hexToBytes, toSignBidirectionalEventIndex } from "@sig-net/midnight";
 
-import { ledger, type TokenFees } from "./managed/erc20-vault/contract/index.js";
+import {
+  type AllowedTronTokenConfig,
+  ledger,
+  type TokenFees,
+} from "./managed/erc20-vault/contract/index.js";
 
 /** The decoded vault public ledger state, as the generated `ledger()` returns it. */
 export type VaultLedgerState = ReturnType<typeof ledger>;
@@ -34,9 +38,10 @@ export async function readVaultLedger(
 /**
  * Read and print the vault's public ledger state: initialisation status, the
  * configured vault EVM address, the pinned EVM chain, the vault EVM account's
- * next nonce, the ERC20s the vault allows, and the pending signet signature
- * requests of each action's map. No
- * proving keys or transactions involved.
+ * next nonce, the Tron fee limits, the ERC20s and TRC-20s the vault allows (each
+ * TRC-20 with its factor and coin colour), the Tron lend pair, and the pending
+ * signet signature requests of each action's map. No proving keys or
+ * transactions involved.
  *
  * @param publicDataProvider - The provider to query raw contract state through.
  * @param vaultContractAddress - The deployed vault contract address, as bare hex.
@@ -60,6 +65,11 @@ export async function printVaultState(
   console.log(`Tron last seen:    ${String(state.tronLastSeen)}`);
   console.log(`Tron USDT:         0x${bytesToHex(state.tronUsdtAddress)}`);
   console.log(`vault EVM nonce:   ${String(state.vaultAccountNonce)}`);
+  const tronFeeLimits = state.vaultTronFeeLimits;
+  console.log(
+    `Tron fee limits:   withdraw ${String(tronFeeLimits.withdraw)}, approve ${String(tronFeeLimits.approve)}, ` +
+      `supply ${String(tronFeeLimits.supply)}, redeem ${String(tronFeeLimits.redeem)} sun`,
+  );
   console.log(`fee recipient:     coin ${bytesToHex(state.feeRecipientCoinPublicKey.bytes)}`);
   console.log(`                   enc  ${bytesToHex(state.feeRecipientEncryptionPublicKey)}`);
   console.log(`allowed ERC20s:    ${String(state.allowedTokens.size())}`);
@@ -70,10 +80,20 @@ export async function printVaultState(
     );
   }
   console.log(`allowed TRC-20s:   ${String(state.allowedTronTokens.size())}`);
-  for (const [token, { fees }] of state.allowedTronTokens) {
+  for (const [token, { fees, factor, colour }] of state.allowedTronTokens) {
     console.log(
-      `- 0x${bytesToHex(token)} fees: withdraw ${String(fees.withdraw)}, swap ${String(fees.swap)}, ` +
+      `- 0x${bytesToHex(token)} factor ${String(factor)}, colour ${bytesToHex(colour)}, ` +
+        `fees (coin units): withdraw ${String(fees.withdraw)}, swap ${String(fees.swap)}, ` +
         `supply ${String(fees.supply)}, redeem ${String(fees.redeem)}`,
+    );
+  }
+  if (state.tronLendShareToken.every((byte) => byte === 0)) {
+    console.log("Tron lend pair:    not set");
+  } else {
+    console.log(
+      `Tron lend pair:    0x${bytesToHex(state.tronLendUnderlying)} -> ` +
+        `0x${bytesToHex(state.tronLendShareToken)}, ` +
+        `min supply ${String(state.tronLendMinSupply)} underlying coin units`,
     );
   }
 
@@ -85,6 +105,10 @@ export async function printVaultState(
   printRequestMap("swap", state.bidirectionalSwapMap);
   printRequestMap("supply", state.bidirectionalSupplyMap);
   printRequestMap("redeem", state.bidirectionalRedeemMap);
+  printRequestMap("Tron withdraw", state.bidirectionalTronWithdrawMap);
+  printRequestMap("Tron approve", state.bidirectionalTronApproveMap);
+  printRequestMap("Tron supply", state.bidirectionalTronSupplyMap);
+  printRequestMap("Tron redeem", state.bidirectionalTronRedeemMap);
 }
 
 /**
@@ -148,19 +172,24 @@ export function vaultTokenFees(state: VaultLedgerState, erc20Address: Uint8Array
 }
 
 /**
- * The flat per-action fees the ledger holds for a TRC-20's vault coin, which
- * `startTronWithdraw` adds to the surrendered principal and takes from the coin.
+ * The listing the ledger holds for a TRC-20: its per-action fees in coin units, which a
+ * start circuit adds to the surrendered principal and takes from the coin, its factor (the
+ * base units one coin unit counts, which calldata multiplies by), and the colour its vault
+ * coins carry.
  *
  * @param state - The decoded vault ledger state.
  * @param tokenAddress - The TRC-20 the vault coin stands for, as its 20 EVM-form bytes.
- * @returns That token's fees, in its base units.
+ * @returns That token's listing.
  * @throws {Error} If the vault does not allow the TRC-20.
  */
-export function vaultTronTokenFees(state: VaultLedgerState, tokenAddress: Uint8Array): TokenFees {
+export function vaultTronTokenConfig(
+  state: VaultLedgerState,
+  tokenAddress: Uint8Array,
+): AllowedTronTokenConfig {
   if (!state.allowedTronTokens.member(tokenAddress)) {
     throw new Error(`the vault does not allow TRC-20 0x${bytesToHex(tokenAddress)}`);
   }
-  return state.allowedTronTokens.lookup(tokenAddress).fees;
+  return state.allowedTronTokens.lookup(tokenAddress);
 }
 
 /**

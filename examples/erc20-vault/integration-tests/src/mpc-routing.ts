@@ -57,8 +57,8 @@ export const TRANSFER_RESULT_MPC_ROUTING: VaultMpcRouting = {
 };
 
 /**
- * The routing of a Tron withdraw event: {@link TRANSFER_RESULT_MPC_ROUTING}'s fields with
- * the MPC's Tron routing key as the execution destination.
+ * The routing of a Tron withdraw or approve event: {@link TRANSFER_RESULT_MPC_ROUTING}'s
+ * fields with the MPC's Tron routing key as the execution destination.
  */
 export const TRON_TRANSFER_RESULT_MPC_ROUTING: VaultMpcRouting = {
   ...TRANSFER_RESULT_MPC_ROUTING,
@@ -103,4 +103,22 @@ export const SUPPLY_MPC_ROUTING: VaultMpcRouting = {
 export const REDEEM_MPC_ROUTING: VaultMpcRouting = {
   ...TRANSFER_RESULT_MPC_ROUTING,
   outputDeserializationSchema: vaultCircuits.redeemOutputSchema(),
+};
+
+/**
+ * The routing of a Tron supply event: {@link SUPPLY_MPC_ROUTING}'s fields with the MPC's
+ * Tron routing key as the execution destination.
+ */
+export const TRON_SUPPLY_MPC_ROUTING: VaultMpcRouting = {
+  ...SUPPLY_MPC_ROUTING,
+  executionDest: pureCircuits.tronCaip2Id(),
+};
+
+/**
+ * The routing of a Tron redeem event: {@link REDEEM_MPC_ROUTING}'s fields with the MPC's
+ * Tron routing key as the execution destination.
+ */
+export const TRON_REDEEM_MPC_ROUTING: VaultMpcRouting = {
+  ...REDEEM_MPC_ROUTING,
+  executionDest: pureCircuits.tronCaip2Id(),
 };

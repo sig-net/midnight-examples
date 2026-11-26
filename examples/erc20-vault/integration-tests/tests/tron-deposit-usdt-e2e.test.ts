@@ -1,8 +1,11 @@
 import type { RequestIdHex } from "@sig-net/midnight";
-import { evmAddressBytes, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 import {
-  resolveAllowedTronTokens,
-  resolveTokenFeesFor,
+  evmAddressBytes,
+  readVaultLedger,
+  vaultTronTokenConfig,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  resolveTronTokenListings,
   resolveTronUsdtAddress,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { waitForFacadeState } from "@sig-net/midnight-examples-lib";
@@ -46,10 +49,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         expect(state.initialised, "run tests/happy-day-e2e.test.ts first").toBe(true);
         expect(state.tronUsdtAddress, "initialise seals TRON_USDT_ADDRESS").toEqual(usdt());
 
-        await addAllowedTronTokens(
-          context,
-          resolveTokenFeesFor(env, resolveAllowedTronTokens(env)),
-        );
+        await addAllowedTronTokens(context, resolveTronTokenListings(env));
         const after = await readVaultLedger(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
@@ -64,7 +64,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
       async () => {
         const context = await session.vaultContext();
         const wallet = await session.wallet();
-        const color = vaultTronTokenType(usdt(), context.vaultContractAddress);
+        const state = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        const color = vaultTronTokenType(
+          vaultTronTokenConfig(state, usdt()),
+          context.vaultContractAddress,
+        );
         const before = (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
 
         const { requestId, claimed } = await runTronDepositRoundTrip(

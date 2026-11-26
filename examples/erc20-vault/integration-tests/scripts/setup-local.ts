@@ -5,8 +5,9 @@
 // test:erc20-vault:e2e` (or a hand-driven flow) reuses the stack with every
 // setup step skipping. The steps are the suite's own `vaultSetupSteps()`, run
 // in-process exactly as vitest's globalSetup runs them, followed by the
-// deploy package's `initialiseVault` and `addAllowedTokensToVault`, the same
-// functions the remote `deploy-initialise` entrypoint runs. Rerunnable: a kept address resumes or
+// deploy package's `initialiseVault`, `addAllowedTokensToVault`,
+// `addAllowedTronTokensToVault` and `setTronLendPairOnVault`, the same functions
+// the remote `deploy-initialise` entrypoint runs. Rerunnable: a kept address resumes or
 // skips, an initialised vault is left untouched, and a value already in
 // `.env` with the run's value is not appended again.
 
@@ -14,6 +15,7 @@ import {
   addAllowedTokensToVault,
   addAllowedTronTokensToVault,
   initialiseVault,
+  setTronLendPairOnVault,
 } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { buildBaseEnv } from "@sig-net/midnight-examples-lib";
 import {
@@ -27,19 +29,23 @@ import { VAULT_PIPELINE_KEYS, vaultSetupSteps } from "../src/setup.ts";
 
 const env = await runSetupSteps(buildBaseEnv(), vaultSetupSteps());
 
-testHeader(1, 4, "initialise: seal the vault's EVM address, chain and MPC response key");
+testHeader(1, 5, "initialise: seal the vault's EVM address, chain and MPC response key");
 const outcome = await initialiseVault(env);
 console.log(`initialise outcome: ${outcome}`);
 
-testHeader(2, 4, "allow: add the ERC20s EVM_ALLOWED_TOKENS lists");
+testHeader(2, 5, "allow: add the ERC20s EVM_ALLOWED_TOKENS lists");
 const added = await addAllowedTokensToVault(env);
 console.log(`allowed ${String(added.length)} new ERC20(s)`);
 
-testHeader(3, 4, "allow: add the TRC-20s TRON_ALLOWED_TOKENS lists");
+testHeader(3, 5, "allow: add the TRC-20s TRON_ALLOWED_TOKENS lists");
 const addedTron = await addAllowedTronTokensToVault(env);
 console.log(`allowed ${String(addedTron.length)} new TRC-20(s)`);
 
-testHeader(4, 4, "persist: append the generated values to .env");
+testHeader(4, 5, "pair: record the Tron lend pair the TRON_LEND_* variables name");
+const paired = await setTronLendPairOnVault(env);
+console.log(`Tron lend pair outcome: ${paired}`);
+
+testHeader(5, 5, "persist: append the generated values to .env");
 const appended = persistToDotEnv(
   env,
   VAULT_PIPELINE_KEYS,

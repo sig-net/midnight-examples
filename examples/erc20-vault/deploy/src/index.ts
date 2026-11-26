@@ -1,5 +1,6 @@
 // Public surface of the vault's deploy package: the split deploy, the
-// deployer-gated initialise, allowed-ERC20 additions, fee repricing and gas-settings resets, the environment its entrypoints run against, and
+// deployer-gated initialise, allowed-ERC20 and TRC-20 additions, fee repricing,
+// gas-settings resets and the Tron lend pair, the environment its entrypoints run against, and
 // the Node pieces those flows and the integration tests share: the
 // compiled-contract binding over the contract package's managed/ output and
 // the midnight-js provider set. The environment-agnostic client surface
@@ -16,6 +17,7 @@ export * from "./fee-config.ts";
 export * from "./initialise-vault.ts";
 export * from "./set-gas-params.ts";
 export * from "./set-token-fees.ts";
+export * from "./set-tron-lend-pair.ts";
 export * from "./tron-targets.ts";
 export * from "./vault-contract-binding.ts";
 export * from "./vault-providers.ts";

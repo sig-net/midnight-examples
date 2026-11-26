@@ -80,59 +80,84 @@ export function deriveVaultTronAddress(
 /**
  * Resolved ledger-tree path of `bidirectionalDepositMap`, which holds the deposit
  * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
- * `requestsPath` [2, 0, 0, 0] the `sendDeposit` circuit packs.
+ * `requestsPath` [2, 6, 0, 0] the `sendDeposit` circuit packs.
  */
-export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [2, 0];
+export const VAULT_DEPOSIT_REQUESTS_PATH: readonly number[] = [2, 6];
 
-/** */
-export const VAULT_TRON_DEPOSIT_REQUESTS_PATH: readonly number[] = [2, 2];
+/**
+ * Resolved ledger-tree path of `bidirectionalTronDepositMap`, which holds the Tron deposit
+ * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
+ * `requestsPath` [2, 8, 0, 0] the `sendTronDeposit` circuit packs.
+ */
+export const VAULT_TRON_DEPOSIT_REQUESTS_PATH: readonly number[] = [2, 8];
 
 /**
  * Resolved ledger-tree path of `bidirectionalWithdrawMap`, which holds the withdraw
  * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
- * `requestsPath` [2, 4, 0, 0] the `sendWithdraw` circuit packs.
+ * `requestsPath` [2, 10, 0, 0] the `sendWithdraw` circuit packs.
  */
-export const VAULT_WITHDRAW_REQUESTS_PATH: readonly number[] = [2, 4];
+export const VAULT_WITHDRAW_REQUESTS_PATH: readonly number[] = [2, 10];
 
 /**
  * Resolved ledger-tree path of `bidirectionalApproveMap`, which holds the approve
  * requests of both spenders (the Uniswap router and the stataToken wrapper), as the
  * compiled `contract-info.json` lists it. Matches the depth 2 + `requestsPath`
- * [1, 13, 0, 0] the `sendApprove` circuit packs.
+ * [2, 4, 0, 0] the `sendApprove` circuit packs.
  */
-export const VAULT_APPROVE_REQUESTS_PATH: readonly number[] = [1, 13];
+export const VAULT_APPROVE_REQUESTS_PATH: readonly number[] = [2, 4];
 
 /**
  * Resolved ledger-tree path of `bidirectionalReplaceNonceMap`, which holds the nonce
  * replacement requests, as the compiled `contract-info.json` lists it. Matches the
- * depth 2 + `requestsPath` [1, 11, 0, 0] the `sendReplaceNonce` circuit packs.
+ * depth 2 + `requestsPath` [2, 2, 0, 0] the `sendReplaceNonce` circuit packs.
  */
-export const VAULT_REPLACE_NONCE_REQUESTS_PATH: readonly number[] = [1, 11];
+export const VAULT_REPLACE_NONCE_REQUESTS_PATH: readonly number[] = [2, 2];
 
 /**
  * Resolved ledger-tree path of `bidirectionalSwapMap`, which holds the swap requests,
  * as the compiled `contract-info.json` lists it. Matches the depth 2 + `requestsPath`
- * [2, 6, 0, 0] the `sendSwap` circuit packs.
+ * [2, 12, 0, 0] the `sendSwap` circuit packs.
  */
-export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [2, 6];
+export const VAULT_SWAP_REQUESTS_PATH: readonly number[] = [2, 12];
 
 /**
  * Resolved ledger-tree path of `bidirectionalSupplyMap`, which holds the supply
  * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
- * `requestsPath` [2, 8, 0, 0] the `sendSupply` circuit packs.
+ * `requestsPath` [2, 14, 0, 0] the `sendSupply` circuit packs.
  */
-export const VAULT_SUPPLY_REQUESTS_PATH: readonly number[] = [2, 8];
+export const VAULT_SUPPLY_REQUESTS_PATH: readonly number[] = [2, 14];
 
 /**
  * Resolved ledger-tree path of `bidirectionalRedeemMap`, which holds the redeem
  * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
- * `requestsPath` [2, 10, 0, 0] the `sendRedeem` circuit packs.
+ * `requestsPath` [3, 1, 0, 0] the `sendRedeem` circuit packs.
  */
-export const VAULT_REDEEM_REQUESTS_PATH: readonly number[] = [2, 10];
+export const VAULT_REDEEM_REQUESTS_PATH: readonly number[] = [3, 1];
 
 /**
  * Resolved ledger-tree path of `bidirectionalTronWithdrawMap`, which holds the Tron
  * withdraw requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
- * `requestsPath` [2, 13, 0, 0] the `sendTronWithdraw` circuit packs.
+ * `requestsPath` [3, 4, 0, 0] the `sendTronWithdraw` circuit packs.
  */
-export const VAULT_TRON_WITHDRAW_REQUESTS_PATH: readonly number[] = [2, 13];
+export const VAULT_TRON_WITHDRAW_REQUESTS_PATH: readonly number[] = [3, 4];
+
+/**
+ * Resolved ledger-tree path of `bidirectionalTronApproveMap`, which holds the Tron lend
+ * approve requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
+ * `requestsPath` [3, 9, 0, 0] the `sendTronApprove` circuit packs.
+ */
+export const VAULT_TRON_APPROVE_REQUESTS_PATH: readonly number[] = [3, 9];
+
+/**
+ * Resolved ledger-tree path of `bidirectionalTronSupplyMap`, which holds the Tron supply
+ * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
+ * `requestsPath` [3, 11, 0, 0] the `sendTronSupply` circuit packs.
+ */
+export const VAULT_TRON_SUPPLY_REQUESTS_PATH: readonly number[] = [3, 11];
+
+/**
+ * Resolved ledger-tree path of `bidirectionalTronRedeemMap`, which holds the Tron redeem
+ * requests, as the compiled `contract-info.json` lists it. Matches the depth 2 +
+ * `requestsPath` [3, 13, 0, 0] the `sendTronRedeem` circuit packs.
+ */
+export const VAULT_TRON_REDEEM_REQUESTS_PATH: readonly number[] = [3, 13];

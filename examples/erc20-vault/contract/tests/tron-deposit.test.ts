@@ -2,10 +2,14 @@ import { readFileSync } from "node:fs";
 
 import {
   type CircuitContext,
+  CompactTypeBytes,
+  CompactTypeVector,
   createCircuitContext,
   createConstructorContext,
   rawTokenType,
   sampleContractAddress,
+  transientHash,
+  upgradeFromTransient,
 } from "@midnight-ntwrk/compact-runtime";
 import { ContractOperation, ContractState } from "@midnightntwrk/onchain-runtime-v4";
 import {
@@ -80,19 +84,27 @@ const ERC20 = bytes(20, 0xaa);
 const TRC20 = bytes(20, 0x7a);
 const UNLISTED_TRC20 = bytes(20, 0x99);
 const TRON_USDT = bytes(20, 0x75);
+// An 18-decimal share token whose coins count 10^12 base units each (6-decimal coins), and
+// a 12-decimal token whose coins count 10^6.
+const SHIFTED_TRC20 = bytes(20, 0x5a);
+const MICRO_SHIFTED_TRC20 = bytes(20, 0x6b);
 const ZERO_ADDRESS = new Uint8Array(20);
 const CHAIN_ID = 11155111n;
 const NO_FEES = { withdraw: 0n, swap: 0n, supply: 0n, redeem: 0n };
 const TRON_TOKEN_FEES = { withdraw: 71n, swap: 73n, supply: 79n, redeem: 83n };
+const SHIFTED_TOKEN_FEES = { withdraw: 3n, swap: 5n, supply: 7n, redeem: 11n };
+const UNSHIFTED = 1n;
+const SHIFT_12 = 10n ** 12n;
+const SHIFT_6 = 10n ** 6n;
 const AMOUNT = 1_000_000n;
 const UINT64_MAX = 18446744073709551615n;
 const INT64_MAX = 9223372036854775807n;
 const MINT_NONCE = bytes(32, 0x2e);
 const ERC20_TRANSFER_SELECTOR = new Uint8Array([0xa9, 0x05, 0x9c, 0xbb]);
 
-const TRON_TOKEN_COLOR = hexToBytes(
-  rawTokenType(pureCircuits.vaultTronTokenDomainSeparator(TRC20), VAULT_ADDRESS),
-);
+const colourOf = (domainSeparator: Uint8Array): Uint8Array =>
+  hexToBytes(rawTokenType(domainSeparator, VAULT_ADDRESS));
+const TRON_TOKEN_COLOR = colourOf(pureCircuits.vaultTronTokenDomainSeparator(TRC20));
 
 interface TronDepositCallArgs {
   inIndex: bigint;
@@ -215,8 +227,14 @@ const deployInitialised = async () => {
     )
   ).context;
   next = (await contract.circuits.addAllowedToken(next, ERC20, NO_FEES)).context;
-  next = (await contract.circuits.addAllowedTronToken(next, TRC20, TRON_TOKEN_FEES)).context;
-  next = (await contract.circuits.addAllowedTronToken(next, TRON_USDT, NO_FEES)).context;
+  next = (await contract.circuits.addAllowedTronToken(next, TRC20, TRON_TOKEN_FEES, UNSHIFTED))
+    .context;
+  next = (await contract.circuits.addAllowedTronToken(next, TRON_USDT, NO_FEES, UNSHIFTED)).context;
+  next = (
+    await contract.circuits.addAllowedTronToken(next, SHIFTED_TRC20, SHIFTED_TOKEN_FEES, SHIFT_12)
+  ).context;
+  next = (await contract.circuits.addAllowedTronToken(next, MICRO_SHIFTED_TRC20, NO_FEES, SHIFT_6))
+    .context;
   return { contract, ctx: next };
 };
 
@@ -308,14 +326,46 @@ describe("initialise", () => {
 describe("addAllowedTronToken", () => {
   it("allows the TRC-20 with its fees for Tron deposits only, not as an ERC20", async () => {
     const { ctx } = await deployInitialised();
-    expect(ledgerOf(ctx).allowedTronTokens.lookup(TRC20)).toEqual({ fees: TRON_TOKEN_FEES });
+    expect(ledgerOf(ctx).allowedTronTokens.lookup(TRC20)).toEqual({
+      fees: TRON_TOKEN_FEES,
+      factor: UNSHIFTED,
+      colour: pureCircuits.vaultTronTokenDomainSeparator(TRC20),
+    });
     expect(ledgerOf(ctx).allowedTokens.member(TRC20)).toBe(false);
   });
 
-  it("re-allowing a TRC-20 restamps its fees", async () => {
+  it("stores a shifted TRC-20's factor and its shifted colour", async () => {
+    const { ctx } = await deployInitialised();
+    expect(ledgerOf(ctx).allowedTronTokens.lookup(SHIFTED_TRC20)).toEqual({
+      fees: SHIFTED_TOKEN_FEES,
+      factor: SHIFT_12,
+      colour: pureCircuits.tronCoinColour(SHIFTED_TRC20, SHIFT_12),
+    });
+    expect(ledgerOf(ctx).allowedTronTokens.lookup(SHIFTED_TRC20).colour).not.toEqual(
+      pureCircuits.vaultTronTokenDomainSeparator(SHIFTED_TRC20),
+    );
+  });
+
+  it.each([
+    ["the same factor", UNSHIFTED],
+    ["another factor", SHIFT_12],
+  ] as const)("refuses to relist a TRC-20 with %s, keeping its listing", async (_name, factor) => {
     const { contract, ctx } = await deployInitialised();
-    const next = (await contract.circuits.addAllowedTronToken(ctx, TRC20, NO_FEES)).context;
-    expect(ledgerOf(next).allowedTronTokens.lookup(TRC20)).toEqual({ fees: NO_FEES });
+    await expect(
+      contract.circuits.addAllowedTronToken(ctx, TRC20, NO_FEES, factor),
+    ).rejects.toThrow(/TRC-20 already allowed/);
+    expect(ledgerOf(ctx).allowedTronTokens.lookup(TRC20)).toEqual({
+      fees: TRON_TOKEN_FEES,
+      factor: UNSHIFTED,
+      colour: pureCircuits.vaultTronTokenDomainSeparator(TRC20),
+    });
+  });
+
+  it("refuses a zero factor", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(
+      contract.circuits.addAllowedTronToken(ctx, UNLISTED_TRC20, TRON_TOKEN_FEES, 0n),
+    ).rejects.toThrow(/Factor must be positive/);
   });
 
   it("a Tron deposit takes no fee: the full amount is minted on an executed transfer", async () => {
@@ -369,22 +419,72 @@ describe("addAllowedTronToken", () => {
     const { contract, ctx } = await deployInitialised();
     const stranger = contextOf(ctx.callContext.currentQueryContext.state, OTHER_SECRET_KEY);
     await expect(
-      contract.circuits.addAllowedTronToken(stranger, UNLISTED_TRC20, TRON_TOKEN_FEES),
+      contract.circuits.addAllowedTronToken(stranger, UNLISTED_TRC20, TRON_TOKEN_FEES, UNSHIFTED),
     ).rejects.toThrow(/Not the deployer/);
   });
 
   it("rejects the zero address", async () => {
     const { contract, ctx } = await deployInitialised();
     await expect(
-      contract.circuits.addAllowedTronToken(ctx, ZERO_ADDRESS, TRON_TOKEN_FEES),
+      contract.circuits.addAllowedTronToken(ctx, ZERO_ADDRESS, TRON_TOKEN_FEES, UNSHIFTED),
     ).rejects.toThrow(/TRC-20 address cannot be zero/);
   });
 
   it("rejects before initialise", async () => {
     const { contract, ctx } = await deployContract();
     await expect(
-      contract.circuits.addAllowedTronToken(ctx, TRC20, TRON_TOKEN_FEES),
+      contract.circuits.addAllowedTronToken(ctx, TRC20, TRON_TOKEN_FEES, UNSHIFTED),
     ).rejects.toThrow(/Not initialised/);
+  });
+});
+
+describe("setTronTokenFees", () => {
+  const REPRICED_FEES = { withdraw: 101n, swap: 103n, supply: 107n, redeem: 109n };
+
+  it.each([
+    ["an unshifted", TRC20, UNSHIFTED],
+    ["a shifted", SHIFTED_TRC20, SHIFT_12],
+  ] as const)(
+    "reprices %s TRC-20 and keeps its factor and colour",
+    async (_name, token, factor) => {
+      const { contract, ctx } = await deployInitialised();
+      const repriced = (await contract.circuits.setTronTokenFees(ctx, token, REPRICED_FEES))
+        .context;
+      expect(ledgerOf(repriced).allowedTronTokens.lookup(token)).toEqual({
+        fees: REPRICED_FEES,
+        factor,
+        colour: pureCircuits.tronCoinColour(token, factor),
+      });
+    },
+  );
+
+  it("refuses a TRC-20 the vault does not allow", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(
+      contract.circuits.setTronTokenFees(ctx, UNLISTED_TRC20, REPRICED_FEES),
+    ).rejects.toThrow(/TRC-20 not allowed/);
+  });
+
+  it("refuses an ERC20 the vault allows", async () => {
+    const { contract, ctx } = await deployInitialised();
+    await expect(contract.circuits.setTronTokenFees(ctx, ERC20, REPRICED_FEES)).rejects.toThrow(
+      /TRC-20 not allowed/,
+    );
+  });
+
+  it("is deployer-gated", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const stranger = contextOf(ctx.callContext.currentQueryContext.state, OTHER_SECRET_KEY);
+    await expect(
+      contract.circuits.setTronTokenFees(stranger, TRC20, REPRICED_FEES),
+    ).rejects.toThrow(/Not the deployer/);
+  });
+
+  it("refuses before initialise", async () => {
+    const { contract, ctx } = await deployContract();
+    await expect(contract.circuits.setTronTokenFees(ctx, TRC20, REPRICED_FEES)).rejects.toThrow(
+      /Not initialised/,
+    );
   });
 });
 
@@ -393,6 +493,132 @@ describe("vaultTronTokenDomainSeparator", () => {
     expect(pureCircuits.vaultTronTokenDomainSeparator(TRC20)).not.toEqual(
       pureCircuits.vaultTokenDomainSeparator(TRC20),
     );
+  });
+});
+
+/** `value` as `Bytes<32>`: little-endian, zero-padded, as Compact's `as Field as Bytes<32>`. */
+const fieldBytes = (value: Uint8Array | bigint): Uint8Array => {
+  const out = new Uint8Array(32);
+  if (typeof value === "bigint") {
+    for (let i = 0, rest = value; rest > 0n; i += 1, rest >>= 8n) out[i] = Number(rest & 0xffn);
+  } else {
+    out.set(value);
+  }
+  return out;
+};
+
+/** `pad(32, text)`: the ASCII bytes, zero-padded. */
+const padded = (text: string): Uint8Array => fieldBytes(new TextEncoder().encode(text));
+
+describe("tronCoinColour", () => {
+  // The colour definitions, recomputed with the runtime's own transientHash: a change to a
+  // tag, an input or their order renames coins already minted.
+  it.each([
+    {
+      name: "an unshifted token keeps hash(vault:token:tron:, token)",
+      factor: UNSHIFTED,
+      inputs: [padded("vault:token:tron:"), fieldBytes(SHIFTED_TRC20)],
+    },
+    {
+      name: "a shifted token is hash(vault:token:tron:shifted:, token, factor)",
+      factor: SHIFT_12,
+      inputs: [
+        padded("vault:token:tron:shifted:"),
+        fieldBytes(SHIFTED_TRC20),
+        fieldBytes(SHIFT_12),
+      ],
+    },
+  ])("$name", ({ factor, inputs }) => {
+    const hashType = new CompactTypeVector(inputs.length, new CompactTypeBytes(32));
+    expect(pureCircuits.tronCoinColour(SHIFTED_TRC20, factor)).toEqual(
+      upgradeFromTransient(transientHash(hashType, inputs)),
+    );
+  });
+
+  it("keeps an unshifted token's colour: vaultTronTokenDomainSeparator", () => {
+    expect(pureCircuits.tronCoinColour(SHIFTED_TRC20, UNSHIFTED)).toEqual(
+      pureCircuits.vaultTronTokenDomainSeparator(SHIFTED_TRC20),
+    );
+  });
+
+  it.each([
+    ["the same token unshifted", SHIFTED_TRC20, UNSHIFTED],
+    ["the same token at another factor", SHIFTED_TRC20, SHIFT_6],
+    ["another token at the same factor", MICRO_SHIFTED_TRC20, SHIFT_12],
+  ] as const)("gives a shifted token a colour apart from %s", (_name, token, factor) => {
+    expect(pureCircuits.tronCoinColour(SHIFTED_TRC20, SHIFT_12)).not.toEqual(
+      pureCircuits.tronCoinColour(token, factor),
+    );
+  });
+
+  it("gives a shifted token a colour apart from the ERC20 colour of its address", () => {
+    expect(pureCircuits.tronCoinColour(SHIFTED_TRC20, SHIFT_12)).not.toEqual(
+      pureCircuits.vaultTokenDomainSeparator(SHIFTED_TRC20),
+    );
+  });
+});
+
+describe("tronBaseOfUnits and tronUnitsOfBaseFloor", () => {
+  it.each([
+    { name: "an unshifted amount", units: AMOUNT, factor: UNSHIFTED, base: AMOUNT },
+    { name: "a 10^12 shift", units: AMOUNT, factor: SHIFT_12, base: AMOUNT * SHIFT_12 },
+    {
+      name: "the Uint<64> maximum at the Uint<64> maximum factor",
+      units: UINT64_MAX,
+      factor: UINT64_MAX,
+      base: UINT64_MAX * UINT64_MAX,
+    },
+  ])("scales $name to base units", ({ units, factor, base }) => {
+    expect(pureCircuits.tronBaseOfUnits(units, factor)).toBe(base);
+  });
+
+  it.each([
+    { name: "an exact multiple", base: 5n * SHIFT_12, q: 5n },
+    { name: "the largest remainder", base: 6n * SHIFT_12 - 1n, q: 5n },
+    { name: "a base below one unit", base: SHIFT_12 - 1n, q: 0n },
+    { name: "the Uint<64> maximum quotient", base: UINT64_MAX * SHIFT_12 + 1n, q: UINT64_MAX },
+  ])("accepts the floor quotient of $name", ({ base, q }) => {
+    expect(pureCircuits.tronUnitsOfBaseFloor(base, SHIFT_12, q)).toBe(q);
+  });
+
+  it.each([
+    {
+      name: "one too large",
+      base: 5n * SHIFT_12,
+      factor: SHIFT_12,
+      q: 6n,
+      error: /Quotient too large/,
+    },
+    {
+      name: "short by one whole factor",
+      base: 5n * SHIFT_12,
+      factor: SHIFT_12,
+      q: 4n,
+      error: /Quotient too small/,
+    },
+    {
+      name: "one too small",
+      base: 6n * SHIFT_12 - 1n,
+      factor: SHIFT_12,
+      q: 4n,
+      error: /Quotient too small/,
+    },
+    {
+      name: "unshifted one too large",
+      base: AMOUNT,
+      factor: UNSHIFTED,
+      q: AMOUNT + 1n,
+      error: /Quotient too large/,
+    },
+    {
+      name: "unshifted one too small",
+      base: AMOUNT,
+      factor: UNSHIFTED,
+      q: AMOUNT - 1n,
+      error: /Quotient too small/,
+    },
+  ])("refuses a quotient $name", ({ base, factor, q, error }) => {
+    expect(() => pureCircuits.tronUnitsOfBaseFloor(base, factor, q)).toThrow(error);
   });
 });
 
@@ -914,7 +1140,8 @@ describe("completeTronDeposit expected transfer result", () => {
         bytes(32, 0xef),
       )
     ).context;
-    next = (await contract.circuits.addAllowedTronToken(next, TRON_USDT, NO_FEES)).context;
+    next = (await contract.circuits.addAllowedTronToken(next, TRON_USDT, NO_FEES, UNSHIFTED))
+      .context;
     const { context: sent, requestId } = await tronDeposit(contract, next, {
       ...VALID_TRON_DEPOSIT,
       deposit: { tokenAddress: TRON_USDT, amount: AMOUNT },
@@ -1137,5 +1364,109 @@ describe("chain-aware queue: each chain's attestations raise only its own height
     expect(next.callContext.currentQueryContext.effects.shieldedMints.size).toBe(1);
     expect(ledgerOf(next).bidirectionalTronDepositMap.member(tron.requestId)).toBe(true);
     expect(ledgerOf(next).tronLastSeen).toBe(TRON_START_HEIGHT);
+  });
+});
+
+// A shifted TRC-20's request amount is in coin units: the transfer moves amount·factor base
+// units, and the settle mints amount coin units in the token's listed colour.
+describe("Tron deposit of a shifted TRC-20", () => {
+  it.each([
+    {
+      name: "an unshifted TRC-20 moves the amount and keeps its colour",
+      token: TRC20,
+      base: AMOUNT,
+      colour: colourOf(pureCircuits.vaultTronTokenDomainSeparator(TRC20)),
+    },
+    {
+      name: "a 10^6-shifted TRC-20 moves amount·10^6",
+      token: MICRO_SHIFTED_TRC20,
+      base: AMOUNT * SHIFT_6,
+      colour: colourOf(pureCircuits.tronCoinColour(MICRO_SHIFTED_TRC20, SHIFT_6)),
+    },
+    {
+      name: "a 10^12-shifted TRC-20 moves amount·10^12",
+      token: SHIFTED_TRC20,
+      base: AMOUNT * SHIFT_12,
+      colour: colourOf(pureCircuits.tronCoinColour(SHIFTED_TRC20, SHIFT_12)),
+    },
+  ])("$name and mints the amount in coin units", async ({ token, base, colour }) => {
+    const { contract, ctx } = await deployInitialised();
+    const { context: sent, requestId } = await tronDeposit(contract, ctx, {
+      ...VALID_TRON_DEPOSIT,
+      deposit: { tokenAddress: token, amount: AMOUNT },
+    });
+    expect(ledgerOf(sent).bidirectionalTronDepositMap.lookup(requestId).txParams.calldata).toEqual({
+      is_some: true,
+      value: {
+        selector: ERC20_TRANSFER_SELECTOR,
+        noWords: 2n,
+        words: [evmAddressAbiWord(VAULT_EVM), numericAbiWord(base)],
+      },
+    });
+    const attested = await attest(
+      contract,
+      sent,
+      respond(
+        MPC_RESPONSE_SECRET,
+        requestId,
+        OutputKind.executed,
+        OUTPUT_TRUE,
+        TRON_ATTESTED_HEIGHT,
+      ),
+    );
+    const settled = (
+      await contract.circuits.completeTronDeposit(
+        attested,
+        requestId,
+        OUTPUT_TRUE,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
+    ).context;
+    expect(coinsMinted(attested, settled).map(({ coinInfo }) => coinInfo)).toEqual([
+      { nonce: MINT_NONCE, color: colour, value: AMOUNT },
+    ]);
+  });
+
+  it("mints a shifted TRC-20 in neither its unshifted colour nor another factor's", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const { context: sent, requestId } = await tronDeposit(contract, ctx, {
+      ...VALID_TRON_DEPOSIT,
+      deposit: { tokenAddress: SHIFTED_TRC20, amount: AMOUNT },
+    });
+    const attested = await attest(
+      contract,
+      sent,
+      respond(
+        MPC_RESPONSE_SECRET,
+        requestId,
+        OutputKind.executed,
+        OUTPUT_TRUE,
+        TRON_ATTESTED_HEIGHT,
+      ),
+    );
+    const settled = (
+      await contract.circuits.completeTronDeposit(
+        attested,
+        requestId,
+        OUTPUT_TRUE,
+        MINT_NONCE,
+        CALLER_RECIPIENT,
+      )
+    ).context;
+    const minted = first(coinsMinted(attested, settled), "minted coin").coinInfo.color;
+    expect(minted).not.toEqual(colourOf(pureCircuits.vaultTronTokenDomainSeparator(SHIFTED_TRC20)));
+    expect(minted).not.toEqual(colourOf(pureCircuits.tronCoinColour(SHIFTED_TRC20, SHIFT_6)));
+  });
+
+  it("moves the largest refundable amount at the 10^12 shift", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const { context: sent, requestId } = await tronDeposit(contract, ctx, {
+      ...VALID_TRON_DEPOSIT,
+      deposit: { tokenAddress: SHIFTED_TRC20, amount: UINT64_MAX },
+    });
+    expect(
+      ledgerOf(sent).bidirectionalTronDepositMap.lookup(requestId).txParams.calldata.value.words,
+    ).toEqual([evmAddressAbiWord(VAULT_EVM), numericAbiWord(UINT64_MAX * SHIFT_12)]);
   });
 });

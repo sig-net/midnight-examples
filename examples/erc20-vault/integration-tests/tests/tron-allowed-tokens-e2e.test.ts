@@ -2,9 +2,10 @@ import { bytesToHex } from "@sig-net/midnight";
 import {
   evmAddressBytes,
   newInputIndex,
+  pureCircuits,
   readVaultLedger,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { resolveTokenFeesFor } from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { resolveTronTokenListings } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -29,7 +30,15 @@ const strangerSession = createVaultSession(
 
 const UNLISTED_TRC20 = `0x${bytesToHex(crypto.getRandomValues(new Uint8Array(20)))}`;
 
-const unlistedWithFees = () => resolveTokenFeesFor(env, [UNLISTED_TRC20]);
+// A shifted listing: one coin unit of it counts 10^6 base units.
+const UNLISTED_FACTOR = 1_000_000n;
+
+const unlistedListing = () =>
+  resolveTronTokenListings({
+    ...env,
+    TRON_ALLOWED_TOKENS: UNLISTED_TRC20,
+    TRON_TOKEN_FACTORS: JSON.stringify({ [UNLISTED_TRC20]: String(UNLISTED_FACTOR) }),
+  });
 
 const TRON_TX = {
   refBlockBytes: new Uint8Array(2),
@@ -67,7 +76,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
       "a stranger cannot allow a TRC-20",
       async () => {
         const stranger = await strangerSession.vaultContext();
-        await expect(addAllowedTronTokens(stranger, unlistedWithFees())).rejects.toThrow(
+        await expect(addAllowedTronTokens(stranger, unlistedListing())).rejects.toThrow(
           /Not the deployer/,
         );
       },
@@ -75,19 +84,24 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
     );
 
     it(
-      "the deployer allows the TRC-20 with its fees, and the ledger holds it in the Tron map only",
+      "the deployer lists the TRC-20 with its fees and factor, and the ledger holds it in the Tron map only",
       async () => {
         const context = await session.vaultContext();
-        const tokens = unlistedWithFees();
+        const tokens = unlistedListing();
         const added = await addAllowedTronTokens(context, tokens);
         expect(added).toEqual([UNLISTED_TRC20]);
         const ledger = await readVaultLedger(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
-        expect(ledger.allowedTronTokens.lookup(evmAddressBytes(UNLISTED_TRC20))).toEqual({
-          fees: tokens.get(UNLISTED_TRC20),
+        const token = evmAddressBytes(UNLISTED_TRC20);
+        const colour = pureCircuits.tronCoinColour(token, UNLISTED_FACTOR);
+        expect(ledger.allowedTronTokens.lookup(token)).toEqual({
+          fees: tokens.get(UNLISTED_TRC20)?.fees,
+          factor: UNLISTED_FACTOR,
+          colour,
         });
+        expect(colour).not.toEqual(pureCircuits.vaultTronTokenDomainSeparator(token));
         expect(ledger.allowedTokens.member(evmAddressBytes(UNLISTED_TRC20))).toBe(false);
       },
       10 * MINUTE,

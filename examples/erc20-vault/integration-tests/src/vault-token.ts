@@ -1,6 +1,7 @@
 // The vault's shielded token color, computed the sanctioned way: the
-// contract's compiled `vaultTokenDomainSeparator` circuit plus the runtime's
-// `rawTokenType` (the off-chain twin of the in-circuit
+// contract's compiled `vaultTokenDomainSeparator` circuit, or for a TRC-20 the
+// colour its listing stores (`tronCoinColour(token, factor)`), plus the
+// runtime's `rawTokenType` (the off-chain twin of the in-circuit
 // `tokenType(domainSep, kernel.self())`) — never a TS re-implementation.
 // Shared by the start flows (a surrendered coin's color) and by tests that
 // read a wallet's shielded balance of the vault token.
@@ -10,8 +11,11 @@ import {
   type RawTokenType,
   rawTokenType,
 } from "@midnight-ntwrk/compact-runtime";
-import { pureCircuits } from "@sig-net/midnight-examples-erc20-vault-contract";
-import { evmAddressBytes } from "@sig-net/midnight-examples-erc20-vault-contract";
+import {
+  type AllowedTronTokenConfig,
+  evmAddressBytes,
+  pureCircuits,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
 
 /**
  * Compute the shielded token color the vault at `vaultContractAddress` mints
@@ -34,16 +38,16 @@ export function vaultTokenType(
 }
 
 /**
- * @param tokenAddress - The TRC-20 in its 20-byte EVM form
- * @param vaultContractAddress - The deployed vault contract address
- * @returns The raw token type
+ * Compute the shielded token color the vault at `vaultContractAddress` mints for a TRC-20:
+ * the colour its listing stores, which `tronCoinColour(token, factor)` fixed at listing.
+ *
+ * @param config - The TRC-20's listing, from `vaultTronTokenConfig`.
+ * @param vaultContractAddress - The deployed vault contract address.
+ * @returns The raw token type (hex) of the vault token for this TRC-20.
  */
 export function vaultTronTokenType(
-  tokenAddress: Uint8Array,
+  config: AllowedTronTokenConfig,
   vaultContractAddress: ContractAddress,
 ): RawTokenType {
-  return rawTokenType(
-    pureCircuits.vaultTronTokenDomainSeparator(tokenAddress),
-    vaultContractAddress,
-  );
+  return rawTokenType(config.colour, vaultContractAddress);
 }

@@ -1,8 +1,8 @@
 // `startTronWithdraw` then `sendTronWithdraw`: surrender a shielded vault coin of a
 // TRC-20 worth the amount plus the withdraw fee, flush the queued withdrawal, and record
 // its SignBidirectionalEvent in the vault's bidirectionalTronWithdrawMap. It asks the MPC
-// to sign a Tron `transfer(destination, amount)` on the TRC-20 from the VAULT's derived
-// Tron account (path "vault") under the vault's fee limit. Tron has no nonce: the
+// to sign a Tron `transfer(destination, amount·factor)` on the TRC-20 from the VAULT's
+// derived Tron account (path "vault") under the vault's withdraw fee limit. Tron has no nonce: the
 // transaction names a solidified reference block and expires, so the withdrawer picks the
 // window, and a transaction that never lands is attested unviable and refunded. The
 // settle side lives in complete-tron-withdraw.ts, and the refund of a withdrawal nobody
@@ -11,28 +11,21 @@ import { createCallTxOptions, submitCallTx } from "@midnight-ntwrk/midnight-js/c
 import {
   calculateRequestId,
   evmAddressAbiWord,
-  getSolidifiedTronReferenceBlock,
   hexToBytes,
   numericAbiWord,
   type RequestIdHex,
   requestIdHex,
-  type SignBidirectionalEvent,
-  SIGNET_DEFAULT_KEY_VERSION,
-  stripHexPrefix,
   toSignBidirectionalEventIndex,
   tronAddressFromEvm,
-  type TronTriggerSmartContractTxParams,
-  TxParamType,
 } from "@sig-net/midnight";
 import {
   feeRecipientEncryptionMapping,
   newInputIndex,
+  pureCircuits,
   queuedRequestIndex,
   readVaultLedger,
-  type TronWithdrawArgs,
-  VAULT_PATH_BYTES,
   VAULT_PRIVATE_STATE_ID,
-  vaultTronTokenFees,
+  vaultTronTokenConfig,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-deploy";
 
@@ -41,76 +34,22 @@ import { TRON_TRANSFER_RESULT_MPC_ROUTING } from "../mpc-routing.ts";
 import type { TronContext } from "../tron-context.ts";
 import type { VaultContext } from "../vault-context.ts";
 import { vaultTronTokenType } from "../vault-token.ts";
+import {
+  type QueuedTronRequest,
+  startTronTxWindow,
+  tronVaultRequestRecord,
+  type TronWindowOptions,
+} from "./tron-vault-request.ts";
 import { flushUntil } from "./vault-queue.ts";
 
-/** The validity window a withdrawal asks for by default: one hour from its timestamp. */
-export const TRON_WITHDRAW_WINDOW_MS = 3_600_000n;
-
-/** The withdrawer's TaPoS reference and validity window, in Tron's milliseconds. */
-export interface TronTxWindow {
-  readonly refBlockBytes: Uint8Array;
-  readonly refBlockHash: Uint8Array;
-  readonly timestamp: bigint;
-  readonly expiration: bigint;
-}
-
 /** Options for {@link queueTronWithdraw}. */
-export interface StartTronWithdrawOptions {
-  /** Withdraw amount in the TRC-20's base units. */
+export interface StartTronWithdrawOptions extends TronWindowOptions {
+  /** Withdraw amount in the TRC-20's coin units: the transfer moves amount·factor base units. */
   readonly amount: bigint;
   /** The recipient's 21-byte, 0x41-prefixed Tron address. */
   readonly destTronAddress: Uint8Array;
   /** The TRC-20, as 20 EVM-form bytes. Defaults to the context's TRC-20. */
   readonly tokenAddress?: Uint8Array;
-  /** The window, counted from the timestamp. Defaults to {@link TRON_WITHDRAW_WINDOW_MS}. */
-  readonly windowMs?: bigint;
-  /** Exact reference and window fields, used verbatim instead of a fresh window. */
-  readonly window?: TronTxWindow;
-}
-
-/** A started and flushed Tron withdrawal, ready for {@link sendTronWithdraw}. */
-export interface QueuedTronWithdraw {
-  /** The request id the send records, computed off-chain from the arguments the start stored. */
-  readonly requestId: RequestIdHex;
-  /** The input index the start queued it under, which a refund names. */
-  readonly inIndex: bigint;
-  readonly outIndex: Uint8Array;
-  readonly window: TronTxWindow;
-}
-
-// The record `sendTronWithdraw` stores for these arguments: the vault's own path, the
-// Tron routing, and `transfer(destination, amount)` on the token plus the binding word,
-// under the window and fee limit the start stored, both read back from its args.
-function expectedTronWithdrawRecord(
-  context: VaultContext,
-  tokenAddress: Uint8Array,
-  options: StartTronWithdrawOptions,
-  stored: TronWithdrawArgs,
-): SignBidirectionalEvent<TronTriggerSmartContractTxParams> {
-  return {
-    sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
-    keyVersion: SIGNET_DEFAULT_KEY_VERSION,
-    path: VAULT_PATH_BYTES,
-    ...TRON_TRANSFER_RESULT_MPC_ROUTING,
-    txParamType: TxParamType.tronTriggerSmartContract,
-    txParams: {
-      ...stored.tx,
-      contractAddress: tronAddressFromEvm(tokenAddress),
-      callValue: 0n,
-      calldata: {
-        is_some: true,
-        value: {
-          selector: ERC20_TRANSFER_SELECTOR,
-          noWords: 3n,
-          words: [
-            evmAddressAbiWord(options.destTronAddress.subarray(1)),
-            numericAbiWord(options.amount),
-            stored.binding,
-          ],
-        },
-      },
-    },
-  };
 }
 
 /**
@@ -131,7 +70,7 @@ export async function queueTronWithdraw(
   context: VaultContext,
   tron: TronContext,
   options: StartTronWithdrawOptions,
-): Promise<QueuedTronWithdraw> {
+): Promise<QueuedTronRequest> {
   if (options.amount <= 0n) {
     throw new Error(`amount must be a positive integer; got ${String(options.amount)}.`);
   }
@@ -146,25 +85,18 @@ export async function queueTronWithdraw(
   if (!state.initialised) {
     throw new Error("vault is not initialised, run the initialise flow first");
   }
-  const fee = vaultTronTokenFees(state, tokenAddress).withdraw;
+  const config = vaultTronTokenConfig(state, tokenAddress);
+  const fee = config.fees.withdraw;
+  const feeLimit = state.vaultTronFeeLimits.withdraw;
   console.log(`vault contract:    ${context.vaultContractAddress}`);
-  console.log(`withdraw fee:      ${String(fee)} base units`);
-  console.log(`Tron fee limit:    ${String(state.vaultTronFeeLimit)} sun`);
+  console.log(`withdraw fee:      ${String(fee)} coin units`);
+  console.log(`token factor:      ${String(config.factor)} base units per coin unit`);
+  console.log(`Tron fee limit:    ${String(feeLimit)} sun`);
 
-  let window = options.window;
-  if (window === undefined) {
-    const reference = await getSolidifiedTronReferenceBlock(tron.tronRpcUrl);
-    const timestamp = BigInt(Date.now());
-    window = {
-      refBlockBytes: reference.refBlockBytes,
-      refBlockHash: reference.refBlockHash,
-      timestamp,
-      expiration: timestamp + (options.windowMs ?? TRON_WITHDRAW_WINDOW_MS),
-    };
-  }
+  const window = await startTronTxWindow(tron, options);
   const coin = {
     nonce: crypto.getRandomValues(new Uint8Array(32)),
-    color: hexToBytes(vaultTronTokenType(tokenAddress, context.vaultContractAddress)),
+    color: hexToBytes(vaultTronTokenType(config, context.vaultContractAddress)),
     value: options.amount + fee,
   };
   const inIndex = newInputIndex();
@@ -194,16 +126,32 @@ export async function queueTronWithdraw(
     context.vaultContractAddress,
   );
   const outIndex = queuedRequestIndex(queuedState, inIndex);
+  const stored = queuedState.tronWithdrawArgsMap.lookup(inIndex);
+  // The record `sendTronWithdraw` stores: `transfer(destination, amount·factor)` on the
+  // token plus the binding word, under the window and fee limit the start stored, all read
+  // back from its args.
   const requestId = requestIdHex(
     calculateRequestId(
-      expectedTronWithdrawRecord(
-        context,
-        tokenAddress,
-        options,
-        queuedState.tronWithdrawArgsMap.lookup(inIndex),
-      ),
+      tronVaultRequestRecord(context, TRON_TRANSFER_RESULT_MPC_ROUTING, {
+        ...stored.tx,
+        contractAddress: tronAddressFromEvm(tokenAddress),
+        callValue: 0n,
+        calldata: {
+          is_some: true,
+          value: {
+            selector: ERC20_TRANSFER_SELECTOR,
+            noWords: 3n,
+            words: [
+              evmAddressAbiWord(options.destTronAddress.subarray(1)),
+              numericAbiWord(pureCircuits.tronBaseOfUnits(options.amount, config.factor)),
+              stored.binding,
+            ],
+          },
+        },
+      }),
     ),
   );
+
   await flushUntil(context, (flushed) => !flushed.inputRequestBuffer.member(inIndex), {
     inIndexes: [inIndex],
     requestIds: [],
@@ -223,7 +171,7 @@ export async function queueTronWithdraw(
  */
 export async function sendTronWithdraw(
   context: VaultContext,
-  queued: QueuedTronWithdraw,
+  queued: QueuedTronRequest,
 ): Promise<RequestIdHex> {
   const result = await context.vault.callTx.sendTronWithdraw(queued.outIndex);
   console.log(`Tron withdraw sent in tx ${result.public.txId}`);
