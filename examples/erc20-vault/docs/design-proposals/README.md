@@ -4,3 +4,4 @@ Major upgrades or feature builds on the erc20 vault contract start their life he
 
 ## Design Proposals So Far
 - [Take Fees on Vault Operations](./001-take-fees-on-vault-operations/README.md)
+- [Tron Deposit](./002-tron-deposit/README.md)
