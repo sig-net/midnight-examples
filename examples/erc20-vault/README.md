@@ -92,10 +92,16 @@ withdrawal and re-mints the burned amount, and keeps the fee as a failed
 withdrawal does. The ledger keeps the send and the refund apart: the refund
 needs the request unsent, and the send needs the flushed entry the refund
 removes. Tron has no nonce, so the same fields name the same Tron transaction,
-which Tron takes only once. The vault keeps no record of used fields: a client
-that reuses the fields of an earlier withdrawal that already landed gets a
-transaction Tron refuses, and that withdrawal's coin is left with nothing to
-settle it. Pick a fresh timestamp for every withdrawal.
+which Tron takes only once. The transfer therefore carries one more calldata
+word after its ABI arguments, the request's ownership commitment, so every
+withdrawal names its own transaction and a copy of someone's public start can
+neither hold it back nor strand it. A TRC-20 whose ABI decoder refused trailing
+calldata would fail every withdrawal, which is refunded, fee kept, so its
+deposits could never leave the vault: list only tokens that accept it, as Tron
+USDT does. The vault keeps no record of used fields: a client that repeats an
+earlier withdrawal's input index, window, arguments and fee limit under the same
+key gets a transaction Tron refuses, and that withdrawal's coin is left with
+nothing to settle it. Pick a fresh input index for every withdrawal.
 
 The vault's Tron account signs and pays every withdrawal: fund
 `tronAddress(vaultEvmAddress)` with TRX, which the network burns for the

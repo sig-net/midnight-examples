@@ -111,6 +111,7 @@ const ms = (seconds: number, millis = 0): bigint => BigInt(seconds) * 1000n + Bi
 const colourOf = (domainSeparator: Uint8Array) =>
   hexToBytes(rawTokenType(domainSeparator, VAULT_ADDRESS));
 const TRON_TOKEN_COLOR = colourOf(pureCircuits.vaultTronTokenDomainSeparator(TRC20));
+const TRC20_MINT_KEY = bytesToHex(pureCircuits.vaultTronTokenDomainSeparator(TRC20));
 const TRON_USDT_COLOR = colourOf(pureCircuits.vaultTronTokenDomainSeparator(TRON_USDT));
 const ERC20_COLOR = colourOf(pureCircuits.vaultTokenDomainSeparator(ERC20));
 
@@ -148,6 +149,11 @@ const VALID_TRON_WITHDRAW: TronWithdrawCallArgs = {
   },
   coin: vaultCoin(AMOUNT + TRON_TOKEN_FEES.withdraw),
 };
+
+// VALID_TRON_WITHDRAW expires at h = NOW + 3600 whole seconds: sendTronWithdraw admits it
+// below block time h - 60 and refuses it from h - 60 on, where the refund opens.
+const LAST_SEND_TIME = NOW + 3600 - SEND_MIN_REMAINING - 1;
+const SEND_CLOSED_TIME = NOW + 3600 - SEND_MIN_REMAINING;
 
 const VALID_USDT_WITHDRAW: TronWithdrawCallArgs = {
   ...VALID_TRON_WITHDRAW,
@@ -348,6 +354,7 @@ describe("startTronWithdraw", () => {
       request: VALID_TRON_WITHDRAW.withdraw,
       tx: { ...VALID_TRON_WITHDRAW.tronTx, feeLimit: DEFAULT_TRON_FEE_LIMIT },
       fee: TRON_TOKEN_FEES.withdraw,
+      binding: pureCircuits.ownershipCommitment(VALID_TRON_WITHDRAW.inIndex, SECRET_KEY),
     });
   });
 
@@ -588,23 +595,109 @@ describe("startTronWithdraw: the window at the start block", () => {
   });
 });
 
-describe("startTronWithdraw: twins", () => {
-  const TWIN = { ...VALID_TRON_WITHDRAW, inIndex: 31n };
+describe("startTronWithdraw: copies", () => {
+  // Every start binds its transfer to the requester's ownership commitment, so a copy of a
+  // public start (same token, amount, destination and window) names its own Tron transaction.
+  const COPY = {
+    ...VALID_TRON_WITHDRAW,
+    inIndex: 31n,
+    coin: { ...VALID_TRON_WITHDRAW.coin, nonce: bytes(32, 0x0d) },
+  };
 
-  it("admits a twin at start: the vault keeps no record of used request ids", async () => {
+  it("lets a stranger's copy that failed and was refunded leave the original refundable", async () => {
     const { contract, ctx } = await deployInitialised();
-    const started = (await startTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context;
-    const second = (await startTronWithdraw(contract, started, TWIN)).context;
-    expect(ledgerOf(second).inputRequestBuffer.member(TWIN.inIndex)).toBe(true);
+    const original = (await startTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context;
+    const copied = (await startTronWithdraw(contract, stranger(original), COPY)).context;
+    const copyOut = queuedRequestIndex(ledgerOf(copied), COPY.inIndex);
+    const originalOut = queuedRequestIndex(ledgerOf(copied), VALID_TRON_WITHDRAW.inIndex);
+    expect(bytesToHex(copyOut)).not.toBe(bytesToHex(originalOut));
+
+    const copyFlushed = await flush(contract, copied, [COPY.inIndex], []);
+    const copySent = (await contract.circuits.sendTronWithdraw(copyFlushed, copyOut)).context;
+    const copyId = first(
+      [...ledgerOf(copySent).bidirectionalTronWithdrawMap].map(([id]) => id),
+      "copy request",
+    );
+    const copyAttested = await attest(
+      contract,
+      copySent,
+      respond(copyId, OutputKind.failed, OUTPUT_EMPTY, TRON_ATTESTED_HEIGHT),
+    );
+    const copySettled = (
+      await contract.circuits.completeTronWithdraw(
+        stranger(copyAttested),
+        copyId,
+        OUTPUT_IGNORED,
+        MINT_NONCE,
+      )
+    ).context;
+
+    const flushed = await flush(
+      contract,
+      atBlockTime(copySettled, NOW),
+      [VALID_TRON_WITHDRAW.inIndex],
+      [],
+    );
+    const sent = (await contract.circuits.sendTronWithdraw(flushed, originalOut)).context;
+    const requestId = first(
+      [...ledgerOf(sent).bidirectionalTronWithdrawMap].map(([id]) => id),
+      "original request",
+    );
+    expect(bytesToHex(requestId)).not.toBe(bytesToHex(copyId));
+    const attested = await attest(
+      contract,
+      sent,
+      respond(requestId, OutputKind.failed, OUTPUT_EMPTY, TRON_ATTESTED_HEIGHT + 1n),
+    );
+    const before = atBlockTime(attested, NOW);
+    const refunded = (
+      await contract.circuits.completeTronWithdraw(before, requestId, OUTPUT_IGNORED, MINT_NONCE)
+    ).context;
+    expect(shieldedMintsSince(before, refunded)).toEqual([[TRC20_MINT_KEY, AMOUNT]]);
   });
 
-  it("holds a twin at the flush while the first is flushed and open", async () => {
+  it("refunds an unsent withdrawal while a stranger's sent copy stays unsettled", async () => {
     const { contract, ctx } = await deployInitialised();
-    const { context: flushed } = await flushedTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW);
-    const twinStarted = (await startTronWithdraw(contract, flushed, TWIN)).context;
-    await expect(flush(contract, twinStarted, [TWIN.inIndex], [])).rejects.toThrow(
-      /Identical request open/,
-    );
+    const original = (await startTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context;
+    const copied = (await startTronWithdraw(contract, stranger(original), COPY)).context;
+    const copyOut = queuedRequestIndex(ledgerOf(copied), COPY.inIndex);
+    const copyFlushed = await flush(contract, copied, [COPY.inIndex], []);
+    const held = (await contract.circuits.sendTronWithdraw(copyFlushed, copyOut)).context;
+
+    const flushed = await flush(contract, held, [VALID_TRON_WITHDRAW.inIndex], []);
+    const closed = atBlockTime(flushed, SEND_CLOSED_TIME);
+    const refunded = (
+      await contract.circuits.refundUnsentTronWithdraw(
+        closed,
+        VALID_TRON_WITHDRAW.inIndex,
+        MINT_NONCE,
+      )
+    ).context;
+    expect(shieldedMintsSince(closed, refunded)).toEqual([[TRC20_MINT_KEY, AMOUNT]]);
+  });
+
+  it("gives a repriced copy its own Tron transaction, so both send", async () => {
+    const { contract, ctx } = await deployInitialised();
+    const original = (await startTronWithdraw(contract, ctx, VALID_TRON_WITHDRAW)).context;
+    const repriced = (
+      await contract.circuits.addAllowedTronToken(original, TRC20, {
+        ...TRON_TOKEN_FEES,
+        withdraw: TRON_TOKEN_FEES.withdraw + 1n,
+      })
+    ).context;
+    const copied = (
+      await startTronWithdraw(contract, stranger(repriced), {
+        ...COPY,
+        coin: { ...vaultCoin(AMOUNT + TRON_TOKEN_FEES.withdraw + 1n), nonce: COPY.coin.nonce },
+      })
+    ).context;
+    const flushed = await flush(contract, copied, [COPY.inIndex, VALID_TRON_WITHDRAW.inIndex], []);
+    let sent = flushed;
+    for (const inIndex of [COPY.inIndex, VALID_TRON_WITHDRAW.inIndex]) {
+      const outIndex = queuedRequestIndex(ledgerOf(copied), inIndex);
+      sent = (await contract.circuits.sendTronWithdraw(sent, outIndex)).context;
+    }
+    expect([...ledgerOf(sent).bidirectionalTronWithdrawMap]).toHaveLength(2);
   });
 
   it("settles many distinct withdrawals flushed together", async () => {
@@ -674,8 +767,12 @@ describe("sendTronWithdraw", () => {
         is_some: true,
         value: {
           selector: ERC20_TRANSFER_SELECTOR,
-          noWords: 2n,
-          words: [evmAddressAbiWord(DEST_TRON), numericAbiWord(AMOUNT)],
+          noWords: 3n,
+          words: [
+            evmAddressAbiWord(DEST_TRON),
+            numericAbiWord(AMOUNT),
+            pureCircuits.ownershipCommitment(VALID_TRON_WITHDRAW.inIndex, SECRET_KEY),
+          ],
         },
       },
     });
@@ -929,11 +1026,6 @@ describe("completeTronWithdraw", () => {
   });
 });
 
-// VALID_TRON_WITHDRAW expires at h = NOW + 3600 whole seconds: sendTronWithdraw admits it
-// below block time h - 60 and refuses it from h - 60 on, where the refund opens.
-const LAST_SEND_TIME = NOW + 3600 - SEND_MIN_REMAINING - 1;
-const SEND_CLOSED_TIME = NOW + 3600 - SEND_MIN_REMAINING;
-
 /** How far an unsent Tron withdrawal got before its window closed to sends. */
 enum UnsentStage {
   Queued = "queued",
@@ -965,9 +1057,7 @@ describe("refundUnsentTronWithdraw", () => {
         )
       ).context;
 
-      expect(shieldedMintsSince(closed, refunded)).toEqual([
-        [bytesToHex(pureCircuits.vaultTronTokenDomainSeparator(TRC20)), AMOUNT],
-      ]);
+      expect(shieldedMintsSince(closed, refunded)).toEqual([[TRC20_MINT_KEY, AMOUNT]]);
       expect(
         coinsMinted(closed, refunded).map(({ coinInfo, recipient }) => [
           coinInfo.color,

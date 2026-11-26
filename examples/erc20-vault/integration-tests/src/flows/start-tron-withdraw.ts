@@ -29,9 +29,9 @@ import {
   newInputIndex,
   queuedRequestIndex,
   readVaultLedger,
+  type TronWithdrawArgs,
   VAULT_PATH_BYTES,
   VAULT_PRIVATE_STATE_ID,
-  type VaultLedgerState,
   vaultTronTokenFees,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { vaultCompiledContract } from "@sig-net/midnight-examples-erc20-vault-deploy";
@@ -70,7 +70,7 @@ export interface StartTronWithdrawOptions {
 
 /** A started and flushed Tron withdrawal, ready for {@link sendTronWithdraw}. */
 export interface QueuedTronWithdraw {
-  /** The request id the send records, computed off-chain from the start's arguments. */
+  /** The request id the send records, computed off-chain from the arguments the start stored. */
   readonly requestId: RequestIdHex;
   /** The input index the start queued it under, which a refund names. */
   readonly inIndex: bigint;
@@ -79,13 +79,13 @@ export interface QueuedTronWithdraw {
 }
 
 // The record `sendTronWithdraw` stores for these arguments: the vault's own path, the
-// Tron routing, the vault's fee limit, and `transfer(destination, amount)` on the token.
+// Tron routing, and `transfer(destination, amount)` on the token plus the binding word,
+// under the window and fee limit the start stored, both read back from its args.
 function expectedTronWithdrawRecord(
   context: VaultContext,
-  state: VaultLedgerState,
   tokenAddress: Uint8Array,
   options: StartTronWithdrawOptions,
-  window: TronTxWindow,
+  stored: TronWithdrawArgs,
 ): SignBidirectionalEvent<TronTriggerSmartContractTxParams> {
   return {
     sender: { bytes: hexToBytes(stripHexPrefix(context.vaultContractAddress)) },
@@ -94,18 +94,18 @@ function expectedTronWithdrawRecord(
     ...TRON_TRANSFER_RESULT_MPC_ROUTING,
     txParamType: TxParamType.tronTriggerSmartContract,
     txParams: {
-      ...window,
-      feeLimit: state.vaultTronFeeLimit,
+      ...stored.tx,
       contractAddress: tronAddressFromEvm(tokenAddress),
       callValue: 0n,
       calldata: {
         is_some: true,
         value: {
           selector: ERC20_TRANSFER_SELECTOR,
-          noWords: 2n,
+          noWords: 3n,
           words: [
             evmAddressAbiWord(options.destTronAddress.subarray(1)),
             numericAbiWord(options.amount),
+            stored.binding,
           ],
         },
       },
@@ -116,9 +116,9 @@ function expectedTronWithdrawRecord(
 /**
  * Queue a Tron withdrawal with `startTronWithdraw` under a fresh input index and flush it.
  * The window is fresh unless `options.window` names one: a timestamp of now on the
- * solidified head, which cannot be reorganised away, expiring `windowMs` later. The vault
- * does not refuse the fields of an earlier Tron withdrawal, which name a transaction Tron
- * takes only once, so an `options.window` must not repeat an earlier withdrawal's.
+ * solidified head, which cannot be reorganised away, expiring `windowMs` later. The start's
+ * binding word (its ownership commitment) makes the transfer this request's own, so the
+ * fresh input index is what keeps it from repeating an earlier Tron transaction.
  *
  * @param context - The flow context
  * @param tron - The Tron context
@@ -162,10 +162,6 @@ export async function queueTronWithdraw(
       expiration: timestamp + (options.windowMs ?? TRON_WITHDRAW_WINDOW_MS),
     };
   }
-  const requestId = requestIdHex(
-    calculateRequestId(expectedTronWithdrawRecord(context, state, tokenAddress, options, window)),
-  );
-
   const coin = {
     nonce: crypto.getRandomValues(new Uint8Array(32)),
     color: hexToBytes(vaultTronTokenType(tokenAddress, context.vaultContractAddress)),
@@ -193,9 +189,20 @@ export async function queueTronWithdraw(
     privateStateId: VAULT_PRIVATE_STATE_ID,
   });
   console.log(`Tron withdraw queued in tx ${queued.public.txId}`);
-  const outIndex = queuedRequestIndex(
-    await readVaultLedger(context.providers.publicDataProvider, context.vaultContractAddress),
-    inIndex,
+  const queuedState = await readVaultLedger(
+    context.providers.publicDataProvider,
+    context.vaultContractAddress,
+  );
+  const outIndex = queuedRequestIndex(queuedState, inIndex);
+  const requestId = requestIdHex(
+    calculateRequestId(
+      expectedTronWithdrawRecord(
+        context,
+        tokenAddress,
+        options,
+        queuedState.tronWithdrawArgsMap.lookup(inIndex),
+      ),
+    ),
   );
   await flushUntil(context, (flushed) => !flushed.inputRequestBuffer.member(inIndex), {
     inIndexes: [inIndex],
