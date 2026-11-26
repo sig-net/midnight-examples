@@ -2,11 +2,9 @@ import { requestIdBytes, type RequestIdHex, tronAddressFromEvm } from "@sig-net/
 import {
   readVaultLedger,
   VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+  vaultTronTokenConfig,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
-import {
-  resolveAllowedTronTokens,
-  resolveTokenFeesFor,
-} from "@sig-net/midnight-examples-erc20-vault-deploy";
+import { resolveTronTokenListings } from "@sig-net/midnight-examples-erc20-vault-deploy";
 import { waitForFacadeState } from "@sig-net/midnight-examples-lib";
 import { banner, logSkip } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
@@ -15,7 +13,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { addAllowedTronTokens } from "../src/flows/add-allowed-tron-tokens.ts";
 import { broadcastTron } from "../src/flows/broadcast-tron.ts";
 import { settleTronDeposit } from "../src/flows/complete-tron-deposit.ts";
-import { pollTronRespondBidirectional } from "../src/flows/poll-tron-respond-bidirectional.ts";
+import {
+  pollTronRespondBidirectional,
+  TronExpectedOutput,
+} from "../src/flows/poll-tron-respond-bidirectional.ts";
 import {
   pollTronSignedTransaction,
   type SignedTronTransaction,
@@ -59,10 +60,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         expect(state.initialised, "run tests/happy-day-e2e.test.ts first").toBe(true);
         expect(state.tronLastSeen, "initialise read TRON_RPC_URL's height").toBeGreaterThan(0n);
 
-        await addAllowedTronTokens(
-          context,
-          resolveTokenFeesFor(env, resolveAllowedTronTokens(env)),
-        );
+        await addAllowedTronTokens(context, resolveTronTokenListings(env));
         const after = await readVaultLedger(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
@@ -166,6 +164,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           pollTronRespondBidirectional(context, t, {
             requestId,
             requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+            expectedOutput: TronExpectedOutput.TransferResult,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS,
           }),
@@ -181,13 +180,16 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
       async () => {
         const context = await session.vaultContext();
         const wallet = await session.wallet();
-        const color = vaultTronTokenType((await tron()).trc20Address, context.vaultContractAddress);
-        vaultTokensBefore =
-          (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
         const ledger = await readVaultLedger(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
+        const color = vaultTronTokenType(
+          vaultTronTokenConfig(ledger, (await tron()).trc20Address),
+          context.vaultContractAddress,
+        );
+        vaultTokensBefore =
+          (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
         if (!ledger.bidirectionalTronDepositMap.member(requestIdBytes(requestId))) {
           logSkip("completeTronDeposit", `request ${requestId} already claimed`);
           return;

@@ -11,7 +11,10 @@ import { POLL_TIMEOUT_MS } from "../poll-timeout.ts";
 import type { TronContext } from "../tron-context.ts";
 import type { VaultContext } from "../vault-context.ts";
 import type { ShieldedTokenRecipient } from "./complete-deposit.ts";
-import { pollTronRespondBidirectional } from "./poll-tron-respond-bidirectional.ts";
+import {
+  pollTronRespondBidirectional,
+  TronExpectedOutput,
+} from "./poll-tron-respond-bidirectional.ts";
 import { queueAndFlushAttestation } from "./queue-attestation.ts";
 import type { RespondOutcome } from "./respond-output.ts";
 
@@ -88,6 +91,7 @@ export async function completeTronDeposit(
   const outcome = await pollTronRespondBidirectional(context, tron, {
     requestId: options.requestId,
     requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+    expectedOutput: TronExpectedOutput.TransferResult,
     intervalMs: 1000,
     timeoutMs: POLL_TIMEOUT_MS,
   });

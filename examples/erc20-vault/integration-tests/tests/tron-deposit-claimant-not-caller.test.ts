@@ -4,7 +4,11 @@ import {
   getMidnightNodeConfig,
   withSyncedWalletFacade,
 } from "@sig-net/midnight-contract-deploy";
-import { banner, logSkip, requireEnv } from "@sig-net/midnight-examples-test-harness";
+import {
+  readVaultLedger,
+  vaultTronTokenConfig,
+} from "@sig-net/midnight-examples-erc20-vault-contract";
+import { banner, logSkip } from "@sig-net/midnight-examples-test-harness";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -38,9 +42,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         const nodeConfig = getMidnightNodeConfig(env);
         const keys = deriveAccountKeys(RECIPIENT_SEED, nodeConfig.networkId);
         const tron = await createTronContext(env);
+        const context = await session.vaultContext();
+        const state = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
         const color = vaultTronTokenType(
-          tron.trc20Address,
-          requireEnv(env, "MIDNIGHT_VAULT_CONTRACT_ADDRESS"),
+          vaultTronTokenConfig(state, tron.trc20Address),
+          context.vaultContractAddress,
         );
         const readRecipientBalance = (): Promise<bigint> =>
           withSyncedWalletFacade(keys, nodeConfig, "recipient", env, (_facade, state) =>

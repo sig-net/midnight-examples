@@ -1,9 +1,13 @@
+import type { TokenFees } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_TOKEN_FEE } from "../src/fee-config.ts";
 import {
   assertTronUsdtSealedIfAllowed,
   resolveAllowedTronTokens,
   resolveTronStartHeight,
+  resolveTronTokenFactors,
+  resolveTronTokenListings,
   resolveTronUsdtAddress,
 } from "../src/tron-targets.ts";
 
@@ -139,5 +143,145 @@ describe("assertTronUsdtSealedIfAllowed", () => {
     expect(() => {
       assertTronUsdtSealedIfAllowed(tokens, usdt);
     }).not.toThrow();
+  });
+});
+
+describe("resolveTronTokenFactors", () => {
+  interface ResolvedCase {
+    readonly name: string;
+    readonly factors: string | undefined;
+    readonly expected: ReadonlyMap<string, bigint>;
+  }
+
+  const RESOLVED: readonly ResolvedCase[] = [
+    { name: "unset to no factor", factors: undefined, expected: new Map() },
+    { name: "blank to no factor", factors: " ", expected: new Map() },
+    {
+      name: "a base58 key to its 20-byte form, with a string factor",
+      factors: JSON.stringify({ [USDT_BASE58]: "1000000000000" }),
+      expected: new Map([[USDT_EVM_FORM, 1_000_000_000_000n]]),
+    },
+    {
+      name: "a hex key without 0x in upper case, with a number factor",
+      factors: JSON.stringify({ [OTHER_TOKEN.slice(2).toUpperCase()]: 1 }),
+      expected: new Map([[OTHER_TOKEN, 1n]]),
+    },
+    {
+      name: "the Uint<64> maximum",
+      factors: JSON.stringify({ [OTHER_TOKEN]: "18446744073709551615" }),
+      expected: new Map([[OTHER_TOKEN, 2n ** 64n - 1n]]),
+    },
+  ];
+
+  it.each(RESOLVED)("resolves $name", ({ factors, expected }) => {
+    expect(resolveTronTokenFactors({ TRON_TOKEN_FACTORS: factors })).toEqual(expected);
+  });
+
+  interface RefusedCase {
+    readonly name: string;
+    readonly factors: string;
+    readonly error: RegExp;
+  }
+
+  const REFUSED: readonly RefusedCase[] = [
+    { name: "a value that is not JSON", factors: "{", error: /must be a JSON object/ },
+    { name: "a JSON array", factors: "[]", error: /must be a JSON object/ },
+    {
+      name: "a zero factor",
+      factors: JSON.stringify({ [OTHER_TOKEN]: "0" }),
+      error: /must be a positive integer, got "0"/,
+    },
+    {
+      name: "a negative factor",
+      factors: JSON.stringify({ [OTHER_TOKEN]: -1 }),
+      error: /must be a positive integer, got "-1"/,
+    },
+    {
+      name: "a fractional factor",
+      factors: JSON.stringify({ [OTHER_TOKEN]: 1.5 }),
+      error: /must be an integer, got 1.5/,
+    },
+    {
+      name: "a factor wider than Uint<64>",
+      factors: JSON.stringify({ [OTHER_TOKEN]: "18446744073709551616" }),
+      error: /must fit a Uint<64>/,
+    },
+    {
+      name: "a factor that is neither a string nor a number",
+      factors: JSON.stringify({ [OTHER_TOKEN]: true }),
+      error: /as a string or a number/,
+    },
+    {
+      name: "the zero address",
+      factors: JSON.stringify({ [ZERO_ADDRESS]: "1" }),
+      error: /zero address/,
+    },
+    {
+      name: "one token named in both forms",
+      factors: JSON.stringify({ [USDT_BASE58]: "1", [USDT_EVM_FORM]: "1" }),
+      error: /names 0xa614f803b6fd780986a42c78ec9c7f77e6ded13c twice/,
+    },
+  ];
+
+  it.each(REFUSED)("refuses $name", ({ factors, error }) => {
+    expect(() => resolveTronTokenFactors({ TRON_TOKEN_FACTORS: factors })).toThrow(error);
+  });
+});
+
+describe("resolveTronTokenListings", () => {
+  const LOCAL_FEES: TokenFees = {
+    withdraw: DEFAULT_TOKEN_FEE,
+    swap: DEFAULT_TOKEN_FEE,
+    supply: DEFAULT_TOKEN_FEE,
+    redeem: DEFAULT_TOKEN_FEE,
+  };
+
+  it("lists each token with its fees, its named factor, and factor 1 when unnamed", () => {
+    const env = {
+      TRON_ALLOWED_TOKENS: `${USDT_BASE58},${OTHER_TOKEN}`,
+      TRON_TOKEN_FACTORS: JSON.stringify({ [OTHER_TOKEN]: "1000000000000" }),
+      VAULT_TOKEN_FEES: JSON.stringify({
+        [USDT_EVM_FORM]: { withdraw: "5", swap: "0", supply: "6", redeem: "7" },
+      }),
+    };
+    expect(resolveTronTokenListings(env)).toEqual(
+      new Map([
+        [USDT_EVM_FORM, { fees: { withdraw: 5n, swap: 0n, supply: 6n, redeem: 7n }, factor: 1n }],
+        [OTHER_TOKEN, { fees: LOCAL_FEES, factor: 1_000_000_000_000n }],
+      ]),
+    );
+  });
+
+  it("refuses a factor naming a token the list leaves out", () => {
+    const env = {
+      TRON_ALLOWED_TOKENS: USDT_BASE58,
+      TRON_TOKEN_FACTORS: JSON.stringify({ [OTHER_TOKEN]: "1000000000000" }),
+    };
+    expect(() => resolveTronTokenListings(env)).toThrow(
+      `TRON_TOKEN_FACTORS names ${OTHER_TOKEN}, which TRON_ALLOWED_TOKENS does not list.`,
+    );
+  });
+
+  it("refuses a list naming the lend share token without its factor", () => {
+    const env = {
+      TRON_ALLOWED_TOKENS: `${USDT_BASE58},${OTHER_TOKEN}`,
+      TRON_LEND_SHARE_TOKEN: OTHER_TOKEN,
+      TRON_TOKEN_FACTORS: JSON.stringify({ [USDT_BASE58]: "1" }),
+    };
+    expect(() => resolveTronTokenListings(env)).toThrow(
+      `TRON_TOKEN_FACTORS must name TRON_LEND_SHARE_TOKEN ${OTHER_TOKEN}`,
+    );
+  });
+
+  it("lists other tokens without the lend share token's factor", () => {
+    const env = { TRON_ALLOWED_TOKENS: USDT_BASE58, TRON_LEND_SHARE_TOKEN: OTHER_TOKEN };
+    expect(resolveTronTokenListings(env)).toEqual(
+      new Map([[USDT_EVM_FORM, { fees: LOCAL_FEES, factor: 1n }]]),
+    );
+  });
+
+  it("lists nothing for an unset list, whatever factors are named", () => {
+    const env = { TRON_TOKEN_FACTORS: JSON.stringify({ [OTHER_TOKEN]: "10" }) };
+    expect(resolveTronTokenListings(env)).toEqual(new Map());
   });
 });

@@ -1,7 +1,8 @@
 // Deploy + initialise entrypoint (`yarn deploy-initialise:erc20-vault`): the
 // one-shot bring-up of a vault on a REMOTE network, where no test pipeline runs
-// the steps for you: deploy, initialise, then allow the ERC20s
-// EVM_ALLOWED_TOKENS lists. Every step is the same function the e2e setup and
+// the steps for you: deploy, initialise, allow the ERC20s EVM_ALLOWED_TOKENS lists
+// and the TRC-20s TRON_ALLOWED_TOKENS lists, then record the Tron lend pair the
+// TRON_LEND_* variables name, if any. Every step is the same function the e2e setup and
 // the flow tests exercise locally, so the multistage deploy this performs is
 // continuously tested. Prints the address to set as
 // NEXT_PUBLIC_MIDNIGHT_CONTRACT_ADDRESS in the frontend.
@@ -23,16 +24,23 @@ import {
   assertNoVaultBoundPresets,
   initialiseVault,
 } from "../src/initialise-vault.ts";
-import { resolveAllowedTronTokens } from "../src/tron-targets.ts";
+import {
+  assertTronLendPairListed,
+  resolveTronLendPair,
+  setTronLendPairOnVault,
+} from "../src/set-tron-lend-pair.ts";
+import { resolveTronTokenListings } from "../src/tron-targets.ts";
 
 const env = buildEntrypointEnv();
 
 // Before spending a whole multistage deploy: a missing chain id, a malformed
-// router override or allowed token, or a leftover previous vault's values must
-// fail now, not after the contract exists.
+// router override or allowed token, a lend pair whose tokens are not listed, or a
+// leftover previous vault's values must fail now, not after the contract exists.
 await assertInitialiseInputsPresent(env);
 resolveAllowedTokens(env);
-resolveAllowedTronTokens(env);
+const tronListings = resolveTronTokenListings(env);
+const tronLendPair = resolveTronLendPair(env);
+if (tronLendPair !== undefined) assertTronLendPairListed(tronLendPair, tronListings);
 assertNoVaultBoundPresets(env);
 
 // One registry for the whole run, so the deployer wallet syncs once and the
@@ -46,6 +54,7 @@ try {
   await initialiseVault(env, contractAddress, wallets);
   await addAllowedTokensToVault(env, contractAddress, wallets);
   await addAllowedTronTokensToVault(env, contractAddress, wallets);
+  await setTronLendPairOnVault(env, contractAddress, wallets);
 } finally {
   await wallets.close();
 }

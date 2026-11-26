@@ -1,26 +1,16 @@
 // `refundUnsentTronWithdraw`: the withdrawer takes back the amount of a Tron withdrawal
 // nobody sent while its window allowed. The start burned the coin, and from block time
-// h - tronWithdrawSendMinRemainingSeconds() on, h the expiration's whole seconds,
+// h - tronSendMinRemainingSeconds() on, h the expiration's whole seconds,
 // `sendTronWithdraw` refuses the withdrawal for good. From that block time the vault
 // re-mints the amount to the withdrawer (the fee stays taken) and drops the withdrawal.
-import { pureCircuits, readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
+import { readVaultLedger } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import type { VaultContext } from "../vault-context.ts";
-
-/**
- * The first time, in milliseconds, at which the vault refunds an unsent Tron withdrawal
- * expiring at `expiration`: the first block time at which `sendTronWithdraw` refuses it.
- *
- * @param expiration - The withdrawal's expiration, in Tron's milliseconds
- * @returns The opening time in milliseconds since the epoch, on a whole second
- */
-export function tronWithdrawRefundOpensAtMs(expiration: bigint): bigint {
-  return (expiration / 1000n - pureCircuits.tronWithdrawSendMinRemainingSeconds()) * 1000n;
-}
+import { waitForTronRefund } from "./tron-vault-request.ts";
 
 /** Options for {@link refundUnsentTronWithdraw}. */
 export interface RefundUnsentTronWithdrawOptions {
-  /** The input index the withdrawal was queued under (`QueuedTronWithdraw.inIndex`). */
+  /** The input index the withdrawal was queued under (`QueuedTronRequest.inIndex`). */
   readonly inIndex: bigint;
 }
 
@@ -46,14 +36,7 @@ export async function refundUnsentTronWithdraw(
   if (!state.tronWithdrawArgsMap.member(options.inIndex)) {
     throw new Error(`no Tron withdrawal is open under input index ${String(options.inIndex)}`);
   }
-  const opensAt = tronWithdrawRefundOpensAtMs(
-    state.tronWithdrawArgsMap.lookup(options.inIndex).tx.expiration,
-  );
-  const waitMs = Number(opensAt - BigInt(Date.now()));
-  if (waitMs > 0) {
-    console.log(`refund opens at ${new Date(Number(opensAt)).toISOString()}, waiting`);
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
-  }
+  await waitForTronRefund(state.tronWithdrawArgsMap.lookup(options.inIndex).tx.expiration);
   const result = await context.vault.callTx.refundUnsentTronWithdraw(
     options.inIndex,
     crypto.getRandomValues(new Uint8Array(32)),

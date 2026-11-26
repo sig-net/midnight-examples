@@ -12,7 +12,10 @@ import type { VaultSession } from "../vault-session.ts";
 import { broadcastTron } from "./broadcast-tron.ts";
 import type { ShieldedTokenRecipient } from "./complete-deposit.ts";
 import { settleTronDeposit } from "./complete-tron-deposit.ts";
-import { pollTronRespondBidirectional } from "./poll-tron-respond-bidirectional.ts";
+import {
+  pollTronRespondBidirectional,
+  TronExpectedOutput,
+} from "./poll-tron-respond-bidirectional.ts";
 import { pollTronSignedTransaction } from "./poll-tron-signature-response.ts";
 import { queueAndFlushAttestation } from "./queue-attestation.ts";
 import { startTronDeposit } from "./start-tron-deposit.ts";
@@ -73,6 +76,7 @@ export async function runTronDepositRoundTrip(
     return pollTronRespondBidirectional(context, tron, {
       requestId,
       requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+      expectedOutput: TronExpectedOutput.TransferResult,
       intervalMs: 1000,
       timeoutMs: POLL_TIMEOUT_MS,
     });

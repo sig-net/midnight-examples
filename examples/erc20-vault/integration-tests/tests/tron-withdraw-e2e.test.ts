@@ -2,18 +2,16 @@ import { requestIdBytes, tronAddressFromEvm } from "@sig-net/midnight";
 import {
   readVaultLedger,
   VAULT_TRON_WITHDRAW_REQUESTS_PATH,
-  vaultTronTokenFees,
+  vaultTronTokenConfig,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 import { waitForFacadeState } from "@sig-net/midnight-examples-lib";
 import { injectE2eEnv, installFlowHooks } from "@sig-net/midnight-examples-test-harness/flow-hooks";
 import { afterAll, describe, expect, it } from "vitest";
 
-import {
-  refundUnsentTronWithdraw,
-  tronWithdrawRefundOpensAtMs,
-} from "../src/flows/refund-unsent-tron-withdraw.ts";
+import { refundUnsentTronWithdraw } from "../src/flows/refund-unsent-tron-withdraw.ts";
 import { queueTronWithdraw, sendTronWithdraw } from "../src/flows/start-tron-withdraw.ts";
 import { runTronDepositRoundTrip } from "../src/flows/tron-deposit-round-trip.ts";
+import { tronRefundOpensAtMs } from "../src/flows/tron-vault-request.ts";
 import { runTronWithdrawRoundTrip } from "../src/flows/tron-withdraw-round-trip.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
 import { createTronContext, type TronContext } from "../src/tron-context.ts";
@@ -27,7 +25,7 @@ const env = injectE2eEnv();
 const session = createVaultSession(env, "user");
 
 const WITHDRAW_AMOUNT = 400_000n;
-// Two minutes above the start's tronWithdrawStartMinRemainingSeconds(), which the block
+// Two minutes above the start's tronStartMinRemainingSeconds(), which the block
 // including the start must still clear after proving: the refund spec waits out most of it.
 const REFUND_WINDOW_MS = 12n * 60_000n;
 
@@ -57,7 +55,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         );
         const trx = await getTrxBalance(t.tronRpcUrl, t.tronVaultAddress.bytes);
         expect(trx, `fund ${t.tronVaultAddress.base58} with TRX`).toBeGreaterThanOrEqual(
-          state.vaultTronFeeLimit,
+          state.vaultTronFeeLimits.withdraw,
         );
       },
       MINUTE,
@@ -72,9 +70,10 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           context.providers.publicDataProvider,
           context.vaultContractAddress,
         );
-        const needed = 2n * (WITHDRAW_AMOUNT + vaultTronTokenFees(state, t.trc20Address).withdraw);
+        const config = vaultTronTokenConfig(state, t.trc20Address);
+        const needed = 2n * (WITHDRAW_AMOUNT + config.fees.withdraw);
         const wallet = await session.wallet();
-        const color = vaultTronTokenType(t.trc20Address, context.vaultContractAddress);
+        const color = vaultTronTokenType(config, context.vaultContractAddress);
         const held = (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
         if (held < needed) {
           await runTronDepositRoundTrip(session, t, { amount: needed - held });
@@ -96,7 +95,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         const token = tronAddressFromEvm(t.trc20Address);
         const recipient = tronAddressFromEvm(crypto.getRandomValues(new Uint8Array(20)));
         const wallet = await session.wallet();
-        const color = vaultTronTokenType(t.trc20Address, context.vaultContractAddress);
+        const before = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        const color = vaultTronTokenType(
+          vaultTronTokenConfig(before, t.trc20Address),
+          context.vaultContractAddress,
+        );
         const coinsBefore =
           (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
         const vaultBefore = await getTrc20Balance(t.tronRpcUrl, token, t.tronVaultAddress.bytes);
@@ -124,7 +130,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         );
         expect(after.bidirectionalTronWithdrawMap.member(requestIdBytes(requestId))).toBe(false);
         expect(after.tronLastSeen).toBeGreaterThanOrEqual(outcome.event.blockHeight);
-        const fee = vaultTronTokenFees(after, t.trc20Address).withdraw;
+        const fee = vaultTronTokenConfig(after, t.trc20Address).fees.withdraw;
         await waitForFacadeState(
           wallet.facade,
           (synced) =>
@@ -140,7 +146,14 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         const context = await session.vaultContext();
         const t = await tron();
         const wallet = await session.wallet();
-        const color = vaultTronTokenType(t.trc20Address, context.vaultContractAddress);
+        const before = await readVaultLedger(
+          context.providers.publicDataProvider,
+          context.vaultContractAddress,
+        );
+        const color = vaultTronTokenType(
+          vaultTronTokenConfig(before, t.trc20Address),
+          context.vaultContractAddress,
+        );
         const coinsBefore =
           (await wallet.facade.waitForSyncedState()).shielded.balances[color] ?? 0n;
 
@@ -149,7 +162,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           destTronAddress: tronAddressFromEvm(crypto.getRandomValues(new Uint8Array(20))),
           windowMs: REFUND_WINDOW_MS,
         });
-        const opensAt = tronWithdrawRefundOpensAtMs(queued.window.expiration);
+        const opensAt = tronRefundOpensAtMs(queued.window.expiration);
         await new Promise((resolve) => setTimeout(resolve, Number(opensAt) - Date.now()));
         await expect(sendTronWithdraw(context, queued)).rejects.toThrow(/too close/);
         await refundUnsentTronWithdraw(context, { inIndex: queued.inIndex });
@@ -162,7 +175,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
         expect(after.bidirectionalTronWithdrawMap.member(requestIdBytes(queued.requestId))).toBe(
           false,
         );
-        const fee = vaultTronTokenFees(after, t.trc20Address).withdraw;
+        const fee = vaultTronTokenConfig(after, t.trc20Address).fees.withdraw;
         await waitForFacadeState(
           wallet.facade,
           (synced) => (synced.shielded.balances[color] ?? 0n) === coinsBefore - fee,

@@ -20,8 +20,10 @@ import {
 } from "@sig-net/midnight";
 import {
   newInputIndex,
+  pureCircuits,
   queuedRequestIndex,
   readVaultLedger,
+  vaultTronTokenConfig,
 } from "@sig-net/midnight-examples-erc20-vault-contract";
 
 import { ERC20_TRANSFER_SELECTOR } from "../evm-transfer.ts";
@@ -38,6 +40,7 @@ export const TRON_DEPOSIT_FEE_LIMIT = 100_000_000n;
 
 /** */
 export interface StartTronDepositOptions {
+  /** Deposit amount in the TRC-20's coin units: the transfer moves amount·factor base units. */
   readonly amount: bigint;
   readonly tokenAddress?: Uint8Array;
   readonly windowMs?: bigint;
@@ -64,21 +67,26 @@ export async function startTronDeposit(
   console.log(`vault contract:    ${context.vaultContractAddress}`);
   console.log(`Tron owner:        ${tron.tronUserAddress.base58}`);
 
-  if (options.allowUnfunded !== true) {
-    const balance = await getTrc20Balance(tron.tronRpcUrl, token, tron.tronUserAddress.bytes);
-    if (balance < options.amount) {
-      throw new Error(
-        `${tron.tronUserAddress.base58} holds ${String(balance)} of the TRC-20, less than the ` +
-          `deposit's ${String(options.amount)}: fund it on Tron and rerun`,
-      );
-    }
-  }
   const before = await readVaultLedger(
     context.providers.publicDataProvider,
     context.vaultContractAddress,
   );
   if (!before.initialised) {
     throw new Error("vault is not initialised, run the initialise flow first");
+  }
+  const baseAmount = pureCircuits.tronBaseOfUnits(
+    options.amount,
+    vaultTronTokenConfig(before, tokenAddress).factor,
+  );
+
+  if (options.allowUnfunded !== true) {
+    const balance = await getTrc20Balance(tron.tronRpcUrl, token, tron.tronUserAddress.bytes);
+    if (balance < baseAmount) {
+      throw new Error(
+        `${tron.tronUserAddress.base58} holds ${String(balance)} base units of the TRC-20, less ` +
+          `than the deposit's ${String(baseAmount)}: fund it on Tron and rerun`,
+      );
+    }
   }
 
   const reference = await getSolidifiedTronReferenceBlock(tron.tronRpcUrl);
@@ -111,7 +119,7 @@ export async function startTronDeposit(
         value: {
           selector: ERC20_TRANSFER_SELECTOR,
           noWords: 2n,
-          words: [evmAddressAbiWord(before.vaultEvmAddress), numericAbiWord(options.amount)],
+          words: [evmAddressAbiWord(before.vaultEvmAddress), numericAbiWord(baseAmount)],
         },
       },
     },

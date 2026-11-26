@@ -58,10 +58,12 @@ import { dealForkEvmAccounts, SEPOLIA_EURC, SEPOLIA_USDC } from "./fork-funding.
 import { assertDebugTraceAvailable } from "./observed-execution.ts";
 import { OutputSource, parseOutputSource } from "./output-source.ts";
 import {
+  ensureTestErc4626,
   ensureTestTrc20,
   ensureTestUsdtLikeTrc20,
   ensureTronAddresses,
   ensureTronAllowedTokens,
+  ensureTronLendDefaults,
   fundTronAccounts,
   TRON_PIPELINE_KEYS,
 } from "./tron-setup.ts";
@@ -489,6 +491,16 @@ const STEPS: readonly SetupStep[] = [
   [
     "setup: deploy the USDT-like test TRC-20 as TRON_USDT_ADDRESS (when TRON_RPC_URL is set)",
     ensureTestUsdtLikeTrc20,
+  ],
+  [
+    "setup: deploy the test ERC-4626 over the USDT-like TRC-20 as TRON_LEND_SHARE_TOKEN (when TRON_RPC_URL is set)",
+    ensureTestErc4626,
+  ],
+  [
+    "setup: default the Tron lend pair and its share token's factor",
+    (env) => {
+      ensureTronLendDefaults(env);
+    },
   ],
   ["setup: default TRON_ALLOWED_TOKENS to the test TRC-20s", ensureTronAllowedTokens],
   ["setup: check/derive vault and user Tron addresses", ensureTronAddresses],

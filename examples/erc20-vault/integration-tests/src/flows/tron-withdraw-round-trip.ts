@@ -11,7 +11,10 @@ import type { TronContext } from "../tron-context.ts";
 import type { VaultSession } from "../vault-session.ts";
 import { broadcastTron } from "./broadcast-tron.ts";
 import { settleTronWithdraw } from "./complete-tron-withdraw.ts";
-import { pollTronRespondBidirectional } from "./poll-tron-respond-bidirectional.ts";
+import {
+  pollTronRespondBidirectional,
+  TronExpectedOutput,
+} from "./poll-tron-respond-bidirectional.ts";
 import { pollTronSignedTransaction } from "./poll-tron-signature-response.ts";
 import type { RespondOutcome } from "./respond-output.ts";
 import { startTronWithdraw, type StartTronWithdrawOptions } from "./start-tron-withdraw.ts";
@@ -66,6 +69,7 @@ export async function runTronWithdrawRoundTrip(
     return pollTronRespondBidirectional(context, tron, {
       requestId,
       requestsPath: VAULT_TRON_WITHDRAW_REQUESTS_PATH,
+      expectedOutput: TronExpectedOutput.TransferResult,
       intervalMs: 1000,
       timeoutMs: POLL_TIMEOUT_MS,
     });

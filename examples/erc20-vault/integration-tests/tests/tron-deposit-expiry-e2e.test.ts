@@ -9,7 +9,10 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { broadcastTron } from "../src/flows/broadcast-tron.ts";
 import { settleTronDeposit } from "../src/flows/complete-tron-deposit.ts";
-import { pollTronRespondBidirectional } from "../src/flows/poll-tron-respond-bidirectional.ts";
+import {
+  pollTronRespondBidirectional,
+  TronExpectedOutput,
+} from "../src/flows/poll-tron-respond-bidirectional.ts";
 import { pollTronSignedTransaction } from "../src/flows/poll-tron-signature-response.ts";
 import { startTronDeposit } from "../src/flows/start-tron-deposit.ts";
 import { POLL_TIMEOUT_MS } from "../src/poll-timeout.ts";
@@ -54,6 +57,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS || !env.TRON_RPC_URL)(
           const attested = await pollTronRespondBidirectional(context, tron, {
             requestId,
             requestsPath: VAULT_TRON_DEPOSIT_REQUESTS_PATH,
+            expectedOutput: TronExpectedOutput.TransferResult,
             intervalMs: 1000,
             timeoutMs: POLL_TIMEOUT_MS + Number(WINDOW_MS),
           });

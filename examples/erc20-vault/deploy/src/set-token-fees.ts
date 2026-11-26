@@ -2,7 +2,9 @@
 // names, each to the fees it gives in that token's base units, the call a
 // scheduled off-chain job makes once it has recomputed the fees from current
 // gas and token prices. A token already at its fees is left alone, so a rerun
-// submits nothing.
+// submits nothing. `setTronTokenFees` is the same repricing for the TRC-20s
+// `TRON_ALLOWED_TOKENS` lists, in each token's coin units, and keeps each one's
+// factor.
 
 import type { PublicDataProvider } from "@midnight-ntwrk/midnight-js/types";
 import { envOrUndefined } from "@sig-net/midnight-contract-deploy";
@@ -15,8 +17,9 @@ import {
 
 import { resolveVaultContractAddress, withDeployerVault } from "./deployer-vault.ts";
 import { formatTokenFees, resolveTokenFeesByToken, type TokenFeesByToken } from "./fee-config.ts";
+import { resolveAllowedTronTokens } from "./tron-targets.ts";
 
-// Two fee structs holding the same figure for every action.
+// Two fee structs holding the same figure for every action. Both repricings compare with it.
 function sameFees(a: TokenFees, b: TokenFees): boolean {
   return (
     a.withdraw === b.withdraw && a.swap === b.swap && a.supply === b.supply && a.redeem === b.redeem
@@ -103,5 +106,93 @@ export async function setTokenFeesOnVault(
     { VAULT_TOKEN_FEES: envOrUndefined(env, "VAULT_TOKEN_FEES") },
     (vault, publicDataProvider) =>
       setTokenFeesOnVaultContract(vault, publicDataProvider, vaultContractAddress, tokens),
+  );
+}
+
+/**
+ * Call the vault's `setTronTokenFees` circuit for each of `tokens` whose ledger fees differ
+ * from the ones given, in the token's coin units, so a rerun submits nothing. The circuit
+ * keeps each token's factor. Every token must already be listed: the check here fails
+ * before any call is submitted. The caller must hold the DEPLOYER identity.
+ *
+ * @param vault - The joined vault contract handle.
+ * @param publicDataProvider - The provider to read the vault's current ledger state through.
+ * @param vaultContractAddress - The vault contract's address (the state to read).
+ * @param tokens - Each TRC-20 to reprice with its new fees, keyed by its 20-byte form.
+ * @returns The TRC-20s this call repriced, in `tokens` order.
+ * @throws {Error} If the vault is not initialised, a token is not listed, or the circuit
+ *   rejects the caller.
+ */
+export async function setTronTokenFeesOnVaultContract(
+  vault: DeployedVaultContract,
+  publicDataProvider: PublicDataProvider,
+  vaultContractAddress: string,
+  tokens: TokenFeesByToken,
+): Promise<readonly string[]> {
+  const state = await readVaultLedger(publicDataProvider, vaultContractAddress);
+  if (!state.initialised) {
+    throw new Error("the vault is not initialised: run `yarn initialise:erc20-vault` first");
+  }
+  for (const token of tokens.keys()) {
+    if (!state.allowedTronTokens.member(evmAddressBytes(token))) {
+      throw new Error(
+        `the vault does not allow TRC-20 ${token}: run \`yarn add-allowed-tron-tokens:erc20-vault\` first`,
+      );
+    }
+  }
+  const repriced: string[] = [];
+  for (const [token, fees] of tokens) {
+    const tokenBytes = evmAddressBytes(token);
+    if (sameFees(state.allowedTronTokens.lookup(tokenBytes).fees, fees)) {
+      console.log(`TRC-20 ${token} already charges ${formatTokenFees(fees)}, skipping`);
+      continue;
+    }
+    const result = await vault.callTx.setTronTokenFees(tokenBytes, fees);
+    console.log(`repriced TRC-20 ${token} to ${formatTokenFees(fees)} in tx ${result.public.txId}`);
+    repriced.push(token);
+  }
+  return repriced;
+}
+
+/**
+ * Join a deployed vault as the deployer and reprice every TRC-20 `TRON_ALLOWED_TOKENS`
+ * lists that `VAULT_TOKEN_FEES` prices, to the fees the map gives in that token's coin
+ * units: the standalone counterpart of {@link setTronTokenFeesOnVaultContract}. No such
+ * token starts no wallet.
+ *
+ * @param env - The environment: `TRON_ALLOWED_TOKENS`, `VAULT_TOKEN_FEES` and everything
+ *   {@link withDeployerVault} reads. Defaults to `process.env`.
+ * @param contractAddress - The vault to reprice. Defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
+ * @returns The TRC-20s this call repriced.
+ * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
+ *   DUST: the error carries the wallet's NIGHT receive address to fund.
+ * @throws {Error} If no contract address is available, a variable is malformed, the vault
+ *   is not initialised, a token is not listed, or the circuit rejects the caller.
+ */
+export async function setTronTokenFeesOnVault(
+  env: Record<string, string | undefined> = process.env,
+  contractAddress?: string,
+): Promise<readonly string[]> {
+  const vaultContractAddress = resolveVaultContractAddress(env, contractAddress, "reprice");
+  const priced = resolveTokenFeesByToken(env);
+  const tokens = new Map<string, TokenFees>();
+  for (const token of resolveAllowedTronTokens(env)) {
+    const fees = priced.get(token);
+    if (fees !== undefined) tokens.set(token, fees);
+  }
+  if (tokens.size === 0) {
+    console.log("VAULT_TOKEN_FEES prices no TRC-20 TRON_ALLOWED_TOKENS lists, nothing to reprice");
+    return [];
+  }
+  return withDeployerVault(
+    env,
+    vaultContractAddress,
+    "repricing TRC-20s on",
+    {
+      TRON_ALLOWED_TOKENS: envOrUndefined(env, "TRON_ALLOWED_TOKENS"),
+      VAULT_TOKEN_FEES: envOrUndefined(env, "VAULT_TOKEN_FEES"),
+    },
+    (vault, publicDataProvider) =>
+      setTronTokenFeesOnVaultContract(vault, publicDataProvider, vaultContractAddress, tokens),
   );
 }
