@@ -13,7 +13,7 @@ const RECIPIENTS: readonly WalletFundingRecipient[] = [2, 3, 4, 5, 6].map((value
   label: `child ${String(value)}`,
   amount: 100n,
 }));
-const CONFIG = funding.getMidnightNodeConfig({ NETWORK_ID: "stagenet" });
+const CONFIG = funding.getMidnightNodeConfig({ NETWORK_ID: "preview" });
 const KEYS: ReadonlyMap<string, funding.AccountKeys> = new Map(
   [ROOT_SEED, ...RECIPIENTS.map(({ seed }) => seed)].map((seed) => [
     seed,
@@ -41,7 +41,7 @@ function deferred<T>(): {
 
 function arrange() {
   vi.spyOn(console, "log").mockImplementation(() => undefined);
-  const registry = new funding.WalletRegistry(CONFIG);
+  const registry = new funding.WalletRegistry(CONFIG, {});
   const balances = new Map<string, { night: bigint; dust: bigint }>();
   const facades = new Map<string, funding.WalletFacade>();
   const keysByAddress = new Map<string, string>();
@@ -59,7 +59,7 @@ function arrange() {
     const state = {
       unshielded,
       dust,
-      pending: { all: [] },
+      lifecycle: [],
     } as Partial<funding.FacadeState> as funding.FacadeState;
     const facade = {
       waitForSyncedState: vi
@@ -215,7 +215,7 @@ describe("pipelined wallet funding", () => {
     const pending = {
       unshielded: state.unshielded,
       dust: state.dust,
-      pending: { all: [{} as funding.FacadeState["pending"]["all"][number]] },
+      lifecycle: [{ status: { _tag: "Submitted" } } as funding.FacadeState["lifecycle"][number]],
     } as Partial<funding.FacadeState> as funding.FacadeState;
     vi.spyOn(root, "waitForSyncedState")
       .mockResolvedValueOnce(state)

@@ -51,7 +51,7 @@ describe("resolveFlatTokenFees", () => {
     { name: "every action set", env: FLAT_FEES_SET, fees: FLAT_FEES },
     {
       name: "every action set on a deployed network",
-      env: { ...FLAT_FEES_SET, NETWORK_ID: "stagenet" },
+      env: { ...FLAT_FEES_SET, NETWORK_ID: "preview" },
       fees: FLAT_FEES,
     },
     {
@@ -86,8 +86,8 @@ describe("resolveFlatTokenFees", () => {
     "refuses an unset %s on a deployed network",
     (name) => {
       expect(() =>
-        resolveFlatTokenFees({ ...FLAT_FEES_SET, NETWORK_ID: "stagenet", [name]: undefined }),
-      ).toThrow(new RegExp(`${name} is required on "stagenet"`));
+        resolveFlatTokenFees({ ...FLAT_FEES_SET, NETWORK_ID: "preview", [name]: undefined }),
+      ).toThrow(new RegExp(`${name} is required on "preview"`));
     },
   );
 });
@@ -238,13 +238,13 @@ describe("resolveTokenFeesFor", () => {
     },
     {
       name: "a priced token to its entry, the flat values unread",
-      env: { VAULT_TOKEN_FEES: PRICED_A, NETWORK_ID: "stagenet" },
+      env: { VAULT_TOKEN_FEES: PRICED_A, NETWORK_ID: "preview" },
       tokens: [TOKEN_A],
       fees: [[TOKEN_A, PRICED_A_FEES]],
     },
     {
       name: "a priced token in another case to its entry under the lowercased key",
-      env: { VAULT_TOKEN_FEES: PRICED_A, NETWORK_ID: "stagenet" },
+      env: { VAULT_TOKEN_FEES: PRICED_A, NETWORK_ID: "preview" },
       tokens: [TOKEN_A.toUpperCase().replace("0X", "0x")],
       fees: [[TOKEN_A, PRICED_A_FEES]],
     },
@@ -274,9 +274,9 @@ describe("resolveTokenFeesFor", () => {
   const REFUSED: readonly RefusedCase[] = [
     {
       name: "an unpriced token on a deployed network with no flat fees",
-      env: { VAULT_TOKEN_FEES: PRICED_A, NETWORK_ID: "stagenet" },
+      env: { VAULT_TOKEN_FEES: PRICED_A, NETWORK_ID: "preview" },
       tokens: [TOKEN_B],
-      error: /VAULT_FEE_WITHDRAW is required on "stagenet"/,
+      error: /VAULT_FEE_WITHDRAW is required on "preview"/,
     },
     {
       name: "a token that is not an address",

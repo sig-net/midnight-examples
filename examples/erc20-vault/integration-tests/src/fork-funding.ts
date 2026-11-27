@@ -8,6 +8,7 @@ import { type ContractWriteMethod, requireEnv } from "@sig-net/midnight-examples
 import { ethers } from "ethers";
 
 import { isAnvil } from "./evm-anvil.ts";
+import { swapQuotedCap, swapRefundDoomedCap } from "./evm-swap.ts";
 
 /** Real Sepolia USDC (the swap suite's tokenIn), also present on a Sepolia fork. */
 export const SEPOLIA_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
@@ -18,7 +19,7 @@ export const SEPOLIA_EURC = "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4";
 const AAVE_POOL_CONFIGURATOR = "0x7Ee60D184C24Ef7AfC1Ec7Be59A0f448A0abd138";
 const AAVE_POOL_ADMIN = "0xfA0e305E0f46AB04f00ae6b5f4560d61a2183E00";
 const ONE_ETH = "0xDE0B6B3A7640000";
-// 100 USDC (6 decimals): far above every suite's small deposits combined.
+// 100 USDC (6 decimals): far above every non-swap suite's small deposits combined.
 const USER_USDC = 100_000_000n;
 
 const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
@@ -193,8 +194,13 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
   const aaveUsdcOnFork = (await provider.getCode(AAVE_USDC)) !== "0x";
   const userAaveUsdc = aaveUsdcOnFork ? USER_USDC : 0n;
 
+  let userUsdc = USER_USDC;
   try {
-    await dealFork(provider, user, USER_USDC, userAaveUsdc);
+    const swapCaps =
+      (await swapQuotedCap(rpcUrl, SEPOLIA_USDC, SEPOLIA_EURC)) +
+      (await swapRefundDoomedCap(rpcUrl, SEPOLIA_USDC, SEPOLIA_EURC));
+    if (2n * swapCaps > userUsdc) userUsdc = 2n * swapCaps;
+    await dealFork(provider, user, userUsdc, userAaveUsdc);
     await dealFork(provider, vault, 0n);
     if (aaveUsdcOnFork) await liftAaveUsdcSupplyCap(provider);
   } catch (error) {
@@ -204,7 +210,7 @@ export async function dealForkEvmAccounts(env: NodeJS.ProcessEnv): Promise<void>
     );
   }
   console.log(
-    `dealt on fork: user ${user} <- 100 USDC${aaveUsdcOnFork ? " + 100 Aave USDC" : ""} + gas; ` +
+    `dealt on fork: user ${user} <- ${ethers.formatUnits(userUsdc, 6)} USDC${aaveUsdcOnFork ? " + 100 Aave USDC" : ""} + gas; ` +
       `vault ${vault} <- gas`,
   );
 }

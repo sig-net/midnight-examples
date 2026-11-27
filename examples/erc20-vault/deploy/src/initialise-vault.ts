@@ -14,7 +14,11 @@ import {
   parseSecp256k1PublicKey,
   SIGNET_DEFAULT_KEY_VERSION,
 } from "@sig-net/midnight";
-import { envOrUndefined, resolveMpcRootPublicKey } from "@sig-net/midnight-contract-deploy";
+import {
+  envOrUndefined,
+  resolveMpcRootPublicKey,
+  type WalletRegistry,
+} from "@sig-net/midnight-contract-deploy";
 import {
   type DeployedVaultContract,
   deriveVaultEvmAddress,
@@ -28,6 +32,7 @@ import { resolveVaultContractAddress, withDeployerVault } from "./deployer-vault
 import { resolveEvmTargets, type VaultEvmTargets } from "./evm-targets.ts";
 import {
   type FeeRecipientKeys,
+  feeRunSettings,
   formatTokenFees,
   resolveFeeRecipient,
   resolveTokenFeesFor,
@@ -376,6 +381,8 @@ export async function initialiseVaultContract(
  * @param env - The environment: everything {@link withDeployerVault} and
  *   {@link resolveInitialiseConfig} read. Defaults to `process.env`.
  * @param contractAddress - The vault to initialise. Defaults to `MIDNIGHT_VAULT_CONTRACT_ADDRESS`.
+ * @param wallets - A registry to take the deployer wallet from, when the caller keeps wallets
+ *   open across steps. Without one the wallet is opened for this call and closed after it.
  * @returns Whether this call initialised the vault or found it already initialised.
  * @throws {WalletUnfundedError} If the deployer wallet holds neither NIGHT nor
  *   DUST: the error carries the wallet's NIGHT receive address to fund.
@@ -386,6 +393,7 @@ export async function initialiseVaultContract(
 export async function initialiseVault(
   env: Record<string, string | undefined> = process.env,
   contractAddress?: string,
+  wallets?: WalletRegistry,
 ): Promise<InitialiseVaultOutcome> {
   const vaultContractAddress = resolveVaultContractAddress(env, contractAddress, "initialise");
 
@@ -393,7 +401,26 @@ export async function initialiseVault(
   // preset contradicting the derivation should fail here, not after a sync.
   const config = await resolveInitialiseConfig(env, vaultContractAddress);
 
-  return withDeployerVault(env, vaultContractAddress, (vault, publicDataProvider) =>
-    initialiseVaultContract(vault, publicDataProvider, vaultContractAddress, config),
+  const evmRpcUrl = envOrUndefined(env, "EVM_RPC_URL");
+  return withDeployerVault(
+    env,
+    vaultContractAddress,
+    "initialising",
+    {
+      EVM_CHAIN_ID: String(config.evmChainId),
+      // The origin alone: an RPC URL can carry its API key in the path.
+      EVM_RPC_URL: evmRpcUrl === undefined ? undefined : new URL(evmRpcUrl).origin,
+      EVM_START_HEIGHT: String(config.evmStartHeight),
+      EVM_ROUTER: config.routerAddress,
+      EVM_STATA_UNDERLYING: config.stataUnderlyingAddress,
+      EVM_STATA_TOKEN: config.stataTokenAddress,
+      MPC_SECP256K1_PUBKEY: resolveMpcRootPublicKey(env).value,
+      ...feeRunSettings(env),
+      VAULT_FEE_RECIPIENT_COIN_PUBLIC_KEY: config.feeRecipient.coinPublicKey,
+      VAULT_FEE_RECIPIENT_ENCRYPTION_PUBLIC_KEY: config.feeRecipient.encryptionPublicKey,
+    },
+    (vault, publicDataProvider) =>
+      initialiseVaultContract(vault, publicDataProvider, vaultContractAddress, config),
+    wallets,
   );
 }

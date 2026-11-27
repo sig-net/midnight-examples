@@ -1,8 +1,10 @@
-// Environment preflight checks: is the local Midnight stack up, is the
+// Environment preflight checks: is the Midnight stack up, is the
 // compact compiler installed. Pure reachability probes — no protocol traffic.
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+
+import { redactUrlQuery } from "@sig-net/midnight";
 
 const execFileAsync = promisify(execFile);
 
@@ -14,18 +16,31 @@ const execFileAsync = promisify(execFile);
  *
  * @param name - Human-readable service name for the error message.
  * @param url - The endpoint to probe.
- * @throws {Error} If the request cannot reach the service at all, with a hint to
- *   start the docker stack.
+ * @throws {Error} If the request cannot reach the service at all, naming the
+ *   endpoint with its query values masked.
  */
 export async function assertHttpReachable(name: string, url: string): Promise<void> {
   try {
     await fetch(url, { signal: AbortSignal.timeout(5_000) });
   } catch (error) {
     throw new Error(
-      `${name} is not reachable at ${url} — is the local Midnight stack up? Start it with \`docker compose up -d\` at the repo root. (${String(error)})`,
+      `${name} is not reachable at ${redactUrlQuery(url)}. The local stack starts with \`docker compose up -d\` at the repo root. (${String(error)})`,
       { cause: error },
     );
   }
+}
+
+/**
+ * The health endpoint of a Midnight node, keeping the node URL's query string
+ * (a hosted node carries its access token there).
+ *
+ * @param nodeUrl - The node's base URL.
+ * @returns The URL of the node's `/health` endpoint.
+ */
+export function nodeHealthUrl(nodeUrl: string): string {
+  const url = new URL(nodeUrl);
+  url.pathname = "/health";
+  return url.href;
 }
 
 /**

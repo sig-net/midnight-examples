@@ -49,7 +49,7 @@ export async function runSetupSteps(
   env: NodeJS.ProcessEnv,
   steps: readonly SetupStep[],
 ): Promise<NodeJS.ProcessEnv> {
-  const wallets = new WalletRegistry(getMidnightNodeConfig(env));
+  const wallets = new WalletRegistry(getMidnightNodeConfig(env), env);
   try {
     for (const [index, [name, run]] of steps.entries()) {
       if (process.env.STEP_THROUGH && index > 0) {

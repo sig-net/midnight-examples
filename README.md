@@ -10,12 +10,14 @@ The examples demonstrate how to integrate using the following packages:
 - [`@sig-net/midnight`](https://www.npmjs.com/package/@sig-net/midnight): the
   client-agnostic protocol library (the shared Compact modules, state readers,
   event decoders, request feed and crypto helpers).
-- [`@sig-net/midnight-contract`](https://www.npmjs.com/package/@sig-net/midnight-contract):
-  the central Signet singleton contract.
+- [`@sig-net/midnight-signer`](https://www.npmjs.com/package/@sig-net/midnight-signer):
+  the Signet signer contract an integrating contract notifies of each request.
+- [`@sig-net/midnight-responder`](https://www.npmjs.com/package/@sig-net/midnight-responder):
+  the Signet responder contract the MPC posts its responses through.
 - [`@sig-net/midnight-contract-deploy`](https://www.npmjs.com/package/@sig-net/midnight-contract-deploy):
-  deploy tooling for that contract plus generic Midnight deploy and wallet
-  plumbing. Used here by the test harness to deploy the singleton for the
-  local e2e stack.
+  deploy tooling for those contracts plus generic Midnight deploy and wallet
+  plumbing. Used here by the test harness to deploy the signet signer and the
+  responder for the local e2e stack.
 
 ## Reading Guide
 - Start by reading the [Sign Bidirectional Protocol Flow](#sign-bidirectional-protocol-flow) to understand the fundamentals of the cross chain protocol.
@@ -50,8 +52,8 @@ The protocol is best understood in 5 steps:
 ![The sign bidirectional protocol flow: five steps between a dApp, contracts on Midnight, the Sig Network MPC and a foreign blockchain](./docs/sign-bidirectional-flow.drawio.png)
 
 1. A user interacts with a dApp, which starts a cross chain interaction by calling a circuit on a contract on Midnight that has integrated with Sig Network.
-2. The MPC network, watching for events on the Singleton contract, picks up the emitted **SignBidirectionalEvent** (which carries the **SignBidirectionalEventNotification**) and honours the signature request it points to.
-3. The integrating dApp, watching for events on the Singleton contract, picks up the emitted **SignatureRespondedEvent** and relays the fully signed transaction to the foreign chain.
+2. The MPC network, watching for events on the Signer contract, picks up the emitted **SignBidirectionalEvent** (which carries the **SignBidirectionalEventNotification**) and honours the signature request it points to.
+3. The integrating dApp, watching for events on the Responder contract, picks up the emitted **SignatureRespondedEvent** and relays the fully signed transaction to the foreign chain.
 4. The MPC network observes the outcome of the signed transaction in final blocks of the foreign blockchain and posts an attestation thereof back to Midnight.
 5. The integrating dApp collects the execution output and its attestation and submits both back to the integrating contract, completing the cross chain interaction.
 
@@ -71,7 +73,7 @@ steps and 5 per-request runtime steps.
 Setup entails:
 1. Installing `@sig-net/midnight` into your project.
 2. Importing the Signet Compact module into your contract.
-3. Declaring the required protocol state in your ledger: the `SignBidirectionalEventMapV1` your requests live in, the `SignetSigner` singleton reference your circuits invoke via cross contract call to notify the MPC of requests, the `mpcResponseKey` your circuits verify attestations against, and the highest target-chain height the contract has accepted (`lastSeen`) together with the height recorded for each request when it is made.
+3. Declaring the required protocol state in your ledger: the `SignBidirectionalEventMapV1` your requests live in, the `SignetSigner` reference your circuits invoke via cross contract call to notify the MPC of requests, the `mpcResponseKey` your circuits verify attestations against, and the highest target-chain height the contract has accepted (`lastSeen`) together with the height recorded for each request when it is made.
 4. Setting the contract's own `mpcResponseKey` with an initialisation circuit call after deploy (its derivation takes the contract's address as input, which exists only once the contract is deployed).
 
 At runtime you integrate the [Sign Bidirectional Protocol Flow above](#sign-bidirectional-protocol-flow):
@@ -172,16 +174,14 @@ For more detail on the ERC20 vault example and on running its e2e suite (a fresh
 | ------- | ------| ------  |----------- |
 | Node | ≥ 22 | `node --version` | [nodejs.org](https://nodejs.org) or your version manager (nvm, fnm, …) |
 | Yarn 4 (via Corepack) | 4.x | `corepack enable && yarn --version` | Corepack ships with Node. The repo's `packageManager` field pins the Yarn version |
-| Compact toolchain | compiler 0.33.0-rc.2, invoked with `--feature-zkir-v3` (see note) | `compact compile --version` → `0.33.0` | Install the `compact` launcher per [Midnight's docs](https://docs.midnight.network/), then `compact update 0.33.0-rc.2` (compiler builds live at [LFDT-Minokawa/compact releases](https://github.com/LFDT-Minokawa/compact/releases)). If the launcher refuses the rc version, use the direct-download recipe in [.github/workflows/example-test.yaml](.github/workflows/example-test.yaml) |
+| Compact toolchain | compiler 0.36.0 | `compact compile --version` → `0.36.0` | Install the `compact` launcher per [Midnight's docs](https://docs.midnight.network/), then `compact update 0.36.0` (compiler builds live at [LFDT-Minokawa/compact releases](https://github.com/LFDT-Minokawa/compact/releases)) |
 | A docker environment | any recent engine | `docker --version` | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS/Windows) or your distro's engine, with **≥ 16 GB RAM allocated** (see note) |
 | Docker Compose v2 | ≥ 2.x | `docker compose version` | Included with Docker Desktop, plugin package on Linux |
 
-**NOTE:** every `compact compile` against this stack must pass the
-`--feature-zkir-v3` flag: it is part of the pinned ledger-9 matched set
-(compiler, node, indexer, proof server), and output compiled without it is not
-compatible with that stack. This repository's compile scripts already pass it.
-Integrators compiling their own contracts must pass it themselves, as shown in
-the [Integrator Guide](https://github.com/sig-net/midnight-integration/blob/main/README.md#integrator-guide).
+**NOTE:** the compiler is part of the pinned ledger-9 matched set (compiler,
+node, indexer, proof server). Compile your own contracts with exactly that
+release: the Compact runtime accepts a cross-contract callee only when its
+compiled verifier keys match the keys deployed on chain.
 
 **NOTE:** the Midnight proof server is quite heavy. Allocate at least 16 GB of
 RAM to your docker environment, otherwise expect to restart the tests multiple

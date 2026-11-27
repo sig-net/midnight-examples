@@ -84,7 +84,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // Wallet facade + vault context + MPC-style reader shared by every test in
 // this file (lazily built, so the offline path never touches the network),
 // stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // One deposit's worth of shielded vault tokens is arranged, burned by the doomed
 // withdraw, and re-minted: 0.1 USDC, the funding preflight's minimum.
@@ -271,7 +271,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         banner([
-          `MPC signed response for doomed withdraw ${withdrawRequestId} found from Signet Contract.`,
+          `MPC signed response for doomed withdraw ${withdrawRequestId} found on the signet responder.`,
           "",
           `Signed tx hash: ${signedTxHash(signedWithdrawTransaction)}`,
         ]);

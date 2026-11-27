@@ -26,10 +26,10 @@ import "@sig-net/midnight/src/Signet";
 
 // ==== Configuration ==================================================================
 
-// The Signet singleton the send circuits cross-contract call to notify the MPC.
+// The Signet signer the send circuits cross-contract call to notify the MPC.
 sealed ledger signetSigner: SignetSigner;
 
-// Verifies every attestation (the Signet singleton emits MPC posts unverified).
+// Verifies every attestation (the signet responder emits MPC posts unverified).
 export ledger mpcResponseKey: Secp256k1Point;
 
 export ledger vaultMaxFeePerGas: Uint<128>;
@@ -168,10 +168,10 @@ export pure circuit userCommitment(sk: Bytes<32>): Bytes<32> {
 // initialise().
 constructor(
   deployerCommitment: Bytes<32>,
-  signetContract: SignetSigner,
+  initialSignetSigner: SignetSigner,
 ) {
   deployer = disclose(deployerCommitment);
-  signetSigner = disclose(signetContract);
+  signetSigner = disclose(initialSignetSigner);
 }
 
 // #####################################################################################
@@ -225,8 +225,8 @@ export circuit initialise(
   vaultMaxPriorityFeePerGas = 1000000000 as Uint<128>;
 
   vaultGasLimits = VaultGasLimits {
-    withdraw: 100000 as Uint<64>,
-    approve: 100000 as Uint<64>,
+    withdraw: 200000 as Uint<64>,
+    approve: 200000 as Uint<64>,
     swap: 700000 as Uint<64>,
     supply: 500000 as Uint<64>,
     redeem: 500000 as Uint<64>
@@ -977,13 +977,17 @@ export circuit completeDeposit(
   assert(bidirectionalDepositMap.member(disclosedId), "Request event missing");
   bidirectionalDepositMap.remove(disclosedId);
 
-  if (record.outputKind == OutputKind.executed) {
-    const output = disclose(serializedOutput);
+  const executed = record.outputKind == OutputKind.executed;
+  const output = disclose(serializedOutput);
+  // compactc 0.36 fails with an internal error on a deserialize under a branch, so it runs
+  // unguarded, over a zero byte unless the request executed.
+  const transferred = deserialize<VaultResponse, 1>(executed ? output : default<Bytes<1>>).success;
+  if (executed) {
     assert(
       verifyAttestedOutputV1<1>(output, record.serializedOutputLength, record.outputHash),
       "Output does not match the attestation"
     );
-    if (deserialize<VaultResponse, 1>(output).success) {
+    if (transferred) {
       const claimRecipient = disclose(recipient).is_some
         ? disclose(recipient).value
         : left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
@@ -1158,8 +1162,11 @@ export circuit completeWithdraw(
       "Output does not match the attestation"
     );
   }
+  // compactc 0.36 fails with an internal error on a deserialize under a branch, so it runs
+  // unguarded, over a zero byte unless the request executed.
+  const transferred = deserialize<VaultResponse, 1>(executed ? output : default<Bytes<1>>).success;
   // A refund of the fee on an unviable verdict is perhaps wanted but not yet implemented.
-  if (outcomeRefunds(record.outputKind) || !deserialize<VaultResponse, 1>(output).success) {
+  if (outcomeRefunds(record.outputKind) || !transferred) {
     mintShieldedToken(
       vaultTokenDomainSeparator(args.request.erc20Address),
       args.request.amount as Uint<64>,

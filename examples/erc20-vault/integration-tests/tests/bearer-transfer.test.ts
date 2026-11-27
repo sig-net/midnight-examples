@@ -27,6 +27,7 @@
 //
 // Tests drive the vault THROUGH the example's typed flow functions
 // (src/flows/), in-process, never a subprocess.
+import { ProviderFailedError } from "@midnight-ntwrk/midnight-js/contracts";
 import { requestIdBytes, type RequestIdHex } from "@sig-net/midnight";
 import { getMidnightNodeConfig } from "@sig-net/midnight-contract-deploy";
 import {
@@ -87,7 +88,7 @@ const requireEnv = (name: string): string => requireEnvOf(env, name);
 // Wallet A, the depositor's session: wallet facade + vault context shared by
 // every test in this file (lazily built, so the offline path never touches the
 // network), stopped once in afterAll.
-const session = createVaultSession(env);
+const session = createVaultSession(env, "user");
 
 // Wallet B's seed AND identity secret: the `bearer` role wallet's seed serving
 // as both, deliberately different from the depositor's USER_SEED /
@@ -103,11 +104,14 @@ const BEARER_SEED = env.BEARER_SEED ?? "";
 
 // Wallet B, the transferee's session: same lazily-built shape as A's, over the
 // same stack, differing ONLY in wallet seed + identity secret.
-const bearerSession = createVaultSession({
-  ...env,
-  USER_SEED: BEARER_SEED,
-  VAULT_USER_SECRET_KEY: BEARER_SEED,
-});
+const bearerSession = createVaultSession(
+  {
+    ...env,
+    USER_SEED: BEARER_SEED,
+    VAULT_USER_SECRET_KEY: BEARER_SEED,
+  },
+  "bearer",
+);
 
 // One deposit's worth of shielded vault tokens is arranged on A, handed to B in
 // a plain transfer, and withdrawn by B: 0.1 USDC, the funding preflight's
@@ -350,10 +354,18 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         // The `startWithdraw` circuit demands a surrendered coin of the full
         // amount. A's wallet holds none of the colour, so balancing cannot fund
         // it and the attempt dies client-side: the tx is never submitted.
+        const attempt = startWithdraw(context, {
+          amount: WITHDRAW_AMOUNT,
+          destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
+        });
+        await expect(attempt).rejects.toBeInstanceOf(ProviderFailedError);
+        await expect(attempt).rejects.toMatchObject({
+          method: "balanceTx",
+          circuitId: "startWithdraw",
+        });
         await expect(
-          startWithdraw(context, {
-            amount: WITHDRAW_AMOUNT,
-            destEvmAddress: requireEnv("EVM_USER_ADDRESS"),
+          attempt.catch((error: unknown) => {
+            throw error instanceof ProviderFailedError ? error.cause : error;
           }),
         ).rejects.toThrow(/[Ii]nsufficient funds/);
 
@@ -431,7 +443,7 @@ describe.skipIf(!process.env.RUN_INTEGRATION_TESTS)(
         });
 
         banner([
-          `MPC signed response for wallet B's withdraw ${withdrawRequestId} found from Signet Contract.`,
+          `MPC signed response for wallet B's withdraw ${withdrawRequestId} found on the signet responder.`,
           "",
           `Signed tx hash: ${signedTxHash(signedWithdrawTransaction)}`,
         ]);
