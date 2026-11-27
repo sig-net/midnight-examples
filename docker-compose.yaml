@@ -89,6 +89,15 @@ services:
     ports:
       - '127.0.0.1:8545:8545'
 
+  tron:
+    container_name: 'local-tron'
+    image: 'tronbox/tre:2.0.0'
+    profiles: ['tron']
+    environment:
+      useDefaultPrivateKey: 'true'
+    ports:
+      - '127.0.0.1:9090:9090'
+
   fakenet:
     # The MPC fakenet responder (sig-net/solana-signet-program, fakenet-signer
     # workspace) in Midnight-only mode (DISABLE_SOLANA). Polls the signet signer's
@@ -104,7 +113,7 @@ services:
     # service. Manual equivalent (and the FAKENET_MANAGED=0 path):
     #   docker compose --profile fakenet up -d --force-recreate fakenet
     container_name: 'fakenet-responder'
-    image: 'ghcr.io/sig-net/fakenet:0.39.0'
+    image: '${FAKENET_IMAGE:-ghcr.io/sig-net/fakenet:0.42.0}'
     profiles: ['fakenet']
     depends_on:
       indexer:
@@ -113,6 +122,9 @@ services:
         condition: service_started
       evm:
         condition: service_started
+      tron:
+        condition: service_started
+        required: false
     extra_hosts: # To let the container reach services on the HOST (e.g. a hardhat node)
       - 'host.docker.internal:host-gateway'
     # The responder's output cache simulation: the exact bytes of every
@@ -127,6 +139,7 @@ services:
       # Container-side twin of the tests' EVM RPC endpoint — both must point
       # at the SAME chain.
       EVM_RPC_URL: '${FAKENET_EVM_RPC_URL:-http://evm:8545}'
+      TRON_RPC_URL: '${FAKENET_TRON_RPC_URL:-http://tron:9090}'
       MIDNIGHT_NETWORK_ID: '${MIDNIGHT_NETWORK_ID:-undeployed}'
       MIDNIGHT_INDEXER_URL: '${MIDNIGHT_INDEXER_URL:-http://indexer:8088/api/v4/graphql}'
       MIDNIGHT_INDEXER_WS_URL: '${MIDNIGHT_INDEXER_WS_URL:-ws://indexer:8088/api/v4/graphql/ws}'
